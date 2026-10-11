@@ -9,6 +9,7 @@ final class LibraryFacetTests: XCTestCase {
         var lens: String?
         var rating: Int
         var location: String?
+        var settings: PortablePackageCaptureSettings?
     }
 
     private func controller(_ rows: [Row]) throws -> LibraryQueryController {
@@ -20,7 +21,8 @@ final class LibraryFacetTests: XCTestCase {
                     + "/" + assetID.raw + "/asset.json",
                 summary: .init(
                     rating: row.rating, cameraMake: row.make, cameraModel: row.model,
-                    lens: row.lens, coarseLocation: row.location, displayName: "photo-\(index)")
+                    lens: row.lens, coarseLocation: row.location,
+                    captureSettings: row.settings, displayName: "photo-\(index)")
             ))
         }
         return LibraryQueryController(
@@ -170,5 +172,68 @@ final class LibraryFacetTests: XCTestCase {
         let summary = try JSONDecoder().decode(
             PortablePackageAssetSummary.self, from: Data(json.utf8))
         XCTAssertNil(summary.coarseLocation)
+    }
+
+    private func rangeController() throws -> LibraryQueryController {
+        func row(_ settings: PortablePackageCaptureSettings?) -> Row {
+            Row(make: nil, model: nil, lens: nil, rating: 0, location: nil, settings: settings)
+        }
+        return try controller([
+            row(.init(focalLength: 24, iso: 100, aperture: 1.8)),
+            row(.init(focalLength: 50, iso: 800, aperture: 2.8)),
+            row(.init(focalLength: 200, iso: 3200, aperture: nil)),
+            row(.init()),  // read, no values
+            row(nil),      // not read yet
+        ])
+    }
+
+    func testRangeFacetFiltersAndExcludesPhotosWithoutAValue() throws {
+        let controller = try rangeController()
+        var query = LibraryQuery()
+        XCTAssertEqual(controller.page(at: 0, query: query).totalCount, 5)
+
+        query.facets.setRange(.init(lower: 30, upper: 250), for: .focalLength)
+        XCTAssertEqual(controller.page(at: 0, query: query).totalCount, 2)
+        query.facets.setRange(.init(lower: 100, upper: 1000), for: .iso)
+        XCTAssertEqual(controller.page(at: 0, query: query).totalCount, 1)
+        XCTAssertEqual(query.facets.activeCount, 2)
+        XCTAssertEqual(
+            query.activeFilterDescriptions,
+            ["30–250 mm", "ISO 100–1000"])
+    }
+
+    func testRangeBoundsIgnoreOwnRangeButHonorOtherFilters() throws {
+        let controller = try rangeController()
+        var query = LibraryQuery()
+        var counts = controller.facetCounts(query: query)
+        XCTAssertEqual(counts.bounds(for: .focalLength), 24...200)
+        XCTAssertEqual(counts.bounds(for: .aperture), 1.8...2.8)
+        XCTAssertEqual(counts.unreadCaptureSettingsCount, 1)
+
+        query.facets.setRange(.init(lower: 100, upper: 3200), for: .iso)
+        query.facets.setRange(.init(lower: 40, upper: 60), for: .focalLength)
+        counts = controller.facetCounts(query: query)
+        // Focal bounds reflect the ISO range but not the focal range itself.
+        XCTAssertEqual(counts.bounds(for: .focalLength), 24...200)
+        // Aperture bounds reflect both other ranges.
+        XCTAssertEqual(counts.bounds(for: .aperture), 2.8...2.8)
+    }
+
+    func testRangeSelectionNormalizesAndRoundTrips() throws {
+        let range = LibraryRangeSelection(lower: 9, upper: 3)
+        XCTAssertEqual(range, LibraryRangeSelection(lower: 3, upper: 9))
+        var facets = LibraryFacetSelection()
+        facets.setRange(range, for: .aperture)
+        let decoded = try JSONDecoder().decode(
+            LibraryFacetSelection.self, from: JSONEncoder().encode(facets))
+        XCTAssertEqual(decoded, facets)
+        XCTAssertTrue(decoded.isActive)
+    }
+
+    func testLegacySummaryDecodesWithUnreadCaptureSettings() throws {
+        let json = #"{"displayName":"a.dng","assetRevision":0}"#
+        let summary = try JSONDecoder().decode(
+            PortablePackageAssetSummary.self, from: Data(json.utf8))
+        XCTAssertNil(summary.captureSettings)
     }
 }

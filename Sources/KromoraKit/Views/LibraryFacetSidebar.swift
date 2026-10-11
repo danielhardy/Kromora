@@ -9,6 +9,16 @@ struct LibraryFacetSidebar: View {
 
     private var query: LibraryQuery { viewModel.portableQuery }
 
+    /// Observed bounds, widened to include an active selection so it can always be adjusted.
+    private func rangeBounds(for facet: LibraryRangeFacet) -> ClosedRange<Double>? {
+        let observed = counts.bounds(for: facet)
+        let selected = query.facets.range(for: facet)
+        guard observed != nil || selected != nil else { return nil }
+        let low = min(observed?.lowerBound ?? .infinity, selected?.lower ?? .infinity)
+        let high = max(observed?.upperBound ?? -.infinity, selected?.upper ?? -.infinity)
+        return low...high
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack {
@@ -33,6 +43,25 @@ struct LibraryFacetSidebar: View {
                                 viewModel.setPortableFacets(facets)
                             }
                         )
+                    }
+                    ForEach(LibraryRangeFacet.allCases) { facet in
+                        if let bounds = rangeBounds(for: facet) {
+                            RangeFacetSection(
+                                facet: facet,
+                                bounds: bounds,
+                                selection: query.facets.range(for: facet),
+                                onCommit: { range in
+                                    var facets = query.facets
+                                    facets.setRange(range, for: facet)
+                                    viewModel.setPortableFacets(facets)
+                                }
+                            )
+                        }
+                    }
+                    if counts.unreadCaptureSettingsCount > 0 {
+                        Text("Reading capture settings from \(counts.unreadCaptureSettingsCount) photos…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 .padding(12)
@@ -75,6 +104,72 @@ private struct FacetSection: View {
                 .accessibilityLabel("\(entry.value), \(entry.count) photos")
             }
         }
+    }
+}
+
+/// Two sliders choosing an inclusive range. The query changes only when a drag ends, so the grid
+/// does not re-filter on every tick. Photos without a value are excluded while a range is active.
+private struct RangeFacetSection: View {
+    let facet: LibraryRangeFacet
+    let bounds: ClosedRange<Double>
+    let selection: LibraryRangeSelection?
+    let onCommit: (LibraryRangeSelection?) -> Void
+
+    @State private var lower = 0.0
+    @State private var upper = 0.0
+
+    private var step: Double { facet == .aperture ? 0.1 : 1 }
+    private var lowerBound: Double { bounds.lowerBound.rounded(.down) }
+    private var upperBound: Double { bounds.upperBound.rounded(.up) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(facet.title).font(.subheadline.weight(.semibold))
+                Spacer()
+                if selection != nil {
+                    Button("Clear") { onCommit(nil) }
+                        .buttonStyle(.borderless)
+                        .font(.caption)
+                        .accessibilityLabel("Clear \(facet.title) filter")
+                }
+            }
+            if lowerBound < upperBound {
+                HStack {
+                    Text(facet.format(lower))
+                    Spacer()
+                    Text(facet.format(upper))
+                }
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                Slider(value: $lower, in: lowerBound...upperBound, step: step) { editing in
+                    if !editing { commit() }
+                }
+                .accessibilityLabel("Minimum \(facet.title)")
+                .accessibilityValue(facet.format(lower))
+                Slider(value: $upper, in: lowerBound...upperBound, step: step) { editing in
+                    if !editing { commit() }
+                }
+                .accessibilityLabel("Maximum \(facet.title)")
+                .accessibilityValue(facet.format(upper))
+            } else {
+                Text(facet.format(lowerBound)).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .onAppear(perform: syncFromSelection)
+        .onChange(of: selection) { syncFromSelection() }
+        .onChange(of: bounds) { syncFromSelection() }
+    }
+
+    private func syncFromSelection() {
+        lower = selection?.lower ?? lowerBound
+        upper = selection?.upper ?? upperBound
+    }
+
+    private func commit() {
+        let range = LibraryRangeSelection(lower: lower, upper: upper)
+        let isFull = range.lower <= lowerBound && range.upper >= upperBound
+        onCommit(isFull ? nil : range)
     }
 }
 

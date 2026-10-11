@@ -27,6 +27,10 @@ struct ImageMetadata: Codable, Sendable, Equatable {
     var meteringMode: String?
     var flash: String?
     var whiteBalance: String?
+    /// Numeric exposure values for Library range filtering (f-number, ISO, focal length in mm).
+    var apertureValue: Double?
+    var isoValue: Int?
+    var focalLengthValue: Double?
 
     // MARK: Image
     var pixelWidth: Int?
@@ -173,20 +177,24 @@ extension ImageMetadata {
         // Exposure
         if let f = exif[kCGImagePropertyExifFNumber] as? Double, f > 0 {
             m.aperture = "ƒ/\(trimNumber(f))"
+            m.apertureValue = f
         }
         if let t = exif[kCGImagePropertyExifExposureTime] as? Double, t > 0 {
             m.shutterSpeed = formatShutter(t)
         }
         if let isoArray = exif[kCGImagePropertyExifISOSpeedRatings] as? [Int], let iso = isoArray.first {
             m.iso = "ISO \(iso)"
+            m.isoValue = iso
         } else if let iso = exif[kCGImagePropertyExifISOSpeedRatings] as? Int {
             m.iso = "ISO \(iso)"
+            m.isoValue = iso
         }
         if let bias = exif[kCGImagePropertyExifExposureBiasValue] as? Double {
             m.exposureBias = abs(bias) < 0.05 ? "0 EV" : String(format: "%+.1f EV", bias)
         }
         if let fl = exif[kCGImagePropertyExifFocalLength] as? Double, fl > 0 {
             m.focalLength = "\(trimNumber(fl)) mm"
+            m.focalLengthValue = fl
         }
         if let fl35 = exif[kCGImagePropertyExifFocalLenIn35mmFilm] as? Int, fl35 > 0 {
             m.focalLength35 = "\(fl35) mm"

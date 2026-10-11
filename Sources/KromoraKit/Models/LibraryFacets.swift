@@ -9,15 +9,52 @@ struct LibraryFacetSelection: Codable, Equatable, Hashable, Sendable {
     var cameras: Set<String> = []
     var lenses: Set<String> = []
     var locations: Set<String> = []
+    var focalLength: LibraryRangeSelection?
+    var iso: LibraryRangeSelection?
+    var aperture: LibraryRangeSelection?
 
     static let none = LibraryFacetSelection()
 
-    var isActive: Bool { !cameras.isEmpty || !lenses.isEmpty || !locations.isEmpty }
-    var activeCount: Int { cameras.count + lenses.count + locations.count }
+    var isActive: Bool { activeCount > 0 }
+    var activeCount: Int {
+        cameras.count + lenses.count + locations.count
+            + LibraryRangeFacet.allCases.count(where: { range(for: $0) != nil })
+    }
 
-    func matches(_ summary: PortablePackageAssetSummary, ignoring ignored: LibraryFacet? = nil)
-        -> Bool
-    {
+    func range(for facet: LibraryRangeFacet) -> LibraryRangeSelection? {
+        switch facet {
+        case .focalLength: focalLength
+        case .iso: iso
+        case .aperture: aperture
+        }
+    }
+
+    mutating func setRange(_ range: LibraryRangeSelection?, for facet: LibraryRangeFacet) {
+        switch facet {
+        case .focalLength: focalLength = range
+        case .iso: iso = range
+        case .aperture: aperture = range
+        }
+    }
+
+    func matches(
+        _ summary: PortablePackageAssetSummary,
+        ignoring ignored: LibraryFacet? = nil,
+        ignoringRange ignoredRange: LibraryRangeFacet? = nil
+    ) -> Bool {
+        for facet in LibraryRangeFacet.allCases where facet != ignoredRange {
+            // Assets without a value (or not yet read) never satisfy an active range.
+            if let range = range(for: facet),
+               !(facet.value(in: summary).map(range.contains) ?? false) {
+                return false
+            }
+        }
+        return matchesValueFacets(summary, ignoring: ignored)
+    }
+
+    private func matchesValueFacets(
+        _ summary: PortablePackageAssetSummary, ignoring ignored: LibraryFacet?
+    ) -> Bool {
         if ignored != .camera, !cameras.isEmpty {
             guard cameras.contains(LibraryFacet.camera.value(in: summary)) else { return false }
         }
@@ -53,6 +90,70 @@ struct LibraryFacetSelection: Codable, Equatable, Hashable, Sendable {
         cameras = try container.decodeIfPresent(Set<String>.self, forKey: .cameras) ?? []
         lenses = try container.decodeIfPresent(Set<String>.self, forKey: .lenses) ?? []
         locations = try container.decodeIfPresent(Set<String>.self, forKey: .locations) ?? []
+        focalLength = try container.decodeIfPresent(LibraryRangeSelection.self, forKey: .focalLength)
+        iso = try container.decodeIfPresent(LibraryRangeSelection.self, forKey: .iso)
+        aperture = try container.decodeIfPresent(LibraryRangeSelection.self, forKey: .aperture)
+    }
+}
+
+/// An inclusive numeric range selected for a range facet.
+struct LibraryRangeSelection: Codable, Equatable, Hashable, Sendable {
+    var lower: Double
+    var upper: Double
+
+    init(lower: Double, upper: Double) {
+        self.lower = min(lower, upper)
+        self.upper = max(lower, upper)
+    }
+
+    func contains(_ value: Double) -> Bool { value >= lower && value <= upper }
+}
+
+/// Facets filtered by a numeric range over capture settings.
+enum LibraryRangeFacet: String, CaseIterable, Codable, Sendable, Identifiable {
+    case focalLength
+    case iso
+    case aperture
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .focalLength: "Focal length"
+        case .iso: "ISO"
+        case .aperture: "Aperture"
+        }
+    }
+
+    func value(in summary: PortablePackageAssetSummary) -> Double? {
+        guard let settings = summary.captureSettings else { return nil }
+        switch self {
+        case .focalLength: return settings.focalLength
+        case .iso: return settings.iso.map(Double.init)
+        case .aperture: return settings.aperture
+        }
+    }
+
+    private func number(_ value: Double) -> String {
+        value.rounded() == value
+            ? String(Int(value)) : value.formatted(.number.precision(.fractionLength(1)))
+    }
+
+    /// Display text for one value, e.g. "35 mm", "ISO 400", "ƒ/2.8".
+    func format(_ value: Double) -> String { decorate(number(value)) }
+
+    /// Display text for a range, e.g. "35–200 mm", "ISO 100–1600", "ƒ/1.8–2.8".
+    func describe(_ range: LibraryRangeSelection) -> String {
+        range.lower == range.upper
+            ? format(range.lower) : decorate("\(number(range.lower))–\(number(range.upper))")
+    }
+
+    private func decorate(_ text: String) -> String {
+        switch self {
+        case .focalLength: "\(text) mm"
+        case .iso: "ISO \(text)"
+        case .aperture: "ƒ/\(text)"
+        }
     }
 }
 
@@ -106,5 +207,12 @@ struct LibraryFacetValueCount: Equatable, Hashable, Sendable, Identifiable {
 struct LibraryFacetCounts: Equatable, Sendable {
     var values: [LibraryFacet: [LibraryFacetValueCount]] = [:]
 
+    /// Observed value bounds per range facet, over entries matching every other active filter
+    /// (including the other range facets, but not the facet's own range).
+    var ranges: [LibraryRangeFacet: ClosedRange<Double>] = [:]
+    /// Count of entries whose original has not yet been read for capture settings.
+    var unreadCaptureSettingsCount = 0
+
     func counts(for facet: LibraryFacet) -> [LibraryFacetValueCount] { values[facet] ?? [] }
+    func bounds(for facet: LibraryRangeFacet) -> ClosedRange<Double>? { ranges[facet] }
 }

@@ -48,6 +48,16 @@ geocoder or other network lookup is used. Absent means the original has not been
 package written before this field; the facet lists these as "Unknown"); the empty string means it was
 read and has no GPS (the facet's "No location" value). Older packages decode unchanged.
 
+The summary's optional `captureSettings` object (`focalLength` in millimetres, `iso`, and
+`aperture` as an f-number, each optional) powers the Library focal length, ISO, and aperture range
+filters. Absent means the original has not been read yet (every package written before this field);
+a present object with missing members means the original was read and lacks those values, so such
+photos never match an active range. Import fills it from the original's EXIF. For older packages the
+session runs a resumable, background-priority repair after its other summary repairs: one membership
+shard per job, read under the writer mutation lock and merged into a fresh shard read before commit.
+The same pass fills a nil `coarseLocation`. Unreadable originals stay nil, still-nil summaries are
+the durable resume marker, and an interrupted open continues at the remaining shards next time.
+
 An `asset.json` record contains `identity` (the KRMA-390 opaque UUID plus immutable source
 fingerprint), `source` (embedded relative path or reserved referenced bookmark), `isRemoved`,
 `currentRevision`, and `editHistory` pointers. A virtual copy also has an optional `copyOfAssetID`

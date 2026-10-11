@@ -83,6 +83,30 @@ struct PortablePackageManifest: Codable, Equatable, Sendable {
     }
 }
 
+/// Numeric capture settings denormalized for Library range filters. A nil field means the
+/// original carries no such value; the whole struct being absent from a summary means the original
+/// has not been read yet.
+struct PortablePackageCaptureSettings: Codable, Equatable, Hashable, Sendable {
+    /// Physical focal length in millimetres.
+    var focalLength: Double?
+    var iso: Int?
+    /// Aperture as an f-number.
+    var aperture: Double?
+
+    init(focalLength: Double? = nil, iso: Int? = nil, aperture: Double? = nil) {
+        self.focalLength = focalLength
+        self.iso = iso
+        self.aperture = aperture
+    }
+
+    init(_ metadata: ImageMetadata) {
+        self.init(
+            focalLength: metadata.focalLengthValue, iso: metadata.isoValue,
+            aperture: metadata.apertureValue
+        )
+    }
+}
+
 /// The denormalised fields available without opening an asset record.
 struct PortablePackageAssetSummary: Codable, Equatable, Hashable, Sendable {
     var captureDate: String?
@@ -97,6 +121,9 @@ struct PortablePackageAssetSummary: Codable, Equatable, Hashable, Sendable {
     /// unchanged); the empty string means it was read and carries no location. Precise
     /// coordinates are never stored here and no geocoding or network lookup is performed.
     var coarseLocation: String?
+    /// Focal length, ISO, and aperture for the Library range facets. Nil means the original has not
+    /// been read yet (every package written before this field); the resumable metadata repair fills it.
+    var captureSettings: PortablePackageCaptureSettings?
     var dimensions: PhotoPixelDimensions?
     var aspectRatio: Double?
     /// The aspect ratio of the pixels a library cell presents: the source aspect with the current
@@ -122,6 +149,7 @@ struct PortablePackageAssetSummary: Codable, Equatable, Hashable, Sendable {
         cameraModel: String? = nil,
         lens: String? = nil,
         coarseLocation: String? = nil,
+        captureSettings: PortablePackageCaptureSettings? = nil,
         dimensions: PhotoPixelDimensions? = nil,
         aspectRatio: Double? = nil,
         presentedAspectRatio: Double? = nil,
@@ -137,6 +165,7 @@ struct PortablePackageAssetSummary: Codable, Equatable, Hashable, Sendable {
         self.cameraModel = cameraModel
         self.lens = lens
         self.coarseLocation = coarseLocation
+        self.captureSettings = captureSettings
         self.dimensions = dimensions
         self.aspectRatio = aspectRatio
         self.presentedAspectRatio = presentedAspectRatio

@@ -505,6 +505,7 @@ struct PortablePackageImporter: Sendable {
                 let sourceDimensions = PortablePackageAssetSummary.sourceDimensions(from: sourceMetadata)
                 let importedSummary = PortablePackageAssetSummary(
                     coarseLocation: sourceMetadata.coarseLocation,
+                    captureSettings: PortablePackageCaptureSettings(sourceMetadata),
                     dimensions: sourceDimensions,
                     presentedAspectRatio: sourceDimensions.map {
                         Double($0.width) / Double($0.height)

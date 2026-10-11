@@ -540,7 +540,7 @@ struct LibraryQuery: Codable, Equatable, Sendable {
     }
 
     /// Human-readable descriptions of each active filter, in a stable order: flag, rating,
-    /// cameras, lenses, locations, then search text.
+    /// cameras, lenses, locations, ranges, then search text.
     var activeFilterDescriptions: [String] {
         var parts: [String] = []
         if filter.flag != .all { parts.append(filter.flag.title) }
@@ -548,6 +548,9 @@ struct LibraryQuery: Codable, Equatable, Sendable {
         parts.append(contentsOf: facets.cameras.sorted())
         parts.append(contentsOf: facets.lenses.sorted())
         parts.append(contentsOf: facets.locations.sorted())
+        for facet in LibraryRangeFacet.allCases {
+            if let range = facets.range(for: facet) { parts.append(facet.describe(range)) }
+        }
         if let text = searchText, !text.isEmpty { parts.append("“\(text)”") }
         return parts
     }
@@ -741,6 +744,20 @@ struct LibraryQueryController: Sendable {
                     return $0.value.localizedStandardCompare($1.value) == .orderedAscending
                 }
         }
+        for facet in LibraryRangeFacet.allCases {
+            var low = Double.infinity, high = -Double.infinity
+            for entry in index.entries where entry.deletedRevision == nil
+                && matches(entry, query: query, foldedSearchText: foldedSearchText,
+                           ignoringRange: facet) {
+                guard let value = facet.value(in: entry.summary) else { continue }
+                low = min(low, value)
+                high = max(high, value)
+            }
+            if low <= high { result.ranges[facet] = low...high }
+        }
+        result.unreadCaptureSettingsCount = index.entries.lazy.filter {
+            $0.deletedRevision == nil && $0.summary.captureSettings == nil
+        }.count
         return result
     }
 
@@ -748,10 +765,12 @@ struct LibraryQueryController: Sendable {
         _ entry: LibraryIndexEntry,
         query: LibraryQuery,
         foldedSearchText: String?,
-        ignoring ignoredFacet: LibraryFacet? = nil
+        ignoring ignoredFacet: LibraryFacet? = nil,
+        ignoringRange ignoredRange: LibraryRangeFacet? = nil
     ) -> Bool {
         let summary = entry.summary
-        guard query.facets.matches(summary, ignoring: ignoredFacet) else { return false }
+        guard query.facets.matches(summary, ignoring: ignoredFacet, ignoringRange: ignoredRange)
+        else { return false }
         let flag = PhotoFlag(rawValue: summary.flag ?? "none") ?? .none
         guard query.filter.matches(flag: flag, rating: summary.rating ?? 0) else { return false }
         guard let foldedSearchText, !foldedSearchText.isEmpty else { return true }

@@ -68,6 +68,7 @@ final class PortableLibrarySession {
     private let indexLoadJobID: ImageWorkScheduler.JobID
     private let presentedAspectRatioRepairJobID: ImageWorkScheduler.JobID
     private let sourceFingerprintBackfillJobID: ImageWorkScheduler.JobID
+    private let captureMetadataBackfillJobID: ImageWorkScheduler.JobID
     private(set) var indexLoadingState: LibraryIndexLoadingState?
     private(set) var isLoadingIndex = false
     private(set) var didRepairIndexOnOpen = false
@@ -92,6 +93,10 @@ final class PortableLibrarySession {
     private var presentedAspectRatioRepairShards: [String] = []
     private var nextPresentedAspectRatioRepairShard = 0
     private var didStartSourceFingerprintBackfill = false
+    private var detachedCaptureMetadataBackfillTask: Task<Void, Never>?
+    private var didStartCaptureMetadataBackfill = false
+    private var captureMetadataBackfillShards: [String] = []
+    private var nextCaptureMetadataBackfillShard = 0
     private var sourceFingerprintBackfillRetryGate = SourceFingerprintBackfillRetryGate()
     private var isShuttingDown = false
     private var lostDuringSession = false
@@ -176,6 +181,9 @@ final class PortableLibrarySession {
             )
             self.sourceFingerprintBackfillJobID = ImageWorkScheduler.JobID(
                 "portable-package-source-fingerprint-backfill-\(lease.ownerID.uuidString)"
+            )
+            self.captureMetadataBackfillJobID = ImageWorkScheduler.JobID(
+                "portable-package-capture-metadata-backfill-\(lease.ownerID.uuidString)"
             )
             if scheduler != nil { startLeaseHeartbeat() }
             if asynchronousIndexLoading {
@@ -455,10 +463,13 @@ final class PortableLibrarySession {
     /// selection are read-only projection work and do not cancel maintenance; the package
     /// scheduler keeps repair at background priority. Shutdown is the cancellation boundary.
     private func startSourceFingerprintBackfill() {
-        guard !didStartSourceFingerprintBackfill, !isShuttingDown,
-              sourceFingerprintBackfillRetryGate.permitsAttempt,
+        guard !didStartSourceFingerprintBackfill, !isShuttingDown else { return }
+        guard sourceFingerprintBackfillRetryGate.permitsAttempt,
               queryController.index.entries.contains(where: { $0.summary.sourceFingerprint == nil })
-        else { return }
+        else {
+            startCaptureMetadataBackfill()
+            return
+        }
         didStartSourceFingerprintBackfill = true
         let package = self.package
         let lease = self.lease
@@ -490,6 +501,7 @@ final class PortableLibrarySession {
                     self.sourceFingerprintBackfillRetryGate.recordProgress()
                 }
                 self.didStartSourceFingerprintBackfill = false
+                self.startCaptureMetadataBackfill()
             }
         }
         if let scheduler {
@@ -502,6 +514,87 @@ final class PortableLibrarySession {
         } else {
             detachedSourceFingerprintBackfillTask = Task.detached(operation: operation)
         }
+    }
+
+    /// Reads focal length, ISO, aperture, and the coarse location cell from originals whose summary
+    /// does not carry them yet. It runs after the other summary repairs, one membership shard per
+    /// background job, and publishes each committed shard to the in-memory index so facets fill in
+    /// while the user browses. The still-nil summaries are the durable resume marker: a package
+    /// open that is interrupted simply continues at the remaining shards next time.
+    private func startCaptureMetadataBackfill() {
+        guard !didStartCaptureMetadataBackfill, !isShuttingDown else { return }
+        let shards = Set(
+            queryController.index.entries
+                .filter { $0.deletedRevision == nil
+                    && PortableLibraryPackage.needsCaptureMetadata($0.summary) }
+                .map { PortableLibraryPackage.shard(for: $0.assetID) }
+        ).sorted()
+        guard !shards.isEmpty else { return }
+        didStartCaptureMetadataBackfill = true
+        captureMetadataBackfillShards = shards
+        nextCaptureMetadataBackfillShard = 0
+
+        if scheduler != nil {
+            enqueueNextCaptureMetadataBackfillShard()
+            return
+        }
+        let package = self.package
+        let lease = self.lease
+        detachedCaptureMetadataBackfillTask = Task.detached { [weak self] in
+            for shard in shards {
+                guard !Task.isCancelled else { return }
+                do {
+                    let entries = try package.repairCaptureMetadataShard(
+                        shard, lease: lease, isCancelled: { Task.isCancelled }
+                    )
+                    await MainActor.run { [weak self] in
+                        self?.publishCaptureMetadataBackfill(entries)
+                    }
+                } catch is CancellationError {
+                    return
+                } catch {
+                    continue
+                }
+                try? await Task.sleep(for: .milliseconds(1))
+            }
+        }
+    }
+
+    private func enqueueNextCaptureMetadataBackfillShard() {
+        guard !isShuttingDown, let scheduler,
+              captureMetadataBackfillShards.indices.contains(nextCaptureMetadataBackfillShard)
+        else { return }
+        let shard = captureMetadataBackfillShards[nextCaptureMetadataBackfillShard]
+        let package = self.package
+        let lease = self.lease
+        let now = clock.now
+        _ = scheduler.enqueuePackageIO(
+            id: captureMetadataBackfillJobID,
+            lane: .maintenance,
+            priority: .background,
+            onTerminal: { [weak self] outcome in
+                guard let self, !self.isShuttingDown, outcome != .cancelled else { return }
+                self.nextCaptureMetadataBackfillShard += 1
+                self.enqueueNextCaptureMetadataBackfillShard()
+            },
+            operation: { [weak self] in
+                do {
+                    let entries = try package.repairCaptureMetadataShard(
+                        shard, lease: lease, now: now(), isCancelled: { Task.isCancelled }
+                    )
+                    await MainActor.run { [weak self] in
+                        self?.publishCaptureMetadataBackfill(entries)
+                    }
+                } catch {
+                    // A bad shard does not stop later ones; its nil summaries retry on next open.
+                }
+            }
+        )
+    }
+
+    private func publishCaptureMetadataBackfill(_ entries: [LibraryIndexEntry]) {
+        guard !entries.isEmpty, !isShuttingDown else { return }
+        _ = try? applyIndexDelta(.init(upserts: entries))
     }
 
     /// Begins the session-owned renewal loop on the shared package-I/O lane. The loop is started
@@ -570,6 +663,7 @@ final class PortableLibrarySession {
         await scheduler?.cancelAndWait(id: indexLoadJobID)
         await scheduler?.cancelAndWait(id: presentedAspectRatioRepairJobID)
         await scheduler?.cancelAndWait(id: sourceFingerprintBackfillJobID)
+        await scheduler?.cancelAndWait(id: captureMetadataBackfillJobID)
         detachedIndexLoadTask?.cancel()
         await detachedIndexLoadTask?.value
         detachedIndexLoadTask = nil
@@ -579,6 +673,9 @@ final class PortableLibrarySession {
         detachedSourceFingerprintBackfillTask?.cancel()
         await detachedSourceFingerprintBackfillTask?.value
         detachedSourceFingerprintBackfillTask = nil
+        detachedCaptureMetadataBackfillTask?.cancel()
+        await detachedCaptureMetadataBackfillTask?.value
+        detachedCaptureMetadataBackfillTask = nil
         try? lease.release()
     }
 

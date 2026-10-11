@@ -729,6 +729,78 @@ extension PortableLibraryPackage {
         }
     }
 
+    /// Whether a summary still lacks the metadata the Library facets read from the original.
+    static func needsCaptureMetadata(_ summary: PortablePackageAssetSummary) -> Bool {
+        summary.captureSettings == nil || summary.coarseLocation == nil
+    }
+
+    /// Fills `captureSettings` and `coarseLocation` from embedded originals, one membership shard
+    /// per call. Originals that cannot be read stay nil, so a later open retries them. The writer
+    /// mutation lock is held across the reads and the commit, and the commit merges into a fresh
+    /// shard read, so concurrent ratings, flags, and tombstones are preserved. Each committed shard
+    /// is independently valid, which makes the pass resumable after cancellation or process death.
+    func repairCaptureMetadataShard(
+        _ shardName: String,
+        lease: PortablePackageLease,
+        now: Date = Date(),
+        isCancelled: @Sendable () -> Bool = { false }
+    ) throws -> [LibraryIndexEntry] {
+        try lease.withWriterMutationLock {
+            guard Self.isValidShard(shardName) else {
+                throw PortablePackageError.invalidShard(shardName)
+            }
+            if isCancelled() { throw CancellationError() }
+            let missing = try readMembershipShard(shardName).entries
+                .filter { !$0.isTombstone && Self.needsCaptureMetadata($0.summary) }
+            guard !missing.isEmpty else { return [] }
+
+            var read: [PortablePhotoAssetID: ImageMetadata] = [:]
+            for entry in missing {
+                if isCancelled() { throw CancellationError() }
+                guard let record = try? readAssetRecord(for: entry.assetID),
+                      record.source.storage == .embedded,
+                      let relativePath = record.source.relativePath,
+                      let url = try? packageURL(for: relativePath),
+                      FileManager.default.fileExists(atPath: url.path)
+                else { continue }
+                read[entry.assetID] = ImageMetadata.read(from: url)
+            }
+            guard !read.isEmpty else { return [] }
+
+            var commitShard = try readMembershipShard(shardName)
+            var repairedIDs: Set<PortablePhotoAssetID> = []
+            for index in commitShard.entries.indices {
+                let entry = commitShard.entries[index]
+                guard !entry.isTombstone, Self.needsCaptureMetadata(entry.summary),
+                      let metadata = read[entry.assetID] else { continue }
+                if entry.summary.captureSettings == nil {
+                    commitShard.entries[index].summary.captureSettings =
+                        PortablePackageCaptureSettings(metadata)
+                }
+                if entry.summary.coarseLocation == nil {
+                    commitShard.entries[index].summary.coarseLocation = metadata.coarseLocation
+                }
+                repairedIDs.insert(entry.assetID)
+            }
+            guard !repairedIDs.isEmpty else { return [] }
+
+            var transaction = try beginTransaction(lease: lease, now: now)
+            do {
+                try transaction.stage(
+                    data: try encodedMembershipShard(commitShard),
+                    at: "Catalog/Membership/\(shardName).json"
+                )
+                try transaction.commit(now: now, isCancelled: isCancelled)
+            } catch {
+                try? transaction.abort()
+                throw error
+            }
+            return commitShard.entries
+                .filter { repairedIDs.contains($0.assetID) }
+                .map(LibraryIndexEntry.init(from:))
+        }
+    }
+
     /// The highest revision number already stored as an edit JSON or XMP sidecar.
     ///
     /// Missing directories mean no revisions have been published. Non-revision filenames are
