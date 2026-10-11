@@ -1890,6 +1890,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         libraryBrowsingCoordinator.setPortableFilter(filter)
     }
 
+    func setPortableFacets(_ facets: LibraryFacetSelection) {
+        previewAdmissionCoordinator.cancelAdjacentPreviewPrefetch()
+        libraryBrowsingCoordinator.setPortableFacets(facets)
+    }
+
+    func portableFacetCounts() async -> LibraryFacetCounts? {
+        await libraryBrowsingCoordinator.portableFacetCounts()
+    }
+
     func setPortableSort(_ sort: LibraryQuerySort) {
         previewAdmissionCoordinator.cancelAdjacentPreviewPrefetch()
         libraryBrowsingCoordinator.setPortableSort(sort)

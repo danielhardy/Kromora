@@ -13,6 +13,7 @@ protocol LibraryBrowsingProviding: AnyObject {
     func browsingWindow(pageIndex: Int, query: LibraryQuery) throws
         -> (assets: [PhotoAsset], totalCount: Int, pageSize: Int)
     func page(at pageIndex: Int, query: LibraryQuery) -> LibraryQueryPage
+    func facetCounts(query: LibraryQuery) async -> LibraryFacetCounts
     func browsingAssets(for items: [LibraryQueryItem]) throws -> [PhotoAsset]
     func select(_ assetID: PortablePhotoAssetID, additive: Bool)
     func setPortableSelection(_ assetIDs: [PortablePhotoAssetID], activeID: PortablePhotoAssetID?)
@@ -321,6 +322,17 @@ final class LibraryBrowsingCoordinator {
         guard let destination, destination.portableQuery.filter != filter else { return }
         destination.portableQuery.filter = filter
         try? reloadPortableWindow(pageIndex: 0)
+    }
+
+    func setPortableFacets(_ facets: LibraryFacetSelection) {
+        guard let destination, destination.portableQuery.facets != facets else { return }
+        destination.portableQuery.facets = facets
+        try? reloadPortableWindow(pageIndex: 0)
+    }
+
+    func portableFacetCounts() async -> LibraryFacetCounts? {
+        guard let library, let destination else { return nil }
+        return await library.facetCounts(query: destination.portableQuery)
     }
 
     func setPortableSort(_ sort: LibraryQuerySort) {

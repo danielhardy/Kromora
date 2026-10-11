@@ -509,15 +509,26 @@ struct LibraryQuery: Codable, Equatable, Sendable {
     var filter: LibraryFilter
     var searchText: String?
     var sort: LibraryQuerySort
+    var facets: LibraryFacetSelection
 
     init(
         filter: LibraryFilter = .all,
         searchText: String? = nil,
-        sort: LibraryQuerySort = .init()
+        sort: LibraryQuerySort = .init(),
+        facets: LibraryFacetSelection = .none
     ) {
         self.filter = filter
         self.searchText = searchText?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.sort = sort
+        self.facets = facets
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        filter = try container.decode(LibraryFilter.self, forKey: .filter)
+        searchText = try container.decodeIfPresent(String.self, forKey: .searchText)
+        sort = try container.decode(LibraryQuerySort.self, forKey: .sort)
+        facets = try container.decodeIfPresent(LibraryFacetSelection.self, forKey: .facets) ?? .none
     }
 
     static let all = Self()
@@ -685,12 +696,38 @@ struct LibraryQueryController: Sendable {
         }
     }
 
+    /// Value counts for each facet over the entries matching every other active filter.
+    func facetCounts(query: LibraryQuery) -> LibraryFacetCounts {
+        let foldedSearchText = query.searchText?.foldedForLibrarySearch
+        var result = LibraryFacetCounts()
+        for facet in LibraryFacet.allCases {
+            var tally: [String: Int] = [:]
+            for entry in index.entries
+            where matches(entry, query: query, foldedSearchText: foldedSearchText, ignoring: facet) {
+                tally[facet.value(in: entry.summary), default: 0] += 1
+            }
+            // Selected values stay listed at zero so they can always be deselected.
+            for value in query.facets.selected(in: facet) where tally[value] == nil {
+                tally[value] = 0
+            }
+            result.values[facet] = tally
+                .map { LibraryFacetValueCount(value: $0.key, count: $0.value) }
+                .sorted {
+                    if $0.count != $1.count { return $0.count > $1.count }
+                    return $0.value.localizedStandardCompare($1.value) == .orderedAscending
+                }
+        }
+        return result
+    }
+
     private func matches(
         _ entry: LibraryIndexEntry,
         query: LibraryQuery,
-        foldedSearchText: String?
+        foldedSearchText: String?,
+        ignoring ignoredFacet: LibraryFacet? = nil
     ) -> Bool {
         let summary = entry.summary
+        guard query.facets.matches(summary, ignoring: ignoredFacet) else { return false }
         let flag = PhotoFlag(rawValue: summary.flag ?? "none") ?? .none
         guard query.filter.matches(flag: flag, rating: summary.rating ?? 0) else { return false }
         guard let foldedSearchText, !foldedSearchText.isEmpty else { return true }

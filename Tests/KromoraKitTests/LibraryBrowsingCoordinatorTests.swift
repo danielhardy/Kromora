@@ -78,6 +78,8 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
             return (start < visible.count ? Array(visible[start..<end]) : [], visible.count, pageSize)
         }
 
+        func facetCounts(query: LibraryQuery) async -> LibraryFacetCounts { LibraryFacetCounts() }
+
         func page(at pageIndex: Int, query: LibraryQuery) -> LibraryQueryPage {
             let visible = committedAssets
             let start = pageIndex * pageSize

@@ -16,6 +16,7 @@ struct LibraryGridView: View {
 
     private let layout = LibraryGridLayout()
     private let contentPadding: Double = 16
+    @SceneStorage("libraryFacetSidebarPresented") private var isFacetSidebarPresented = false
     @State private var scrollOffset: Double = 0
     @State private var admittedThumbnailIDs: [PhotoAssetID] = []
 
@@ -28,6 +29,12 @@ struct LibraryGridView: View {
                 CullingBarView(viewModel: viewModel, collection: collection)
                 Divider()
                     .frame(height: 28)
+                if collection.isPortableWindowed {
+                    LibraryFacetToolbarControls(
+                        viewModel: viewModel, isSidebarPresented: $isFacetSidebarPresented)
+                    Divider()
+                        .frame(height: 28)
+                }
                 Button(role: .destructive) {
                     viewModel.requestDeleteSelectedLibraryItems()
                 } label: {
@@ -55,6 +62,7 @@ struct LibraryGridView: View {
                     .accessibilityLabel("Showing \(collection.items.count) of \(total) photos")
             }
 
+            HStack(spacing: 0) {
             GeometryReader { geometry in
                 if entries.isEmpty {
                     LibraryEmptyState(collection: collection, viewModel: viewModel)
@@ -121,6 +129,11 @@ struct LibraryGridView: View {
                     }
                     .background(KromoraTheme.windowBackground)
                 }
+            }
+            if isFacetSidebarPresented, collection.isPortableWindowed {
+                Divider()
+                LibraryFacetSidebar(viewModel: viewModel)
+            }
             }
         }
         .background(KromoraTheme.windowBackground)

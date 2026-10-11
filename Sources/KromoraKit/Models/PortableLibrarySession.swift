@@ -628,6 +628,12 @@ final class PortableLibrarySession {
         page(at: 0, query: query).totalCount
     }
 
+    /// A value snapshot of the query controller for index-side work off the main actor.
+    func facetCounts(query: LibraryQuery) async -> LibraryFacetCounts {
+        let controller = queryController
+        return await Task.detached { controller.facetCounts(query: query) }.value
+    }
+
     func page(at pageIndex: Int, query: LibraryQuery = .all) -> LibraryQueryPage {
         if pageIndex == 0, query == .all, let startupFirstPage {
             return startupFirstPage
