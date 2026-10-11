@@ -22,6 +22,8 @@ Options:
   --iterations COUNT          Metal presentation iterations
   --items COUNT               Concurrent export item count
   --gestures COUNT            Concurrent editing gesture count
+  --no-trace         Run the benchmark under xctest without xctrace (no trace file; use when
+                     Instruments cannot record, e.g. DTServiceHub errors)
   --force            Re-run on a tree that was already captured (see below)
   -h, --help         Show this help
 
@@ -37,6 +39,7 @@ USAGE
 
 benchmark=""
 force_repeat=0
+no_trace=0
 source_path=""
 capture_id=""
 output_dir=""
@@ -91,6 +94,10 @@ while (( $# > 0 )); do
             ;;
         --force)
             force_repeat=1
+            shift
+            ;;
+        --no-trace)
+            no_trace=1
             shift
             ;;
         -h|--help)
@@ -167,7 +174,7 @@ if [[ -z "$swift_path" || ! -x "$swift_path" ]]; then
     print -u2 "Swift executable could not be resolved"
     exit 2
 fi
-if [[ -z "$xctrace_path" || ! -x "$xctrace_path" ]]; then
+if (( ! no_trace )) && [[ -z "$xctrace_path" || ! -x "$xctrace_path" ]]; then
     print -u2 "xctrace executable could not be resolved"
     exit 2
 fi
@@ -297,7 +304,16 @@ if [[ "$benchmark" == "concurrent-export-editing" && ${#secondary_env[@]} -gt 0 
         "$xctest_path" -XCTest "$test_filter" "$test_bundle"
     )
 fi
-"$xctrace_path" "${xctrace_args[@]}" >> "$summary_path" 2>&1
+if (( no_trace )); then
+    # Same environment as the xctrace launch (--env K=V pairs), without Instruments.
+    env_pairs=()
+    for arg in "${benchmark_env[@]}" "${secondary_env[@]-}"; do
+        [[ "$arg" == "--env" || -z "$arg" ]] || env_pairs+=("$arg")
+    done
+    env "${env_pairs[@]}" "$xctest_path" -XCTest "$test_filter" "$test_bundle" >> "$summary_path" 2>&1
+else
+    "$xctrace_path" "${xctrace_args[@]}" >> "$summary_path" 2>&1
+fi
 
 { print "$tree_id"; print "$summary_path ($(date -u +%FT%TZ))" } > "$stamp_path"
 print "trace=$trace_path"
