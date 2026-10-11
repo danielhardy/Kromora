@@ -582,6 +582,7 @@ extension PortableLibraryPackage {
         shardNames: [String] = Self.allShards,
         now: Date = Date(),
         isCancelled: @Sendable () -> Bool = { false },
+        afterWriterLockAcquired: (@Sendable () -> Void)? = nil,
         onBatch: (@Sendable ([LibraryIndexEntry]) async -> Void)? = nil
     ) async throws -> [PortablePhotoAssetID] {
         var repaired: [PortablePhotoAssetID] = []
@@ -589,7 +590,8 @@ extension PortableLibraryPackage {
             try Task.checkCancellation()
             if isCancelled() { throw CancellationError() }
             let entries = try repairPresentedAspectRatioShard(
-                shardName, lease: lease, now: now, isCancelled: isCancelled
+                shardName, lease: lease, now: now, isCancelled: isCancelled,
+                afterWriterLockAcquired: afterWriterLockAcquired
             )
             guard !entries.isEmpty else { continue }
             repaired.append(contentsOf: entries.map(\.assetID))
@@ -656,9 +658,11 @@ extension PortableLibraryPackage {
         _ shardName: String,
         lease: PortablePackageLease,
         now: Date = Date(),
-        isCancelled: @Sendable () -> Bool = { false }
+        isCancelled: @Sendable () -> Bool = { false },
+        afterWriterLockAcquired: (@Sendable () -> Void)? = nil
     ) throws -> [LibraryIndexEntry] {
         try lease.withWriterMutationLock {
+            afterWriterLockAcquired?()
             guard Self.isValidShard(shardName) else {
                 throw PortablePackageError.invalidShard(shardName)
             }

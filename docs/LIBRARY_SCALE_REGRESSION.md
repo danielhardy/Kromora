@@ -159,3 +159,41 @@ zero at every scale. At 100k, launch and post-mutation reload differ by approxim
 −0.7% from the implementation capture above; the latter remains above the dated KRMA-519 reload
 capture of 323.02 ms (a different run and macOS version, not a controlled before/after).
 The concurrency gate again committed all 32 revisions with one concurrent package writer.
+
+## KRMA-831 full mutation interval (2026-10-11)
+
+Report schema version 2 adds `mutationTimingBoundary` and splits the mutation into three metrics.
+The probe starts a mutation while presented-ratio repair holds the writer mutation lock:
+`PortableLibrarySession` takes a test-only `presentedAspectRatioRepairLockHook` that parks the
+repair thread inside the lock, the probe waits until repair has parked, issues
+`updateLibraryState`, and releases repair 25 ms later. The write therefore always waits on a held
+lock, independent of task scheduling, and its wait includes the rest of the repair transaction.
+The synthetic fixture's sequential IDs share one shard prefix, so repair is a single
+whole-library transaction; that is the worst case for lock hold time, not a typical library.
+
+| Metric | Interval |
+| --- | --- |
+| `production-mutation-write` | `updateLibraryState`: writer-lock wait plus package transaction |
+| `production-mutation-reload` | Browsing reload after the write returns (same interval as the pre-KRMA-831 metric of this name) |
+| `production-mutation-full` | One timer from before `updateLibraryState` to the end of the reload |
+
+Three samples in a debug build on Mac16,11 / macOS 27.2 (JSON:
+[`evidence/library-scale-krma-831.json`](evidence/library-scale-krma-831.json)), p95 in ms. Every
+gate passed: mutation state visible, zero browsing record reads, and the 100k concurrency gate
+committed 32 of 32 revisions with one concurrent writer.
+
+| Scale | Mutation write | Mutation reload | Mutation full | Record reads |
+| ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 538.36 | 143.02 | 681.39 | 0 |
+| 10,000 | 4,367.33 | 170.02 | 4,537.35 | 0 |
+| 100,000 | 42,714.32 | 428.22 | 43,137.61 | 0 |
+
+The write column is dominated by waiting for the in-flight repair transaction, which is the stall
+that motivated KRMA-829: at 100k a rating or flag change issued during an active repair waits
+about 43 s in a debug build. Production repair splits real libraries across up to 256 shards and
+sleeps between them, so this is an upper bound set by the single-shard fixture, not a prediction.
+
+Comparison rules: the KRMA-829 captures above (`production-mutation-reload` 141.56 / 165.12 /
+406.51 ms) timed only the reload and ran without controlled repair overlap. Compare them only
+with this section's `production-mutation-reload` column, never with `production-mutation-write`
+or `production-mutation-full`. The historical JSON files are unchanged; they use schema version 1.

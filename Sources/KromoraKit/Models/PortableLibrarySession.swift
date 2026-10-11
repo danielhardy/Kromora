@@ -74,6 +74,10 @@ final class PortableLibrarySession {
     var onIndexLoadingStateChange: (@MainActor (LibraryIndexLoadingState) -> Void)?
     var onIndexWriteFailure: (@MainActor (String) -> Void)?
     var onPresentedAspectRatioUpdates: (@MainActor ([PortablePhotoAssetID: Double]) -> Void)?
+    /// Test seam: runs on the repair thread while it holds the writer mutation lock for a shard,
+    /// so a benchmark can start a mutation against a lock that is provably held. Production
+    /// leaves it nil.
+    private let presentedAspectRatioRepairLockHook: (@Sendable () -> Void)?
     private var activeImportJobIDs: Set<ImageWorkScheduler.JobID> = []
     private var asyncImportCatalog: ImportCatalogState?
     private var pendingImportIndexDelta = LibraryIndexDelta.empty
@@ -101,8 +105,10 @@ final class PortableLibrarySession {
         leaseDuration: TimeInterval = PortablePackageLease.defaultDuration,
         clock: PortableLibrarySessionClock = .init(),
         scheduler: ImageWorkScheduler? = nil,
-        asynchronousIndexLoading: Bool = false
+        asynchronousIndexLoading: Bool = false,
+        presentedAspectRatioRepairLockHook: (@Sendable () -> Void)? = nil
     ) throws {
+        self.presentedAspectRatioRepairLockHook = presentedAspectRatioRepairLockHook
         let normalizedRoot = rootURL.standardizedFileURL
         let acquisitionNow = now ?? clock.now()
         let fileManager = FileManager.default
@@ -353,12 +359,14 @@ final class PortableLibrarySession {
         let package = self.package
         let lease = self.lease
         let shardNames = presentedAspectRatioRepairShards
+        let lockHook = presentedAspectRatioRepairLockHook
         let operation: @Sendable () async -> Void = { [weak self] in
             do {
                 _ = try await package.repairPresentedAspectRatios(
                     lease: lease,
                     shardNames: shardNames,
                     isCancelled: { Task.isCancelled },
+                    afterWriterLockAcquired: lockHook,
                     onBatch: { [weak self] entries in
                         await MainActor.run {
                             self?.publishPresentedAspectRatioRepairBatch(entries)
@@ -390,6 +398,7 @@ final class PortableLibrarySession {
         let package = self.package
         let lease = self.lease
         let now = clock.now
+        let lockHook = presentedAspectRatioRepairLockHook
         _ = scheduler.enqueuePackageIO(
             id: presentedAspectRatioRepairJobID,
             lane: .maintenance,
@@ -414,6 +423,7 @@ final class PortableLibrarySession {
                         shardNames: [shardName],
                         now: now(),
                         isCancelled: { Task.isCancelled },
+                        afterWriterLockAcquired: lockHook,
                         onBatch: { [weak self] entries in
                             await MainActor.run {
                                 self?.publishPresentedAspectRatioRepairBatch(entries)

@@ -2,6 +2,7 @@ import CoreGraphics
 import Darwin
 import Foundation
 import ImageIO
+import Synchronization
 import XCTest
 
 @testable import KromoraKit
@@ -15,6 +16,19 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
 
     private static let firstPageSize = 60
     private static let defaultSampleCount = 3
+    /// How long the parked repair holds the writer lock after the mutation is about to start.
+    private static let repairHold: DispatchTimeInterval = .milliseconds(25)
+
+    /// KRMA-831 schema 2. Before it, `production-mutation-reload` started after
+    /// `updateLibraryState` returned and ran with no controlled repair overlap, so it is not
+    /// comparable with the same-named metric here or with `production-mutation-full`.
+    private static let mutationTimingBoundary =
+        "production-mutation-write: updateLibraryState including writer-lock wait and package "
+        + "transaction; production-mutation-reload: browsing reload after the write returns; "
+        + "production-mutation-full: one timer from before updateLibraryState to the end of the "
+        + "reload. Presented-ratio repair is parked inside the writer mutation lock before the write "
+        + "and released 25 ms after it is issued, so the mutation always waits on a held lock; the "
+        + "wait includes the remainder of the repair transaction."
 
     private struct Metric: Codable {
         let unit: String
@@ -51,6 +65,8 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
         let baseline: String
         let sampleCount: Int
         let firstPageSize: Int
+        /// Describes which interval each `production-mutation-*` metric covers (KRMA-831).
+        let mutationTimingBoundary: String
         let environment: Environment
         let scales: [String: ScaleResult]
         let concurrency: ConcurrencyResult?
@@ -75,7 +91,9 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
         let productionLaunchMs: Double
         let productionReloadMs: Double
         let productionFirstGridMs: Double
+        let productionMutationWriteMs: Double
         let productionMutationReloadMs: Double
+        let productionMutationFullMs: Double
         let productionRecordReads: Double
     }
 
@@ -143,7 +161,9 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
                 metrics["production-launch", default: []].append(measured.productionLaunchMs)
                 metrics["production-reload", default: []].append(measured.productionReloadMs)
                 metrics["production-first-grid", default: []].append(measured.productionFirstGridMs)
+                metrics["production-mutation-write", default: []].append(measured.productionMutationWriteMs)
                 metrics["production-mutation-reload", default: []].append(measured.productionMutationReloadMs)
+                metrics["production-mutation-full", default: []].append(measured.productionMutationFullMs)
                 metrics["production-record-reads", default: []].append(measured.productionRecordReads)
                 metrics["interactive-preview-submission", default: []].append(
                     try await measureInteractivePreview(at: fixture.generated.rootURL)
@@ -172,11 +192,12 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
         }
 
         let report = Report(
-            schemaVersion: 1,
+            schemaVersion: 2,
             benchmark: "package-backed-library-scale-regression",
             baseline: "docs/LIBRARY_PACKAGE_BASELINE.md (KRMA-389)",
             sampleCount: sampleCount,
             firstPageSize: Self.firstPageSize,
+            mutationTimingBoundary: Self.mutationTimingBoundary,
             environment: Environment(
                 machineClass: command("/usr/sbin/sysctl", arguments: ["-n", "hw.model"]),
                 macOS: command("/usr/bin/sw_vers", arguments: ["-productVersion"]),
@@ -326,7 +347,9 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
             productionLaunchMs: production.launchMs,
             productionReloadMs: production.reloadMs,
             productionFirstGridMs: production.firstGridMs,
+            productionMutationWriteMs: production.mutationWriteMs,
             productionMutationReloadMs: production.mutationReloadMs,
+            productionMutationFullMs: production.mutationFullMs,
             productionRecordReads: Double(production.recordReads)
         )
     }
@@ -335,8 +358,33 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
         let launchMs: Double
         let reloadMs: Double
         let firstGridMs: Double
+        let mutationWriteMs: Double
         let mutationReloadMs: Double
+        let mutationFullMs: Double
         let recordReads: Int
+    }
+
+    /// Parks the first presented-ratio repair shard inside the writer mutation lock until the
+    /// probe releases it. The synthetic fixture's sequential IDs share one shard prefix, so
+    /// repair is a single long lock-holding transaction.
+    private final class RepairLockGate: Sendable {
+        private let arrived = DispatchSemaphore(value: 0)
+        private let release = DispatchSemaphore(value: 0)
+        private let didPark = Mutex(false)
+
+        /// Runs on the repair thread while it holds the writer lock; parks once.
+        func park() {
+            let first = didPark.withLock { parked in
+                defer { parked = true }
+                return !parked
+            }
+            guard first else { return }
+            arrived.signal()
+            _ = release.wait(timeout: .now() + 60)
+        }
+
+        var hasParked: Bool { arrived.wait(timeout: .now()) == .success }
+        func releaseRepair() { release.signal() }
     }
 
     private final class RecordReadCounter: @unchecked Sendable {
@@ -374,8 +422,12 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
         defer { try? FileManager.default.removeItem(at: copyIndexURL.deletingLastPathComponent()) }
         let counter = RecordReadCounter()
         let launchStart = DispatchTime.now().uptimeNanoseconds
-        let probe = try await MainActor.run {
-            let session = try PortableLibrarySession(at: copyURL, indexURL: copyIndexURL)
+        let repairGate = RepairLockGate()
+        func runProbe() async throws -> ProductionProbe {
+            let session = try PortableLibrarySession(
+                at: copyURL, indexURL: copyIndexURL,
+                presentedAspectRatioRepairLockHook: { repairGate.park() }
+            )
             session.assetRecordReadObserver = { _ in counter.record() }
             let launchEnd = DispatchTime.now().uptimeNanoseconds
             let reloadStart = DispatchTime.now().uptimeNanoseconds
@@ -437,9 +489,32 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
             // update, then reload republishes page 0. Total count is unchanged, the new state
             // is visible, and record reads stay at zero, proving the mutation path does not
             // regress to full materialization at scale.
+            //
+            // KRMA-831: the session's presented-ratio repair is running in the background (the
+            // fixture summaries carry no ratio). `presentedAspectRatioRepairLockHook` parks the
+            // repair thread inside the writer mutation lock, so the mutation below starts against
+            // a lock that is provably held rather than depending on task scheduling. A detached
+            // task releases repair after `Self.repairHold`; `updateLibraryState` blocks
+            // on the lock until then. The timer starts before the write, so lock wait and the
+            // package transaction are inside `mutationFullMs`.
+            let parkDeadline = DispatchTime.now().uptimeNanoseconds + 120_000_000_000
+            while !repairGate.hasParked {
+                guard DispatchTime.now().uptimeNanoseconds < parkDeadline else {
+                    throw NSError(domain: "KromoraScaleRegression", code: 10, userInfo: [
+                        NSLocalizedDescriptionKey: "presented-ratio repair never took the writer lock"
+                    ])
+                }
+                try await Task.sleep(for: .milliseconds(1))
+            }
             let firstItem = try XCTUnwrap(session.page(at: 0, query: .all).items.first)
             let nextRating = ((firstItem.summary.rating ?? 0) + 1) % 6
             let nextFlag: PhotoFlag = firstItem.summary.flag == PhotoFlag.pick.rawValue ? .none : .pick
+            // GCD, not a Task: main and the parked repair thread are both blocked, and release
+            // must not depend on cooperative-pool capacity.
+            DispatchQueue.global().asyncAfter(deadline: .now() + Self.repairHold) {
+                repairGate.releaseRepair()
+            }
+            let mutationStart = DispatchTime.now().uptimeNanoseconds
             try session.updateLibraryState(for: firstItem.assetID, rating: nextRating, flag: nextFlag)
             let mutationReloadStart = DispatchTime.now().uptimeNanoseconds
             let reloaded = try session.browsingWindow(pageIndex: 0, query: .all)
@@ -460,18 +535,17 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
             }
             // The session owns no heartbeat or imports without a scheduler; scope exit runs
             // deinit on the main actor, which cancels renewal and releases the writer lease.
-            return (
+            return ProductionProbe(
                 launchMs: milliseconds(from: launchStart, to: launchEnd),
                 reloadMs: milliseconds(from: reloadStart, to: reloadEnd),
                 firstGridMs: milliseconds(from: gridStart, to: gridEnd),
+                mutationWriteMs: milliseconds(from: mutationStart, to: mutationReloadStart),
                 mutationReloadMs: milliseconds(from: mutationReloadStart, to: mutationReloadEnd),
+                mutationFullMs: milliseconds(from: mutationStart, to: mutationReloadEnd),
                 recordReads: counter.count
             )
         }
-        return ProductionProbe(
-            launchMs: probe.launchMs, reloadMs: probe.reloadMs, firstGridMs: probe.firstGridMs,
-            mutationReloadMs: probe.mutationReloadMs, recordReads: probe.recordReads
-        )
+        return try await runProbe()
     }
 
     private func decodeThumbnails(

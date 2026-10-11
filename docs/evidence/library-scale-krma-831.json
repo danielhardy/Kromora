@@ -1,0 +1,312 @@
+{
+  "baseline" : "docs\/LIBRARY_PACKAGE_BASELINE.md (KRMA-389)",
+  "benchmark" : "package-backed-library-scale-regression",
+  "concurrency" : {
+    "committedRevisionCount" : 32,
+    "editorStartedWhilePackageIOWasActive" : true,
+    "maxConcurrentPackageWriters" : 1,
+    "packageIOYieldCount" : 1,
+    "packageOperations" : 32,
+    "scale" : 100000
+  },
+  "environment" : {
+    "disk" : "unavailable",
+    "macOS" : "27.2",
+    "machineClass" : "Mac16,11",
+    "swift" : "Apple Swift version 6.4 (swiftlang-6.4.0.33.1 clang-2100.3.33.1)\nTarget: arm64-apple-macosx27.2.0"
+  },
+  "firstPageSize" : 60,
+  "mutationTimingBoundary" : "production-mutation-write: updateLibraryState including writer-lock wait and package transaction; production-mutation-reload: browsing reload after the write returns; production-mutation-full: one timer from before updateLibraryState to the end of the reload. Presented-ratio repair is parked inside the writer mutation lock before the write and released 25 ms after it is issued, so the mutation always waits on a held lock; the wait includes the remainder of the repair transaction.",
+  "sampleCount" : 3,
+  "scales" : {
+    "1000" : {
+      "assetCount" : 1000,
+      "method" : "package-membership-and-index-projection",
+      "metrics" : {
+        "decoded-thumbnail-count" : {
+          "p95" : 60,
+          "p999" : 60,
+          "samples" : 3,
+          "unit" : "count"
+        },
+        "filter" : {
+          "p95" : 0.334417,
+          "p999" : 0.334417,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "first-page-delivery" : {
+          "p95" : 11.344459,
+          "p999" : 11.344459,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "interactive-preview-submission" : {
+          "p95" : 0.456208,
+          "p999" : 0.456208,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "memory-footprint" : {
+          "p95" : 360448,
+          "p999" : 360448,
+          "samples" : 3,
+          "unit" : "bytes"
+        },
+        "observable-object-count" : {
+          "p95" : 0,
+          "p999" : 0,
+          "samples" : 3,
+          "unit" : "count"
+        },
+        "production-first-grid" : {
+          "p95" : 2.20075,
+          "p999" : 2.20075,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "production-launch" : {
+          "p95" : 303.730625,
+          "p999" : 303.730625,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "production-mutation-full" : {
+          "p95" : 681.388,
+          "p999" : 681.388,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "production-mutation-reload" : {
+          "p95" : 143.024917,
+          "p999" : 143.024917,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "production-mutation-write" : {
+          "p95" : 538.363083,
+          "p999" : 538.363083,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "production-record-reads" : {
+          "p95" : 0,
+          "p999" : 0,
+          "samples" : 3,
+          "unit" : "count"
+        },
+        "production-reload" : {
+          "p95" : 164.736875,
+          "p999" : 164.736875,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "scroll" : {
+          "p95" : 2.947666,
+          "p999" : 2.947666,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "warm-launch" : {
+          "p95" : 11.344459,
+          "p999" : 11.344459,
+          "samples" : 3,
+          "unit" : "ms"
+        }
+      }
+    },
+    "10000" : {
+      "assetCount" : 10000,
+      "method" : "package-membership-and-index-projection",
+      "metrics" : {
+        "decoded-thumbnail-count" : {
+          "p95" : 60,
+          "p999" : 60,
+          "samples" : 3,
+          "unit" : "count"
+        },
+        "filter" : {
+          "p95" : 2.976875,
+          "p999" : 2.976875,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "first-page-delivery" : {
+          "p95" : 102.799291,
+          "p999" : 102.799291,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "interactive-preview-submission" : {
+          "p95" : 0.440167,
+          "p999" : 0.440167,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "memory-footprint" : {
+          "p95" : 3276800,
+          "p999" : 3276800,
+          "samples" : 3,
+          "unit" : "bytes"
+        },
+        "observable-object-count" : {
+          "p95" : 0,
+          "p999" : 0,
+          "samples" : 3,
+          "unit" : "count"
+        },
+        "production-first-grid" : {
+          "p95" : 1.81275,
+          "p999" : 1.81275,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "production-launch" : {
+          "p95" : 1755.6115,
+          "p999" : 1755.6115,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "production-mutation-full" : {
+          "p95" : 4537.35175,
+          "p999" : 4537.35175,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "production-mutation-reload" : {
+          "p95" : 170.023167,
+          "p999" : 170.023167,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "production-mutation-write" : {
+          "p95" : 4367.328583,
+          "p999" : 4367.328583,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "production-record-reads" : {
+          "p95" : 0,
+          "p999" : 0,
+          "samples" : 3,
+          "unit" : "count"
+        },
+        "production-reload" : {
+          "p95" : 171.485083,
+          "p999" : 171.485083,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "scroll" : {
+          "p95" : 29.034542,
+          "p999" : 29.034542,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "warm-launch" : {
+          "p95" : 102.799291,
+          "p999" : 102.799291,
+          "samples" : 3,
+          "unit" : "ms"
+        }
+      }
+    },
+    "100000" : {
+      "assetCount" : 100000,
+      "method" : "package-membership-and-index-projection",
+      "metrics" : {
+        "decoded-thumbnail-count" : {
+          "p95" : 60,
+          "p999" : 60,
+          "samples" : 3,
+          "unit" : "count"
+        },
+        "filter" : {
+          "p95" : 31.890334,
+          "p999" : 31.890334,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "first-page-delivery" : {
+          "p95" : 1031.905375,
+          "p999" : 1031.905375,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "interactive-preview-submission" : {
+          "p95" : 0.412917,
+          "p999" : 0.412917,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "memory-footprint" : {
+          "p95" : 32145408,
+          "p999" : 32145408,
+          "samples" : 3,
+          "unit" : "bytes"
+        },
+        "observable-object-count" : {
+          "p95" : 0,
+          "p999" : 0,
+          "samples" : 3,
+          "unit" : "count"
+        },
+        "production-first-grid" : {
+          "p95" : 1.72825,
+          "p999" : 1.72825,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "production-launch" : {
+          "p95" : 16100.858042,
+          "p999" : 16100.858042,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "production-mutation-full" : {
+          "p95" : 43137.6085,
+          "p999" : 43137.6085,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "production-mutation-reload" : {
+          "p95" : 428.217792,
+          "p999" : 428.217792,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "production-mutation-write" : {
+          "p95" : 42714.318333,
+          "p999" : 42714.318333,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "production-record-reads" : {
+          "p95" : 0,
+          "p999" : 0,
+          "samples" : 3,
+          "unit" : "count"
+        },
+        "production-reload" : {
+          "p95" : 443.436125,
+          "p999" : 443.436125,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "scroll" : {
+          "p95" : 286.49275,
+          "p999" : 286.49275,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "warm-launch" : {
+          "p95" : 1031.905375,
+          "p999" : 1031.905375,
+          "samples" : 3,
+          "unit" : "ms"
+        }
+      }
+    }
+  },
+  "schemaVersion" : 2
+}
