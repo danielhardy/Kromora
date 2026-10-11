@@ -22,11 +22,13 @@ final class ExportWorkflowCoordinatorTests: XCTestCase {
         func presentExportError(_ message: String) { errors.append(message) }
     }
 
-    private func makeWorkflow() -> (ExportWorkflowCoordinator, Destination) {
+    private func makeWorkflow(shareRoot: URL? = nil) -> (ExportWorkflowCoordinator, Destination) {
         let destination = Destination()
         let workflow = ExportWorkflowCoordinator(
             export: ExportCoordinator(engine: FakeRenderEngine(), photosDelivery: nil),
-            destination: destination
+            destination: destination,
+            shareRoot: shareRoot ?? FileManager.default.temporaryDirectory
+                .appendingPathComponent("KromoraShareTests-\(UUID().uuidString)", isDirectory: true)
         )
         return (workflow, destination)
     }
@@ -65,5 +67,72 @@ final class ExportWorkflowCoordinatorTests: XCTestCase {
         workflow.exportFailed()
         XCTAssertNil(workflow.pendingShareURL)
         XCTAssertNil(workflow.externalEditorHandoffURL)
+    }
+
+    private func makeShareRoot() throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("KromoraShareTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        return root
+    }
+
+    func testRemoveShareExportsDeletesOnlyTheShareRoot() throws {
+        let root = try makeShareRoot()
+        let userFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("user-export-\(UUID().uuidString).tiff")
+        try Data([1]).write(to: userFile)
+        addTeardownBlock { try? FileManager.default.removeItem(at: userFile) }
+        let stale = root.appendingPathComponent("abandoned", isDirectory: true)
+        try FileManager.default.createDirectory(at: stale, withIntermediateDirectories: true)
+        try Data([1]).write(to: stale.appendingPathComponent("a.tiff"))
+
+        let (workflow, _) = makeWorkflow(shareRoot: root)
+        workflow.removeShareExports()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: userFile.path))
+    }
+
+    func testFailedShareExportRemovesTemporaryFilesAndPendingState() throws {
+        let root = try makeShareRoot()
+        let directory = root.appendingPathComponent("pending", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let (workflow, destination) = makeWorkflow(shareRoot: root)
+        destination.exportSingleRequest = ExportSingleRequest(
+            source: ImageSource(backing: .data(Data([1])), kind: .standard, nativeExtent: CGSize(width: 1, height: 1)),
+            document: EditDocument(), lut: nil, baseName: "Photo"
+        )
+        workflow.shareDialog()
+        XCTAssertNotNil(workflow.pendingShareURL)
+
+        workflow.exportFailed()
+
+        XCTAssertNil(workflow.pendingShareURL)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    func testCompletionWithoutKeyWindowCleansUpAndReportsStatus() throws {
+        try XCTSkipIf(NSApplication.shared.keyWindow != nil, "A key window is present")
+        let root = try makeShareRoot()
+        let directory = root.appendingPathComponent("ready", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("Photo_share.tiff")
+        try Data([1]).write(to: file)
+        let (workflow, destination) = makeWorkflow(shareRoot: root)
+
+        workflow.exportCompleted(at: file)  // not pending: ignored
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+
+        destination.exportSingleRequest = ExportSingleRequest(
+            source: ImageSource(backing: .data(Data([1])), kind: .standard, nativeExtent: CGSize(width: 1, height: 1)), document: EditDocument(), lut: nil, baseName: "Photo"
+        )
+        workflow.shareDialog()
+        let pending = try XCTUnwrap(workflow.pendingShareURL)
+        workflow.exportCompleted(at: pending)
+
+        XCTAssertNil(workflow.pendingShareURL)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+        XCTAssertEqual(destination.statuses.last, "Share unavailable: no window to present the sharing menu")
     }
 }

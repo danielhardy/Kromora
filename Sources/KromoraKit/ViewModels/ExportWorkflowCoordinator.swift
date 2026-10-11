@@ -48,10 +48,18 @@ final class ExportWorkflowCoordinator {
     private(set) var pendingShareURL: URL?
     private(set) var externalEditorHandoffURL: URL?
     private var sharePicker: NSSharingServicePicker?
+    private var sharePickerDelegate: SharePickerDelegate?
+    private let shareRoot: URL
 
-    init(export: ExportCoordinator, destination: (any ExportWorkflowDestination)? = nil) {
+    init(
+        export: ExportCoordinator,
+        destination: (any ExportWorkflowDestination)? = nil,
+        shareRoot: URL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Kromora Share Exports", isDirectory: true)
+    ) {
         self.export = export
         self.destination = destination
+        self.shareRoot = shareRoot
     }
 
     static func shareDialogMode(for selectionCount: Int) -> ShareDialogMode {
@@ -62,6 +70,7 @@ final class ExportWorkflowCoordinator {
 
     func exportFailed() {
         externalEditorHandoffURL = nil
+        if pendingShareURL != nil { removeShareExports() }
         pendingShareURL = nil
     }
 
@@ -200,10 +209,19 @@ final class ExportWorkflowCoordinator {
 
     // MARK: - Share
 
+    /// Starts a new share by discarding every earlier temporary export, including directories a
+    /// previous launch abandoned, then returns a fresh directory. Only `shareRoot` is ever touched;
+    /// user-selected export destinations and external-editor files live elsewhere.
     private func makeShareDirectory() -> URL {
-        FileManager.default.temporaryDirectory
-            .appendingPathComponent("Kromora Share Exports", isDirectory: true)
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        removeShareExports()
+        return shareRoot.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    }
+
+    /// Removes all temporary share exports and releases the picker that referenced them.
+    func removeShareExports() {
+        sharePicker = nil
+        sharePickerDelegate = nil
+        try? FileManager.default.removeItem(at: shareRoot)
     }
 
     private func shareSelectedExports() {
@@ -235,7 +253,10 @@ final class ExportWorkflowCoordinator {
                   let urls = try? FileManager.default.contentsOfDirectory(
                     at: directory, includingPropertiesForKeys: nil
                   ).filter({ $0.pathExtension.lowercased() == "tif" || $0.pathExtension.lowercased() == "tiff" }),
-                  !urls.isEmpty else { return }
+                  !urls.isEmpty else {
+                self.removeShareExports()
+                return
+            }
             self.presentSharePicker(for: urls)
         }
     }
@@ -272,12 +293,43 @@ final class ExportWorkflowCoordinator {
 
     private func presentSharePicker(for urls: [URL]) {
         pendingShareURL = nil
-        guard let view = NSApp.keyWindow?.contentView else {
-            destination?.setExportStatus("Share export ready: \(urls.count) file(s)")
+        guard let view = NSApplication.shared.keyWindow?.contentView else {
+            removeShareExports()
+            destination?.setExportStatus("Share unavailable: no window to present the sharing menu")
             return
         }
         let picker = NSSharingServicePicker(items: urls)
+        let delegate = SharePickerDelegate { [weak self] in self?.removeShareExports() }
+        picker.delegate = delegate
         sharePicker = picker
+        sharePickerDelegate = delegate
         picker.show(relativeTo: view.bounds, of: view, preferredEdge: .minY)
+    }
+}
+
+/// Keeps temporary share files alive until the chosen service finishes, fails, or the picker is
+/// dismissed without a choice.
+@MainActor
+private final class SharePickerDelegate: NSObject, @MainActor NSSharingServicePickerDelegate, @MainActor NSSharingServiceDelegate {
+    private let onFinish: () -> Void
+
+    init(onFinish: @escaping () -> Void) {
+        self.onFinish = onFinish
+    }
+
+    func sharingServicePicker(_ picker: NSSharingServicePicker, didChoose service: NSSharingService?) {
+        guard let service else {
+            onFinish()
+            return
+        }
+        service.delegate = self
+    }
+
+    func sharingService(_ sharingService: NSSharingService, didShareItems items: [Any]) {
+        onFinish()
+    }
+
+    func sharingService(_ sharingService: NSSharingService, didFailToShareItems items: [Any], error: any Error) {
+        onFinish()
     }
 }
