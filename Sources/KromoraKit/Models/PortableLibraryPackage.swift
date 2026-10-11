@@ -92,6 +92,11 @@ struct PortablePackageAssetSummary: Codable, Equatable, Hashable, Sendable {
     var cameraMake: String?
     var cameraModel: String?
     var lens: String?
+    /// Coarse, on-device location cell (one-degree grid) for the Library location facet. Nil means
+    /// the original has not been read for GPS yet (packages written before this field decode
+    /// unchanged); the empty string means it was read and carries no location. Precise
+    /// coordinates are never stored here and no geocoding or network lookup is performed.
+    var coarseLocation: String?
     var dimensions: PhotoPixelDimensions?
     var aspectRatio: Double?
     /// The aspect ratio of the pixels a library cell presents: the source aspect with the current
@@ -116,6 +121,7 @@ struct PortablePackageAssetSummary: Codable, Equatable, Hashable, Sendable {
         cameraMake: String? = nil,
         cameraModel: String? = nil,
         lens: String? = nil,
+        coarseLocation: String? = nil,
         dimensions: PhotoPixelDimensions? = nil,
         aspectRatio: Double? = nil,
         presentedAspectRatio: Double? = nil,
@@ -130,6 +136,7 @@ struct PortablePackageAssetSummary: Codable, Equatable, Hashable, Sendable {
         self.cameraMake = cameraMake
         self.cameraModel = cameraModel
         self.lens = lens
+        self.coarseLocation = coarseLocation
         self.dimensions = dimensions
         self.aspectRatio = aspectRatio
         self.presentedAspectRatio = presentedAspectRatio

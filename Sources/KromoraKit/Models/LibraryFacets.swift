@@ -8,11 +8,12 @@ import Foundation
 struct LibraryFacetSelection: Codable, Equatable, Hashable, Sendable {
     var cameras: Set<String> = []
     var lenses: Set<String> = []
+    var locations: Set<String> = []
 
     static let none = LibraryFacetSelection()
 
-    var isActive: Bool { !cameras.isEmpty || !lenses.isEmpty }
-    var activeCount: Int { cameras.count + lenses.count }
+    var isActive: Bool { !cameras.isEmpty || !lenses.isEmpty || !locations.isEmpty }
+    var activeCount: Int { cameras.count + lenses.count + locations.count }
 
     func matches(_ summary: PortablePackageAssetSummary, ignoring ignored: LibraryFacet? = nil)
         -> Bool
@@ -23,6 +24,9 @@ struct LibraryFacetSelection: Codable, Equatable, Hashable, Sendable {
         if ignored != .lens, !lenses.isEmpty {
             guard lenses.contains(LibraryFacet.lens.value(in: summary)) else { return false }
         }
+        if ignored != .location, !locations.isEmpty {
+            guard locations.contains(LibraryFacet.location.value(in: summary)) else { return false }
+        }
         return true
     }
 
@@ -30,6 +34,7 @@ struct LibraryFacetSelection: Codable, Equatable, Hashable, Sendable {
         switch facet {
         case .camera: cameras
         case .lens: lenses
+        case .location: locations
         }
     }
 
@@ -37,6 +42,7 @@ struct LibraryFacetSelection: Codable, Equatable, Hashable, Sendable {
         switch facet {
         case .camera: cameras.formSymmetricDifference([value])
         case .lens: lenses.formSymmetricDifference([value])
+        case .location: locations.formSymmetricDifference([value])
         }
     }
 
@@ -46,12 +52,14 @@ struct LibraryFacetSelection: Codable, Equatable, Hashable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         cameras = try container.decodeIfPresent(Set<String>.self, forKey: .cameras) ?? []
         lenses = try container.decodeIfPresent(Set<String>.self, forKey: .lenses) ?? []
+        locations = try container.decodeIfPresent(Set<String>.self, forKey: .locations) ?? []
     }
 }
 
 enum LibraryFacet: String, CaseIterable, Codable, Sendable, Identifiable {
     case camera
     case lens
+    case location
 
     var id: String { rawValue }
 
@@ -59,11 +67,16 @@ enum LibraryFacet: String, CaseIterable, Codable, Sendable, Identifiable {
         switch self {
         case .camera: "Camera"
         case .lens: "Lens"
+        case .location: "Location"
         }
     }
 
     /// Value shown for assets that carry no value for this facet.
     static let missingValue = "Unknown"
+
+    /// Value for assets whose original was read and carries no GPS. Assets not yet read stay
+    /// under `missingValue`.
+    static let noLocationValue = "No location"
 
     func value(in summary: PortablePackageAssetSummary) -> String {
         let raw: String?
@@ -73,6 +86,9 @@ enum LibraryFacet: String, CaseIterable, Codable, Sendable, Identifiable {
                 .joined(separator: " ")
         case .lens:
             raw = summary.lens
+        case .location:
+            guard let cell = summary.coarseLocation else { return Self.missingValue }
+            raw = cell.isEmpty ? Self.noLocationValue : cell
         }
         let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines)
         return (trimmed?.isEmpty == false ? trimmed : nil) ?? Self.missingValue

@@ -41,6 +41,13 @@ contains capture date, rating, flag, label, camera make/model, lens, pixel dimen
 display name, and the current asset revision. It is sufficient for membership, rough-state, sort,
 and filter work without opening `asset.json`.
 
+The summary's optional `coarseLocation` powers the Library location facet. It is a one-degree grid
+cell (about 110 km, for example `≈38° N, 122° W`) rounded on-device from the original's GPS tags
+when the asset is imported; precise coordinates are never copied into the index. No reverse
+geocoder or other network lookup is used. Absent means the original has not been read for GPS (every
+package written before this field; the facet lists these as "Unknown"); the empty string means it was
+read and has no GPS (the facet's "No location" value). Older packages decode unchanged.
+
 An `asset.json` record contains `identity` (the KRMA-390 opaque UUID plus immutable source
 fingerprint), `source` (embedded relative path or reserved referenced bookmark), `isRemoved`,
 `currentRevision`, and `editHistory` pointers. A virtual copy also has an optional `copyOfAssetID`

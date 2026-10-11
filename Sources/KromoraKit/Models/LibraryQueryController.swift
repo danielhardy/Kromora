@@ -540,13 +540,14 @@ struct LibraryQuery: Codable, Equatable, Sendable {
     }
 
     /// Human-readable descriptions of each active filter, in a stable order: flag, rating,
-    /// cameras, lenses, then search text.
+    /// cameras, lenses, locations, then search text.
     var activeFilterDescriptions: [String] {
         var parts: [String] = []
         if filter.flag != .all { parts.append(filter.flag.title) }
         if filter.rating != .any { parts.append(filter.rating.title) }
         parts.append(contentsOf: facets.cameras.sorted())
         parts.append(contentsOf: facets.lenses.sorted())
+        parts.append(contentsOf: facets.locations.sorted())
         if let text = searchText, !text.isEmpty { parts.append("“\(text)”") }
         return parts
     }

@@ -41,6 +41,9 @@ struct ImageMetadata: Codable, Sendable, Equatable {
 
     // MARK: Location
     var coordinates: String?    // "37.7749° N, 122.4194° W"
+    /// One-degree grid cell (~110 km) for Library filtering, e.g. "≈38° N, 122° W". Empty when
+    /// the file carries no GPS; the precise coordinates are never copied into the index.
+    var coarseLocation: String = ""
 
     var isEmpty: Bool {
         sections.isEmpty
@@ -218,6 +221,7 @@ extension ImageMetadata {
 
         // Location
         m.coordinates = formatGPS(gps)
+        m.coarseLocation = coarseLocationCell(gps) ?? ""
 
         return m
     }
@@ -256,6 +260,16 @@ extension ImageMetadata {
         out.dateStyle = .medium
         out.timeStyle = .short
         return out.string(from: date)
+    }
+
+    /// Rounds to whole degrees on-device. No geocoder or network lookup is involved.
+    private static func coarseLocationCell(_ gps: [CFString: Any]) -> String? {
+        guard let lat = gps[kCGImagePropertyGPSLatitude] as? Double,
+              let lon = gps[kCGImagePropertyGPSLongitude] as? Double,
+              lat.isFinite, lon.isFinite else { return nil }
+        let latRef = (gps[kCGImagePropertyGPSLatitudeRef] as? String) ?? (lat >= 0 ? "N" : "S")
+        let lonRef = (gps[kCGImagePropertyGPSLongitudeRef] as? String) ?? (lon >= 0 ? "E" : "W")
+        return "≈\(Int(abs(lat).rounded()))° \(latRef), \(Int(abs(lon).rounded()))° \(lonRef)"
     }
 
     private static func formatGPS(_ gps: [CFString: Any]) -> String? {

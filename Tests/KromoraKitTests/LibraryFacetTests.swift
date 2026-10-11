@@ -8,6 +8,7 @@ final class LibraryFacetTests: XCTestCase {
         var model: String?
         var lens: String?
         var rating: Int
+        var location: String?
     }
 
     private func controller(_ rows: [Row]) throws -> LibraryQueryController {
@@ -19,7 +20,7 @@ final class LibraryFacetTests: XCTestCase {
                     + "/" + assetID.raw + "/asset.json",
                 summary: .init(
                     rating: row.rating, cameraMake: row.make, cameraModel: row.model,
-                    lens: row.lens, displayName: "photo-\(index)")
+                    lens: row.lens, coarseLocation: row.location, displayName: "photo-\(index)")
             ))
         }
         return LibraryQueryController(
@@ -134,5 +135,40 @@ final class LibraryFacetTests: XCTestCase {
         XCTAssertTrue(controller.page(at: 0, query: LibraryQuery()).items.contains {
             $0.assetID == id && $0.isSelected
         })
+    }
+
+    func testLocationFacetSeparatesNoLocationFromUnreadAssets() throws {
+        let controller = try controller([
+            Row(make: nil, model: nil, lens: nil, rating: 1, location: "≈38° N, 122° W"),
+            Row(make: nil, model: nil, lens: nil, rating: 1, location: "≈38° N, 122° W"),
+            Row(make: nil, model: nil, lens: nil, rating: 1, location: ""),
+            Row(make: nil, model: nil, lens: nil, rating: 1, location: nil),
+        ])
+        var query = LibraryQuery()
+        let counts = Dictionary(
+            uniqueKeysWithValues: controller.facetCounts(query: query).counts(for: .location)
+                .map { ($0.value, $0.count) })
+        XCTAssertEqual(counts, ["≈38° N, 122° W": 2, "No location": 1, "Unknown": 1])
+
+        query.facets.toggle("No location", in: .location)
+        XCTAssertEqual(controller.page(at: 0, query: query).totalCount, 1)
+        query.facets.toggle("≈38° N, 122° W", in: .location)
+        XCTAssertEqual(controller.page(at: 0, query: query).totalCount, 3)
+        XCTAssertEqual(
+            query.activeFilterDescriptions, ["No location", "≈38° N, 122° W"].sorted())
+    }
+
+    func testLegacyFacetPayloadDecodesWithoutLocations() throws {
+        let json = #"{"cameras":["Sony A7"],"lenses":[]}"#
+        let facets = try JSONDecoder().decode(LibraryFacetSelection.self, from: Data(json.utf8))
+        XCTAssertEqual(facets.cameras, ["Sony A7"])
+        XCTAssertTrue(facets.locations.isEmpty)
+    }
+
+    func testLegacySummaryDecodesWithUnreadLocation() throws {
+        let json = #"{"displayName":"a.dng","assetRevision":0}"#
+        let summary = try JSONDecoder().decode(
+            PortablePackageAssetSummary.self, from: Data(json.utf8))
+        XCTAssertNil(summary.coarseLocation)
     }
 }

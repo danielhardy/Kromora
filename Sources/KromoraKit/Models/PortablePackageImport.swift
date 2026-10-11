@@ -501,8 +501,10 @@ struct PortablePackageImporter: Sendable {
                 )
                 try transaction.stage(data: try Self.encode(record), at: recordPath)
 
-                let sourceDimensions = PortablePackageAssetSummary.sourceDimensions(at: stagedOriginalURL)
+                let sourceMetadata = ImageMetadata.read(from: stagedOriginalURL)
+                let sourceDimensions = PortablePackageAssetSummary.sourceDimensions(from: sourceMetadata)
                 let importedSummary = PortablePackageAssetSummary(
+                    coarseLocation: sourceMetadata.coarseLocation,
                     dimensions: sourceDimensions,
                     presentedAspectRatio: sourceDimensions.map {
                         Double($0.width) / Double($0.height)

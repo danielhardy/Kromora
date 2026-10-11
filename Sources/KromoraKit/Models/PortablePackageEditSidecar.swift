@@ -203,7 +203,10 @@ struct PortablePackageEditCommit: Sendable {
 extension PortablePackageAssetSummary {
     /// The upright pixel dimensions of an original, read from its header without decoding.
     static func sourceDimensions(at url: URL) -> PhotoPixelDimensions? {
-        let metadata = ImageMetadata.read(from: url)
+        sourceDimensions(from: ImageMetadata.read(from: url))
+    }
+
+    static func sourceDimensions(from metadata: ImageMetadata) -> PhotoPixelDimensions? {
         guard let width = metadata.pixelWidth, let height = metadata.pixelHeight,
               width > 0, height > 0 else { return nil }
         return PhotoPixelDimensions(width: width, height: height)
