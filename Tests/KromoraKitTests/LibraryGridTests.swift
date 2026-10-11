@@ -186,9 +186,8 @@ final class LibraryGridTests: TempDirectoryTestCase {
         XCTAssertEqual(resolved.item.id, expectedID)
     }
 
-    /// The package stores no pixel dimensions, so an unedited photo starts on the 4:3 placeholder
-    /// and used to reflow when its metadata arrived. The persisted original thumbnail carries the
-    /// oriented ratio it was made with, which is enough to lay the cell out correctly at once.
+    /// The package stores no pixel dimensions, so an unedited photo starts on the 4:3 presented
+    /// ratio until its persisted original thumbnail supplies the oriented ratio it was made with.
     func testStoredOriginalGeometryResolvesAnUnresolvedCellWithoutOverridingKnownShapes() throws {
         let geometry = PresentedGeometry(
             crop: CropAdjustments(), rotation: .zero, orientedAspectRatio: 1.5

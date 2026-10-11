@@ -309,6 +309,9 @@ final class LibraryScanTests: TempDirectoryTestCase {
         }
         XCTAssertNil(collection.items.first?.metadata)
 
+        let entriesBeforeMetadata = collection.thumbnailEntries
+        let projectionRebuildsBeforeMetadata = collection.projectionRebuildCount
+
         await collection.scanCompletion()
         await collection.metadataCompletion()
         let metadata = try XCTUnwrap(collection.items.first?.metadata)
@@ -318,6 +321,11 @@ final class LibraryScanTests: TempDirectoryTestCase {
         XCTAssertEqual(metadata.pixelWidth, 64)
         XCTAssertEqual(metadata.pixelHeight, 48)
         XCTAssertEqual(collection.items.first?.url?.standardizedFileURL, url.standardizedFileURL)
+        XCTAssertEqual(collection.projectionRebuildCount, projectionRebuildsBeforeMetadata)
+        XCTAssertEqual(collection.thumbnailEntries.map(\.id), entriesBeforeMetadata.map(\.id))
+        XCTAssertEqual(
+            collection.thumbnailEntries.map(\.itemIndex), entriesBeforeMetadata.map(\.itemIndex)
+        )
     }
 
     func testUnreadableImageIsReportedWithoutDiscardingReadableFiles() async throws {
