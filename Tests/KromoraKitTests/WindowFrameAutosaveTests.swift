@@ -7,9 +7,11 @@ import XCTest
 final class WindowFrameAutosaveTests: XCTestCase {
     private let frameName = "KromoraTests-\(UUID().uuidString)"
 
-    override func tearDown() {
-        NSWindow.removeFrame(usingName: frameName)
-        super.tearDown()
+    override func tearDown() async throws {
+        await MainActor.run {
+            NSWindow.removeFrame(usingName: frameName)
+        }
+        try await super.tearDown()
     }
 
     private func makeWindow() -> NSWindow {
@@ -28,12 +30,13 @@ final class WindowFrameAutosaveTests: XCTestCase {
 
         let resized = NSRect(x: 220, y: 140, width: 1_480, height: 930)
         first.setFrame(resized, display: false)
-        first.saveFrame(usingName: frameName)
 
         let second = makeWindow()
         XCTAssertNotEqual(second.frame.size, resized.size)
         second.contentView = WindowFrameAutosave.Anchor(autosaveName: frameName)
 
+        XCTAssertEqual(second.frame.minX, resized.minX, accuracy: 1)
+        XCTAssertEqual(second.frame.minY, resized.minY, accuracy: 1)
         XCTAssertEqual(second.frame.width, resized.width, accuracy: 1)
         XCTAssertEqual(second.frame.height, resized.height, accuracy: 1)
     }
