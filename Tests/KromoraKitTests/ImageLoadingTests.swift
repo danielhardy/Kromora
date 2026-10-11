@@ -159,6 +159,28 @@ final class ImageLoadingTests: TempDirectoryTestCase {
         XCTAssertEqual(fromURL.pixelHeight, fromData.pixelHeight)
     }
 
+    func testMetadataRoundsValidGPSAndIgnoresOutOfRangeCoordinates() throws {
+        let validURL = try Fixtures.writeJPEG(
+            named: "valid-gps.jpg", in: tempDirectory,
+            gps: [
+                kCGImagePropertyGPSLatitude: 43.615,
+                kCGImagePropertyGPSLatitudeRef: "N",
+                kCGImagePropertyGPSLongitude: 116.2023,
+                kCGImagePropertyGPSLongitudeRef: "W",
+            ]
+        )
+        XCTAssertEqual(ImageMetadata.read(from: validURL).coarseLocation, "≈44° N, 116° W")
+
+        let invalidURL = try Fixtures.writeJPEG(
+            named: "invalid-gps.jpg", in: tempDirectory,
+            gps: [
+                kCGImagePropertyGPSLatitude: 91.0,
+                kCGImagePropertyGPSLongitude: 116.2023,
+            ]
+        )
+        XCTAssertEqual(ImageMetadata.read(from: invalidURL).coarseLocation, "")
+    }
+
     /// Opening a RAW must produce the neutral baseline — the render that the whole migration
     /// promises not to move, and the one `RecipeExtractor` fits its cubes against.
     ///

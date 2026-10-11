@@ -274,7 +274,8 @@ extension ImageMetadata {
     private static func coarseLocationCell(_ gps: [CFString: Any]) -> String? {
         guard let lat = gps[kCGImagePropertyGPSLatitude] as? Double,
               let lon = gps[kCGImagePropertyGPSLongitude] as? Double,
-              lat.isFinite, lon.isFinite else { return nil }
+              lat.isFinite, lon.isFinite,
+              abs(lat) <= 90, abs(lon) <= 180 else { return nil }
         let latRef = (gps[kCGImagePropertyGPSLatitudeRef] as? String) ?? (lat >= 0 ? "N" : "S")
         let lonRef = (gps[kCGImagePropertyGPSLongitudeRef] as? String) ?? (lon >= 0 ? "E" : "W")
         return "≈\(Int(abs(lat).rounded()))° \(latRef), \(Int(abs(lon).rounded()))° \(lonRef)"
