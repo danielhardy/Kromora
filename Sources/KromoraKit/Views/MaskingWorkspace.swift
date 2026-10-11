@@ -2301,7 +2301,8 @@ struct MaskCanvasOverlay: View {
     }
 }
 
-private extension LocalAdjustmentLayer {
+extension LocalAdjustmentLayer {
+    /// Internal so regression tests can keep the mask overlay task identity contract explicit.
     /// Only what can change the overlay: membership, geometry, inversion and amount.
     var overlayIdentity: LocalAdjustmentLayer {
         var copy = self
