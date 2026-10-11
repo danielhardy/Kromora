@@ -37,19 +37,17 @@ final class PreviewCoordinator {
     /// The semantic mask work a published refined frame has already warmed.
     ///
     /// The two-phase publish only pays for itself while the refined render can still suspend on
-    /// Vision. Once a resolved frame for this photo and mask recipe has reached the screen, the
-    /// renderer's component cache answers the next render without suspending, and a base frame
-    /// would just be a second full-graph render for every pointer tick. Mask resolution is keyed
-    /// by the component definitions and the mask quality tier — not by the document's global look
-    /// or the requested box — so a slider drag or a zoom keeps the warm identity while adding or
-    /// editing a smart mask correctly loses it. A new box only costs a resize of the cached
-    /// matte; treating it as cold published a base frame without the smart mask on every zoom
-    /// step (the layer is deferred whole), which read as the mask flickering off and on.
+    /// Vision. Once a resolved frame for this photo and mask recipe has reached the screen, a base
+    /// frame would just be a second full-graph render for every pointer tick. Semantic warmth is
+    /// keyed by component definitions, not the document's global look, requested box, or mask
+    /// quality tier. A quality change may still need a higher-detail matte, but the previous
+    /// mask-bearing frame should stay on screen while it resolves. Treating a quality change as
+    /// cold published a base frame without the smart mask (the layer is deferred whole), which
+    /// read as the mask flickering off and on when settling after zoom.
     private struct SemanticWarmth: Equatable {
         let source: ImageSource
         let assetID: PhotoAssetID?
         let components: [MaskSource]
-        let maskQuality: MaskQuality
     }
 
     private struct Token: Equatable {
@@ -428,8 +426,7 @@ final class PreviewCoordinator {
                         $0.isUsable && $0.source.semanticDefinition != nil
                     }.map(\.source)
                     : []
-            },
-            maskQuality: request.quality.maskQuality
+            }
         )
     }
 

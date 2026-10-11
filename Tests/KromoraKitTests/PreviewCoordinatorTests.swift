@@ -411,6 +411,58 @@ final class PreviewCoordinatorTests: XCTestCase {
         XCTAssertEqual(requests[2].maskResolution, .resolved)
     }
 
+    /// Settling a zoom can raise mask quality from preview to render. Keep the last mask-bearing
+    /// frame on screen while that higher-quality matte resolves; a deferred base frame would drop
+    /// the Person layer between the interactive and settled publications.
+    func testSettlingWarmSmartMaskToFullResolutionDoesNotPublishAMasklessFrame() async throws {
+        let fake = ControlledRenderEngine()
+        let coordinator = PreviewCoordinator(engine: fake, settleDelay: .zero)
+        var publications: [PreviewCoordinator.Publication] = []
+        coordinator.onPublication = { publications.append($0) }
+        let source = makeSource()
+
+        coordinator.submit(personMaskedRequest(source: source, exposure: 0.1))
+        try await waitUntil("the cold base render") { await fake.requests.count == 1 }
+        await fake.releaseNext()
+        try await waitUntil("the cold mask refinement") { await fake.requests.count == 2 }
+        await fake.releaseNext()
+        try await waitUntil("the mask-bearing preview") { publications.count == 2 }
+        XCTAssertEqual(publications.last?.request.maskResolution, .resolved)
+        let warmPublicationStart = publications.count
+
+        coordinator.beginInteraction()
+        coordinator.submit(personMaskedRequest(source: source, exposure: 0.2), phase: .interactive)
+        try await waitUntil("the interactive render") { await fake.requests.count == 3 }
+        await fake.releaseNext()
+        try await waitUntil("the interactive publication") { publications.count == 3 }
+        XCTAssertEqual(publications.last?.request.quality, .interactive)
+        XCTAssertEqual(publications.last?.request.maskResolution, .resolved)
+
+        let preview = personMaskedRequest(source: source, exposure: 0.2)
+        let fullResolution = RenderRequest(
+            source: preview.source, document: preview.document,
+            targetSize: CGSize(width: 2_400, height: 1_600),
+            quality: .fullResolution, output: .raster
+        )
+        coordinator.submit(fullResolution)
+        try await waitUntil("the settled full-resolution render") { await fake.requests.count == 4 }
+        let requests = await fake.allRequests()
+        XCTAssertEqual(requests[3].quality, .fullResolution)
+        XCTAssertEqual(requests[3].maskResolution, .resolved)
+        XCTAssertEqual(publications.count, 3,
+                       "the mask-bearing interactive frame must remain visible while settling")
+
+        await fake.releaseNext()
+        try await waitUntil("the settled mask-bearing publication") { publications.count == 4 }
+        XCTAssertEqual(publications.last?.request.quality, .fullResolution)
+        XCTAssertEqual(publications.last?.request.maskResolution, .resolved)
+        XCTAssertTrue(publications.dropFirst(warmPublicationStart).allSatisfy {
+            $0.request.maskResolution == .resolved
+        },
+                      "no publication may drop the smart mask during the quality transition")
+        coordinator.endInteraction()
+    }
+
     /// The refinement is fenced by the same token as the base frame: a superseded base frame must
     /// neither publish nor drag its own refinement onto the screen behind a newer edit.
     func testASupersededBaseFrameNeitherPublishesNorRefines() async throws {
@@ -472,6 +524,19 @@ final class PreviewCoordinatorTests: XCTestCase {
             document: EditDocument(
                 rawDevelop: RAWDevelopSettings(exposure: exposure),
                 localAdjustments: [Self.maskLayer(target: .subject)]
+            ),
+            targetSize: CGSize(width: 320, height: 240),
+            quality: .preview,
+            output: .raster
+        )
+    }
+
+    private func personMaskedRequest(source: ImageSource, exposure: Double) -> RenderRequest {
+        RenderRequest(
+            source: source,
+            document: EditDocument(
+                rawDevelop: RAWDevelopSettings(exposure: exposure),
+                localAdjustments: [Self.maskLayer(target: .person)]
             ),
             targetSize: CGSize(width: 320, height: 240),
             quality: .preview,
