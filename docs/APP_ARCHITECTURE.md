@@ -23,8 +23,8 @@ reservations, and UserDefaults culling state no longer have a product owner.
 collaborators, owns published cross-feature presentation state, and sequences source/revision
 fences. Feature workflows do not reach into one another's private state.
 
-`AppViewModel.swift` is 5,117 lines after the coordinator extractions. `PackageSettingsTests.testAppViewModelDoesNotRegrow`
-fails above 5,150 lines as a trend guard; extract new workflows into coordinators rather than raising the ceiling.
+`AppViewModel.swift` is 5,105 lines after the coordinator extractions. `PackageSettingsTests.testAppViewModelDoesNotRegrow`
+fails above 5,120 lines as a trend guard; extract new workflows into coordinators rather than raising the ceiling.
 
 ## Boundaries
 
@@ -136,8 +136,10 @@ query controller's selection for the visible window, and owns grid selection, ke
 portable asset page-faulting, culling persistence, and deletion confirmation. Its
 `LibraryBrowsingDestination` is limited to presentation values and callbacks for status/errors,
 selection-to-edit, source opening, and deletion. `AppViewModel` remains responsible for opening and
-preparing the active photo, the cross-feature cleanup after deletion, and
-`clearActiveSourceAfterLibraryDeletion`; the coordinator never stores the application model.
+preparing the active photo and `clearActiveSourceAfterLibraryDeletion`; the coordinator never
+stores the application model. `LibraryDeletionCoordinator` owns the post-deletion cleanup sequence
+through `LibraryDeletionCleanupDestination` and returns a `LibraryDeletionOutcome` (active-photo
+action plus status/error message) that the root applies.
 `LibraryBrowsingCoordinatorTests` exercise paging, query no-op behavior, off-window opens, culling
 persistence, and the grid-only confirmation rule with a fake query provider and destination.
 
@@ -245,8 +247,10 @@ query controller's selection for the visible window, and owns grid selection, ke
 portable asset page-faulting, culling persistence, and deletion confirmation. Its
 `LibraryBrowsingDestination` is limited to presentation values and callbacks for status/errors,
 selection-to-edit, source opening, and deletion. `AppViewModel` remains responsible for opening and
-preparing the active photo, the cross-feature cleanup after deletion, and
-`clearActiveSourceAfterLibraryDeletion`; the coordinator never stores the application model.
+preparing the active photo and `clearActiveSourceAfterLibraryDeletion`; the coordinator never
+stores the application model. `LibraryDeletionCoordinator` owns the post-deletion cleanup sequence
+through `LibraryDeletionCleanupDestination` and returns a `LibraryDeletionOutcome` (active-photo
+action plus status/error message) that the root applies.
 `LibraryBrowsingCoordinatorTests` exercise paging, query no-op behavior, off-window opens, culling
 persistence, and the grid-only confirmation rule with a fake query provider and destination.
 
@@ -354,7 +358,7 @@ source-identity late-result rejection, revision composition, and identity-docume
 
 `AppViewModel` is the composition root, the main-window command façade, and the sole publisher of
 the active `EditDocument`. The inventory below reflects the current `AppViewModel.swift` MARKs
-after the ownership stages; the main file is 5,117 lines, recorded here only as supporting context.
+after the ownership stages; the main file is 5,105 lines, recorded here only as supporting context.
 
 | MARK / remaining workflow | Owner and root responsibility |
 | --- | --- |

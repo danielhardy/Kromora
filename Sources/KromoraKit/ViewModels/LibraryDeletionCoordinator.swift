@@ -1,10 +1,44 @@
 import Foundation
 
-/// Owns the destructive half of a library deletion. It flushes edits before touching an item,
-/// clears analysis caches, preserves referenced originals, trashes managed originals, and removes
-/// the corresponding edit record. Presentation cleanup is returned as a value to the root.
+/// Cross-feature cleanup a deletion fans out to. The root implements it with the stores it owns;
+/// the coordinator never sees `AppViewModel`.
+@MainActor
+protocol LibraryDeletionCleanupDestination: AnyObject {
+    var activeDeletionAssetID: PhotoAssetID? { get }
+    func removeEditedThumbnails(for assetIDs: Set<PhotoAssetID>)
+    func removeThumbnailFrames(for assetIDs: Set<PortablePhotoAssetID>)
+    func removeEditorSessions(for assetIDs: Set<PhotoAssetID>)
+    func syncPortableSelectionAfterDeletion()
+    func invalidatePreviewIdentities(_ identities: Set<PortablePhotoIdentity>) async
+    func invalidateRenderCaches() async
+}
+
+/// What the root applies to the active photo after a deletion.
+enum LibraryDeletionActivePhotoAction: Equatable, Sendable {
+    case none
+    case openSelection
+    case clearSource
+}
+
+/// What the root presents after a deletion.
+enum LibraryDeletionMessage: Equatable, Sendable {
+    case none
+    case status(String)
+    case error(String)
+}
+
+struct LibraryDeletionOutcome: Equatable, Sendable {
+    let result: LibraryDeletionResult
+    let activePhoto: LibraryDeletionActivePhotoAction
+    let message: LibraryDeletionMessage
+}
+
+/// Owns library deletion: the destructive half (flush edits, clear analysis caches, preserve
+/// referenced originals, trash managed originals, remove the edit record) and the cleanup
+/// fan-out after it. The active-photo decision and messaging are returned as values to the root.
 @MainActor
 final class LibraryDeletionCoordinator {
+    weak var destination: (any LibraryDeletionCleanupDestination)?
     private let collection: ImageCollection
     private let persistence: EditPersistenceCoordinator
     private let editStore: EditDocumentStore
@@ -29,6 +63,69 @@ final class LibraryDeletionCoordinator {
         self.portableLibrary = portableLibrary
         self.persistenceIdentity = persistenceIdentity
         self.allowsUnregisteredSourceDeletion = allowsUnregisteredSourceDeletion
+    }
+
+    /// Delete, then clean up dependent state in a fixed order: per-asset stores and sessions,
+    /// collection removal, then awaited preview/render cache invalidation before the caller
+    /// decides what to do with the active photo.
+    func deleteAndCleanUp(
+        _ candidates: [ImageCollection.DeletionCandidate]
+    ) async -> LibraryDeletionOutcome {
+        let identitiesByID: [PhotoAssetID: PortablePhotoIdentity] = Dictionary(
+            uniqueKeysWithValues: candidates.compactMap { candidate in
+                guard let item = collection.items.first(where: { $0.id == candidate.id }) else {
+                    return nil
+                }
+                return (candidate.id, item.asset.source.portableIdentity)
+            }
+        )
+        let result = await delete(candidates)
+        guard !result.deletedIDs.isEmpty else {
+            return LibraryDeletionOutcome(
+                result: result,
+                activePhoto: .none,
+                message: result.failures.first.map { .error($0) } ?? .none
+            )
+        }
+
+        let deletedSet = Set(result.deletedIDs)
+        destination?.removeEditedThumbnails(for: deletedSet)
+        destination?.removeThumbnailFrames(
+            for: Set(deletedSet.map { PortablePhotoAssetID.compatibility(from: $0) })
+        )
+        // Deletion is the lifecycle boundary for editor sessions, so removed photos cannot leave
+        // their undo snapshots retained.
+        destination?.removeEditorSessions(for: deletedSet)
+        _ = collection.removeItems(with: deletedSet)
+        if collection.isPortableWindowed {
+            // Query controller already dropped tombstones via index delta; mirror the single
+            // authority back into the window adapter so selection never points at a deleted ID.
+            destination?.syncPortableSelectionAfterDeletion()
+        }
+        await destination?.invalidatePreviewIdentities(
+            Set(result.deletedIDs.compactMap { identitiesByID[$0] })
+        )
+        await destination?.invalidateRenderCaches()
+
+        var activePhoto = LibraryDeletionActivePhotoAction.none
+        if let active = destination?.activeDeletionAssetID, deletedSet.contains(active) {
+            activePhoto = collection.selectedItem != nil ? .openSelection : .clearSource
+        }
+
+        let message: LibraryDeletionMessage
+        if !result.failures.isEmpty {
+            message = .error(
+                "Removed \(result.deletedIDs.count) photo(s), but some photos could not be removed: "
+                    + result.failures.joined(separator: " ")
+            )
+        } else {
+            message = .status(
+                result.deletedIDs.count == 1
+                    ? "Photo removed from Library"
+                    : "Removed \(result.deletedIDs.count) photos from Library"
+            )
+        }
+        return LibraryDeletionOutcome(result: result, activePhoto: activePhoto, message: message)
     }
 
     func delete(_ candidates: [ImageCollection.DeletionCandidate]) async -> LibraryDeletionResult {

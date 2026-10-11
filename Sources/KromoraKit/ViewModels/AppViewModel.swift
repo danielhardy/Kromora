@@ -1173,6 +1173,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             },
             allowsUnregisteredSourceDeletion: self.usesInjectedEditStore
         )
+        self.libraryDeletionCoordinator.destination = self
         self.photosImportCoordinator.destination = self
         self.photosImportReview.onImport = { [weak self] selections, provider in
             self?.photosImportCoordinator.start(selections: selections, provider: provider)
@@ -3095,62 +3096,18 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     func deleteLibraryItems(
         _ candidates: [ImageCollection.DeletionCandidate]
     ) async -> LibraryDeletionResult {
-        let identitiesByID: [PhotoAssetID: PortablePhotoIdentity] = Dictionary(
-            uniqueKeysWithValues: candidates.compactMap { candidate in
-                guard let item = collection.items.first(where: { $0.id == candidate.id }) else {
-                    return nil
-                }
-                return (candidate.id, item.asset.source.portableIdentity)
-            }
-        )
-        let result = await libraryDeletionCoordinator.delete(candidates)
-        guard !result.deletedIDs.isEmpty else {
-            if let message = result.failures.first { presentError(message) }
-            return result
+        let outcome = await libraryDeletionCoordinator.deleteAndCleanUp(candidates)
+        switch outcome.activePhoto {
+        case .none: break
+        case .openSelection: openActiveCollectionImage(loadMode: false)
+        case .clearSource: clearActiveSourceAfterLibraryDeletion()
         }
-
-        let deletedSet = Set(result.deletedIDs)
-        editedThumbnailCoordinator.removeAssets(deletedSet)
-        let deletedPortableIDs = Set(deletedSet.map { PortablePhotoAssetID.compatibility(from: $0) })
-        Task { [thumbnailFrameStore] in
-            await thumbnailFrameStore.remove(assetIDs: deletedPortableIDs)
+        switch outcome.message {
+        case .none: break
+        case .status(let message): statusMessage = message
+        case .error(let message): presentError(message)
         }
-        // Deletion is the lifecycle boundary for editor sessions. Keep the coordinator's bulk
-        // operation wired here so removed photos cannot leave their undo snapshots retained.
-        editorDocument.removeSessions(for: deletedSet)
-        _ = collection.removeItems(with: deletedSet)
-        if collection.isPortableWindowed {
-            // Query controller already dropped tombstones via index delta; mirror the single
-            // authority back into the window adapter so selection never points at a deleted ID.
-            libraryBrowsingCoordinator.syncPortableSelection()
-        }
-        let deletedIdentities = Set(
-            result.deletedIDs.compactMap { identitiesByID[$0] }
-        )
-        await previewPresentation.store.invalidate(identities: deletedIdentities)
-        Thumbnails.invalidateCache()
-        await engine.invalidateRenderCaches()
-
-        if let activeAssetID, deletedSet.contains(activeAssetID) {
-            if collection.selectedItem != nil {
-                openActiveCollectionImage(loadMode: false)
-            } else {
-                clearActiveSourceAfterLibraryDeletion()
-            }
-        }
-
-        if !result.failures.isEmpty {
-            presentError(
-                "Removed \(result.deletedIDs.count) photo(s), but some photos could not be removed: "
-                    + result.failures.joined(separator: " ")
-            )
-        } else {
-            statusMessage =
-                result.deletedIDs.count == 1
-                ? "Photo removed from Library"
-                : "Removed \(result.deletedIDs.count) photos from Library"
-        }
-        return result
+        return outcome.result
     }
 
     private func clearActiveSourceAfterLibraryDeletion() {
@@ -4906,6 +4863,37 @@ extension AppViewModel: PreviewAdmissionDestination {
     func admissionScheduleIdleFrameWarmup() { idleFrameWarmerCoordinator.schedule() }
     func admissionCancelIdleFrameWarmup(resetProgress: Bool) {
         idleFrameWarmerCoordinator.cancel(resetProgress: resetProgress)
+    }
+}
+
+extension AppViewModel: LibraryDeletionCleanupDestination {
+    var activeDeletionAssetID: PhotoAssetID? { activeAssetID }
+
+    func removeEditedThumbnails(for assetIDs: Set<PhotoAssetID>) {
+        editedThumbnailCoordinator.removeAssets(assetIDs)
+    }
+
+    func removeThumbnailFrames(for assetIDs: Set<PortablePhotoAssetID>) {
+        Task { [thumbnailFrameStore] in
+            await thumbnailFrameStore.remove(assetIDs: assetIDs)
+        }
+    }
+
+    func removeEditorSessions(for assetIDs: Set<PhotoAssetID>) {
+        editorDocument.removeSessions(for: assetIDs)
+    }
+
+    func syncPortableSelectionAfterDeletion() {
+        libraryBrowsingCoordinator.syncPortableSelection()
+    }
+
+    func invalidatePreviewIdentities(_ identities: Set<PortablePhotoIdentity>) async {
+        await previewPresentation.store.invalidate(identities: identities)
+    }
+
+    func invalidateRenderCaches() async {
+        Thumbnails.invalidateCache()
+        await engine.invalidateRenderCaches()
     }
 }
 

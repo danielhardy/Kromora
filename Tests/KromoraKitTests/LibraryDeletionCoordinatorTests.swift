@@ -218,6 +218,158 @@ final class LibraryDeletionCoordinatorTests: TempDirectoryTestCase {
         await collection.shutdown()
     }
 
+    // MARK: Cleanup fan-out
+
+    private final class RecordingDestination: LibraryDeletionCleanupDestination {
+        var activeDeletionAssetID: PhotoAssetID?
+        var events: [String] = []
+        var removedSessions: Set<PhotoAssetID> = []
+        var invalidatedIdentityCount = 0
+
+        func removeEditedThumbnails(for assetIDs: Set<PhotoAssetID>) { events.append("thumbnails") }
+        func removeThumbnailFrames(for assetIDs: Set<PortablePhotoAssetID>) { events.append("frames") }
+        func removeEditorSessions(for assetIDs: Set<PhotoAssetID>) {
+            removedSessions = assetIDs
+            events.append("sessions")
+        }
+        func syncPortableSelectionAfterDeletion() { events.append("selection") }
+        func invalidatePreviewIdentities(_ identities: Set<PortablePhotoIdentity>) async {
+            invalidatedIdentityCount = identities.count
+            events.append("preview")
+        }
+        func invalidateRenderCaches() async { events.append("render") }
+    }
+
+    private func makePortableFixture(
+        count: Int,
+        withForeignItem: Bool = false
+    ) async throws -> (
+        collection: ImageCollection, coordinator: LibraryDeletionCoordinator,
+        analysis: PhotoAnalysisCoordinator, destination: RecordingDestination
+    ) {
+        let sources = try (0..<count).map {
+            try Fixtures.writeGradientPNG(
+                width: 16 + $0, height: 12, named: "cleanup-\($0).png", in: tempDirectory
+            )
+        }
+        let packageURL = tempDirectory.appendingPathComponent("cleanup-\(UUID().uuidString).kromora")
+        let session = try PortableLibrarySession(at: packageURL)
+        try session.importURLs(sources)
+        var assets = try session.materializedAssets()
+        if withForeignItem {
+            // An item the session does not know about fails its package removal.
+            let foreign = try PortableLibrarySession(
+                at: tempDirectory.appendingPathComponent("foreign-\(UUID().uuidString).kromora")
+            )
+            try foreign.importURLs([
+                try Fixtures.writeGradientPNG(
+                    width: 40, height: 12, named: "foreign.png", in: tempDirectory
+                )
+            ])
+            assets += try foreign.materializedAssets()
+        }
+        let collection = makeTestCollection(libraryFolderURL: packageURL)
+        collection.loadPortableAssets(assets)
+        let store = makeInMemoryEditStore()
+        let analysis = makeAnalysisCoordinator()
+        let coordinator = makeCoordinator(
+            collection: collection, persistence: EditPersistenceCoordinator(store: store),
+            store: store, analysis: analysis, portableLibrary: session
+        )
+        let destination = RecordingDestination()
+        coordinator.destination = destination
+        return (collection, coordinator, analysis, destination)
+    }
+
+    func testCleanupRunsInOrderAndReportsStatusForInactiveDeletion() async throws {
+        let fixture = try await makePortableFixture(count: 2)
+        let item = try XCTUnwrap(fixture.collection.items.first)
+
+        let outcome = await fixture.coordinator.deleteAndCleanUp([
+            candidate(for: item, in: fixture.collection)
+        ])
+
+        XCTAssertEqual(outcome.result.deletedIDs, [item.id])
+        XCTAssertEqual(outcome.activePhoto, .none)
+        XCTAssertEqual(outcome.message, .status("Photo removed from Library"))
+        XCTAssertEqual(fixture.destination.removedSessions, [item.id])
+        XCTAssertEqual(fixture.destination.invalidatedIdentityCount, 1)
+        let events = fixture.destination.events
+        XCTAssertEqual(events.filter { $0 != "selection" },
+                       ["thumbnails", "frames", "sessions", "preview", "render"])
+        XCTAssertFalse(fixture.collection.items.contains { $0.id == item.id })
+        await fixture.analysis.shutdown()
+        await fixture.collection.shutdown()
+    }
+
+    func testDeletingActivePhotoWithRemainingSelectionOpensIt() async throws {
+        let fixture = try await makePortableFixture(count: 2)
+        let item = try XCTUnwrap(fixture.collection.items.first)
+        fixture.destination.activeDeletionAssetID = item.id
+        fixture.collection.select(at: 0)
+
+        let outcome = await fixture.coordinator.deleteAndCleanUp([
+            candidate(for: item, in: fixture.collection)
+        ])
+
+        XCTAssertNotNil(fixture.collection.selectedItem)
+        XCTAssertEqual(outcome.activePhoto, .openSelection)
+        await fixture.analysis.shutdown()
+        await fixture.collection.shutdown()
+    }
+
+    func testDeletingLastActivePhotoClearsSource() async throws {
+        let fixture = try await makePortableFixture(count: 1)
+        let item = try XCTUnwrap(fixture.collection.items.first)
+        fixture.destination.activeDeletionAssetID = item.id
+
+        let outcome = await fixture.coordinator.deleteAndCleanUp([
+            candidate(for: item, in: fixture.collection)
+        ])
+
+        XCTAssertNil(fixture.collection.selectedItem)
+        XCTAssertEqual(outcome.activePhoto, .clearSource)
+        XCTAssertEqual(outcome.message, .status("Photo removed from Library"))
+        await fixture.analysis.shutdown()
+        await fixture.collection.shutdown()
+    }
+
+    func testFullFailureSkipsCleanupAndReportsFirstError() async throws {
+        let fixture = try await makePortableFixture(count: 0, withForeignItem: true)
+        let item = try XCTUnwrap(fixture.collection.items.first)
+
+        let outcome = await fixture.coordinator.deleteAndCleanUp([
+            candidate(for: item, in: fixture.collection)
+        ])
+
+        XCTAssertTrue(outcome.result.deletedIDs.isEmpty)
+        XCTAssertEqual(outcome.activePhoto, .none)
+        guard case .error(let message) = outcome.message else {
+            return XCTFail("expected an error message, got \(outcome.message)")
+        }
+        XCTAssertTrue(message.contains("Could not remove"))
+        XCTAssertTrue(fixture.destination.events.isEmpty)
+        await fixture.analysis.shutdown()
+        await fixture.collection.shutdown()
+    }
+
+    func testPartialFailureCleansUpDeletedItemsAndReportsError() async throws {
+        let fixture = try await makePortableFixture(count: 1, withForeignItem: true)
+        let candidates = fixture.collection.items.map { candidate(for: $0, in: fixture.collection) }
+
+        let outcome = await fixture.coordinator.deleteAndCleanUp(candidates)
+
+        XCTAssertEqual(outcome.result.deletedIDs.count, 1)
+        XCTAssertEqual(outcome.result.failures.count, 1)
+        guard case .error(let message) = outcome.message else {
+            return XCTFail("expected an error message, got \(outcome.message)")
+        }
+        XCTAssertTrue(message.hasPrefix("Removed 1 photo(s), but some photos could not be removed:"))
+        XCTAssertTrue(fixture.destination.events.contains("render"))
+        await fixture.analysis.shutdown()
+        await fixture.collection.shutdown()
+    }
+
     private func makeAnalysisCoordinator(
         cacheDirectory: URL? = nil
     ) -> PhotoAnalysisCoordinator {
