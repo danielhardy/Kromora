@@ -79,7 +79,7 @@ final class CoordinatorBoundaryTests: TempDirectoryTestCase {
         XCTAssertEqual(writeCount, 1)
     }
 
-    func testEditorDocumentCoordinatorOwnsHistoryAndClipboardWithoutAppViewModel() {
+    func testEditorDocumentCoordinatorOwnsHistoryWithoutAppViewModel() {
         let coordinator = EditorDocumentCoordinator()
         let original = EditDocument()
         var edited = original
@@ -90,12 +90,6 @@ final class CoordinatorBoundaryTests: TempDirectoryTestCase {
         XCTAssertEqual(coordinator.undo(current: edited), original)
         XCTAssertTrue(coordinator.canRedo)
         XCTAssertEqual(coordinator.redo(current: original), edited)
-
-        coordinator.copy(document: edited)
-        XCTAssertEqual(
-            coordinator.clipboard?.applying(to: original, destinationIsRAW: false), edited
-        )
-        XCTAssertTrue(coordinator.canPaste)
     }
 
     func testEditorDocumentCoordinatorKeepsPerPhotoSessionAndRevisionBoundaries() {

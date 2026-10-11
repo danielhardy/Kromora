@@ -242,7 +242,9 @@ final class CopyPasteTests: TempDirectoryTestCase {
             lut: LUTSettings(lutID: LUTID(raw: "copied.cube"), intensity: 0.9)
         )
         viewModel.updateDocument { $0 = sourceEdits }
-        viewModel.editorDocument.copy(document: sourceEdits, categories: [.light])
+        viewModel.presentSelectiveCopyDialog()
+        viewModel.selectiveCopyCategories = [.light]
+        viewModel.confirmSelectiveCopy()
 
         let destinationIndex = try XCTUnwrap(
             viewModel.collection.items.firstIndex { $0.displayName == "destination.png" }

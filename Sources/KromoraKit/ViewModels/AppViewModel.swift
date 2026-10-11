@@ -188,18 +188,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     @Published private(set) var durableEditHistory: [PortablePackageEditRevision] = []
     @Published private(set) var durableCurrentEditRevision: UInt64 = 0
 
-    /// The last copied value-state payload. It contains no image or rendered data, so it remains
-    /// safe to apply to several destinations and keeps future selective-copy UI on one stable seam.
-    /// Compatibility projection for the editor coordinator's value-only clipboard. The
-    /// coordinator is the single owner; AppViewModel only exposes the historical API to views and
-    /// commands.
-    var editClipboard: EditClipboardPayload? { editorDocument.clipboard }
+    /// Compatibility projection for the copy/paste coordinator's value-only clipboard.
+    /// The payload contains no images; the root exposes it to existing views and commands.
+    var editClipboard: EditClipboardPayload? { editClipboardWorkflow.clipboard }
 
     var editClipboardCategories: Set<EditClipboardPayload.Category> {
-        editorDocument.clipboardCategories
+        editClipboardWorkflow.clipboardCategories
     }
 
-    var canPasteEdits: Bool { editorDocument.canPaste }
+    var canPasteEdits: Bool { editClipboardWorkflow.canPaste }
 
     /// The most recent persistence warning. A damaged edit catalog must not prevent the source
     /// image from opening, but it should remain visible to the user.
@@ -613,9 +610,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
     /// Source-folder file browser panel visibility.
     @Published var isSourceBrowserPresented: Bool = false
-    @Published var isSelectiveCopyDialogPresented = false
-    @Published var selectiveCopyCategories: Set<EditClipboardPayload.Category> =
-        Set(EditClipboardPayload.Category.allCases)
+    var isSelectiveCopyDialogPresented: Bool {
+        get { editClipboardWorkflow.isSelectiveCopyDialogPresented }
+        set { editClipboardWorkflow.isSelectiveCopyDialogPresented = newValue }
+    }
+    var selectiveCopyCategories: Set<EditClipboardPayload.Category> {
+        get { editClipboardWorkflow.selectiveCopyCategories }
+        set { editClipboardWorkflow.selectiveCopyCategories = newValue }
+    }
     /// The visible workspace. Library selection, the active edit document, and render surfaces
     /// remain owned by their existing collaborators; this value only composes those surfaces.
     @Published private(set) var navigation = NavigationState()
@@ -717,9 +719,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     let lookPreviewCoordinator: LookPreviewCoordinator
     let collection: ImageCollection
     let editStore: EditDocumentStore
-    /// Value-only editor sessions, history, and clipboard. The published document remains owned by
+    /// Value-only editor sessions and history. The published document remains owned by
     /// AppViewModel so render scheduling has one presentation-state owner.
     let editorDocument: EditorDocumentCoordinator
+    let editClipboardWorkflow: EditClipboardCoordinator
     /// Provider interaction and progress belong to the application composition root, while this
     /// model remains the narrow destination for durable collection admission and source loading.
     let photosImportCoordinator: PhotosImportCoordinator
@@ -1084,7 +1087,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             preferences: preferences,
             userLookFolderURL: userLookFolderURL
         )
-        self.selectiveCopyCategories = self.settings.lastCopyCategories
+        self.editClipboardWorkflow = EditClipboardCoordinator(
+            editor: self.editorDocument, settings: self.settings
+        )
         self.workScheduler = packageIOScheduler
         self.persistence = EditPersistenceCoordinator(store: effectiveEditStore)
         // Look thumbnails have a bounded, independent thumbnail lane. Sharing the editor's lane
@@ -1159,6 +1164,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         self.photosImportCoordinator.onStatus = { [weak self] message in
             self?.statusMessage = message
         }
+        self.editClipboardWorkflow.destination = self
         self.maskingWorkflow.destination = self
         self.retouchWorkflow.destination = self
 
@@ -1340,11 +1346,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // will-change timing, so no forwarding path here may spawn a Task.
         //
         // Remaining ObservableObject children (settings, library, media workflow, editor
-        // document, derive, look-save) are still consumed via `viewModel.*` by legacy views
+        // document, edit clipboard, derive, look-save) are still consumed via `viewModel.*`
         // (LookInspectorView reads `viewModel.library`, ContentView sheets read
         // `viewModel.derive`/`viewModel.lookSave`, toolbar menus read removable-media state,
-        // clipboard/undo read `editorDocument`). Forward those synchronously — `send()` in the
-        // same turn preserves will-change timing — until each view holds its child directly
+        // clipboard/undo read `editClipboardWorkflow`/`editorDocument`). Forward synchronously:
+        // `send()` in the same turn preserves will-change timing until views hold children directly
         // and the corresponding entry can be removed. Delete this loop only when every entry
         // is gone; removing an entry before its views observe the child directly makes that
         // surface stale (sheets stop presenting, library scans stop refreshing).
@@ -1353,6 +1359,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             library.objectWillChange.eraseToAnyPublisher(),
             libraryMediaWorkflow.objectWillChange.eraseToAnyPublisher(),
             editorDocument.objectWillChange.eraseToAnyPublisher(),
+            editClipboardWorkflow.objectWillChange.eraseToAnyPublisher(),
             derive.objectWillChange.eraseToAnyPublisher(),
             lookSave.objectWillChange.eraseToAnyPublisher(),
         ] {
@@ -3511,147 +3518,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     // MARK: - Copy and paste
 
-    func presentSelectiveCopyDialog() {
-        guard activeAssetID != nil, sourceImage != nil else {
-            statusMessage = "Open an image first"
-            return
-        }
-        selectiveCopyCategories = settings.lastCopyCategories
-        isSelectiveCopyDialogPresented = true
-    }
-
-    func confirmSelectiveCopy() {
-        guard activeAssetID != nil, sourceImage != nil else {
-            isSelectiveCopyDialogPresented = false
-            statusMessage = "Open an image first"
-            return
-        }
-        settings.lastCopyCategories = selectiveCopyCategories
-        editorDocument.copy(document: document, categories: selectiveCopyCategories)
-        isSelectiveCopyDialogPresented = false
-        statusMessage = copiedEditsMessage(categories: selectiveCopyCategories)
-    }
-
-    func cancelSelectiveCopy() {
-        isSelectiveCopyDialogPresented = false
-    }
-
-    /// Copy the active photo's value-state edits. RAW decoder defaults are represented by neutral
-    /// optional settings, so copying never transfers a source photo's as-shot seed accidentally.
-    func copyAllEdits() {
-        guard activeAssetID != nil, sourceImage != nil else {
-            statusMessage = "Open an image first"
-            return
-        }
-        editorDocument.copy(document: document)
-        statusMessage = "Copied all edits from \(sourceName)"
-    }
-
-    /// Paste to the active photo, or to every selected photo. Non-active destinations receive their
-    /// own history entry and disk snapshot; they do not need to be opened first.
-    func pasteEdits() {
-        guard let clipboard = editClipboard else {
-            statusMessage = "Copy edits first"
-            return
-        }
-
-        let selected = collection.selectedItems
-        if selected.isEmpty {
-            guard activeAssetID != nil, let source = imageSource else {
-                statusMessage = "Open an image first"
-                return
-            }
-            endUndoGrouping()
-            let updated = clipboard.applying(
-                to: document, destinationIsRAW: source.kind == .raw,
-                categories: editClipboardCategories
-            )
-            updateDocument { $0 = updated }
-            statusMessage = pasteCompletionMessage(photoCount: 1)
-            return
-        }
-
-        endUndoGrouping()
-        var pastedCount = 0
-        for item in selected {
-            let assetID = item.id
-            let sourceReference = EditSourceReference(
-                assetID: assetID, portableIdentity: persistencePortableIdentity(for: item),
-                url: item.url
-            )
-            let destinationIsRAW: Bool
-            if let url = item.url {
-                destinationIsRAW = ImageSource.kind(forExtension: url.pathExtension) == .raw
-            } else if let data = item.imageData {
-                destinationIsRAW = ImageSource.kind(forData: data) == .raw
-            } else {
-                destinationIsRAW = false
-            }
-
-            if activeSourceReference == sourceReference {
-                // The selected filmstrip item can change activeAssetID before its source load
-                // finishes, while activeSourceReference still describes the document on screen.
-                // Use that reference as the ownership boundary and restore the matching editor
-                // session before applying a paste to the active document.
-                activeAssetID = assetID
-                editorDocument.activate(session: editorDocument.session(for: assetID))
-                let updated = clipboard.applying(
-                    to: document, destinationIsRAW: destinationIsRAW,
-                    categories: editClipboardCategories
-                )
-                updateDocument { $0 = updated }
-            } else {
-                let updated = clipboard.applying(
-                    to: editorDocument.session(for: assetID)?.document ?? EditDocument(),
-                    destinationIsRAW: destinationIsRAW,
-                    categories: editClipboardCategories
-                )
-                guard editorDocument.apply(updated, to: assetID) else { continue }
-                requestEditedThumbnail(for: assetID, priority: .visibleGrid, force: true)
-                queuePersistence(
-                    updated,
-                    for: sourceReference,
-                    reportsStatus: false,
-                    force: true
-                )
-            }
-            pastedCount += 1
-        }
-
-        statusMessage = pasteCompletionMessage(photoCount: pastedCount)
-        requestPersistenceFlush()
-    }
-
-    private func pasteCompletionMessage(photoCount: Int) -> String {
-        let destination = photoCount == 1 ? "1 photo" : "\(photoCount) photos"
-        let result = photoCount > 0
-            ? "Pasted \(copiedCategorySummary) to \(destination)"
-            : "Pasted \(copiedCategorySummary)"
-        return editClipboardCategories.contains(.retouch)
-            ? "\(result); retouch sources resolve per photo"
-            : result
-    }
-
-    private var copiedCategorySummary: String {
-        if editClipboardCategories == Set(EditClipboardPayload.Category.allCases) {
-            return "edits"
-        }
-        return
-            editClipboardCategories
-            .sorted { $0.title < $1.title }
-            .map(\.title)
-            .joined(separator: ", ")
-    }
-
-    private func copiedEditsMessage(
-        categories: Set<EditClipboardPayload.Category>
-    ) -> String {
-        let summary =
-            categories == Set(EditClipboardPayload.Category.allCases)
-            ? "all edits"
-            : categories.sorted { $0.title < $1.title }.map(\.title).joined(separator: ", ")
-        return "Copied \(summary) from \(sourceName)"
-    }
+    func presentSelectiveCopyDialog() { editClipboardWorkflow.presentSelectiveCopyDialog() }
+    func confirmSelectiveCopy() { editClipboardWorkflow.confirmSelectiveCopy() }
+    func cancelSelectiveCopy() { editClipboardWorkflow.cancelSelectiveCopy() }
+    func copyAllEdits() { editClipboardWorkflow.copyAllEdits() }
+    func pasteEdits() { editClipboardWorkflow.pasteEdits() }
 
     /// Select a grid cell without leaving the grid. This is what makes a multi-selection useful:
     /// Command-click and Shift-click change the batch while the active photo remains explicit.
@@ -5707,4 +5578,42 @@ extension AppViewModel: IdleFrameWarmerDestination {
             plan: plan, canonical: true
         )
     }
+}
+
+extension AppViewModel: EditClipboardDestination {
+    var clipboardHasCopySource: Bool { activeAssetID != nil && sourceImage != nil }
+    var clipboardSourceName: String { sourceName }
+    var clipboardDocument: EditDocument { document }
+    var clipboardActiveSourceReference: EditSourceReference? { activeSourceReference }
+    var clipboardActiveDestinationIsRAW: Bool? {
+        guard activeAssetID != nil, let imageSource else { return nil }
+        return imageSource.kind == .raw
+    }
+    var clipboardSelectedTargets: [EditClipboardTarget] {
+        collection.selectedItems.map { item in
+            let isRAW: Bool
+            if let url = item.url {
+                isRAW = ImageSource.kind(forExtension: url.pathExtension) == .raw
+            } else if let data = item.imageData {
+                isRAW = ImageSource.kind(forData: data) == .raw
+            } else {
+                isRAW = false
+            }
+            return EditClipboardTarget(
+                sourceReference: EditSourceReference(
+                    assetID: item.id, portableIdentity: persistencePortableIdentity(for: item),
+                    url: item.url
+                ),
+                isRAW: isRAW
+            )
+        }
+    }
+
+    func activateClipboardAsset(_ assetID: PhotoAssetID) { activeAssetID = assetID }
+    func setClipboardStatus(_ message: String) { statusMessage = message }
+    func persistInactiveClipboardDocument(_ document: EditDocument, for reference: EditSourceReference) {
+        requestEditedThumbnail(for: reference.assetID, priority: .visibleGrid, force: true)
+        queuePersistence(document, for: reference, reportsStatus: false, force: true)
+    }
+    func flushClipboardPersistence() { requestPersistenceFlush() }
 }

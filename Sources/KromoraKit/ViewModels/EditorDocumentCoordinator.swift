@@ -6,23 +6,18 @@ import Combine
 /// `AppViewModel` remains the composition root and the owner of the currently published
 /// `EditDocument`, because render scheduling and source fences are presentation concerns. This
 /// coordinator owns the state that makes an edit session durable and reversible: per-photo
-/// in-memory sessions, undo/redo history, session revisions, and the copy/paste payload.
+/// in-memory sessions, undo/redo history, and session revisions.
 ///
 /// No Core Image, AppKit, renderer, or persistence actor crosses this boundary. Callers provide
 /// and receive `EditDocument`/`PhotoEditSession` values, which makes this workflow testable without
 /// constructing the application model.
 @MainActor
 final class EditorDocumentCoordinator: ObservableObject {
-    @Published private(set) var clipboard: EditClipboardPayload?
-    @Published private(set) var clipboardCategories: Set<EditClipboardPayload.Category> =
-        Set(EditClipboardPayload.Category.allCases)
-
     private(set) var activeHistory = EditHistory()
     private var sessions: [PhotoAssetID: PhotoEditSession] = [:]
     private var sessionRevisions: [PhotoAssetID: UInt64] = [:]
     private var nextRevision: UInt64 = 0
 
-    var canPaste: Bool { clipboard != nil }
     var canUndo: Bool { activeHistory.canUndo }
     var canRedo: Bool { activeHistory.canRedo }
     var undoDepth: Int { activeHistory.undoCount }
@@ -125,13 +120,4 @@ final class EditorDocumentCoordinator: ObservableObject {
     func redo(current: EditDocument) -> EditDocument? {
         activeHistory.redo(current: current)
     }
-
-    func copy(
-        document: EditDocument,
-        categories: Set<EditClipboardPayload.Category> = Set(EditClipboardPayload.Category.allCases)
-    ) {
-        clipboard = EditClipboardPayload(document: document)
-        clipboardCategories = categories
-    }
-
 }

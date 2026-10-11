@@ -57,9 +57,9 @@ final class ObservationInvalidationTests: TempDirectoryTestCase {
         viewModel.lookSave.isSheetPresented = false
         XCTAssertEqual(appChanges, 7)
 
-        viewModel.editorDocument.copy(document: EditDocument())
-        // `copy` writes two @Published values (clipboard + categories), so two
-        // will-change events forward synchronously.
+        viewModel.editClipboardWorkflow.selectiveCopyCategories = [.light]
+        viewModel.editClipboardWorkflow.isSelectiveCopyDialogPresented = true
+        // Clipboard presentation forwards two child will-change events synchronously.
         XCTAssertEqual(appChanges, 9, "clipboard must forward synchronously")
 
         viewModel.libraryMediaWorkflow.isRemovableMediaSelectorPresented = true
