@@ -84,22 +84,22 @@ enum ColorMixerControl: String, CaseIterable, Hashable, Sendable {
 }
 
 enum ColorMixerChannelName: String, CaseIterable, Hashable, Sendable {
-    case red, orange, yellow, green, aqua, blue, purple, magenta
+    case red, orange, yellow, green, cyan, blue, purple, magenta
 
     var title: String { rawValue.capitalized }
 
-    /// Fractional hue centers matching `hueWeight` in the HSL mixer kernel
-    /// (R/O/Y/G/A/B/P/M at 0°, 30°, 60°, 120°, 180°, 240°, 270°, 300°).
+    /// Fractional hue centers matching `bandWeights` in the HSL mixer kernel
+    /// (R/O/Y/G/C/B/P/M at 0°, 30°, 60°, 120°, 180°, 225°, 270°, 315°).
     var hueCenter: Double {
         switch self {
         case .red: return 0
         case .orange: return 1.0 / 12.0
         case .yellow: return 1.0 / 6.0
         case .green: return 1.0 / 3.0
-        case .aqua: return 0.5
-        case .blue: return 2.0 / 3.0
+        case .cyan: return 0.5
+        case .blue: return 5.0 / 8.0
         case .purple: return 0.75
-        case .magenta: return 5.0 / 6.0
+        case .magenta: return 7.0 / 8.0
         }
     }
 
@@ -420,7 +420,7 @@ extension AppViewModel {
         case .orange: return document.color.mixer.orange
         case .yellow: return document.color.mixer.yellow
         case .green: return document.color.mixer.green
-        case .aqua: return document.color.mixer.aqua
+        case .cyan: return document.color.mixer.cyan
         case .blue: return document.color.mixer.blue
         case .purple: return document.color.mixer.purple
         case .magenta: return document.color.mixer.magenta
@@ -601,7 +601,7 @@ extension AppViewModel {
         case .orange: mixer.orange = value
         case .yellow: mixer.yellow = value
         case .green: mixer.green = value
-        case .aqua: mixer.aqua = value
+        case .cyan: mixer.cyan = value
         case .blue: mixer.blue = value
         case .purple: mixer.purple = value
         case .magenta: mixer.magenta = value

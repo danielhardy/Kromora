@@ -5,7 +5,7 @@ import CoreGraphics
 
 final class ColorMixerTests: XCTestCase {
 
-    private let hues: [CGFloat] = [0, 30, 60, 120, 180, 240, 270, 300]
+    private let hues: [CGFloat] = [0, 30, 60, 120, 180, 225, 270, 315]
 
     private func image(hues: [CGFloat]) throws -> CIImage {
         let space = CGColorSpace(name: CGColorSpace.sRGB)!
@@ -57,7 +57,7 @@ final class ColorMixerTests: XCTestCase {
             orange: ColorMixerChannel(hue: -10),
             yellow: ColorMixerChannel(saturation: 25),
             green: ColorMixerChannel(luminance: -25),
-            aqua: ColorMixerChannel(hue: 15),
+            cyan: ColorMixerChannel(hue: 15),
             blue: ColorMixerChannel(saturation: 35),
             purple: ColorMixerChannel(luminance: 10),
             magenta: ColorMixerChannel(hue: -20)
@@ -142,7 +142,7 @@ final class ColorMixerTests: XCTestCase {
             channels[channelIndex] = adjustment
             let mixer = ColorMixerAdjustments(
                 red: channels[0], orange: channels[1], yellow: channels[2], green: channels[3],
-                aqua: channels[4], blue: channels[5], purple: channels[6], magenta: channels[7]
+                cyan: channels[4], blue: channels[5], purple: channels[6], magenta: channels[7]
             )
             let edited = try Pixels.bytes(of: RenderPipeline.applyColorMixer(mixer, to: source))
             let intendedDelta = chroma(pixel(edited, channelIndex)) - chroma(pixel(base, channelIndex))
@@ -168,6 +168,40 @@ final class ColorMixerTests: XCTestCase {
         let right = abs(chroma(pixel(edited, 3)) - chroma(pixel(base, 3)))
         XCTAssertLessThan(abs(left - right), 20,
                           "adjacent hues should transition through a smooth overlap")
+    }
+
+    func testSkyBetweenCyanAndBlueRespondsToBothChannels() throws {
+        // Production renders in an sRGB working space; the shared test context is linear, which
+        // would shift this pixel's hue towards blue and hide the cyan channel's reach.
+        let context = CIContext(options: [.workingColorSpace: WorkingSpace.sRGB.cgColorSpace])
+        func render(_ image: CIImage) -> [UInt8] {
+            var buffer = [UInt8](repeating: 0, count: 4)
+            context.render(
+                image, toBitmap: &buffer, rowBytes: 4, bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
+                format: .RGBA8, colorSpace: WorkingSpace.sRGB.cgColorSpace
+            )
+            return buffer
+        }
+        let source = try image(hues: [210])
+        let base = chroma(pixel(render(source), 0))
+
+        for (name, mixer) in [
+            ("cyan", ColorMixerAdjustments(cyan: ColorMixerChannel(saturation: -80))),
+            ("blue", ColorMixerAdjustments(blue: ColorMixerChannel(saturation: -80))),
+        ] {
+            let edited = render(RenderPipeline.applyColorMixer(mixer, to: source))
+            XCTAssertLessThan(chroma(pixel(edited, 0)), base - 15,
+                              "(name) should visibly desaturate a 210° sky")
+        }
+    }
+
+    func testLegacyAquaKeyDecodesIntoCyan() throws {
+        let json = Data(#"{"aqua":{"hue":0,"saturation":40,"luminance":0}}"#.utf8)
+        let mixer = try JSONDecoder().decode(ColorMixerAdjustments.self, from: json)
+        XCTAssertEqual(mixer.cyan.saturation, 40)
+
+        let reencoded = try JSONEncoder().encode(mixer)
+        XCTAssertTrue(String(decoding: reencoded, as: UTF8.self).contains("\"cyan\""))
     }
 
     func testMixerChangesReachSharedGraphAndAreDeterministic() throws {

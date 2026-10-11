@@ -300,15 +300,15 @@ final class NeutralOriginSliderTests: XCTestCase {
         XCTAssertEqual(ColorMixerControl.saturation.trackStyle, .saturation)
         XCTAssertEqual(ColorMixerControl.luminance.trackStyle, .neutral)
         XCTAssertEqual(
-            ColorMixerControl.hue.trackStyle(for: .aqua),
+            ColorMixerControl.hue.trackStyle(for: .cyan),
             .localizedHue(
-                center: ColorMixerChannelName.aqua.hueCenter,
+                center: ColorMixerChannelName.cyan.hueCenter,
                 halfSpan: ColorMixerChannel.hueEndpointDegrees / 360.0
             )
         )
         XCTAssertEqual(
-            ColorMixerControl.saturation.trackStyle(for: .aqua),
-            .channelSaturation(hue: ColorMixerChannelName.aqua.hueCenter)
+            ColorMixerControl.saturation.trackStyle(for: .cyan),
+            .channelSaturation(hue: ColorMixerChannelName.cyan.hueCenter)
         )
         XCTAssertEqual(ColorGradingControl.hue.trackStyle, .hue)
         XCTAssertEqual(ColorGradingControl.saturation.trackStyle, .saturation)

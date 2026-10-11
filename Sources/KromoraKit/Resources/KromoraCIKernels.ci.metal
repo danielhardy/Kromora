@@ -159,17 +159,27 @@ float wrappedHue(float value) {
     return value - floor(value);
 }
 
-float circularDistance(float hue, float center) {
-    float distance = abs(hue - center);
-    return min(distance, 1.0 - distance);
-}
-
-float hueWeight(float hue, float center) {
-    // Raised cosine: both the value and its first derivative reach zero at the edge.
-    float radius = 0.125;
-    float distance = circularDistance(hue, center);
-    if (distance >= radius) { return 0.0; }
-    return 0.5 + 0.5 * cos(3.141592653589793 * distance / radius);
+// Partition-of-unity weights over the eight mixer band centres (red, orange, yellow, green, cyan,
+// blue, purple, magenta). A hue between two adjacent centres is split between exactly those two
+// bands with a raised cosine, so the weights always sum to 1: every hue is fully covered, nothing
+// is double-counted, and each band reaches exactly to its neighbours' centres. Keep the centres in
+// sync with `ColorMixerChannelName.hueCenter`.
+void bandWeights(float hue, thread float *weights) {
+    const float centers[9] = {
+        0.0, 1.0 / 12.0, 1.0 / 6.0, 1.0 / 3.0, 1.0 / 2.0, 5.0 / 8.0, 3.0 / 4.0, 7.0 / 8.0, 1.0
+    };
+    for (int i = 0; i < 8; i++) { weights[i] = 0.0; }
+    for (int i = 0; i < 8; i++) {
+        float low = centers[i];
+        float high = centers[i + 1];
+        if (hue <= high || i == 7) {
+            float t = clamp((hue - low) / (high - low), 0.0, 1.0);
+            float s = 0.5 - 0.5 * cos(3.141592653589793 * t);
+            weights[i] += 1.0 - s;
+            weights[(i + 1) % 8] += s;
+            return;
+        }
+    }
 }
 
 float hueToRGB(float p, float q, float t) {
@@ -201,7 +211,7 @@ float4 hslMixer(
     float4 orange,
     float4 yellow,
     float4 green,
-    float4 aqua,
+    float4 cyan,
     float4 blue,
     float4 purple,
     float4 magenta
@@ -233,26 +243,28 @@ float4 hslMixer(
     }
     hue = wrappedHue(hue);
 
-    float redWeight = hueWeight(hue, 0.0);
-    float orangeWeight = hueWeight(hue, 1.0 / 12.0);
-    float yellowWeight = hueWeight(hue, 1.0 / 6.0);
-    float greenWeight = hueWeight(hue, 1.0 / 3.0);
-    float aquaWeight = hueWeight(hue, 1.0 / 2.0);
-    float blueWeight = hueWeight(hue, 2.0 / 3.0);
-    float purpleWeight = hueWeight(hue, 3.0 / 4.0);
-    float magentaWeight = hueWeight(hue, 5.0 / 6.0);
+    float w[8];
+    bandWeights(hue, w);
+    float redWeight = w[0];
+    float orangeWeight = w[1];
+    float yellowWeight = w[2];
+    float greenWeight = w[3];
+    float cyanWeight = w[4];
+    float blueWeight = w[5];
+    float purpleWeight = w[6];
+    float magentaWeight = w[7];
 
     float hueDelta = redWeight * red.x + orangeWeight * orange.x
         + yellowWeight * yellow.x + greenWeight * green.x
-        + aquaWeight * aqua.x + blueWeight * blue.x
+        + cyanWeight * cyan.x + blueWeight * blue.x
         + purpleWeight * purple.x + magentaWeight * magenta.x;
     float saturationDelta = redWeight * red.y + orangeWeight * orange.y
         + yellowWeight * yellow.y + greenWeight * green.y
-        + aquaWeight * aqua.y + blueWeight * blue.y
+        + cyanWeight * cyan.y + blueWeight * blue.y
         + purpleWeight * purple.y + magentaWeight * magenta.y;
     float luminanceDelta = redWeight * red.z + orangeWeight * orange.z
         + yellowWeight * yellow.z + greenWeight * green.z
-        + aquaWeight * aqua.z + blueWeight * blue.z
+        + cyanWeight * cyan.z + blueWeight * blue.z
         + purpleWeight * purple.z + magentaWeight * magenta.z;
 
     return float4(

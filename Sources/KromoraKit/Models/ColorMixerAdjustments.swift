@@ -59,7 +59,7 @@ struct ColorMixerAdjustments: Codable, Equatable, Sendable {
     var orange: ColorMixerChannel
     var yellow: ColorMixerChannel
     var green: ColorMixerChannel
-    var aqua: ColorMixerChannel
+    var cyan: ColorMixerChannel
     var blue: ColorMixerChannel
     var purple: ColorMixerChannel
     var magenta: ColorMixerChannel
@@ -69,7 +69,7 @@ struct ColorMixerAdjustments: Codable, Equatable, Sendable {
         orange: ColorMixerChannel = .neutral,
         yellow: ColorMixerChannel = .neutral,
         green: ColorMixerChannel = .neutral,
-        aqua: ColorMixerChannel = .neutral,
+        cyan: ColorMixerChannel = .neutral,
         blue: ColorMixerChannel = .neutral,
         purple: ColorMixerChannel = .neutral,
         magenta: ColorMixerChannel = .neutral
@@ -78,30 +78,37 @@ struct ColorMixerAdjustments: Codable, Equatable, Sendable {
         self.orange = orange
         self.yellow = yellow
         self.green = green
-        self.aqua = aqua
+        self.cyan = cyan
         self.blue = blue
         self.purple = purple
         self.magenta = magenta
     }
 
     var channels: [ColorMixerChannel] {
-        [red, orange, yellow, green, aqua, blue, purple, magenta]
+        [red, orange, yellow, green, cyan, blue, purple, magenta]
     }
 
     var isIdentity: Bool { channels.allSatisfy(\.isIdentity) }
 
     private enum CodingKeys: String, CodingKey {
-        case red, orange, yellow, green, aqua, blue, purple, magenta
+        case red, orange, yellow, green, cyan, blue, purple, magenta
+    }
+
+    /// Pre-rename key, read only so edits saved before "Aqua" became "Cyan" keep their values.
+    private enum LegacyCodingKeys: String, CodingKey {
+        case aqua
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        let legacy = try decoder.container(keyedBy: LegacyCodingKeys.self)
         self.init(
             red: try container.decodeIfPresent(ColorMixerChannel.self, forKey: .red) ?? .neutral,
             orange: try container.decodeIfPresent(ColorMixerChannel.self, forKey: .orange) ?? .neutral,
             yellow: try container.decodeIfPresent(ColorMixerChannel.self, forKey: .yellow) ?? .neutral,
             green: try container.decodeIfPresent(ColorMixerChannel.self, forKey: .green) ?? .neutral,
-            aqua: try container.decodeIfPresent(ColorMixerChannel.self, forKey: .aqua) ?? .neutral,
+            cyan: try container.decodeIfPresent(ColorMixerChannel.self, forKey: .cyan)
+                ?? legacy.decodeIfPresent(ColorMixerChannel.self, forKey: .aqua) ?? .neutral,
             blue: try container.decodeIfPresent(ColorMixerChannel.self, forKey: .blue) ?? .neutral,
             purple: try container.decodeIfPresent(ColorMixerChannel.self, forKey: .purple) ?? .neutral,
             magenta: try container.decodeIfPresent(ColorMixerChannel.self, forKey: .magenta) ?? .neutral

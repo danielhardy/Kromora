@@ -1438,7 +1438,7 @@ enum RenderPipeline {
         let parameters: [Any] = [
             mixerKernelVector(mixer.red), mixerKernelVector(mixer.orange),
             mixerKernelVector(mixer.yellow), mixerKernelVector(mixer.green),
-            mixerKernelVector(mixer.aqua), mixerKernelVector(mixer.blue),
+            mixerKernelVector(mixer.cyan), mixerKernelVector(mixer.blue),
             mixerKernelVector(mixer.purple), mixerKernelVector(mixer.magenta),
         ]
 
