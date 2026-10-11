@@ -82,22 +82,57 @@ described there.
 
 ## Library grid with a large cold import (KRMA-841)
 
-Static analysis of the post-import path (no Instruments profile or timing numbers have been
-recorded yet; they need a supervised release-build session, `swift run -c release`, since debug
-builds inflate Swift-side grid and observation cost):
+`LargeImportLibraryGridBenchmark` is the window-independent, opt-in harness (no `NSWindow`, so it
+measures model, scheduler and decode cost, not SwiftUI layout). It copies the `realworldtest/` RAW
+files N times with unique trailing bytes (identity and the memory cache are content-keyed, so links
+or plain copies would share one decode), drives a real `ImageCollection` with the real scheduler and
+ImageIO/RAW decode, requests the first 30-cell window, simulates a fast scroll (one 6-cell row every
+16 ms, request entering and release leaving cells as `LibraryGridView` does), then runs select-all and
+a shift-click while decodes are in flight. A main-actor heartbeat (4 ms sleep) measures stalls.
 
-- Rejected: unbounded decode concurrency and stale queued work. `ImageWorkScheduler` already caps
-  thumbnails at 4 running / 24 queued, orders by priority, and `releaseThumbnail` cancels a queued
-  decode when a cell leaves the viewport (`testLargeColdLibraryBoundsDecodeWorkAndReleaseCancelsQueuedDecodes`).
-- Confirmed main-actor cost: every thumbnail arrival, request, and release did linear
-  `items.firstIndex(where:)` scans, and `fillThumbnailQueue` filtered and sorted the whole library
-  on each arrival. With thousands of items and several arrivals per frame that is quadratic work
-  on the main actor. `ImageCollection.itemIndex(for:)` is now a verified cache, and
-  `fillThumbnailQueue` returns immediately when the queue is full and otherwise walks only the
-  demanded and prepared ids.
-- Still open and worth measuring: the grid body reads selection at grid and row level, so a
-  selection change re-evaluates hosted rows; `applyThumbnail` re-signals edited demand for every
-  visible id on each arrival.
+```sh
+KROMORA_LARGE_IMPORT_BENCHMARK=1 KROMORA_LARGE_IMPORT_COUNT=1500 \
+KROMORA_LARGE_IMPORT_OUTPUT=/tmp/krma841.txt \
+swift test -c release --filter LargeImportLibraryGridBenchmark
+```
+
+Measured state, Release, Apple M4 Pro, macOS 27.2, 8 local fixtures (two 126-129 MB ARW, six
+3-17 MB DNG/HEIC) cycled to N cold files, on top of commit `3cba3952` plus the KRMA-841 index cache:
+
+| Files | Fill first 30 cells | Heartbeat gap p50 / p99 / max | Gaps > 33 ms | Select-all | Shift-click | Peak RSS |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 300 | 396 ms | 4.8 / 6.0 / 17.8 ms | 0 of 512 | 0.14-0.42 ms | 0.16 ms | 1812 MB |
+| 1500 | 2006 ms | 5.0 / 6.7 / 18.2 ms | 0 of 1291 | 0.57-1.10 ms | 0.76 ms | 1928 MB |
+
+Root causes from the measurements:
+
+- Rejected: main-actor starvation. During sustained cold RAW decode the heartbeat never exceeded
+  18 ms (about 13 ms over its 4-5 ms cadence) and never missed a 33 ms frame. Selection costs
+  about 1 ms at 1500 items. Decode concurrency is bounded (4 running / 24 queued) and
+  `releaseThumbnail` cancels queued decodes when a cell leaves the viewport
+  (`testLargeColdLibraryBoundsDecodeWorkAndReleaseCancelsQueuedDecodes`).
+- Fixed earlier (92a5ea8f): per-arrival `items.firstIndex(where:)` scans and whole-library
+  filtering/sorting in `fillThumbnailQueue`. These were quadratic on the main actor; the numbers
+  above are with the `itemIndex(for:)` cache in place. Pre-change baseline (same harness and
+  fixtures on `92a5ea8f~1`, Release, M4 Pro): 300 files fill 1042 ms, heartbeat p50/p99/max
+  5.0 / 5.4 / 18.0 ms, 0 of 428 gaps > 33 ms, select-all 0.28-0.47 ms, shift-click 0.34 ms, peak
+  RSS 1894 MB; 1500 files fill 1953 ms, heartbeat 5.0 / 6.1 / 15.8 ms, 0 of 1337 gaps > 33 ms,
+  select-all 1.41-1.83 ms, shift-click 1.70 ms, peak RSS 1936 MB. The scans cost roughly 1 ms per
+  selection operation at 1500 items (select-all and shift-click about 2x slower than after the
+  fix) and did not produce frame-length stalls at the model level, so they were a real but small
+  contributor; fill time and peak memory are unchanged within fixture-order noise.
+- Remaining cost is decode time and transient memory, not UI-thread work. Filling a 30-cell window
+  of cold RAWs takes 0.4-2.0 s depending on which fixtures lead, and four concurrent full decodes
+  push peak RSS to about 1.9 GB (resident 1.3-1.5 GB afterwards). `PlatformThumbnailProvider`
+  creates thumbnails with `kCGImageSourceCreateThumbnailFromImageAlways`, which decodes the full
+  RAW instead of the embedded preview. Moving to an embedded-preview tier changes thumbnail pixels
+  and frame-store signatures, so it is a separate quality decision, not part of this change.
+- Not measured here: SwiftUI body/layout cost per frame in a mounted `LibraryGridView`. That needs a
+  supervised Instruments session (Instruments could not record on this machine, see KRMA-860's
+  note above). The model-level result suggests it is not main-actor decode or scheduling work.
+- Still open and worth measuring with a mounted grid: the grid body reads selection at grid and row
+  level, so a selection change re-evaluates hosted rows; `applyThumbnail` re-signals edited demand
+  for every visible id on each arrival.
 
 ## Optional RAW and performance work
 
@@ -515,6 +550,66 @@ The whole-file SHA-256 on the main actor is gone (KRMA-746, KRMA-747). The first
 misses are tracked, unchanged and non-gating, by KRMA-748 and KRMA-749 under KRMA-750 (see
 ADR-LKF-001). Exact warm Edit paints at about 290 ms with zero renders, so the remaining first-pixel
 time is Edit-surface mount and SwiftUI work, not rendering or hashing.
+
+### Last-known-frame measured state on Apple M4 Pro (2026-10-10)
+
+Three consecutive direct Release runs of `LastKnownFrameReleaseBenchmark/testReleaseLastKnownFrameBudgets`
+with `KROMORA_LAST_KNOWN_FRAME_ITERATIONS=30` on commit `3cba3952`, Apple M4 Pro, macOS 27.2
+(26B5101f), Xcode 27.0 beta, `DSC01019.ARW` (9504×6336), viewport 1440×1032 points, 30 warm samples
+for the grid and Edit-navigation scenarios. **These are direct runs without `xctrace`**: Instruments
+could not record on this machine (`DTServiceHub` connection failure), so there is no Metal System
+Trace, and the table below is not a like-for-like comparison with the 2026-10-01 M1 Pro table (different
+chip, OS, viewport, and no tracing overhead). Values are the median across the three runs, with the
+individual p95 values in parentheses. Reports: `/tmp/kromora-capture/lkf-direct-{1,2,3}.jsonl`.
+
+| Scenario | p50 | p95 | Budget | Result |
+| --- | ---: | ---: | --- | --- |
+| Exact warm Edit | 365 ms | 365 ms (365/375/363) | zero renders, one confirmed frame | **pass** |
+| Stale warm Edit | 363 ms | 363 ms (364/362/363) | one provisional, at most one confirmed | **pass** |
+| Warm Edit first pixel | 361 ms | 387 ms (389/387/387) | p95 <= 50 ms | miss |
+| Main-actor before first suspension | — | 99.0 ms (99.2/99.0/99.0) | <= 2 ms target; median p95 <= 3 ms | **miss** |
+| Warm 30-cell grid re-entry | 142 ms | 147 ms (147/147/147) | p95 <= 100 ms | miss |
+
+Exact and stale warm Edit are single-sample scenarios by design (`sampleCount` 1); their p50 and p95
+are that sample. One run recorded a single zero-presented-time fallback in each scenario; the other two
+recorded none.
+
+Compared with 2026-10-01 the grid re-entry p95 improved (235 to 147 ms) but still misses its 100 ms
+budget. The main-actor time before the first suspension is about 99 ms, far above the 2.03 ms measured
+after KRMA-746/747 and close to the 72 ms that fix removed. This is not explained by the
+hardware change: a faster chip should lower it. KRMA-860 found the cause (below), so the 99 ms is a
+regression that has since been fixed, not a baseline. The warm Edit first-pixel p95 (387 ms) was
+inflated by the same main-thread starvation.
+
+#### Post-fix state (KRMA-860, 2026-10-10)
+
+Cause: whole-file SHA-256 hashing on the main actor while building an `ImageSource`, about 50 ms for a
+126 MB ARW. Two paths: (1) `makePortableIdentity` compared the persisted file-change signature with
+`==`, but package dates are whole seconds, so it never matched; (2) browsing assets carry a placeholder
+signature, so edited-thumbnail requests, adjacent-preview prefetch, the idle warmer, and open all
+rehashed (about 35 in a row at idle). Fixes: `2eaef446` (tolerant `isSameFileSnapshot`), `0b152709`
+(keep the stored hash for a real identity with a browsing signature; legacy `browsing-v1` identities
+still hash), `871d216d` (`wholeFileRehash` log line).
+
+Post-fix evidence is a **dev-build** photo-switch timeline (three Library to Edit switches, KRMA-869
+log), not the Release `last-known-frame` p95 series:
+
+| Phase | Before | After |
+| --- | ---: | ---: |
+| `selectPortableItem` | 50.8 ms | 2.4 ms |
+| `selectionSyncReturned` | 100.9 ms (303.8 in one run) | 2.8 ms |
+| `loadSyncPrefix` `planMs` | 49-50 ms | 0 ms |
+| `beginLoadScheduled` | 520 ms | 32 ms |
+| First pixel, stored frame | 1,313-1,955 ms | 74 / 192 / 205 ms |
+
+No `wholeFileRehash` runs on the main thread; the remaining ones are off-main in source preparation
+(`hadStoredSignature=false`, 50-62 ms each).
+
+**Not yet measured:** the Release median p95 for main-actor time before first suspension. The
+one allowed display-bound series for KRMA-860 was spent on the pre-fix table above, and the 2.8 ms
+selection-sync figure is from a dev build, so the <= 3 ms budget is plausible but unconfirmed. The next
+supervised release-qualification capture should record it. Regression guard without a window:
+`ImageSourceIdentityReuseTests` (the date round-trip test fails without the fix).
 
 ### Persisted package identity hash reuse (KRMA-753, 2026-10-01)
 
