@@ -155,9 +155,9 @@ final class LightInspectorTests: TempDirectoryTestCase {
         ))
         XCTAssertFalse(toneCurveSection.contains("Button(\"Reset\")"))
 
-        let resetButtonSource = try inspectorSource(named: "ResetIconButton.swift")
-        XCTAssertTrue(resetButtonSource.contains("Image(systemName: \"arrow.counterclockwise\")"))
-        XCTAssertTrue(resetButtonSource.contains(".accessibilityLabel(accessibilityLabel ?? title)"))
+        let resetTitle = "Reset Red tone curve"
+        let resetButton = ResetIconButton(resetTitle) {}
+        XCTAssertEqual(resetButton.resolvedAccessibilityLabel, resetTitle)
     }
 
     func testAdvancedCurveControlsAreCollapsedUntilExpanded() throws {
