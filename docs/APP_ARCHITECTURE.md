@@ -23,14 +23,14 @@ reservations, and UserDefaults culling state no longer have a product owner.
 collaborators, owns published cross-feature presentation state, and sequences source/revision
 fences. Feature workflows do not reach into one another's private state.
 
-`AppViewModel.swift` is 5,398 lines after the coordinator extractions. `PackageSettingsTests.testAppViewModelDoesNotRegrow`
-fails above 5,500 lines as a trend guard; extract new workflows into coordinators rather than raising the ceiling.
+`AppViewModel.swift` is 5,256 lines after the coordinator extractions. `PackageSettingsTests.testAppViewModelDoesNotRegrow`
+fails above 5,300 lines as a trend guard; extract new workflows into coordinators rather than raising the ceiling.
 
 ## Boundaries
 
 | Workflow | Owner | Values crossing the boundary |
 | --- | --- | --- |
-| Source and library | `ImageCollection`, `SourceImportPlan`, `SourceSessionCoordinator`, `LibraryMediaWorkflowCoordinator`, `LibraryImportCoordinator`, `PhotosImportCoordinator`, and `LUTLibrary` | source plans, prepared source publications, media/import requests, stored-document results, metadata/capability values, collection items, import progress |
+| Source and library | `ImageCollection`, `SourceImportPlan`, `SourceSessionCoordinator`, `LibraryMediaWorkflowCoordinator`, `LibraryImportCoordinator`, `PackageSourceImportCoordinator`, `PhotosImportCoordinator`, and `LUTLibrary` | source plans, prepared source publications, media/import requests, stored-document results, metadata/capability values, collection items, import progress |
 | Library browsing | `LibraryBrowsingCoordinator` owns portable query-window paging, mirrored selection, culling-state persistence, and deletion confirmation; `AppViewModel` owns source loading, deletion cleanup, and the edit handoff | query values, page summaries/assets, selection IDs, deletion candidates/results, and open/status callbacks |
 | Editor document and history | `AppViewModel` owns the published active `EditDocument`; `EditorDocumentCoordinator` owns per-photo sessions and bounded undo/redo; package sidecars own durable commit history, named snapshots, and virtual-copy identity | `EditDocument`, `PhotoEditSession`, immutable revision numbers |
 | Copy and paste edits | `EditClipboardCoordinator` owns clipboard values, selective-copy state/preferences, and single/batch paste routing; `EditorDocumentCoordinator` owns destination sessions/history; `AppViewModel` commits the active document and adapts persistence/thumbnail effects | `EditClipboardPayload`, category sets, `EditClipboardTarget`, source references, document commit/status callbacks |
@@ -162,6 +162,8 @@ collection/editor presentation boundaries. Worker cancellation is cooperative an
 and awaits the library progress observer; the package session's shared scheduler continues to bound
 actual I/O admission.
 
+`PackageSourceImportCoordinator` owns the folder, removable-media, and Photos-drop import shape on top of it: start, observe, reload, open the first imported or duplicate asset, and report an `ImportOutcomeSummary` through the narrow `PackageSourceImportDestination` (the root conforms; the coordinator never holds `AppViewModel`). It also owns the drop-promise task and security-scoped access release on no-files paths.
+
 Multi-photo imports stream into the Library grid while they run. The worker appends each committed
 source's index entry to a lock-backed `PortablePackageCommitBuffer`; the progress observer drains it
 through `PortablePackageImportHandle.publishCommitted()` at most every 250 ms, which applies an
@@ -238,7 +240,7 @@ after the ownership stages; the main file is 4,293 lines, recorded here only as 
 | Error presentation | The root maps hard failures to its status bar and alert; collaborators report outcomes. |
 | Auto adjustment | `AutoWorkflowCoordinator` owns invocation state and cancellation. `runAutoAdjustment` snapshots source/document identity, fences completion, presents status, and commits a successful value through `updateDocument`. |
 | Image loading and source changes | `load` is the root sequencer: it closes undo, flushes the previous edit, activates the session, invalidates old source/display work, clears surfaces, then starts `SourceSessionCoordinator`. Root installation and stored-edit adoption publish the active document and schedule the corrective render. Stored-edit adoption has two stages: `SourceSessionCoordinator.begin` starts the edit read at selection and `onStoredDocumentLoaded` lets `adoptStoredDocumentValues` put the document on the panel as soon as it is read, independent of the serialized source preparation; the source-dependent reconciliation (`adoptStoredEdits`) still runs after preparation, and queues a corrective render only if a render with a different document was already scheduled. `SourceSessionCoordinator` owns replaceable source preparation and its worker tasks. |
-| Import and library commands | `LibraryImportCoordinator`, `PhotosImportCoordinator`, `PhotosImportBatchCoordinator`, `LibraryMediaWorkflowCoordinator`, and `LibraryBrowsingCoordinator` own their worker, provider, batch bridge, validation, query-window, and selection state. The root keeps view-compatible entry points, final package/import publication, source-to-edit handoff, and cross-feature deletion cleanup. |
+| Import and library commands | `LibraryImportCoordinator`, `PackageSourceImportCoordinator`, `PhotosImportCoordinator`, `PhotosImportBatchCoordinator`, `LibraryMediaWorkflowCoordinator`, and `LibraryBrowsingCoordinator` own their worker, provider, batch bridge, validation, query-window, and selection state. The root keeps view-compatible entry points, final package/import publication, source-to-edit handoff, and cross-feature deletion cleanup. |
 | Launch hints | `LibraryBrowsingCoordinator` coalesces device-local viewport/active-ID hints, reads at most two hinted packed-frame windows below current viewport priority, and cancels remaining speculative reads when the grid publishes its real viewport. Hints never alter selection, scroll position, or package truth. |
 | Edited thumbnails | `EditedThumbnailCoordinator` owns request state. Root demand, refresh, debounce, and invalidation hooks are forwards; collection/document publication remains at the root boundary. |
 | Copy/paste and Looks | `EditClipboardCoordinator` owns clipboard values, selective-copy presentation/preferences, and paste sequencing through a narrow destination. `EditorDocumentCoordinator` owns per-photo sessions/history. `LookSelectionCoordinator` owns Look resolution against `LUTLibrary`/`DerivedLUTRegistry`, the one-shot missing-reference report, and selection/audition decisions; it returns outcomes and never mutates the document. Root commands apply those outcomes through `updateDocument` and preserve multi-photo persistence semantics. |

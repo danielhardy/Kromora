@@ -675,7 +675,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Bridges streamed Photos package results to one deferred collection refresh and source
     /// handoff. Package writes and collection/document ownership remain with their coordinators.
     private let photosImportBatchCoordinator = PhotosImportBatchCoordinator()
-    private var droppedPromiseTask: Task<Void, Never>?
     private var bestEffortFrameStoreFlushTask: Task<Void, Never>?
     /// Replaces cache flush work in lifecycle tests so they can hold each store independently.
     var frameStoreFlushOperationsForTesting: FrameStoreFlushOperations?
@@ -740,6 +739,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         isShuttingDown: { [weak self] in self?.isShuttingDown ?? true },
         publishProgress: { [weak self] progress in self?.portableImportProgress = progress },
         publishStatus: { [weak self] status in self?.statusMessage = status }
+    )
+    /// Folder, removable-media and Photos-drop import orchestration over the shared coordinator.
+    private lazy var packageSourceImports = PackageSourceImportCoordinator(
+        imports: libraryImportCoordinator, destination: self
     )
     /// Coalesced durable edit snapshots. The application model routes persistence policy here;
     /// file I/O remains inside `EditDocumentStore`.
@@ -950,7 +953,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private var lutCacheInvalidationTask: Task<Void, Never>?
     private var semanticCoordinatorInstallTask: Task<Void, Never>?
     private var pendingPersistenceFlush: Task<PersistenceFlushResult, Never>?
-    private var isShuttingDown = false
+    private(set) var isShuttingDown = false
     private var cancellables: [AnyCancellable] = []
     private let portableLibraryOpenError: String?
 
@@ -1669,7 +1672,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Surface a user-facing error both as a dismissible alert and in the
     /// status bar. Used for hard failures (load / export / derive / save);
     /// transient preview hiccups stay status-bar-only to avoid alert spam.
-    private func presentError(_ message: String) {
+    func presentError(_ message: String) {
         statusMessage = message
         errorMessage = message
     }
@@ -1852,27 +1855,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         presentError("Could not open \(url.lastPathComponent): \(reason)")
     }
 
-    private func observePortableImport(
-        _ handle: PortablePackageImportHandle,
-        operationID: UUID,
-        total: Int,
-        prefix: String,
-        onSuccess: @escaping @MainActor (PortablePackageImportResult) -> Void,
-        onFailure: @escaping @MainActor (Error) -> Void
-    ) {
-        // Multi-photo imports fold each committed batch into the Library grid as it lands; a
-        // single photo has nothing to stream and is published by its completion handler.
-        let streamsToGrid = total > 1
-        libraryImportCoordinator.observe(
-            handle, operationID: operationID, prefix: prefix,
-            onCommitted: { [weak self] in
-                guard streamsToGrid else { return }
-                try? self?.libraryBrowsingCoordinator.mergeCommittedImports()
-            },
-            onSuccess: onSuccess, onFailure: onFailure
-        )
-    }
-
     /// Cancels the running package import. Photos committed so far stay in the Library.
     func cancelLibraryImport() {
         guard portableImportProgress != nil else { return }
@@ -2011,7 +1993,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 [url], duplicatePolicy: .importAnyway, access: access.map { [$0] } ?? []
             )
             transferredAccess = access != nil
-            observePortableImport(
+            packageSourceImports.observe(
                 handle, operationID: operationID, total: 1, prefix: "Photo import",
                 onSuccess: { [weak self] result in
                     guard let self else { return }
@@ -2897,7 +2879,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
         do {
             let handle = try libraryImportCoordinator.startImportData(data, name: name)
-            observePortableImport(
+            packageSourceImports.observe(
                 handle, operationID: operationID, total: 1, prefix: "Photo import",
                 onSuccess: { [weak self] result in
                     guard let self else { return }
@@ -3075,66 +3057,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
 
     private func importRemovableMedia(_ request: RemovableMediaImportRequest) {
-        let files = request.files
-        guard !isShuttingDown else { return }
-        libraryImportCoordinator.adoptOperation(request.operationID)
-        let operationID = request.operationID
-        guard portableLibrary != nil else {
-            reportPortableLibraryUnavailable()
-            libraryMediaWorkflow.cancelRemovableMediaImport()
-            return
-        }
-        do {
-            let handle = try libraryImportCoordinator.startImportURLs(
-                files.map(\.url), access: request.access.map { [$0] } ?? []
-            )
-            observePortableImport(
-                handle, operationID: operationID, total: files.count,
-                prefix: "Removable media import",
-                onSuccess: { [weak self] result in
-                    guard let self else { return }
-                    do {
-                        try self.reloadPortableCollection()
-                        if let assetID = result.imported.first?.assetID
-                            ?? result.duplicates.first?.existingAssetID
-                        {
-                            self.openPortableAsset(assetID)
-                        }
-                        self.libraryMediaWorkflow.finishImport(
-                            summary: ImportOutcomeSummary(
-                                result: result,
-                                total: request.totalSelected,
-                                preflightSkipped: request.totalSelected - files.count
-                            ),
-                            operationID: request.operationID
-                        )
-                    } catch {
-                        self.libraryMediaWorkflow.finishImport(
-                            summary: .failure(
-                                total: request.totalSelected,
-                                reason: error.localizedDescription
-                            ), operationID: request.operationID
-                        )
-                    }
-                },
-                onFailure: { [weak self] error in
-                    guard let self, self.isCurrentImport(operationID) else { return }
-                    self.libraryMediaWorkflow.finishImport(
-                        summary: .failure(
-                            total: request.totalSelected, reason: error.localizedDescription
-                        ), operationID: request.operationID
-                    )
-                }
-            )
-        } catch {
-            guard isCurrentImport(operationID) else { return }
-            libraryMediaWorkflow.finishImport(
-                summary: .failure(
-                    total: request.totalSelected, reason: error.localizedDescription
-                ),
-                operationID: request.operationID
-            )
-        }
+        packageSourceImports.importRemovableMedia(request)
         isRemovableMediaSelectorPresented = false
     }
 
@@ -3165,50 +3088,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         case .image(let data, let name):
             openImage(data: data, name: name)
         case .promises(let receivers):
-            let operationID = beginImportOperation()
-            droppedPromiseTask?.cancel()
-            droppedPromiseTask = Task { @MainActor [weak self] in
-                guard let self, self.isCurrentImport(operationID) else { return }
-                ImageDrop.purgeDropDirectories()
-                let directory: URL
-                do {
-                    directory = try ImageDrop.makeDropDirectory()
-                } catch {
-                    guard self.isCurrentImport(operationID) else { return }
-                    self.statusMessage = "Photos drop failed: \(error.localizedDescription)"
-                    self.droppedPromiseTask = nil
-                    return
-                }
-                defer {
-                    ImageDrop.purgeDropDirectories()
-                }
-
-                let result = await ImageDrop.receive(receivers, into: directory)
-                guard self.isCurrentImport(operationID) else { return }
-                var summary: ImportOutcomeSummary?
-                if !result.urls.isEmpty {
-                    // Promise URLs are already known to be files. Use the same durable multi-file
-                    // path as other library imports rather than opening a Photos derivative URL.
-                    summary = self.openImages(urls: result.urls, operationID: operationID)
-                }
-                if !result.failures.isEmpty {
-                    let promiseSummary = ImportOutcomeSummary(
-                        total: result.failures.count,
-                        failed: result.failures.count,
-                        failureReasons: result.failures
-                    )
-                    let combined = (summary ?? ImportOutcomeSummary(total: 0)).adding(
-                        promiseSummary
-                    )
-                    self.presentImportOutcome(combined, prefix: "Photos drop")
-                } else if let summary {
-                    self.presentImportOutcome(summary, prefix: "Photos drop")
-                } else {
-                    self.statusMessage =
-                        "Photos drop complete — 0 imported, 0 duplicate, 0 skipped, 0 failed"
-                }
-                self.droppedPromiseTask = nil
-            }
+            packageSourceImports.importDroppedPromises(receivers)
         }
     }
 
@@ -3219,77 +3099,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         url: URL,
         access: SecurityScopedResourceAccess? = nil
     ) -> ImportOutcomeSummary? {
-        var transferredAccess = false
-        defer {
-            if !transferredAccess { access?.release() }
-        }
-        let operationID = beginImportOperation()
         cancelIdlePreviewBuild(resetCursor: true)
-        guard portableLibrary != nil else {
-            reportPortableLibraryUnavailable()
-            return nil
-        }
-        let files = supportedImageURLs(in: url)
-        guard !files.isEmpty else {
-            statusMessage = "No supported images were found in \(url.lastPathComponent)."
-            return nil
-        }
-        do {
-            let handle = try libraryImportCoordinator.startImportURLs(
-                files, access: access.map { [$0] } ?? []
-            )
-            transferredAccess = access != nil
-            observePortableImport(
-                handle, operationID: operationID, total: files.count, prefix: "Folder import",
-                onSuccess: { [weak self] result in
-                    guard let self else { return }
-                    do {
-                        try self.reloadPortableCollection()
-                        if let assetID = result.imported.first?.assetID
-                            ?? result.duplicates.first?.existingAssetID
-                        {
-                            self.openPortableAsset(assetID)
-                        }
-                        self.presentImportOutcome(
-                            ImportOutcomeSummary(result: result, total: files.count),
-                            prefix: "Folder import"
-                        )
-                    } catch { self.presentError(error.localizedDescription) }
-                },
-                onFailure: { [weak self] error in
-                    guard let self, self.isCurrentImport(operationID) else { return }
-                    self.presentImportOutcome(
-                        .failure(total: files.count, reason: error.localizedDescription),
-                        prefix: "Folder import"
-                    )
-                }
-            )
-            return nil
-        } catch {
-            guard isCurrentImport(operationID) else { return nil }
-            let summary = ImportOutcomeSummary.failure(
-                total: files.count, reason: error.localizedDescription
-            )
-            presentImportOutcome(summary, prefix: "Folder import")
-            return summary
-        }
-    }
-
-    private func supportedImageURLs(in folder: URL) -> [URL] {
-        guard
-            let enumerator = FileManager.default.enumerator(
-                at: folder, includingPropertiesForKeys: [.isRegularFileKey],
-                options: [.skipsHiddenFiles]
-            )
-        else { return [] }
-        return enumerator.compactMap { value in
-            guard let url = value as? URL,
-                  (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true,
-                  ImageDecoder.supportedExtensions.contains(url.pathExtension.lowercased()),
-                FileManager.default.isReadableFile(atPath: url.path)
-            else { return nil }
-            return url
-        }.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+        return packageSourceImports.openSourceFolder(url: url, access: access)
     }
 
     /// Move between the two top-level workspaces. Entering Edit uses the collection's active
@@ -4833,17 +4644,16 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             [
                 lutCacheInvalidationTask,
                 semanticCoordinatorInstallTask,
-                droppedPromiseTask,
             ]
         for task in tasks { task?.cancel() }
         lutCacheInvalidationTask = nil
         semanticCoordinatorInstallTask = nil
-        droppedPromiseTask = nil
         let frameStoreFlushTask = bestEffortFrameStoreFlushTask
         bestEffortFrameStoreFlushTask = nil
         await frameStoreFlushTask?.value
         await maskingWorkflow.shutdown()
         await libraryMediaWorkflow.shutdown()
+        packageSourceImports.shutdown()
         await libraryImportCoordinator.shutdown()
         await sourceSession.shutdown()
 
@@ -5415,4 +5225,32 @@ extension AppViewModel: ExportWorkflowDestination {
 
     func setExportStatus(_ message: String) { statusMessage = message }
     func presentExportError(_ message: String) { presentError(message) }
+}
+
+extension AppViewModel: PackageSourceImportDestination {
+    var isPackageAvailable: Bool { portableLibrary != nil }
+
+    func reportPackageUnavailable() { reportPortableLibraryUnavailable() }
+
+    func mergeCommittedImports() { try? libraryBrowsingCoordinator.mergeCommittedImports() }
+
+    func reloadCollection() throws { try reloadPortableCollection() }
+
+    func openAsset(_ assetID: PortablePhotoAssetID) { openPortableAsset(assetID) }
+
+    func presentOutcome(_ summary: ImportOutcomeSummary, prefix: String) {
+        presentImportOutcome(summary, prefix: prefix)
+    }
+
+    func presentStatus(_ message: String) { statusMessage = message }
+
+    func openImages(urls: [URL], operationID: UUID) -> ImportOutcomeSummary? {
+        openImages(urls: urls, operationID: operationID, access: [])
+    }
+
+    func finishMediaImport(_ summary: ImportOutcomeSummary, operationID: UUID) {
+        libraryMediaWorkflow.finishImport(summary: summary, operationID: operationID)
+    }
+
+    func cancelMediaImport() { libraryMediaWorkflow.cancelRemovableMediaImport() }
 }
