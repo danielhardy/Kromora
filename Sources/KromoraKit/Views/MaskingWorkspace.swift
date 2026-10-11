@@ -336,6 +336,9 @@ struct MaskingWorkspace: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .buttonStyle(.bordered)
+                    // Choosing a kind is an ordinary action, not a selected state: keep the
+                    // app's copper accent for what is on, and let these read as plain buttons.
+                    .tint(nil)
                     .accessibilityLabel("Add \(kind.title) mask")
                 }
             }
