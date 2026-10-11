@@ -135,10 +135,10 @@ final class PackageSettingsTests: XCTestCase {
         )
     }
 
-    /// Trend guard, not a goal: `AppViewModel.swift` stood at 5,256 lines after the KRMA-874…877, 884
+    /// Trend guard, not a goal: `AppViewModel.swift` stood at 5,238 lines after the KRMA-874…877, 884, 885
     /// extractions. The ceiling leaves modest headroom; new workflows belong in a coordinator.
     func testAppViewModelDoesNotRegrow() throws {
-        let ceiling = 5_300
+        let ceiling = 5_280
         let url = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Sources/KromoraKit/ViewModels/AppViewModel.swift")
