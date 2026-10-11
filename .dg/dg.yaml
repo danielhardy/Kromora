@@ -17,7 +17,7 @@ git:
   branch_per_issue: false
 agents:
   claim_ttl_minutes: 60
-  default_actor: codex
+  default_actor: claude
   supported:
     - cursor
     - claude
@@ -40,8 +40,8 @@ agents:
     enabled: true
     yolo: true
     runner:
-      kind: codex
-      model: gpt-6-luna
+      kind: claude
+      model: sonnet
     max_concurrency: 1
     labels: []
     context_budget: 12000
@@ -53,10 +53,10 @@ agents:
   verification:
     enabled: true
     max_concurrency: 1
-    default_actor: claude
+    default_actor: codex
     runner:
-      kind: claude
-      model: sonnet
+      kind: codex
+      model: gpt-6-luna
     action_mode: safe_fixes
     completion: auto
     different_agent: warn

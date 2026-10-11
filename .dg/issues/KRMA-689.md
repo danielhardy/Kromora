@@ -2,7 +2,7 @@
 id: KRMA-689
 title: Investigate remaining white strokes along image edges
 type: bug
-status: review
+status: done
 priority: medium
 creation_provenance:
   runner: codex
@@ -12,14 +12,16 @@ labels:
   - bug
   - rendering
 created: 2026-09-28T20:49:18.685Z
-updated: 2026-09-28T21:14:54.833Z
+updated: 2026-10-09T14:31:13.010Z
 blockers:
   - id: evt_mulqxbsh_ne6p7s
     type: human
     reason: The remaining edge-stroke report cannot be reproduced or localized because its screenshot/source image is inaccessible and the affected view and conditions are unknown.
     action: Attach a readable screenshot and, if possible, the source image; specify whether it occurs in preview, thumbnail, comparison, crop, or export and note zoom/display conditions.
     created_at: 2026-09-28T21:14:54.833Z
-order: a0
+    resolved_at: 2026-10-09T14:30:52.459Z
+    resolved_by: web
+order: zzzq
 board: product
 blocked_reason: The remaining edge-stroke report cannot be reproduced or localized because its screenshot/source image is inaccessible and the affected view and conditions are unknown.
 blocked_action: Attach a readable screenshot and, if possible, the source image; specify whether it occurs in preview, thumbnail, comparison, crop, or export and note zoom/display conditions.
