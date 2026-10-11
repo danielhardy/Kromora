@@ -2,7 +2,7 @@
 id: KRMA-875
 title: Extract Look selection workflow from AppViewModel
 type: task
-status: backlog
+status: ready
 priority: low
 human_review_required: false
 creation_provenance:
@@ -13,9 +13,9 @@ labels:
   - architecture
   - maintainability
 created: 2026-10-11T13:33:41.719Z
-updated: 2026-10-11T13:33:42.099Z
+updated: 2026-10-11T13:35:43.602Z
 blockers: []
-order: zzzzq
+order: z
 board: product
 ---
 

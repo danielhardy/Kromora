@@ -2,7 +2,7 @@
 id: KRMA-878
 title: Guard AppViewModel.swift against regrowth with a line-count test
 type: task
-status: backlog
+status: ready
 priority: low
 human_review_required: false
 creation_provenance:
@@ -13,14 +13,14 @@ labels:
   - architecture
   - maintainability
 created: 2026-10-11T13:33:44.500Z
-updated: 2026-10-11T13:33:50.341Z
+updated: 2026-10-11T13:35:45.419Z
 depends_on:
   - KRMA-874
   - KRMA-875
   - KRMA-876
   - KRMA-877
 blockers: []
-order: zzzzy
+order: zv
 board: product
 ---
 

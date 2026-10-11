@@ -2,7 +2,7 @@
 id: KRMA-874
 title: Extract removable-media import workflow from AppViewModel
 type: task
-status: backlog
+status: ready
 priority: low
 human_review_required: false
 creation_provenance:
@@ -13,9 +13,9 @@ labels:
   - architecture
   - maintainability
 created: 2026-10-11T13:33:40.807Z
-updated: 2026-10-11T13:33:41.182Z
+updated: 2026-10-11T13:35:42.974Z
 blockers: []
-order: zzzzh
+order: y
 board: product
 ---
 

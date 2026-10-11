@@ -2,7 +2,7 @@
 id: KRMA-877
 title: Extract export orchestration from AppViewModel
 type: task
-status: backlog
+status: ready
 priority: low
 human_review_required: false
 creation_provenance:
@@ -13,9 +13,9 @@ labels:
   - architecture
   - maintainability
 created: 2026-10-11T13:33:43.561Z
-updated: 2026-10-11T13:33:43.950Z
+updated: 2026-10-11T13:35:44.824Z
 blockers: []
-order: zzzzx
+order: zq
 board: product
 ---
 

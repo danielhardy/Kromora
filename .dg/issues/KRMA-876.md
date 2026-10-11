@@ -2,7 +2,7 @@
 id: KRMA-876
 title: Extract copy and paste of edits from AppViewModel
 type: task
-status: backlog
+status: ready
 priority: low
 human_review_required: false
 creation_provenance:
@@ -13,9 +13,9 @@ labels:
   - architecture
   - maintainability
 created: 2026-10-11T13:33:42.635Z
-updated: 2026-10-11T13:33:43.023Z
+updated: 2026-10-11T13:35:44.237Z
 blockers: []
-order: zzzzv
+order: zh
 board: product
 ---
 
