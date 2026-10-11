@@ -77,7 +77,7 @@ final class ExportWorkflowCoordinatorTests: XCTestCase {
         return root
     }
 
-    func testRemoveShareExportsDeletesOnlyTheShareRoot() throws {
+    func testStartingShareCleansAbandonedFilesWithoutTouchingUserExports() throws {
         let root = try makeShareRoot()
         let userFile = FileManager.default.temporaryDirectory
             .appendingPathComponent("user-export-\(UUID().uuidString).tiff")
@@ -87,11 +87,40 @@ final class ExportWorkflowCoordinatorTests: XCTestCase {
         try FileManager.default.createDirectory(at: stale, withIntermediateDirectories: true)
         try Data([1]).write(to: stale.appendingPathComponent("a.tiff"))
 
-        let (workflow, _) = makeWorkflow(shareRoot: root)
-        workflow.removeShareExports()
+        let (workflow, destination) = makeWorkflow(shareRoot: root)
+        destination.exportSingleRequest = ExportSingleRequest(
+            source: ImageSource(backing: .data(Data([1])), kind: .standard, nativeExtent: CGSize(width: 1, height: 1)),
+            document: EditDocument(), lut: nil, baseName: "Photo"
+        )
+        workflow.shareDialog()
 
-        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+        let pending = try XCTUnwrap(workflow.pendingShareURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: pending.deletingLastPathComponent().path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stale.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: userFile.path))
+    }
+
+    func testStartingAnotherSharePreservesEarlierInFlightDirectory() throws {
+        let root = try makeShareRoot()
+        let (workflow, destination) = makeWorkflow(shareRoot: root)
+        destination.exportSingleRequest = ExportSingleRequest(
+            source: ImageSource(backing: .data(Data([1])), kind: .standard, nativeExtent: CGSize(width: 1, height: 1)),
+            document: EditDocument(), lut: nil, baseName: "Photo"
+        )
+
+        workflow.shareDialog()
+        let firstURL = try XCTUnwrap(workflow.pendingShareURL)
+        let firstDirectory = firstURL.deletingLastPathComponent()
+        workflow.shareDialog()
+        let secondURL = try XCTUnwrap(workflow.pendingShareURL)
+
+        XCTAssertNotEqual(firstDirectory, secondURL.deletingLastPathComponent())
+        XCTAssertTrue(FileManager.default.fileExists(atPath: firstDirectory.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: secondURL.deletingLastPathComponent().path))
+
+        workflow.exportFailed()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: firstDirectory.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: secondURL.deletingLastPathComponent().path))
     }
 
     func testFailedShareExportRemovesTemporaryFilesAndPendingState() throws {
@@ -110,6 +139,30 @@ final class ExportWorkflowCoordinatorTests: XCTestCase {
 
         XCTAssertNil(workflow.pendingShareURL)
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    func testPickerDismissalAndShareServiceTerminalCallbacksReleaseTheirExports() {
+        let picker = NSSharingServicePicker(items: [])
+        var dismissalFinished = false
+        let dismissalDelegate = SharePickerDelegate { dismissalFinished = true }
+        dismissalDelegate.sharingServicePicker(picker, didChoose: nil)
+        XCTAssertTrue(dismissalFinished)
+
+        let service = NSSharingService(
+            title: "Test",
+            image: NSImage(size: NSSize(width: 1, height: 1)),
+            alternateImage: nil,
+            handler: {}
+        )
+        var shared = false
+        let completionDelegate = SharePickerDelegate { shared = true }
+        completionDelegate.sharingService(service, didShareItems: [])
+        XCTAssertTrue(shared)
+
+        var failed = false
+        let failureDelegate = SharePickerDelegate { failed = true }
+        failureDelegate.sharingService(service, didFailToShareItems: [], error: CocoaError(.fileReadUnknown))
+        XCTAssertTrue(failed)
     }
 
     func testCompletionWithoutKeyWindowCleansUpAndReportsStatus() throws {

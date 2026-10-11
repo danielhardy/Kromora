@@ -47,8 +47,9 @@ final class ExportWorkflowCoordinator {
     private let export: ExportCoordinator
     private(set) var pendingShareURL: URL?
     private(set) var externalEditorHandoffURL: URL?
-    private var sharePicker: NSSharingServicePicker?
-    private var sharePickerDelegate: SharePickerDelegate?
+    private var pendingShareExports: [URL: URL] = [:]
+    private var activeShareDirectories: Set<URL> = []
+    private var sharePickerSessions: [URL: SharePickerSession] = [:]
     private let shareRoot: URL
 
     init(
@@ -70,16 +71,21 @@ final class ExportWorkflowCoordinator {
 
     func exportFailed() {
         externalEditorHandoffURL = nil
-        if pendingShareURL != nil { removeShareExports() }
+        let directories = Set(pendingShareExports.values)
+        pendingShareExports.removeAll()
         pendingShareURL = nil
+        for directory in directories {
+            removeShareExport(at: directory)
+        }
     }
 
     func exportCompleted(at url: URL) {
         if externalEditorHandoffURL == url {
             externalEditorHandoffURL = nil
             NSWorkspace.shared.open(url)
-        } else if pendingShareURL == url {
-            presentSharePicker(for: [url])
+        } else if let directory = pendingShareExports.removeValue(forKey: url) {
+            if pendingShareURL == url { pendingShareURL = nil }
+            presentSharePicker(for: [url], in: directory)
         }
     }
 
@@ -209,19 +215,38 @@ final class ExportWorkflowCoordinator {
 
     // MARK: - Share
 
-    /// Starts a new share by discarding every earlier temporary export, including directories a
-    /// previous launch abandoned, then returns a fresh directory. Only `shareRoot` is ever touched;
-    /// user-selected export destinations and external-editor files live elsewhere.
+    /// Removes abandoned exports from earlier launches, while keeping directories still owned by
+    /// an in-flight export or sharing service, then returns a fresh directory.
     private func makeShareDirectory() -> URL {
-        removeShareExports()
-        return shareRoot.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        removeAbandonedShareExports()
+        let directory = shareRoot.appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .standardizedFileURL
+        activeShareDirectories.insert(directory)
+        return directory
     }
 
-    /// Removes all temporary share exports and releases the picker that referenced them.
-    func removeShareExports() {
-        sharePicker = nil
-        sharePickerDelegate = nil
-        try? FileManager.default.removeItem(at: shareRoot)
+    /// Sweeps directories left by a previous launch without disturbing live share sessions.
+    private func removeAbandonedShareExports() {
+        let fileManager = FileManager.default
+        guard let contents = try? fileManager.contentsOfDirectory(
+            at: shareRoot, includingPropertiesForKeys: nil
+        ) else { return }
+        for url in contents where !activeShareDirectories.contains(url.standardizedFileURL) {
+            try? fileManager.removeItem(at: url)
+        }
+        if activeShareDirectories.isEmpty {
+            try? fileManager.removeItem(at: shareRoot)
+        }
+    }
+
+    private func removeShareExport(at directory: URL) {
+        let directory = directory.standardizedFileURL
+        activeShareDirectories.remove(directory)
+        sharePickerSessions.removeValue(forKey: directory)
+        try? FileManager.default.removeItem(at: directory)
+        if activeShareDirectories.isEmpty {
+            try? FileManager.default.removeItem(at: shareRoot)
+        }
     }
 
     private func shareSelectedExports() {
@@ -233,9 +258,9 @@ final class ExportWorkflowCoordinator {
         }
         let directory = makeShareDirectory()
         do {
-            try? FileManager.default.removeItem(at: directory)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         } catch {
+            removeShareExport(at: directory)
             destination.presentExportError("Could not prepare share exports: \(error.localizedDescription)")
             return
         }
@@ -254,10 +279,10 @@ final class ExportWorkflowCoordinator {
                     at: directory, includingPropertiesForKeys: nil
                   ).filter({ $0.pathExtension.lowercased() == "tif" || $0.pathExtension.lowercased() == "tiff" }),
                   !urls.isEmpty else {
-                self.removeShareExports()
+                self.removeShareExport(at: directory)
                 return
             }
-            self.presentSharePicker(for: urls)
+            self.presentSharePicker(for: urls, in: directory)
         }
     }
 
@@ -270,12 +295,13 @@ final class ExportWorkflowCoordinator {
         let url = directory.appendingPathComponent(request.baseName + "_share.tiff")
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            try? FileManager.default.removeItem(at: url)
         } catch {
+            removeShareExport(at: directory)
             destination.presentExportError("Could not prepare a share export: \(error.localizedDescription)")
             return
         }
         pendingShareURL = url
+        pendingShareExports[url] = directory
         export.performExport(
             source: request.source,
             assetID: destination.exportActiveAssetID,
@@ -291,26 +317,40 @@ final class ExportWorkflowCoordinator {
         )
     }
 
-    private func presentSharePicker(for urls: [URL]) {
-        pendingShareURL = nil
+    private func presentSharePicker(for urls: [URL], in directory: URL) {
         guard let view = NSApplication.shared.keyWindow?.contentView else {
-            removeShareExports()
+            removeShareExport(at: directory)
             destination?.setExportStatus("Share unavailable: no window to present the sharing menu")
             return
         }
         let picker = NSSharingServicePicker(items: urls)
-        let delegate = SharePickerDelegate { [weak self] in self?.removeShareExports() }
+        let delegate = SharePickerDelegate { [weak self] in
+            self?.removeShareExport(at: directory)
+        }
         picker.delegate = delegate
-        sharePicker = picker
-        sharePickerDelegate = delegate
+        sharePickerSessions[directory.standardizedFileURL] = SharePickerSession(
+            picker: picker,
+            delegate: delegate
+        )
         picker.show(relativeTo: view.bounds, of: view, preferredEdge: .minY)
+    }
+}
+
+@MainActor
+private final class SharePickerSession {
+    let picker: NSSharingServicePicker
+    let delegate: SharePickerDelegate
+
+    init(picker: NSSharingServicePicker, delegate: SharePickerDelegate) {
+        self.picker = picker
+        self.delegate = delegate
     }
 }
 
 /// Keeps temporary share files alive until the chosen service finishes, fails, or the picker is
 /// dismissed without a choice.
 @MainActor
-private final class SharePickerDelegate: NSObject, @MainActor NSSharingServicePickerDelegate, @MainActor NSSharingServiceDelegate {
+final class SharePickerDelegate: NSObject, @MainActor NSSharingServicePickerDelegate, @MainActor NSSharingServiceDelegate {
     private let onFinish: () -> Void
 
     init(onFinish: @escaping () -> Void) {
