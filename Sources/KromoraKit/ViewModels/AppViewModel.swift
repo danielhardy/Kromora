@@ -747,6 +747,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Writing images to disk — the single export, the batch run, and naming. Production exports
     /// use an isolated RenderEngine lane while preserving the same render request funnel.
     let export: ExportCoordinator
+    /// Export entry points, Share, external-editor handoff, and bundle export.
+    let exportWorkflow: ExportWorkflowCoordinator
     /// The "Derive Look from JPG" flow and its scratch-until-saved result.
     let derive = DeriveCoordinator()
     /// The active-document global Look export flow. It snapshots edits and never mutates them while
@@ -1112,6 +1114,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             maskResolver: CoordinatorLocalMaskResolver(coordinator: analysisCoordinator),
             editStore: effectiveEditStore
         )
+        self.exportWorkflow = ExportWorkflowCoordinator(export: self.export)
         self.previewCoordinator = PreviewCoordinator(engine: engine, scheduler: workScheduler)
         let previewFrameStore = LatestPreviewFrameStore(
             directory: previewFrameStoreDirectory
@@ -1165,6 +1168,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             self?.statusMessage = message
         }
         self.editClipboardWorkflow.destination = self
+        self.exportWorkflow.destination = self
         self.maskingWorkflow.destination = self
         self.retouchWorkflow.destination = self
 
@@ -1513,18 +1517,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             }
         }
         export.onError = { [weak self] message in
-            self?.externalEditorHandoffURL = nil
-            self?.pendingShareURL = nil
+            self?.exportWorkflow.exportFailed()
             self?.presentError(message)
         }
         export.onExportCompleted = { [weak self] url in
-            guard let self else { return }
-            if self.externalEditorHandoffURL == url {
-                self.externalEditorHandoffURL = nil
-                NSWorkspace.shared.open(url)
-            } else if self.pendingShareURL == url {
-                self.presentSharePicker(for: [url])
-            }
+            self?.exportWorkflow.exportCompleted(at: url)
         }
         export.defaultFolderURL = { [weak self] in self?.settings.ensureDefaultExportFolder() }
 
@@ -4512,221 +4509,35 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     // MARK: - Export
 
-    /// The destination flow used by the Edit toolbar's Share action. A single selected photo keeps
-    /// the existing save-panel behavior, while a multi-selection is handed to the selected-item
-    /// batch exporter so the user chooses one destination folder for the whole operation.
-    enum ShareDialogMode: Equatable {
-        case singlePhoto
-        case selectedPhotos
-    }
+    typealias ShareDialogMode = ExportWorkflowCoordinator.ShareDialogMode
 
     static func shareDialogMode(for selectionCount: Int) -> ShareDialogMode {
-        selectionCount > 1 ? .selectedPhotos : .singlePhoto
+        ExportWorkflowCoordinator.shareDialogMode(for: selectionCount)
     }
 
-    /// Share the active photo, or every photo selected in the Edit thumbnail strip when the
-    /// selection contains more than one item. This is deliberately separate from `exportDialog()`:
-    /// File ▸ Export remains the single-photo save-panel command, while Share is selection-aware.
-    func shareDialog() {
-        switch Self.shareDialogMode(for: collection.selectedItems.count) {
-        case .singlePhoto:
-            shareCurrentExport()
-        case .selectedPhotos:
-            shareSelectedExports()
-        }
+    func shareDialog() { exportWorkflow.shareDialog() }
+    func exportDialog() { exportWorkflow.exportDialog() }
+    func editInExternalEditor() { exportWorkflow.editInExternalEditor() }
+    func exportOriginalWithSettings() { exportWorkflow.exportOriginalWithSettings() }
+    func batchExportDialog() { exportWorkflow.batchExportDialog() }
+    func exportSelectedDialog() { exportWorkflow.exportSelectedDialog() }
+
+    /// What ⌘S would export, without running a panel. Internal for headless assertions.
+    var exportRequest: ExportWorkflowCoordinator.SingleRequest? { exportSingleRequest }
+
+    /// What Export All would write, without running a panel.
+    var batchExportRequest: ExportWorkflowCoordinator.BatchRequest {
+        makeBatchExportRequest(from: collection.items)
     }
 
-    private var pendingShareURL: URL?
-    private var sharePicker: NSSharingServicePicker?
-
-    private func shareSelectedExports() {
-        let request = selectedBatchExportRequest
-        guard !request.items.isEmpty else {
-            statusMessage = "Select at least one photo to share"
-            return
-        }
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("Kromora Share Exports", isDirectory: true)
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        do {
-            try? FileManager.default.removeItem(at: directory)
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        } catch {
-            presentError("Could not prepare share exports: \(error.localizedDescription)")
-            return
-        }
-        statusMessage = "Preparing selected photos for sharing…"
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            let outcome = await self.export.performBatchExport(
-                request.items,
-                document: request.document,
-                lut: request.lut,
-                options: ExportOptions(format: .tiff, destination: .folder(directory)),
-                to: directory
-            )
-            guard outcome.exported > 0,
-                  let urls = try? FileManager.default.contentsOfDirectory(
-                    at: directory, includingPropertiesForKeys: nil
-                  ).filter({ $0.pathExtension.lowercased() == "tif" || $0.pathExtension.lowercased() == "tiff" }),
-                  !urls.isEmpty else { return }
-            self.presentSharePicker(for: urls)
-        }
+    /// The panel-free request used by Export Originals; never widened to the whole collection.
+    var selectedBatchExportRequest: ExportWorkflowCoordinator.BatchRequest {
+        makeBatchExportRequest(from: collection.selectedItems)
     }
 
-    private func shareCurrentExport() {
-        guard let request = exportRequest else {
-            statusMessage = "Open an image first"
-            return
-        }
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("Kromora Share Exports", isDirectory: true)
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let url = directory.appendingPathComponent(request.baseName + "_share.tiff")
-        do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            try? FileManager.default.removeItem(at: url)
-        } catch {
-            presentError("Could not prepare a share export: \(error.localizedDescription)")
-            return
-        }
-        pendingShareURL = url
-        export.performExport(
-            source: request.source,
-            assetID: activeAssetID,
-            document: request.document,
-            lut: request.lut,
-            options: ExportOptions(
-                format: .tiff,
-                destination: .file(url),
-                metadata: .preserve,
-                location: .exclude
-            ),
-            to: url
-        )
-    }
+    var selectedExportRequest: ExportWorkflowCoordinator.BatchRequest { selectedBatchExportRequest }
 
-    private func presentSharePicker(for urls: [URL]) {
-        pendingShareURL = nil
-        guard let view = NSApp.keyWindow?.contentView else {
-            statusMessage = "Share export ready: \(urls.count) file(s)"
-            return
-        }
-        let picker = NSSharingServicePicker(items: urls)
-        sharePicker = picker
-        picker.show(relativeTo: view.bounds, of: view, preferredEdge: .minY)
-    }
-
-    /// Export the open image at full resolution.
-    ///
-    /// **The Step 6 cutover.** What goes to disk is now the same `EditDocument` the screen is
-    /// rendering, at `.full` instead of `.preview` — one argument apart, through one funnel. Before,
-    /// this handed over a baked `CIImage` that carried the LUT and nothing else, so develop and
-    /// adjustments reached the preview and silently did not reach the file.
-    ///
-    /// Note it exports `document`, not `displayRequest` — holding Space to compare should not change
-    /// what ⌘S writes.
-    func exportDialog() {
-        guard let request = exportRequest else {
-            statusMessage = "Open an image first"
-            return
-        }
-        export.exportDialog(
-            source: request.source,
-            assetID: activeAssetID,
-            document: request.document,
-            lut: request.lut,
-            suggestedBaseName: request.baseName
-        )
-    }
-
-    private var externalEditorHandoffURL: URL?
-
-    /// Render a full-resolution TIFF for the system's default TIFF editor. The active source remains
-    /// read-only; after editing, use Open Image to import the returned TIFF as a new library item.
-    func editInExternalEditor() {
-        guard let request = exportRequest else {
-            statusMessage = "Open an image first"
-            return
-        }
-        let panel = NSSavePanel()
-        panel.title = "Edit in External Editor"
-        panel.nameFieldStringValue = request.baseName + "_external.tiff"
-        panel.allowedContentTypes = [.tiff]
-        panel.directoryURL = export.defaultFolderURL?()
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        externalEditorHandoffURL = url
-        export.performExport(
-            source: request.source,
-            assetID: activeAssetID,
-            document: request.document,
-            lut: request.lut,
-            options: ExportOptions(
-                format: .tiff,
-                destination: .file(url),
-                metadata: .preserve,
-                location: .exclude
-            ),
-            to: url,
-            access: .systemGranted(for: url)
-        )
-    }
-
-    /// Copy the untouched source and its edit recipe into a checksum-verified portable bundle.
-    func exportOriginalWithSettings() {
-        guard let request = exportRequest else {
-            statusMessage = "Open an image first"
-            return
-        }
-        let privacyAlert = NSAlert()
-        privacyAlert.messageText = "Keep the original's embedded metadata?"
-        privacyAlert.informativeText = "The bundle preserves the original file byte-for-byte. It may contain location metadata such as GPS coordinates. The active library original will remain unchanged."
-        privacyAlert.addButton(withTitle: "Keep Original Metadata")
-        privacyAlert.addButton(withTitle: "Cancel")
-        guard privacyAlert.runModal() == .alertFirstButtonReturn else { return }
-        let panel = NSOpenPanel()
-        panel.title = "Choose Bundle Location"
-        panel.prompt = "Export Bundle"
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.canCreateDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.directoryURL = export.defaultFolderURL?()
-        guard panel.runModal() == .OK, let parent = panel.url else { return }
-        let access = SecurityScopedResourceAccess.systemGranted(for: parent)
-        let stem = URL(fileURLWithPath: sourceName).deletingPathExtension().lastPathComponent
-        let name = stem.isEmpty ? "Photo" : stem
-        let destination = parent.appendingPathComponent(
-            "\(name).\(OriginalSettingsBundle.fileExtension)", isDirectory: true
-        )
-        statusMessage = "Preparing original + settings bundle…"
-        Task { @MainActor [weak self, access] in
-            defer { access.release() }
-            guard let self else { return }
-            do {
-                try await OriginalSettingsBundle.create(
-                    source: request.source,
-                    sourceName: sourceName,
-                    document: request.document,
-                    destination: destination,
-                    locationMetadataIncluded: true
-                )
-                self.statusMessage = "Original + settings bundle exported; the original remains read-only."
-            } catch {
-                self.presentError("Bundle export failed: \(error.localizedDescription)")
-            }
-        }
-    }
-
-    /// What ⌘S would export, without running a panel.
-    ///
-    /// Internal rather than private because `NSSavePanel` cannot run headless, so this is the only
-    /// way to assert the part of `exportDialog` that has content — *which* document goes to disk. The
-    /// wrapper around it is the two lines the panel makes untestable, which is the same trade
-    /// `docs/ENGINEERING_GUIDE.md` already records for every other panel in the app.
-    var exportRequest:
-        (source: ImageSource, document: EditDocument, lut: CubeLUT?, baseName: String)?
-    {
+    var exportSingleRequest: ExportSingleRequest? {
         guard let imageSource else { return nil }
         // `sourceURL` is the managed copy for one-off opens and may carry Kromora's internal
         // de-duplication prefix. The user-facing name is retained separately in `sourceName`.
@@ -4734,7 +4545,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             sourceName.isEmpty
             ? (sourceURL?.deletingPathExtension().lastPathComponent ?? "image")
             : URL(fileURLWithPath: sourceName).deletingPathExtension().lastPathComponent
-        return (
+        return ExportWorkflowCoordinator.SingleRequest(
             source: imageSource,
             document: document,
             lut: selectedLook,
@@ -4742,54 +4553,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         )
     }
 
-    /// Apply the current look to every imported image and export them all to a
-    /// chosen folder.
-    ///
-    /// Cut over with the single export, and for the same reason: `performBatchExport` used to load
-    /// and grade each file itself, so fixing only the single path would have left Export All writing
-    /// the old, develop-less render.
-    func batchExportDialog() {
-        let request = batchExportRequest
-        export.batchExportDialog(items: request.items, document: request.document, lut: request.lut)
-    }
-
-    /// Export exactly the library selection. The active photo is not implicitly added when the
-    /// user has selected other cells; selection and edit focus are separate in the grid model.
-    func exportSelectedDialog() {
-        let request = selectedBatchExportRequest
-        guard !request.items.isEmpty else {
-            statusMessage = "Select at least one photo to export"
-            return
-        }
-        export.batchExportDialog(items: request.items, document: request.document, lut: request.lut)
-    }
-
-    /// What Export All would write, without running a panel. Internal for the same reason
-    /// `exportRequest` is.
-    var batchExportRequest:
-        (items: [ExportCoordinator.BatchItem], document: EditDocument, lut: CubeLUT?)
-    {
-        makeBatchExportRequest(from: collection.items)
-    }
-
-    /// The panel-free request used by Export Originals. Unlike the historical `batchExportRequest`
-    /// compatibility seam, this list is never widened to the whole collection.
-    var selectedBatchExportRequest:
-        (items: [ExportCoordinator.BatchItem], document: EditDocument, lut: CubeLUT?)
-    {
-        makeBatchExportRequest(from: collection.selectedItems)
-    }
-
-    /// Alternate spelling for callers that use the product-facing command name.
-    var selectedExportRequest:
-        (items: [ExportCoordinator.BatchItem], document: EditDocument, lut: CubeLUT?)
-    {
-        selectedBatchExportRequest
-    }
-
     private func makeBatchExportRequest(
         from sourceItems: [ImageCollection.Item]
-    ) -> (items: [ExportCoordinator.BatchItem], document: EditDocument, lut: CubeLUT?) {
+    ) -> ExportWorkflowCoordinator.BatchRequest {
         // Snapshot only Sendable source/edit values — never carry NSImage thumbnails into export.
         // A missing session document is intentional: ExportCoordinator asks EditDocumentStore for
         // the durable record, so unopened selected photos still export their own saved edits.
@@ -4812,7 +4578,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 lut: itemLUT
             )
         }
-        return (items: items, document: document, lut: selectedLook)
+        return ExportWorkflowCoordinator.BatchRequest(items: items, document: document, lut: selectedLook)
     }
 
     // MARK: - Recipe extractor
@@ -5616,4 +5382,17 @@ extension AppViewModel: EditClipboardDestination {
         queuePersistence(document, for: reference, reportsStatus: false, force: true)
     }
     func flushClipboardPersistence() { requestPersistenceFlush() }
+}
+
+extension AppViewModel: ExportWorkflowDestination {
+    var exportSelectionCount: Int { collection.selectedItems.count }
+    var exportActiveAssetID: PhotoAssetID? { activeAssetID }
+    var exportSourceName: String { sourceName }
+
+    func exportBatchRequest(selectedOnly: Bool) -> ExportBatchRequest {
+        selectedOnly ? selectedBatchExportRequest : batchExportRequest
+    }
+
+    func setExportStatus(_ message: String) { statusMessage = message }
+    func presentExportError(_ message: String) { presentError(message) }
 }
