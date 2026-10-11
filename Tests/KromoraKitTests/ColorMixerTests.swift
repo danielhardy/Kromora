@@ -154,11 +154,25 @@ final class ColorMixerTests: XCTestCase {
         }
     }
 
+    /// Production renders in an sRGB working space; the shared test context is linear, which shifts
+    /// hues as the kernel sees them.
+    private func renderInSRGBWorkingSpace(_ image: CIImage) -> [UInt8] {
+        let context = CIContext(options: [.workingColorSpace: WorkingSpace.sRGB.cgColorSpace])
+        let width = Int(image.extent.width)
+        var buffer = [UInt8](repeating: 0, count: width * 4)
+        context.render(
+            image, toBitmap: &buffer, rowBytes: width * 4, bounds: image.extent,
+            format: .RGBA8, colorSpace: WorkingSpace.sRGB.cgColorSpace
+        )
+        return buffer
+    }
+
     func testRedWraparoundIsContinuousAndOverlapIsSmooth() throws {
-        let source = try image(hues: [359, 1, 28, 32])
+        // Red and orange share the 0-30 degree overlap, so 15 and 16 sit either side of its midpoint.
+        let source = try image(hues: [359, 1, 15, 16])
         let mixer = ColorMixerAdjustments(red: ColorMixerChannel(saturation: -70))
-        let base = try Pixels.bytes(of: source)
-        let edited = try Pixels.bytes(of: RenderPipeline.applyColorMixer(mixer, to: source))
+        let base = renderInSRGBWorkingSpace(source)
+        let edited = renderInSRGBWorkingSpace(RenderPipeline.applyColorMixer(mixer, to: source))
 
         XCTAssertLessThanOrEqual(
             abs(chroma(pixel(edited, 0)) - chroma(pixel(edited, 1))), 3,
@@ -171,25 +185,16 @@ final class ColorMixerTests: XCTestCase {
     }
 
     func testSkyBetweenCyanAndBlueRespondsToBothChannels() throws {
-        // Production renders in an sRGB working space; the shared test context is linear, which
-        // would shift this pixel's hue towards blue and hide the cyan channel's reach.
-        let context = CIContext(options: [.workingColorSpace: WorkingSpace.sRGB.cgColorSpace])
-        func render(_ image: CIImage) -> [UInt8] {
-            var buffer = [UInt8](repeating: 0, count: 4)
-            context.render(
-                image, toBitmap: &buffer, rowBytes: 4, bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
-                format: .RGBA8, colorSpace: WorkingSpace.sRGB.cgColorSpace
-            )
-            return buffer
-        }
+        // Rendered in the sRGB working space: the linear test context would shift this pixel's hue
+        // towards blue and hide the cyan channel's reach.
         let source = try image(hues: [210])
-        let base = chroma(pixel(render(source), 0))
+        let base = chroma(pixel(renderInSRGBWorkingSpace(source), 0))
 
         for (name, mixer) in [
             ("cyan", ColorMixerAdjustments(cyan: ColorMixerChannel(saturation: -80))),
             ("blue", ColorMixerAdjustments(blue: ColorMixerChannel(saturation: -80))),
         ] {
-            let edited = render(RenderPipeline.applyColorMixer(mixer, to: source))
+            let edited = renderInSRGBWorkingSpace(RenderPipeline.applyColorMixer(mixer, to: source))
             XCTAssertLessThan(chroma(pixel(edited, 0)), base - 15,
                               "(name) should visibly desaturate a 210° sky")
         }
