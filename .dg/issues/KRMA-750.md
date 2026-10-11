@@ -2,7 +2,7 @@
 id: KRMA-750
 title: "Last-known-frame performance: warm Edit first-pixel and 30-cell grid budgets (non-gating umbrella)"
 type: task
-status: backlog
+status: done
 priority: high
 creation_provenance:
   runner: claude
@@ -11,9 +11,9 @@ creation_provenance:
 labels:
   - performance
 created: 2026-10-01T20:23:06.838Z
-updated: 2026-10-05T14:36:58.539Z
+updated: 2026-10-11T13:11:52.698Z
 blockers: []
-order: kubd9h1r
+order: zzzzz
 board: product
 ---
 
@@ -46,3 +46,8 @@ The whole-file SHA-256 on the main actor is fixed (KRMA-746/747; down to 64 samp
 ## Run notes
 
 Caffeinate the display (`caffeinate -dimu`), one capture at a time, nothing else on the display. See docs/TESTING.md ("KRMA-744 harness repair and first valid capture"). Do not open a child ticket per re-run: a measured miss with a profile and an open ticket is a handoff (ADR-LKF-001).
+
+
+### Comment — human @ 2026-10-11T13:11:52.273Z
+
+Closing as won't-do (2026-10-11): owner tried a release build (swift run -c release) and warm Edit first pixel and grid return feel fast. The 50 ms / 100 ms budgets were optional polish, non-gating per ADR-LKF-001. Measurements and attribution stay in docs/TESTING.md; reopen if it feels slow on other hardware.

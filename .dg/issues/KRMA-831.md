@@ -2,9 +2,8 @@
 id: KRMA-831
 title: Measure writer-lock wait in the production mutation scale probe
 type: task
-status: backlog
+status: ready
 priority: medium
-parent: KRMA-829
 human_review_required: false
 creation_provenance:
   runner: codex
@@ -13,9 +12,10 @@ creation_provenance:
 labels:
   - verification
 created: 2026-10-08T15:28:30.395Z
-updated: 2026-10-08T15:28:30.395Z
+updated: 2026-10-11T13:07:52.600Z
+parent: KRMA-829
 blockers: []
-order: z
+order: n
 board: product
 ---
 

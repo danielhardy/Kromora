@@ -2,7 +2,7 @@
 id: KRMA-857
 title: Test mask analysis status presentation (status bar) and absence of panel banner
 type: task
-status: backlog
+status: done
 priority: low
 agent: codex
 verification_agent: codex
@@ -12,11 +12,11 @@ creation_provenance:
   model: unknown
   actor: claude
 created: 2026-10-10T13:08:34.933Z
-updated: 2026-10-10T13:08:42.611Z
+updated: 2026-10-11T13:11:10.564Z
 depends_on:
   - KRMA-850
 blockers: []
-order: zzz
+order: zzzzh
 board: product
 ---
 
@@ -33,3 +33,8 @@ KRMA-850 moved the "Mask analysis unavailable/failed" message from the Masks ins
 5. Runs in the `fast` lane.
 
 Related: KRMA-850.
+
+
+### Comment — claude @ 2026-10-11T13:11:10.137Z
+
+Closing as won't-do: low-value test hardening for shipped KRMA-850 behavior; no MaskStatusPresentation type exists. Reopen if the status bar split regresses.

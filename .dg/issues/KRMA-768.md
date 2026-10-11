@@ -2,7 +2,7 @@
 id: KRMA-768
 title: Make frame writes survive an abrupt quit (Xcode Stop, crash, force quit)
 type: task
-status: backlog
+status: done
 priority: medium
 creation_provenance:
   runner: claude
@@ -13,13 +13,13 @@ labels:
   - cache
   - reliability
 created: 2026-10-02T13:44:24.216Z
-updated: 2026-10-05T14:36:58.499Z
+updated: 2026-10-11T13:11:08.086Z
 depends_on:
   - KRMA-778
   - KRMA-779
   - KRMA-780
 blockers: []
-order: iy3sf5oi
+order: zzzx
 board: product
 ---
 
@@ -49,3 +49,8 @@ KRMA-768 remains in backlog as an umbrella while any child is unfinished; it is 
 - Cache files are disposable presentation caches, never package truth. A cache failure must degrade to a miss, never to a wrong-photo frame, package error, or blocked open.
 - Use Swift 6 with no escape hatches, macOS 26+ on Apple Silicon, and no third-party dependencies.
 - Each implementation commit starts with its child issue ID. Do not push or disturb unrelated working-tree changes.
+
+
+### Comment — claude @ 2026-10-11T13:11:07.649Z
+
+Closing: children 778, 779, 780 are done.

@@ -2,20 +2,20 @@
 id: KRMA-058
 title: Profile and fix the highest-impact measured bottlenecks
 type: task
-status: backlog
+status: done
 priority: high
 labels:
   - mvp
   - epic:quality
   - phase:10
 created: 2026-08-30T18:30:37.263Z
-updated: 2026-10-05T14:36:58.249Z
+updated: 2026-10-11T13:11:12.188Z
 depends_on:
   - KRMA-057
   - KRMA-056
 blockers: []
 estimate: 8
-order: 7kubd9h0
+order: zzzzv
 board: product
 ---
 
@@ -48,6 +48,10 @@ Part of **Epic 10 — Image quality, performance, and MVP release gate**. The so
 ## Out of scope
 
 - Micro-optimizations without measured benefit.
+
+### Comment — claude @ 2026-10-11T13:11:11.770Z
+
+Closing: the measured bottleneck (main-actor whole-file hashing) was fixed under KRMA-860. Remaining first-pixel/grid budgets are tracked by KRMA-748/749/750.
 
 ## Agent log
 

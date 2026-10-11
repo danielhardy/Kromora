@@ -2,7 +2,7 @@
 id: KRMA-748
 title: Reduce warm Edit first-pixel latency after source hashing is removed
 type: bug
-status: backlog
+status: done
 priority: high
 agent: claude
 verification_agent: cursor
@@ -16,11 +16,11 @@ creation_provenance:
 labels:
   - verification
 created: 2026-10-01T20:06:16.885Z
-updated: 2026-10-05T14:36:58.458Z
+updated: 2026-10-11T13:11:51.071Z
 depends_on:
   - KRMA-734
 blockers: []
-order: h1w7kub9
+order: zzzzx
 board: product
 ---
 
@@ -55,6 +55,10 @@ Correction: I parked this as 'superseded by KRMA-750'; that was wrong. This is t
 ### Comment — claude @ 2026-10-01T22:51:54.811Z
 
 Parked in backlog by the owner while the last-known-frame chain is verified. Optional polish toward the plan's 'instant' goal: warm Edit first pixel is about 290 ms and grid return about 235 ms in release (docs/TESTING.md), and it is not yet known whether that feels slow. Decide after trying a release build (swift run -c release). If it feels fine, close 748, 749, and 750 as won't-do; if not, promote KRMA-750 and do the work as one structural effort, supervised.
+
+### Comment — human @ 2026-10-11T13:11:50.651Z
+
+Closing as won't-do (2026-10-11): owner tried a release build (swift run -c release) and warm Edit first pixel and grid return feel fast. The 50 ms / 100 ms budgets were optional polish, non-gating per ADR-LKF-001. Measurements and attribution stay in docs/TESTING.md; reopen if it feels slow on other hardware.
 
 ## Agent log
 

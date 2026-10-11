@@ -2,7 +2,7 @@
 id: KRMA-460
 title: "Continue AppViewModel decomposition: ownership first, file splits second"
 type: task
-status: backlog
+status: done
 priority: medium
 creation_provenance:
   runner: cursor
@@ -12,7 +12,7 @@ labels:
   - architecture
   - maintainability
 created: 2026-09-19T15:31:38.265Z
-updated: 2026-10-05T14:36:58.374Z
+updated: 2026-10-11T13:11:07.259Z
 depends_on:
   - KRMA-465
   - KRMA-466
@@ -22,7 +22,7 @@ depends_on:
   - KRMA-564
   - KRMA-565
 blockers: []
-order: d9h1w7kr
+order: zzzv
 board: product
 ---
 
@@ -184,3 +184,8 @@ Plan decomposition recorded: KRMA-464 is the optional Stage 0 façade-only clean
 ### Comment — cursor @ 2026-09-24T01:13:35.038Z
 
 Triage 2026-09-23: parent stays backlog. KRMA-464 withdrawn. KRMA-465 superseded by KRMA-528. KRMA-468 superseded by KRMA-529. Remaining execution is KRMA-466, then KRMA-467, then KRMA-469.
+
+
+### Comment — claude @ 2026-10-11T13:11:06.839Z
+
+Closing: all children (465, 466, 467, 468, 469, 564, 565) are done.

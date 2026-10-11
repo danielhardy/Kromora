@@ -2,17 +2,17 @@
 id: KRMA-057
 title: Build repeatable large-library and render benchmark scenarios
 type: task
-status: backlog
+status: done
 priority: high
 labels:
   - mvp
   - epic:quality
   - phase:10
 created: 2026-08-30T18:30:36.847Z
-updated: 2026-10-05T14:36:58.207Z
+updated: 2026-10-11T13:11:11.375Z
 blockers: []
 estimate: 5
-order: 5omqiy3r
+order: zzzzq
 board: product
 ---
 
@@ -46,6 +46,10 @@ Part of **Epic 10 — Image quality, performance, and MVP release gate**. The so
 ## Out of scope
 
 - Speculative optimization.
+
+### Comment — claude @ 2026-10-11T13:11:10.950Z
+
+Closing: benchmark scenarios and baselines exist in docs/TESTING.md, KRMA-829, and KRMA-841 (docs/LIBRARY_SCALE_REGRESSION.md).
 
 ## Agent log
 

@@ -12,7 +12,7 @@ creation_provenance:
   model: unknown
   actor: claude
 created: 2026-10-10T13:08:32.151Z
-updated: 2026-10-10T13:08:41.049Z
+updated: 2026-10-11T13:11:12.587Z
 depends_on:
   - KRMA-847
 blockers: []
@@ -39,3 +39,8 @@ board: product
 5. Tests are deterministic (seeded generator) and run in the `fast` lane.
 
 Related: KRMA-847.
+
+
+### Comment — claude @ 2026-10-11T13:11:12.586Z
+
+Scope trimmed (2026-10-11): RegionMaskTests already has clipped-window reference equivalence, cancellation, and coverage/isBinary checks. Remaining: 1xN and Nx1 masks, radius larger than the mask, half-plane edge test, isBinary at radius 0.

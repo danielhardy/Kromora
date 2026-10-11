@@ -12,7 +12,7 @@ creation_provenance:
   model: unknown
   actor: claude
 created: 2026-10-10T13:08:35.833Z
-updated: 2026-10-10T13:08:43.147Z
+updated: 2026-10-11T13:11:12.832Z
 depends_on:
   - KRMA-853
 blockers: []
@@ -36,3 +36,8 @@ Audit `Tests/KromoraKitTests/LightInspectorTests.swift`, `CropInspectorTests.swi
 4. `scripts/ci-tests.sh fast` and `serial` pass.
 
 Depends on KRMA-853 (immediate repair of the currently failing assertion). Related: KRMA-844, KRMA-846.
+
+
+### Comment — claude @ 2026-10-11T13:11:12.832Z
+
+Scope trimmed (2026-10-11): only LightInspectorTests still uses inspectorSource/lightInspectorSource; audit that file first. Depends on KRMA-853, which is still failing at LightInspectorTests.swift:160.

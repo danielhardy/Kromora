@@ -2,7 +2,7 @@
 id: KRMA-860
 title: Investigate main-actor time before first suspension regressing to ~99 ms (budget 2 ms)
 type: bug
-status: review
+status: verification
 priority: high
 agent: claude
 verification_agent: codex
@@ -35,13 +35,15 @@ creation_provenance:
   model: unknown
   actor: claude
 created: 2026-10-10T13:30:37.048Z
-updated: 2026-10-11T01:44:48.997Z
+updated: 2026-10-11T13:30:58.928Z
 blockers:
   - id: evt_mv35unad_qoajp6
     type: human
     reason: Acceptance needs a post-fix Release last-known-frame median p95 (<= 3 ms). The one allowed display-bound series was spent pre-fix, and CLAUDE.md forbids another without approval; docs/TESTING.md now records the cause and the dev-build post-fix timeline (selection sync 100.9 -> 2.8 ms) but marks the Release p95 as unmeasured.
     action: Either approve one supervised post-fix series (caffeinate -dimu, unlocked display, scripts/run-kromora-capture.sh last-known-frame, 3 runs) and add the median p95 to the Post-fix state section of docs/TESTING.md, or accept the dev-build timeline plus ImageSourceIdentityReuseTests as sufficient and close the issue.
     created_at: 2026-10-11T01:44:48.997Z
+    resolved_at: 2026-10-11T13:30:58.926Z
+    resolved_by: cli
 order: h
 board: product
 blocked_reason: Acceptance needs a post-fix Release last-known-frame median p95 (<= 3 ms). The one allowed display-bound series was spent pre-fix, and CLAUDE.md forbids another without approval; docs/TESTING.md now records the cause and the dev-build post-fix timeline (selection sync 100.9 -> 2.8 ms) but marks the Release p95 as unmeasured.
@@ -138,6 +140,10 @@ Commits for KRMA-860 (oldest first; review with git show <sha>):
 - 2eaef446ef1bd68bede1bfba7bc952831923acfd KRMA-860: stop rehashing the whole file on the main actor at every photo switch
 - 871d216d7028a7933d95d889b1555760361ce968 KRMA-860: log whole-file rehashes so a stall on the main actor names itself
 - 0b152709dc116a1db407b6fd411d04f08e6a8528 KRMA-860: reuse a browsing asset's content hash instead of rehashing the file on the main actor
+
+### Comment — human @ 2026-10-11T13:30:58.686Z
+
+Release capture 2026-10-11 (M4 Pro, macOS 27.2, 873684f2, --no-trace): main-actor before first suspension p95 1.47 ms (budget <= 3 ms). Recorded in docs/TESTING.md. Report: /tmp/kromora-capture/KRMA860-nt-run1-DSC01019-20261011-073013-report.jsonl
 
 ## Agent log
 

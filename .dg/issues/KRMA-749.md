@@ -2,7 +2,7 @@
 id: KRMA-749
 title: Attribute and fix warm 30-cell grid re-entry (still 231 ms p95 after KRMA-745)
 type: bug
-status: backlog
+status: done
 priority: high
 creation_provenance:
   runner: claude
@@ -12,12 +12,12 @@ labels:
   - verification
   - performance
 created: 2026-10-01T20:18:29.922Z
-updated: 2026-10-05T14:36:58.416Z
+updated: 2026-10-11T13:11:51.883Z
 parent: KRMA-750
 depends_on:
   - KRMA-734
 blockers: []
-order: f5omqiy0
+order: zzzzy
 board: product
 ---
 
@@ -52,3 +52,8 @@ Correction: I parked this as 'superseded by KRMA-750'; that was wrong. This is t
 ### Comment — claude @ 2026-10-01T22:51:55.861Z
 
 Parked in backlog by the owner while the last-known-frame chain is verified. Optional polish toward the plan's 'instant' goal: warm Edit first pixel is about 290 ms and grid return about 235 ms in release (docs/TESTING.md), and it is not yet known whether that feels slow. Decide after trying a release build (swift run -c release). If it feels fine, close 748, 749, and 750 as won't-do; if not, promote KRMA-750 and do the work as one structural effort, supervised.
+
+
+### Comment — human @ 2026-10-11T13:11:51.458Z
+
+Closing as won't-do (2026-10-11): owner tried a release build (swift run -c release) and warm Edit first pixel and grid return feel fast. The 50 ms / 100 ms budgets were optional polish, non-gating per ADR-LKF-001. Measurements and attribution stay in docs/TESTING.md; reopen if it feels slow on other hardware.

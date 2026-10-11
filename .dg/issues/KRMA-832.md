@@ -2,7 +2,7 @@
 id: KRMA-832
 title: Remove obsolete mosaic aspect projection from square Library grid
 type: task
-status: backlog
+status: ready
 priority: low
 human_review_required: false
 creation_provenance:
@@ -11,11 +11,11 @@ creation_provenance:
   actor: codex
 labels:
   - verification
-parent: KRMA-828
 created: 2026-10-08T15:58:33.161Z
-updated: 2026-10-08T15:58:33.161Z
+updated: 2026-10-11T13:07:59.342Z
+parent: KRMA-828
 blockers: []
-order: zh
+order: t
 board: product
 ---
 

@@ -2,7 +2,7 @@
 id: KRMA-813
 title: "Epic: Ship Kromora through the Mac App Store"
 type: feature
-status: backlog
+status: done
 priority: high
 human_review_required: false
 creation_provenance:
@@ -13,7 +13,7 @@ labels:
   - epic
   - appstore
 created: 2026-10-03T19:25:34.385Z
-updated: 2026-10-05T14:36:58.580Z
+updated: 2026-10-11T13:11:08.910Z
 depends_on:
   - KRMA-808
   - KRMA-809
@@ -21,7 +21,7 @@ depends_on:
   - KRMA-811
   - KRMA-812
 blockers: []
-order: mqiy3sf0
+order: zzzy
 board: product
 ---
 
@@ -47,3 +47,8 @@ One codebase, one binary distribution channel (Mac App Store, plus TestFlight), 
 - KRMA-810
 - KRMA-811
 - KRMA-812
+
+
+### Comment — claude @ 2026-10-11T13:11:08.485Z
+
+Closing: child epics 808-812 are done. The remaining human sandbox acceptance run is tracked by KRMA-059.
