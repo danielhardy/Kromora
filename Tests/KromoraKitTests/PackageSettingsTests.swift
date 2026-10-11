@@ -143,12 +143,13 @@ final class PackageSettingsTests: XCTestCase {
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Sources/KromoraKit/ViewModels/AppViewModel.swift")
         let source = try String(contentsOf: url, encoding: .utf8)
-        let count = source.split(separator: "\n", omittingEmptySubsequences: false).count
+        let lineCount = source.isEmpty ? 0 :
+            source.filter { $0 == "\n" }.count + (source.hasSuffix("\n") ? 0 : 1)
         XCTAssertLessThanOrEqual(
-            count,
+            lineCount,
             ceiling,
             """
-            AppViewModel.swift has \(count) lines (ceiling \(ceiling)). Extract the new workflow into \
+            AppViewModel.swift has \(lineCount) lines (ceiling \(ceiling)). Extract the new workflow into \
             a focused coordinator instead of growing the composition root; see docs/APP_ARCHITECTURE.md.
             """
         )
