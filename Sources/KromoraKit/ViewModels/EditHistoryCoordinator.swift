@@ -87,7 +87,8 @@ final class EditHistoryCoordinator {
                 self.history = history
                 self.currentRevision = currentRevision
             } catch {
-                self?.clear()
+                guard let self, self.environment.activeSourceReference() == reference else { return }
+                self.clear()
             }
         }
     }
@@ -110,6 +111,7 @@ final class EditHistoryCoordinator {
                 environment.adoptRestoredRevision(value.document, priorDocuments)
                 self.refresh()
             } catch {
+                guard environment.activeSourceReference() == reference else { return }
                 environment.reportStatus("Could not navigate edit history: \(error.localizedDescription)")
             }
         }
@@ -128,6 +130,7 @@ final class EditHistoryCoordinator {
                 environment.reportStatus("Saved snapshot ‘\(name)’")
                 self.refresh()
             } catch {
+                guard environment.activeSourceReference() == reference else { return }
                 environment.reportStatus("Could not save snapshot: \(error.localizedDescription)")
             }
         }
@@ -146,12 +149,14 @@ final class EditHistoryCoordinator {
         let document = environment.currentDocument()
         return Task { [store, environment] in
             guard await environment.flushPersistence() else { return }
+            guard environment.activeSourceReference() == reference else { return }
             do {
                 let copy = try makeCopy()
                 try await store.save(document, for: copy.sourceReference)
                 guard environment.activeSourceReference() == reference else { return }
                 try didCreate(copy)
             } catch {
+                guard environment.activeSourceReference() == reference else { return }
                 environment.reportStatus("Could not create virtual copy: \(error.localizedDescription)")
             }
         }

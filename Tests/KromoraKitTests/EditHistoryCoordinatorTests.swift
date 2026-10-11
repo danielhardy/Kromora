@@ -112,6 +112,23 @@ final class EditHistoryCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.currentRevision, 0)
     }
 
+    func testStaleRefreshFailureDoesNotClearHistoryAfterReferenceChanges() async throws {
+        let store = FakeStore()
+        await store.set(revisions: [revision(1, exposure: 0.1)], current: 1)
+        let host = Host()
+        host.reference = referenceA
+        let coordinator = makeCoordinator(store: store, host: host)
+        await coordinator.refresh()?.value
+        await store.setFailReads(true)
+
+        let task = coordinator.refresh()
+        host.reference = referenceB
+        await task?.value
+
+        XCTAssertEqual(coordinator.history.map(\.revision), [1])
+        XCTAssertEqual(coordinator.currentRevision, 1)
+    }
+
     func testRefreshWithoutActivePhotoAndOnReadFailureClearsState() async throws {
         let store = FakeStore()
         await store.set(revisions: [revision(1, exposure: 0.1)], current: 1)
