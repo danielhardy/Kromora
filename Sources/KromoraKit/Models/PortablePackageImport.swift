@@ -303,9 +303,11 @@ final class PortablePackageImportCatalog {
         var shards: [String: PortablePackageMembershipShard] = [:]
         var existingHashes: [String: PortablePhotoAssetID] = [:]
         for shardName in PortableLibraryPackage.allShards {
+            try Task.checkCancellation()
             let shard = try package.readMembershipShard(shardName)
             shards[shardName] = shard
             for entry in shard.entries where !entry.isTombstone {
+                try Task.checkCancellation()
                 let record = try package.readAssetRecord(for: entry.assetID)
                 existingHashes[record.identity.sourceFingerprint.contentHash] = entry.assetID
             }
