@@ -4,6 +4,8 @@ title: Extract copy and paste of edits from AppViewModel
 type: task
 status: ready
 priority: low
+agent: codex
+model: gpt-6.1-sol
 human_review_required: false
 creation_provenance:
   runner: claude
@@ -13,7 +15,7 @@ labels:
   - architecture
   - maintainability
 created: 2026-10-11T13:33:42.635Z
-updated: 2026-10-11T13:35:44.237Z
+updated: 2026-10-11T13:37:18.740Z
 blockers: []
 order: zh
 board: product

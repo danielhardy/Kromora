@@ -17944,3 +17944,4 @@
 {"id":"evt_mv3v8wb8_30y1sj","type":"issue.moved","ts":"2026-10-11T13:35:44.276Z","actor":"human","issue_id":"KRMA-876","payload":{"before":{"status":"backlog","order":"zzzzv"},"after":{"status":"ready","order":"zh"},"fields":["status","order"]}}
 {"id":"evt_mv3v8wrh_fjwgji","type":"issue.moved","ts":"2026-10-11T13:35:44.861Z","actor":"human","issue_id":"KRMA-877","payload":{"before":{"status":"backlog","order":"zzzzx"},"after":{"status":"ready","order":"zq"},"fields":["status","order"]}}
 {"id":"evt_mv3v8x81_9xvfwv","type":"issue.moved","ts":"2026-10-11T13:35:45.457Z","actor":"human","issue_id":"KRMA-878","payload":{"before":{"status":"backlog","order":"zzzzy"},"after":{"status":"ready","order":"zv"},"fields":["status","order"]}}
+{"id":"evt_mv3vax8a_who6h8","type":"issue.updated","ts":"2026-10-11T13:37:18.778Z","actor":"human","issue_id":"KRMA-876","payload":{"before":{"status":"ready","order":"zh"},"after":{"status":"ready","order":"zh"},"fields":["agent"]}}
