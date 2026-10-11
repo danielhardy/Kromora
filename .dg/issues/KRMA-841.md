@@ -2,7 +2,7 @@
 id: KRMA-841
 title: Keep the Library grid responsive while thumbnails render after a large import
 type: bug
-status: review
+status: verification
 priority: high
 agent: claude
 verification_agent: codex
@@ -47,13 +47,15 @@ creation_provenance:
   model: unknown
   actor: claude
 created: 2026-10-09T18:06:33.347Z
-updated: 2026-10-10T14:52:41.206Z
+updated: 2026-10-11T14:09:11.853Z
 blockers:
   - id: evt_mv2ik03a_q3fb9c
     type: human
     reason: "Remaining acceptance evidence needs a mounted LibraryGridView profile (SwiftUI/main-actor frame behavior while thumbnails generate). That needs an unlocked, awake display and Instruments, which cannot record on this machine; CLAUDE.md also bars unattended display-bound runs. Window-independent pre-change vs post-change Release baselines are now in docs/TESTING.md: scans cost about 1 ms per selection op at 1500 items, 0 gaps over 33 ms either way."
     action: "Run a supervised Release session: swift run -c release, import ~1500 large RAWs, scroll and select-all while thumbnails fill, record SwiftUI/Hangs/Time Profiler results (hitches, select-all latency, fill time, peak memory) in docs/TESTING.md, or accept the model-level evidence and waive the mounted-grid criterion."
     created_at: 2026-10-10T14:52:41.206Z
+    resolved_at: 2026-10-11T14:09:11.851Z
+    resolved_by: cli
 order: h
 board: product
 blocked_reason: "Remaining acceptance evidence needs a mounted LibraryGridView profile (SwiftUI/main-actor frame behavior while thumbnails generate). That needs an unlocked, awake display and Instruments, which cannot record on this machine; CLAUDE.md also bars unattended display-bound runs. Window-independent pre-change vs post-change Release baselines are now in docs/TESTING.md: scans cost about 1 ms per selection op at 1500 items, 0 gaps over 33 ms either way."
@@ -120,6 +122,10 @@ Verification: run `scripts/ci-tests.sh fast` and `scripts/ci-tests.sh serial`, p
 The new `LargeImportLibraryGridBenchmark` is useful model/scheduler evidence, but it does not mount `LibraryGridView` or measure SwiftUI layout/frame presentation, and its reported metrics have no pre-change baseline. An independent Release run with 1,500 local RAW copies passed: visible fill 2,089 ms, simulated-scroll heartbeat max 19.5 ms with 0/1,319 gaps over 33 ms, select-all 0.53–1.10 ms, shift-click 0.67 ms, peak RSS 1,912 MB. This supports the model path only; it cannot establish real scrolling/selection responsiveness or the measured contribution of the removed scans. `docs/TESTING.md` also states that Instruments could not record on this machine.
 
 To unblock: record a comparable pre-change and current Release baseline for the mounted large-import Library interaction, including scroll hitch/frame behavior, select-all latency, visible-thumbnail fill, and peak memory; capture the relevant SwiftUI/main-actor profile and identify measured causes; then rerun the interaction while thumbnails are still generating. Keep the display-bound capture benchmark out of scope. Verification requires that evidence in `docs/TESTING.md`, a green serial lane, the focused interaction/profile procedure, and reporting the known unrelated fast-lane KRMA-853 failure separately.
+
+### Comment — human @ 2026-10-11T14:09:11.611Z
+
+Owner decision 2026-10-11: waive the mounted-grid Instruments profile criterion. Instruments cannot record on this machine; window-independent Release baselines (1,500 RAWs: 0/1,319 heartbeat gaps over 33 ms, select-all ~1 ms) are in docs/TESTING.md, and the owner reports the grid feels OK in use once images are imported. Verifier: do not require the mounted profile.
 
 ## Agent log
 
