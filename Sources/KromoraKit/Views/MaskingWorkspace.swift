@@ -2308,6 +2308,7 @@ extension LocalAdjustmentLayer {
         var copy = self
         copy.adjustments = .neutral
         copy.name = ""
+        copy.ownership = .user
         copy.autoProvenance = nil
         return copy
     }

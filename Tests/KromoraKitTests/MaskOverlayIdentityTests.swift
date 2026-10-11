@@ -51,6 +51,12 @@ final class MaskOverlayIdentityTests: XCTestCase {
             purpose: .backgroundProtection, algorithmVersion: 2, generationID: "next-run"
         )
         XCTAssertEqual(provenanceChanged.overlayIdentity, layer.overlayIdentity)
+
+        var autoOwned = provenanceAdded
+        autoOwned.ownership = .auto
+        var manuallyOwned = autoOwned
+        manuallyOwned.ownership = .user
+        XCTAssertEqual(manuallyOwned.overlayIdentity, autoOwned.overlayIdentity)
     }
 
     func testMaskRecipeChangesChangeOverlayIdentity() {
