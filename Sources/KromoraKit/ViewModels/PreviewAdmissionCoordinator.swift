@@ -222,6 +222,19 @@ final class PreviewAdmissionCoordinator {
         let identity = Self.histogramIdentity(for: request, destination: destination)
         let assetID = destination.admissionActiveAssetID
         let sourceRevision = destination.admissionSourceRevision
+        // Zoom and pan re-present the same edit through a new surface or region of interest. The
+        // histogram describes the edit, so identical image content never resamples it.
+        if completedHistogramAssetID == assetID,
+            completedHistogramSourceRevision == sourceRevision,
+            completedHistogramIdentity?.hasSameImageContent(as: identity) == true,
+            destination.admissionHistogram != nil
+        {
+            pendingPresentationHistogram = nil
+            if destination.admissionHistogramLoading {
+                destination.publishAdmissionHistogramLoading(false)
+            }
+            return
+        }
         if let presentationSample = destination.admissionPresentationHistogramSample,
             presentationSample.surfaceRevision == destination.admissionPresentationSurfaceRevision
         {

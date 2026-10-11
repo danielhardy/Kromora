@@ -62,6 +62,33 @@ final class PreviewAdmissionCoordinatorTests: TempDirectoryTestCase {
         await destination.scheduler.cancelAllAndWait()
     }
 
+    func testRePresentingTheSameEditDoesNotRepublishTheHistogram() async throws {
+        let engine = FakeRenderEngine()
+        let destination = makeDestination(engine: engine)
+        let request = makeRequest(source: destination.source)
+        let first = try makeHistogram(red: 220, green: 90, blue: 30)
+        let zoomed = try makeHistogram(red: 10, green: 200, blue: 90)
+        let coordinator = makeCoordinator(destination: destination, engine: engine)
+        destination.admissionInspectorPresented = true
+        destination.admissionLastPresentedRequest = request
+        destination.admissionPresentationHistogramSample = .init(
+            surfaceRevision: 1, state: .sample(first)
+        )
+        coordinator.updateHistogram(for: request, presentedImage: CIImage(color: .black))
+        XCTAssertEqual(destination.histogramPublicationCount, 1)
+
+        // Zooming re-presents the same document through a new surface with different pixels.
+        destination.admissionPresentationHistogramSample = .init(
+            surfaceRevision: 2, state: .sample(zoomed)
+        )
+        coordinator.updateHistogram(for: request, presentedImage: CIImage(color: .white))
+
+        XCTAssertEqual(destination.admissionHistogram, first)
+        XCTAssertEqual(destination.histogramPublicationCount, 1)
+        coordinator.shutdown()
+        await destination.scheduler.cancelAllAndWait()
+    }
+
     func testNewerInteractiveTextureSampleWinsAndOlderCompletionIsIgnored() async throws {
         let engine = FakeRenderEngine()
         let destination = makeDestination(engine: engine)
