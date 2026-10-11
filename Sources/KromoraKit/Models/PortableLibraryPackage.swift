@@ -110,6 +110,11 @@ struct PortablePackageCaptureSettings: Codable, Equatable, Hashable, Sendable {
 /// The denormalised fields available without opening an asset record.
 struct PortablePackageAssetSummary: Codable, Equatable, Hashable, Sendable {
     var captureDate: String?
+    /// Sortable "yyyy-MM-dd'T'HH:mm:ss" capture time (camera-local, no zone) for the Library date
+    /// range facet; `captureDate` is a locale-formatted display string and is not comparable. Nil
+    /// means the original has not been read yet; the empty string means it was read and carries
+    /// no valid capture date.
+    var captureDateISO: String?
     var rating: Int?
     var flag: String?
     var label: String?
@@ -142,6 +147,7 @@ struct PortablePackageAssetSummary: Codable, Equatable, Hashable, Sendable {
 
     init(
         captureDate: String? = nil,
+        captureDateISO: String? = nil,
         rating: Int? = nil,
         flag: String? = nil,
         label: String? = nil,
@@ -158,6 +164,7 @@ struct PortablePackageAssetSummary: Codable, Equatable, Hashable, Sendable {
         assetRevision: UInt64 = 0
     ) {
         self.captureDate = captureDate
+        self.captureDateISO = captureDateISO
         self.rating = rating
         self.flag = flag
         self.label = label

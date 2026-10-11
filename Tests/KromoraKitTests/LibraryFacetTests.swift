@@ -10,6 +10,7 @@ final class LibraryFacetTests: XCTestCase {
         var rating: Int
         var location: String?
         var settings: PortablePackageCaptureSettings?
+        var dateISO: String? = ""
     }
 
     private func controller(_ rows: [Row]) throws -> LibraryQueryController {
@@ -20,7 +21,7 @@ final class LibraryFacetTests: XCTestCase {
                 recordPath: "Assets/" + PortableLibraryPackage.shard(for: assetID)
                     + "/" + assetID.raw + "/asset.json",
                 summary: .init(
-                    rating: row.rating, cameraMake: row.make, cameraModel: row.model,
+                    captureDateISO: row.dateISO, rating: row.rating, cameraMake: row.make, cameraModel: row.model,
                     lens: row.lens, coarseLocation: row.location,
                     captureSettings: row.settings, displayName: "photo-\(index)")
             ))
@@ -235,5 +236,48 @@ final class LibraryFacetTests: XCTestCase {
         let summary = try JSONDecoder().decode(
             PortablePackageAssetSummary.self, from: Data(json.utf8))
         XCTAssertNil(summary.captureSettings)
+    }
+
+    func testSortableDateParsingRejectsMalformedValues() {
+        XCTAssertEqual(ImageMetadata.sortableDate("2024:03:09 14:05:59"), "2024-03-09T14:05:59")
+        XCTAssertNil(ImageMetadata.sortableDate("0000:00:00 00:00:00"))
+        XCTAssertNil(ImageMetadata.sortableDate("garbage"))
+        XCTAssertNil(ImageMetadata.sortableDate(nil))
+    }
+
+    func testDayNumberMatchesCalendar() throws {
+        XCTAssertEqual(LibraryRangeFacet.dayNumber("1970-01-01T00:00:00"), 0)
+        XCTAssertEqual(LibraryRangeFacet.dayNumber("2024-02-29T10:00:00"), 19_782)
+        XCTAssertEqual(LibraryRangeFacet.dayNumber("2024-03-01"), 19_783)
+        XCTAssertEqual(LibraryRangeFacet.dayNumber("1969-12-31"), -1)
+    }
+
+    func testCaptureDateRangeFacet() throws {
+        let controller = try controller([
+            "2024-01-10T09:00:00", "2024-06-15T23:59:59", "2025-01-01T00:00:00", "", nil,
+        ].map {
+            Row(make: nil, model: nil, lens: nil, rating: 0, settings: .init(), dateISO: $0)
+        })
+        var query = LibraryQuery()
+        let counts = controller.facetCounts(query: query)
+        XCTAssertEqual(
+            counts.bounds(for: .captureDate),
+            LibraryRangeFacet.dayNumber("2024-01-10")!...LibraryRangeFacet.dayNumber("2025-01-01")!)
+        XCTAssertEqual(counts.unreadCaptureSettingsCount, 1)
+
+        // Inclusive on both whole days; empty and unread dates never match.
+        query.facets.setRange(
+            .init(
+                lower: LibraryRangeFacet.dayNumber("2024-01-10")!,
+                upper: LibraryRangeFacet.dayNumber("2024-06-15")!),
+            for: .captureDate)
+        XCTAssertEqual(controller.page(at: 0, query: query).totalCount, 2)
+    }
+
+    func testLegacySummaryDecodesWithUnreadCaptureDate() throws {
+        let json = #"{"displayName":"a.dng","assetRevision":0}"#
+        let summary = try JSONDecoder().decode(
+            PortablePackageAssetSummary.self, from: Data(json.utf8))
+        XCTAssertNil(summary.captureDateISO)
     }
 }

@@ -732,9 +732,10 @@ extension PortableLibraryPackage {
     /// Whether a summary still lacks the metadata the Library facets read from the original.
     static func needsCaptureMetadata(_ summary: PortablePackageAssetSummary) -> Bool {
         summary.captureSettings == nil || summary.coarseLocation == nil
+            || summary.captureDateISO == nil
     }
 
-    /// Fills `captureSettings` and `coarseLocation` from embedded originals, one membership shard
+    /// Fills `captureSettings`, `coarseLocation`, and `captureDateISO` from embedded originals, one membership shard
     /// per call. Originals that cannot be read stay nil, so a later open retries them. The writer
     /// mutation lock is held across the reads and the commit, and the commit merges into a fresh
     /// shard read, so concurrent ratings, flags, and tombstones are preserved. Each committed shard
@@ -779,6 +780,9 @@ extension PortableLibraryPackage {
                 }
                 if entry.summary.coarseLocation == nil {
                     commitShard.entries[index].summary.coarseLocation = metadata.coarseLocation
+                }
+                if entry.summary.captureDateISO == nil {
+                    commitShard.entries[index].summary.captureDateISO = metadata.dateTakenISO
                 }
                 repairedIDs.insert(entry.assetID)
             }

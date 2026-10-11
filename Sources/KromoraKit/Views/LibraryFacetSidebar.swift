@@ -134,7 +134,9 @@ private struct RangeFacetSection: View {
                         .accessibilityLabel("Clear \(facet.title) filter")
                 }
             }
-            if lowerBound < upperBound {
+            if facet == .captureDate {
+                dateRangePickers
+            } else if lowerBound < upperBound {
                 HStack {
                     Text(facet.format(lower))
                     Spacer()
@@ -159,6 +161,39 @@ private struct RangeFacetSection: View {
         .onAppear(perform: syncFromSelection)
         .onChange(of: selection) { syncFromSelection() }
         .onChange(of: bounds) { syncFromSelection() }
+    }
+
+    /// Day-granularity pickers clamped to the observed capture dates. Each change commits at once.
+    @ViewBuilder private var dateRangePickers: some View {
+        let low = LibraryRangeFacet.date(forDayNumber: lowerBound)
+        let high = LibraryRangeFacet.date(forDayNumber: upperBound)
+        let utc = Calendar.utcGregorian
+        DatePicker(
+            "From", selection: dateBinding(\.lower, fallback: lowerBound),
+            in: low...high, displayedComponents: .date
+        )
+        .environment(\.calendar, utc).environment(\.timeZone, .gmt)
+        DatePicker(
+            "To", selection: dateBinding(\.upper, fallback: upperBound),
+            in: low...high, displayedComponents: .date
+        )
+        .environment(\.calendar, utc).environment(\.timeZone, .gmt)
+    }
+
+    private func dateBinding(
+        _ edge: WritableKeyPath<LibraryRangeSelection, Double>, fallback: Double
+    ) -> Binding<Date> {
+        Binding(
+            get: { LibraryRangeFacet.date(forDayNumber: selection?[keyPath: edge] ?? fallback) },
+            set: { newDate in
+                let day = (newDate.timeIntervalSince1970 / 86_400).rounded(.down)
+                var range = selection ?? LibraryRangeSelection(lower: lowerBound, upper: upperBound)
+                range[keyPath: edge] = day
+                range = LibraryRangeSelection(lower: range.lower, upper: range.upper)
+                let isFull = range.lower <= lowerBound && range.upper >= upperBound
+                onCommit(isFull ? nil : range)
+            }
+        )
     }
 
     private func syncFromSelection() {

@@ -756,7 +756,8 @@ struct LibraryQueryController: Sendable {
             if low <= high { result.ranges[facet] = low...high }
         }
         result.unreadCaptureSettingsCount = index.entries.lazy.filter {
-            $0.deletedRevision == nil && $0.summary.captureSettings == nil
+            $0.deletedRevision == nil
+                && ($0.summary.captureSettings == nil || $0.summary.captureDateISO == nil)
         }.count
         return result
     }

@@ -12,6 +12,7 @@ struct LibraryFacetSelection: Codable, Equatable, Hashable, Sendable {
     var focalLength: LibraryRangeSelection?
     var iso: LibraryRangeSelection?
     var aperture: LibraryRangeSelection?
+    var captureDate: LibraryRangeSelection?
 
     static let none = LibraryFacetSelection()
 
@@ -26,6 +27,7 @@ struct LibraryFacetSelection: Codable, Equatable, Hashable, Sendable {
         case .focalLength: focalLength
         case .iso: iso
         case .aperture: aperture
+        case .captureDate: captureDate
         }
     }
 
@@ -34,6 +36,7 @@ struct LibraryFacetSelection: Codable, Equatable, Hashable, Sendable {
         case .focalLength: focalLength = range
         case .iso: iso = range
         case .aperture: aperture = range
+        case .captureDate: captureDate = range
         }
     }
 
@@ -93,6 +96,7 @@ struct LibraryFacetSelection: Codable, Equatable, Hashable, Sendable {
         focalLength = try container.decodeIfPresent(LibraryRangeSelection.self, forKey: .focalLength)
         iso = try container.decodeIfPresent(LibraryRangeSelection.self, forKey: .iso)
         aperture = try container.decodeIfPresent(LibraryRangeSelection.self, forKey: .aperture)
+        captureDate = try container.decodeIfPresent(LibraryRangeSelection.self, forKey: .captureDate)
     }
 }
 
@@ -114,6 +118,8 @@ enum LibraryRangeFacet: String, CaseIterable, Codable, Sendable, Identifiable {
     case focalLength
     case iso
     case aperture
+    /// Capture day as days since 1970-01-01 (camera-local calendar day).
+    case captureDate
 
     var id: String { rawValue }
 
@@ -122,16 +128,38 @@ enum LibraryRangeFacet: String, CaseIterable, Codable, Sendable, Identifiable {
         case .focalLength: "Focal length"
         case .iso: "ISO"
         case .aperture: "Aperture"
+        case .captureDate: "Capture date"
         }
     }
 
     func value(in summary: PortablePackageAssetSummary) -> Double? {
+        if self == .captureDate { return summary.captureDateISO.flatMap(Self.dayNumber) }
         guard let settings = summary.captureSettings else { return nil }
         switch self {
         case .focalLength: return settings.focalLength
         case .iso: return settings.iso.map(Double.init)
         case .aperture: return settings.aperture
+        case .captureDate: return nil
         }
+    }
+
+    /// Days since 1970-01-01 for the "yyyy-MM-dd…" prefix of a sortable capture time.
+    static func dayNumber(_ iso: String) -> Double? {
+        let parts = iso.prefix(10).split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else { return nil }
+        // Civil-from-days inverse (proleptic Gregorian), avoiding Calendar in the per-entry loop.
+        let year = parts[1] <= 2 ? parts[0] - 1 : parts[0]
+        let era = (year >= 0 ? year : year - 399) / 400
+        let yearOfEra = year - era * 400
+        let shiftedMonth = parts[1] + (parts[1] > 2 ? -3 : 9)
+        let dayOfYear = (153 * shiftedMonth + 2) / 5 + parts[2] - 1
+        let dayOfEra = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear
+        return Double(era * 146_097 + dayOfEra - 719_468)
+    }
+
+    /// The inverse of `dayNumber`, as a date at noon UTC (stable across zones for display).
+    static func date(forDayNumber day: Double) -> Date {
+        Date(timeIntervalSince1970: day * 86_400 + 43_200)
     }
 
     private func number(_ value: Double) -> String {
@@ -140,11 +168,24 @@ enum LibraryRangeFacet: String, CaseIterable, Codable, Sendable, Identifiable {
     }
 
     /// Display text for one value, e.g. "35 mm", "ISO 400", "ƒ/2.8".
-    func format(_ value: Double) -> String { decorate(number(value)) }
+    func format(_ value: Double) -> String {
+        self == .captureDate ? Self.dayText(value) : decorate(number(value))
+    }
+
+    private static func dayText(_ day: Double) -> String {
+        Self.date(forDayNumber: day).formatted(
+            Date.FormatStyle(locale: .autoupdatingCurrent, timeZone: .gmt)
+                .year().month(.abbreviated).day()
+        )
+    }
 
     /// Display text for a range, e.g. "35–200 mm", "ISO 100–1600", "ƒ/1.8–2.8".
     func describe(_ range: LibraryRangeSelection) -> String {
-        range.lower == range.upper
+        if self == .captureDate {
+            return range.lower == range.upper
+                ? format(range.lower) : "\(format(range.lower))–\(format(range.upper))"
+        }
+        return range.lower == range.upper
             ? format(range.lower) : decorate("\(number(range.lower))–\(number(range.upper))")
     }
 
@@ -153,6 +194,7 @@ enum LibraryRangeFacet: String, CaseIterable, Codable, Sendable, Identifiable {
         case .focalLength: "\(text) mm"
         case .iso: "ISO \(text)"
         case .aperture: "ƒ/\(text)"
+        case .captureDate: text
         }
     }
 }
@@ -215,4 +257,13 @@ struct LibraryFacetCounts: Equatable, Sendable {
 
     func counts(for facet: LibraryFacet) -> [LibraryFacetValueCount] { values[facet] ?? [] }
     func bounds(for facet: LibraryRangeFacet) -> ClosedRange<Double>? { ranges[facet] }
+}
+
+extension Calendar {
+    /// Gregorian calendar fixed to UTC, used for camera-local capture days stored as day numbers.
+    static let utcGregorian: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .gmt
+        return calendar
+    }()
 }

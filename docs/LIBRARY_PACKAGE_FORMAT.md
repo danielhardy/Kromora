@@ -58,6 +58,13 @@ shard per job, read under the writer mutation lock and merged into a fresh shard
 The same pass fills a nil `coarseLocation`. Unreadable originals stay nil, still-nil summaries are
 the durable resume marker, and an interrupted open continues at the remaining shards next time.
 
+The summary's optional `captureDateISO` is a sortable `yyyy-MM-ddTHH:mm:ss` capture time in the
+camera's local time (EXIF carries no zone) that powers the Library capture-date range filter, which
+compares whole days inclusively. `captureDate` stays a locale-formatted display string and is never
+compared. Absent means the original has not been read yet; the empty string means it was read and
+has no valid capture date, so such photos never match an active date range. Import fills it, and the
+same resumable repair pass above fills it for older packages.
+
 An `asset.json` record contains `identity` (the KRMA-390 opaque UUID plus immutable source
 fingerprint), `source` (embedded relative path or reserved referenced bookmark), `isRemoved`,
 `currentRevision`, and `editHistory` pointers. A virtual copy also has an optional `copyOfAssetID`

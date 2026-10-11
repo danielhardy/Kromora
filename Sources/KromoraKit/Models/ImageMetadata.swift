@@ -41,6 +41,9 @@ struct ImageMetadata: Codable, Sendable, Equatable {
 
     // MARK: Capture
     var dateTaken: String?
+    /// Sortable capture time for Library date filtering, "yyyy-MM-dd'T'HH:mm:ss" in the camera's
+    /// local time (EXIF carries no zone). Empty when the file carries no valid capture date.
+    var dateTakenISO: String = ""
     var software: String?
 
     // MARK: Location
@@ -225,6 +228,8 @@ extension ImageMetadata {
         // Capture
         m.dateTaken = formatDate(exif[kCGImagePropertyExifDateTimeOriginal] as? String)
             ?? formatDate(tiff[kCGImagePropertyTIFFDateTime] as? String)
+        m.dateTakenISO = sortableDate(exif[kCGImagePropertyExifDateTimeOriginal] as? String)
+            ?? sortableDate(tiff[kCGImagePropertyTIFFDateTime] as? String) ?? ""
         m.software  = trimmed(tiff[kCGImagePropertyTIFFSoftware] as? String)
 
         // Location
@@ -268,6 +273,20 @@ extension ImageMetadata {
         out.dateStyle = .medium
         out.timeStyle = .short
         return out.string(from: date)
+    }
+
+    /// EXIF "yyyy:MM:dd HH:mm:ss" → "yyyy-MM-dd'T'HH:mm:ss", or nil when malformed (including the
+    /// all-zero placeholder some cameras write).
+    static func sortableDate(_ raw: String?) -> String? {
+        guard let raw = trimmed(raw) else { return nil }
+        let parts = raw.prefix(19).split(whereSeparator: { ": -T".contains($0) }).compactMap { Int($0) }
+        guard parts.count == 6, (1...9999).contains(parts[0]), (1...12).contains(parts[1]),
+              (1...31).contains(parts[2]), (0...23).contains(parts[3]),
+              (0...59).contains(parts[4]), (0...60).contains(parts[5])
+        else { return nil }
+        return String(
+            format: "%04d-%02d-%02dT%02d:%02d:%02d",
+            parts[0], parts[1], parts[2], parts[3], parts[4], parts[5])
     }
 
     /// Rounds to whole degrees on-device. No geocoder or network lookup is involved.

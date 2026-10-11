@@ -504,6 +504,7 @@ struct PortablePackageImporter: Sendable {
                 let sourceMetadata = ImageMetadata.read(from: stagedOriginalURL)
                 let sourceDimensions = PortablePackageAssetSummary.sourceDimensions(from: sourceMetadata)
                 let importedSummary = PortablePackageAssetSummary(
+                    captureDateISO: sourceMetadata.dateTakenISO,
                     coarseLocation: sourceMetadata.coarseLocation,
                     captureSettings: PortablePackageCaptureSettings(sourceMetadata),
                     dimensions: sourceDimensions,

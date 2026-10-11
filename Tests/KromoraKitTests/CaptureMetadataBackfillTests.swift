@@ -20,6 +20,7 @@ final class CaptureMetadataBackfillTests: TempDirectoryTestCase {
         let index = try XCTUnwrap(shard.entries.firstIndex { $0.assetID == assetID })
         shard.entries[index].summary.captureSettings = nil
         shard.entries[index].summary.coarseLocation = nil
+        shard.entries[index].summary.captureDateISO = nil
         shard.entries[index].summary.rating = 4
         try package.writeMembershipShard(shard)
 
@@ -30,6 +31,7 @@ final class CaptureMetadataBackfillTests: TempDirectoryTestCase {
             package.readMembershipShard(shardName).entries.first { $0.assetID == assetID }?.summary)
         XCTAssertEqual(summary.captureSettings, PortablePackageCaptureSettings())
         XCTAssertEqual(summary.coarseLocation, "")
+        XCTAssertEqual(summary.captureDateISO, "")  // the generated JPEG carries no EXIF date
         XCTAssertEqual(summary.rating, 4)
 
         // Resumable and idempotent: a repaired shard has nothing left to do.
