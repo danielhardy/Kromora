@@ -605,15 +605,14 @@ log), not the Release `last-known-frame` p95 series:
 No `wholeFileRehash` runs on the main thread; the remaining ones are off-main in source preparation
 (`hadStoredSignature=false`, 50-62 ms each).
 
-**Release measurement (2026-10-11, KRMA-860):** one supervised `last-known-frame` run on Apple M4 Pro /
-macOS 27.2 at `873684f2`, DSC01019.ARW, 30 warm samples, run with `--no-trace` because Instruments
-could not record (`DTServiceHub` error). Main-actor time before first suspension p95 is **1.47 ms**
-(warm Edit navigation; exact 1.14 ms, stale 1.29 ms), inside the <= 3 ms budget. Selection sync is
-about 1.4 ms per switch. For context, warm Edit first-pixel p95 was 187 ms and warm 30-cell grid p95
-154 ms; both miss the old optional 50/100 ms budgets, which were closed as won't-do after a release
-build felt fast (KRMA-748/749/750). One series, not the three-run median the ticket proposed.
-Regression guard without a window: `ImageSourceIdentityReuseTests` (the date round-trip test fails
-without the fix).
+**Release measurement (2026-10-11, KRMA-860):** three supervised `last-known-frame` runs on Apple M4 Pro /
+macOS 27.2, DSC01019.ARW, 30 warm samples each, run with `--no-trace` because Instruments could not
+record (`DTServiceHub` error). Run 1 used `873684f2`; runs 2 and 3 used `d2d1c72b`. Main-actor time
+before first suspension p95 (warm Edit navigation) was 1.47, 1.52, and 1.48 ms, **median 1.48 ms**, inside
+the <= 3 ms budget. Selection sync is about 1.4 ms per switch. For context, warm Edit first-pixel p95 was
+187-197 ms and warm 30-cell grid p95 154-157 ms; both miss the old optional 50/100 ms budgets, which were
+closed as won't-do after a release build felt fast (KRMA-748/749/750). Regression guard without a
+window: `ImageSourceIdentityReuseTests` (the date round-trip test fails without the fix).
 
 ### Persisted package identity hash reuse (KRMA-753, 2026-10-01)
 

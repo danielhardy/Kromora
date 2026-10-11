@@ -2,7 +2,7 @@
 id: KRMA-460
 title: "Continue AppViewModel decomposition: ownership first, file splits second"
 type: task
-status: backlog
+status: ready
 priority: medium
 creation_provenance:
   runner: cursor
@@ -12,7 +12,7 @@ labels:
   - architecture
   - maintainability
 created: 2026-09-19T15:31:38.265Z
-updated: 2026-10-11T13:33:50.601Z
+updated: 2026-10-11T13:42:55.893Z
 depends_on:
   - KRMA-465
   - KRMA-466
@@ -27,7 +27,7 @@ depends_on:
   - KRMA-877
   - KRMA-878
 blockers: []
-order: zzzzz
+order: zx
 board: product
 ---
 

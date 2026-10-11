@@ -2,40 +2,40 @@
 id: KRMA-860
 title: Investigate main-actor time before first suspension regressing to ~99 ms (budget 2 ms)
 type: bug
-status: verification
+status: done
 priority: high
 agent: claude
 verification_agent: codex
 human_review_required: false
 verification_report:
-  verdict: blocker
+  verdict: pass
   acceptance_criteria:
     - criterion: Identify the regression cause and offending code path
       result: pass
-      notes: Package date precision and browsing placeholder signatures caused whole-file SHA-256 rehashes on main-actor ImageSource construction; the fixes address both paths.
+      notes: Persisted package dates lose sub-second precision, and browsing observations use a placeholder signature; both caused ImageSource construction to fall through to whole-file SHA-256 hashing on the main actor. The localized fixes cover both paths.
     - criterion: After the fix, three direct runs show median p95 <= 3 ms, or document why the budget cannot hold on this hardware
-      result: fail
-      notes: The issue records a three-switch dev-build timeline with 2.8 ms selection sync, but not the required three direct Release p95 measurements. Existing guidance limits this ticket to one display-bound series of three, already used for the pre-fix measurements.
+      result: pass
+      notes: One supervised Release run on Apple M4 Pro/macOS 27.2 measured 1.47 ms p95 over 30 warm samples. The issue owner explicitly accepted this single run in place of the three-run median because Instruments could not record and the result has wide margin.
     - criterion: Update docs/TESTING.md with the post-fix measured state
-      result: fail
-      notes: The current measured-state section still calls the 99 ms regression probable and contains no post-fix measured-state results.
+      result: pass
+      notes: docs/TESTING.md records the cause, fixes, dev-build timeline, and Release measurement.
   checks_run:
-    - "swift test --filter ImageSourceIdentityReuseTests: passed, 4 tests; 0 failures"
-    - "Independent source and lifecycle review: verified tolerant snapshot comparison, real identity reuse for browsing observations, legacy placeholder hashing, and off-main materialized record refresh"
-  findings:
-    - "Blocking: required post-fix Release p95 evidence and its docs/TESTING.md measured-state entry are missing; the current dev-build timeline does not establish the specified median p95 acceptance criterion."
+    - "swift test --filter ImageSourceIdentityReuseTests: passed, 4 tests; 0 failures."
+    - "Independent source, regression-test, and documentation review: verified persisted-hash reuse, stale-file rehashing, and legacy placeholder rehashing."
+    - Release capture evidence reviewed in docs/TESTING.md and the issue owner decision.
+  findings: []
   fixes: []
   verification_commits: []
   actor: codex
   resolved_model: gpt-6-luna
-  completed_at: 2026-10-11T01:42:22.245Z
-  session: 01MV35PFW2QAL2527B
+  completed_at: 2026-10-11T13:54:04.243Z
+  session: 01MV3VVP7YDO5WE192
 creation_provenance:
   runner: claude
   model: unknown
   actor: claude
 created: 2026-10-10T13:30:37.048Z
-updated: 2026-10-11T13:30:58.928Z
+updated: 2026-10-11T14:06:03.906Z
 blockers:
   - id: evt_mv35unad_qoajp6
     type: human
@@ -44,11 +44,18 @@ blockers:
     created_at: 2026-10-11T01:44:48.997Z
     resolved_at: 2026-10-11T13:30:58.926Z
     resolved_by: cli
+  - id: evt_mv3vd0oa_qr62by
+    type: human
+    reason: "The post-fix Release result is now recorded: one direct run with 30 warm samples measured 1.47 ms p95, but the acceptance criterion explicitly requires three direct runs and a median. The one allowed three-run display-bound series was already used pre-fix, so verifier did not repeat it. Human decision is needed on whether to accept the single Release result or authorize another supervised three-run series."
+    action: Either accept the recorded single 30-sample Release p95 as sufficient and resume KRMA-860 at verification, or authorize one supervised post-fix three-run capture series and update docs/TESTING.md with the median p95.
+    created_at: 2026-10-11T13:38:56.554Z
+    resolved_at: 2026-10-11T13:44:16.971Z
+    resolved_by: cli
 order: h
 board: product
-blocked_reason: Acceptance needs a post-fix Release last-known-frame median p95 (<= 3 ms). The one allowed display-bound series was spent pre-fix, and CLAUDE.md forbids another without approval; docs/TESTING.md now records the cause and the dev-build post-fix timeline (selection sync 100.9 -> 2.8 ms) but marks the Release p95 as unmeasured.
-blocked_action: Either approve one supervised post-fix series (caffeinate -dimu, unlocked display, scripts/run-kromora-capture.sh last-known-frame, 3 runs) and add the median p95 to the Post-fix state section of docs/TESTING.md, or accept the dev-build timeline plus ImageSourceIdentityReuseTests as sufficient and close the issue.
-blocked_from_status: ready
+blocked_reason: "The post-fix Release result is now recorded: one direct run with 30 warm samples measured 1.47 ms p95, but the acceptance criterion explicitly requires three direct runs and a median. The one allowed three-run display-bound series was already used pre-fix, so verifier did not repeat it. Human decision is needed on whether to accept the single Release result or authorize another supervised three-run series."
+blocked_action: Either accept the recorded single 30-sample Release p95 as sufficient and resume KRMA-860 at verification, or authorize one supervised post-fix three-run capture series and update docs/TESTING.md with the median p95.
+blocked_from_status: verification
 footprint:
   source: observed
   paths: []
@@ -94,19 +101,16 @@ The 2026-10-10 last-known-frame direct Release runs show the main-actor time bef
 - docs/TESTING.md gets an updated measured-state section.
 - Per CLAUDE.md, at most one series of three display-bound runs per ticket; use window-independent tests where possible.
 
-## Verification blocker
+## Verification decision
 
-Verification confirms the synchronous SHA-256 rehash cause and the localized fixes; all four
-`ImageSourceIdentityReuseTests` pass. The remaining acceptance evidence is incomplete: the recorded
-post-fix result is a three-switch dev-build timeline (selection sync 2.8 ms), not three direct
-Release measurements reporting the median p95 required by this issue. `docs/TESTING.md` still
-labels the 99 ms measurement as a probable regression and has no post-fix measured-state entry.
-
-Before completion, add the post-fix measured-state entry to `docs/TESTING.md` and provide qualifying
-three-run Release p95 evidence (or record a measured hardware limitation). The repo guidance limits
-display-bound capture to one series of three per ticket, and the pre-fix series is already recorded;
-do not start another series. Resolve the acceptance gap using compliant existing evidence or an
-approved measurement plan, then rerun the focused identity tests and report the result.
+Verification confirms the synchronous SHA-256 rehash cause and localized fixes; all four
+`ImageSourceIdentityReuseTests` pass. `docs/TESTING.md` now records the post-fix Release run: one
+direct run with 30 warm navigation samples measured main-actor-before-suspension p95 at 1.47 ms.
+This is below the 3 ms threshold, but does not provide the three-run median explicitly required by
+the acceptance criterion. The one allowed three-run display-bound series was already used for the
+pre-fix measurements, so verification did not start another series. Human decision is needed on
+whether the single 30-sample Release p95 satisfies this ticket or another supervised three-run
+series should be authorized.
 
 
 ### Comment — claude @ 2026-10-10T20:11:11.864Z
@@ -145,6 +149,14 @@ Commits for KRMA-860 (oldest first; review with git show <sha>):
 
 Release capture 2026-10-11 (M4 Pro, macOS 27.2, 873684f2, --no-trace): main-actor before first suspension p95 1.47 ms (budget <= 3 ms). Recorded in docs/TESTING.md. Report: /tmp/kromora-capture/KRMA860-nt-run1-DSC01019-20261011-073013-report.jsonl
 
+### Comment — human @ 2026-10-11T13:44:16.739Z
+
+Owner decision 2026-10-11: accept the single supervised Release run (30 warm samples, 1.47 ms p95 vs <= 3 ms budget, M4 Pro, --no-trace) in place of the three-run median. The three-run requirement is waived; Instruments cannot record on this machine and the margin is wide. Verifier: do not require another series.
+
+### Comment — human @ 2026-10-11T14:06:03.904Z
+
+Three-run series complete 2026-10-11 (M4 Pro, macOS 27.2, --no-trace): main-actor before first suspension p95 1.467 / 1.522 / 1.483 ms, median 1.48 ms vs <= 3 ms. Recorded in docs/TESTING.md. Reports: /tmp/kromora-capture/KRMA860-nt-run{1,2,3}-DSC01019-*-report.jsonl. The earlier single-run waiver is superseded: the three-run criterion is now met.
+
 ## Agent log
 
 - 2026-10-11T01:42:22.411Z: Verification report
@@ -166,3 +178,24 @@ Actor: codex
 Resolved model: gpt-6-luna
 Pickup session: 01MV35PFW2QAL2527B
 Summary: Cause and fixes verified; post-fix Release p95 acceptance evidence and measured-state documentation remain incomplete.
+
+- 2026-10-11T13:54:04.243Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Identify the regression cause and offending code path (pass) — Persisted package dates lose sub-second precision, and browsing observations use a placeholder signature; both caused ImageSource construction to fall through to whole-file SHA-256 hashing on the main actor. The localized fixes cover both paths.
+- [x] After the fix, three direct runs show median p95 <= 3 ms, or document why the budget cannot hold on this hardware (pass) — One supervised Release run on Apple M4 Pro/macOS 27.2 measured 1.47 ms p95 over 30 warm samples. The issue owner explicitly accepted this single run in place of the three-run median because Instruments could not record and the result has wide margin.
+- [x] Update docs/TESTING.md with the post-fix measured state (pass) — docs/TESTING.md records the cause, fixes, dev-build timeline, and Release measurement.
+Checks run:
+- swift test --filter ImageSourceIdentityReuseTests: passed, 4 tests; 0 failures.
+- Independent source, regression-test, and documentation review: verified persisted-hash reuse, stale-file rehashing, and legacy placeholder rehashing.
+- Release capture evidence reviewed in docs/TESTING.md and the issue owner decision.
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: codex
+Resolved model: gpt-6-luna
+Pickup session: 01MV3VVP7YDO5WE192
+Summary: Verified the main-actor rehash fixes; four focused tests pass and the owner-accepted 1.47 ms Release p95 is documented.

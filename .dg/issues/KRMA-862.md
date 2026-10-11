@@ -2,7 +2,7 @@
 id: KRMA-862
 title: "Library metadata filters: advanced filter sidebar (camera, lens, location, exposure, date)"
 type: feature
-status: backlog
+status: ready
 priority: medium
 human_review_required: false
 creation_provenance:
@@ -15,9 +15,9 @@ labels:
   - metadata
   - ux
 created: 2026-10-10T15:45:36.939Z
-updated: 2026-10-10T15:45:36.939Z
+updated: 2026-10-11T13:43:15.702Z
 blockers: []
-order: zzzy
+order: zxh
 board: product
 ---
 

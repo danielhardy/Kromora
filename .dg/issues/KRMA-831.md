@@ -2,7 +2,7 @@
 id: KRMA-831
 title: Measure writer-lock wait in the production mutation scale probe
 type: task
-status: ready
+status: verification
 priority: medium
 human_review_required: false
 creation_provenance:
@@ -12,11 +12,18 @@ creation_provenance:
 labels:
   - verification
 created: 2026-10-08T15:28:30.395Z
-updated: 2026-10-11T13:07:52.600Z
+updated: 2026-10-11T13:58:05.701Z
 parent: KRMA-829
 blockers: []
-order: n
+order: q
 board: product
+footprint:
+  source: observed
+  paths: []
+  observed:
+    paths: []
+    captured_at: 2026-10-11T13:53:26.012Z
+    unavailable_reason: "missing_commits: no implementation commits are recorded"
 ---
 
 ## Objective

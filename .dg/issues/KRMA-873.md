@@ -2,7 +2,7 @@
 id: KRMA-873
 title: Review app-wide tint policy for bordered buttons
 type: task
-status: backlog
+status: ready
 priority: low
 human_review_required: false
 creation_provenance:
@@ -11,11 +11,11 @@ creation_provenance:
   actor: codex
 labels:
   - verification
-parent: KRMA-871
 created: 2026-10-11T03:11:55.163Z
-updated: 2026-10-11T03:11:55.163Z
+updated: 2026-10-11T13:43:07.900Z
+parent: KRMA-871
 blockers: []
-order: zzzz
+order: zy
 board: product
 ---
 

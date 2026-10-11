@@ -2,7 +2,7 @@
 id: KRMA-853
 title: "Failing: LightInspectorTests tone curve reset source assertion broken by ResetIconButton change"
 type: bug
-status: ready
+status: verification
 priority: medium
 agent: codex
 verification_agent: codex
@@ -12,10 +12,17 @@ creation_provenance:
   model: unknown
   actor: claude
 created: 2026-10-10T13:02:41.164Z
-updated: 2026-10-11T13:13:13.096Z
+updated: 2026-10-11T13:56:49.385Z
 blockers: []
-order: w
+order: v
 board: product
+footprint:
+  source: observed
+  paths: []
+  observed:
+    paths: []
+    captured_at: 2026-10-11T13:56:48.728Z
+    unavailable_reason: "missing_commits: no implementation commits are recorded"
 ---
 
 ## Objective
@@ -36,3 +43,8 @@ Repair the test. Prefer asserting behavior (the reset control exposes an accessi
 ### Comment — claude @ 2026-10-11T13:11:13.077Z
 
 Confirmed still valid 2026-10-11: ResetIconButton uses resolvedAccessibilityLabel but the test asserts the old modifier text. Highest-priority open item; consider promoting to ready.
+
+
+### Comment — codex @ 2026-10-11T13:56:48.213Z
+
+Replaced the brittle ResetIconButton modifier source assertion with a behavioral accessibility-label assertion. Verified the focused LightInspector test and scripts/ci-tests.sh fast (1,612 tests passed). Commit: d2d1c72b.
