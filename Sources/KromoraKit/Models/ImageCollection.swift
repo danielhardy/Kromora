@@ -50,10 +50,6 @@ final class ImageCollectionPresentationModel {
     struct ThumbnailEntry: Identifiable, Equatable {
         let id: PhotoAssetID
         let itemIndex: Int?
-        let aspectRatio: Double
-        /// False while the entry is still using the 4:3 fallback because pixel dimensions
-        /// have not arrived. The mosaic may replace that placeholder; a resolved entry stays put.
-        let aspectResolved: Bool
         var isPlaceholder: Bool { false }
     }
 
@@ -408,9 +404,6 @@ final class ImageCollectionPresentationModel {
     private var nextMetadataRequestID: UInt64 = 0
     private var pendingMetadataRequestIDs: Set<UInt64> = []
     private var metadataCompletionWaiters: [CheckedContinuation<Void, Never>] = []
-    /// Dimensions that arrived during the current metadata burst. Published once when the
-    /// burst drains so the mosaic corrects itself without rebuilding on every header.
-    private var metadataAffectsMosaic = false
     private var scanGeneration: UInt64 = 0
 
     private struct MetadataRequest: Sendable {
@@ -834,7 +827,7 @@ final class ImageCollectionPresentationModel {
     ///
     /// Edited work is one turn behind the originals and uses background priority, so a free
     /// thumbnail slot keeps painting embedded previews until that window is queued. Calling
-    /// this for the visible mosaic is what fills the grid without waiting for a click.
+    /// this for the visible grid cells is what fills the grid without waiting for a click.
     func requestVisibleThumbnails(for ids: [PhotoAssetID]) {
         guard !ids.isEmpty else { return }
         if !isThumbnailDemandDriven { beginThumbnailDemand() }
@@ -959,8 +952,8 @@ final class ImageCollectionPresentationModel {
         invalidateCollectionProjection(notify: true)
     }
 
-    /// Patch only the package-published cell geometry. This invalidates the mosaic's placement
-    /// snapshot but never requeues reads or edited renders for the affected thumbnails.
+    /// Patch only the package-published cell geometry. This invalidates the collection projection
+    /// but never requeues reads or edited renders for the affected thumbnails.
     func applyPresentedAspectRatioUpdates(_ updates: [PortablePhotoAssetID: Double]) {
         var geometryChanged = false
         for (assetID, ratio) in updates {
@@ -1034,7 +1027,6 @@ final class ImageCollectionPresentationModel {
         metadataContinuation = nil
         metadataTask?.cancel()
         metadataTask = nil
-        metadataAffectsMosaic = false
         pendingMetadataRequestIDs.removeAll()
         let waiters = metadataCompletionWaiters
         metadataCompletionWaiters.removeAll()
@@ -1101,12 +1093,8 @@ final class ImageCollectionPresentationModel {
         }
         switch outcome {
         case .success(let metadata):
-            let previousDimensions = items[index].asset.dimensions
             items[index].metadata = metadata
             items[index].asset.updateMetadata(from: metadata)
-            if items[index].asset.dimensions != previousDimensions {
-                metadataAffectsMosaic = true
-            }
         case .failure(let warning):
             if !scanWarnings.contains(where: { $0.message == warning }) {
                 scanWarnings.append(.init(id: warning, message: warning))
@@ -1116,10 +1104,6 @@ final class ImageCollectionPresentationModel {
     }
     private func finishMetadataWaitersIfIdle() {
         guard pendingMetadataRequestIDs.isEmpty else { return }
-        if metadataAffectsMosaic {
-            metadataAffectsMosaic = false
-            invalidateCollectionProjection(notify: true)
-        }
         let waiters = metadataCompletionWaiters
         metadataCompletionWaiters.removeAll()
         waiters.forEach { $0.resume() }

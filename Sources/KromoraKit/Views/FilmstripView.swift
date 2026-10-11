@@ -65,7 +65,7 @@ struct FilmstripView: View {
                                 onSelect(adjacentIndex, [])
                                 return result
                             }
-                            // Use the source ID for navigation scrolling; the mosaic keeps the
+                            // Use the source ID for navigation scrolling; the collection keeps the
                             // reservation ID internally so this cell can be replaced in place.
                             .id(item.id)
                             .onAppear {

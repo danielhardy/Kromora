@@ -182,7 +182,7 @@ final class LastKnownFrameReleaseBenchmark: TempDirectoryTestCase {
             return LiveEditTelemetryClock.now
         }
 
-        // First visit hydrates the actual visible mosaic and warms its in-memory thumbnails.
+        // First visit hydrates the actual visible grid and warms its in-memory thumbnails.
         let coldGridStart = CACurrentMediaTime()
         let firstGridMount =
             RenderDiagnostics.snapshot.gridMounts

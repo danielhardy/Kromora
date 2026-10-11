@@ -250,13 +250,8 @@ final class LibraryGridTests: TempDirectoryTestCase {
 
         let item = try XCTUnwrap(collection.items.first)
         XCTAssertEqual(item.libraryAspectRatio, 0.75, accuracy: 0.001)
-        XCTAssertEqual(
-            collection.thumbnailEntries.first?.aspectRatio ?? 0,
-            0.75,
-            accuracy: 0.001,
-            "the grid mosaic must see the oriented aspect as soon as metadata settles"
-        )
-        XCTAssertEqual(collection.thumbnailEntries.first?.aspectResolved, true)
+        XCTAssertEqual(collection.thumbnailEntries.map(\.id), [item.id])
+        XCTAssertEqual(collection.thumbnailEntries.first?.itemIndex, 0)
         collection.requestThumbnail(for: item.id)
         let deadline = Date().addingTimeInterval(5)
         while item.thumbnail == nil {
@@ -269,11 +264,10 @@ final class LibraryGridTests: TempDirectoryTestCase {
 
         XCTAssertEqual(collection.selection.activeID, item.id)
         XCTAssertEqual(
-            collection.thumbnailEntries.first?.aspectRatio ?? 0,
-            0.75,
-            accuracy: 0.001,
-            "selecting the photo must not change its portrait framing geometry"
+            collection.thumbnailEntries.map(\.id), [item.id],
+            "selecting the photo must not change the square grid's entry identity"
         )
+        XCTAssertEqual(item.libraryAspectRatio, 0.75, accuracy: 0.001)
         XCTAssertLessThan(item.thumbnail!.size.width, item.thumbnail!.size.height)
     }
 
