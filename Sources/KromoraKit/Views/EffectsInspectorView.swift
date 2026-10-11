@@ -270,20 +270,15 @@ struct EffectsInspectorView: View {
             Image(systemName: "slider.horizontal.3")
                 .font(.system(size: 11, weight: .medium))
                 .frame(width: 24, height: 24)
-                .background {
-                    Circle().fill(Color.accentColor.opacity(isExpanded.wrappedValue ? 0.2 : 0))
-                }
                 .overlay(alignment: .topTrailing) {
                     if isModified && !isExpanded.wrappedValue {
-                        Circle().fill(Color.accentColor).frame(width: 5, height: 5)
+                        Circle().fill(KromoraTheme.primaryAccent).frame(width: 5, height: 5)
                             .padding(3)
                             .accessibilityHidden(true)
                     }
                 }
-                .contentShape(Circle())
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(isExpanded.wrappedValue ? Color.accentColor : Color.secondary)
+        .buttonStyle(InspectorIconButtonStyle(isActive: isExpanded.wrappedValue))
         .help("\(isExpanded.wrappedValue ? "Hide" : "Show") advanced \(section) controls")
         .accessibilityLabel("Advanced \(section) controls")
         .accessibilityValue(isExpanded.wrappedValue ? "Expanded" : "Collapsed")
