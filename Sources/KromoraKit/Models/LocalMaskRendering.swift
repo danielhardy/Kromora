@@ -557,7 +557,11 @@ actor CoordinatorLocalMaskResolver: LocalMaskResolving {
         }
     }
 
-    private static func apply(_ definition: SemanticMaskDefinition, to mask: NormalizedMask) throws -> NormalizedMask {
+    static func apply(
+        _ definition: SemanticMaskDefinition,
+        to mask: NormalizedMask,
+        feather: (NormalizedMask, Int) throws -> NormalizedMask = MaskOperations.feather
+    ) throws -> NormalizedMask {
         // An untouched definition must not pay for a full-resample pass: at render quality this
         // maps tens of millions of values for no change.
         if definition.edgeFeather <= 0 && definition.edgeShift == 0 && definition.density == 1 {
@@ -566,7 +570,7 @@ actor CoordinatorLocalMaskResolver: LocalMaskResolving {
         var result = mask
         if definition.edgeFeather > 0 {
             let radius = max(1, Int((definition.edgeFeather * Double(min(mask.size.width, mask.size.height)) * 0.05).rounded()))
-            result = try MaskOperations.feather(result, radius: radius)
+            result = try feather(result, radius)
         }
         let values = result.values.map { value in
             let shifted = min(max(Double(value) + definition.edgeShift, 0), 1)
