@@ -107,6 +107,45 @@ final class LibraryMediaWorkflowCoordinatorTests: XCTestCase {
         await coordinator.shutdown()
     }
 
+    func testLibraryMembersAreTaggedProgressivelyAndLeftOutOfDefaultSelection() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("kromora-library-tags-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        func make(_ name: String, _ byte: UInt8) throws -> MediaVolumeFile {
+            let url = directory.appendingPathComponent(name)
+            try Data(repeating: byte, count: 64).write(to: url)
+            return MediaVolumeFile(url: url)
+        }
+        let known = try make("known.jpg", 1), touched = try make("touched.jpg", 1)
+        let new = try make("new.jpg", 2)
+        let hash = try XCTUnwrap(LibraryMembershipMatcher.contentHash(of: known.url))
+        let provider = StreamingWorkflowMediaProvider()
+        let coordinator = LibraryMediaWorkflowCoordinator(
+            provider: provider, fileDialog: WorkflowFileDialog()
+        )
+        coordinator.libraryMatcherLoader = { LibraryMembershipMatcher(knownHashes: [hash]) }
+
+        coordinator.openRemovableMedia(MediaVolume(name: "Card", url: directory))
+        provider.send(.init(files: [known, touched, new], warnings: []))
+        try await waitUntil { coordinator.removableMediaLibraryChecked == 3 }
+        XCTAssertEqual(coordinator.removableMediaInLibrary, [known.id, touched.id])
+        XCTAssertEqual(coordinator.selectedRemovableMediaFiles, [new])
+
+        // Select All keeps matched items out; an explicit click selects one for re-import.
+        coordinator.selectAllRemovableMedia()
+        XCTAssertEqual(coordinator.selectedRemovableMediaFiles, [new])
+        coordinator.toggleRemovableMediaSelection(touched)
+        XCTAssertEqual(Set(coordinator.selectedRemovableMediaFiles.map(\.id)), [touched.id, new.id])
+
+        coordinator.hidesInLibraryRemovableMedia = true
+        XCTAssertEqual(coordinator.visibleRemovableMediaFiles, [new])
+
+        provider.finish()
+        try await waitUntil { !coordinator.isCheckingRemovableMediaLibrary }
+        await coordinator.shutdown()
+    }
+
     func testClosingSelectorMidScanCancelsTheStreamAndKeepsPartialListFromGrowing() async throws {
         let volume = MediaVolume(name: "Card", url: FileManager.default.temporaryDirectory)
         let a = MediaVolumeFile(url: URL(fileURLWithPath: "/Volumes/Card/a.jpg"))

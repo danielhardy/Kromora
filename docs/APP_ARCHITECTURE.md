@@ -135,6 +135,13 @@ cancelable media-import validation task. It publishes narrow state and a
 final package or managed-copy transaction, then reports the result back through `finishImport`; no
 workflow creates a second authoritative library.
 
+The removable-media selector tags files already in the open library. `LibraryMembershipMatcher`
+compares each file's SHA-256 with the package import catalog's content hashes (the same rule
+`PortablePackageImporter` uses for duplicates), hashing lazily and cancellably on a detached task as
+scan batches arrive. Tagged files are left out of default selection and Select All unless the user
+clicked them; the library is the only authority, so other libraries and deleted assets are not
+remembered. Folder import and the system Photos picker have no in-app selector to tag.
+
 `ApplicationShellCoordinator` owns workspace mount/unmount observers, app-activation observers,
 debounce tasks, portable-package maintenance admission, and observer/maintenance teardown. Its
 callbacks are refresh signals only. `AppViewModel` retains the compatibility façade and orders

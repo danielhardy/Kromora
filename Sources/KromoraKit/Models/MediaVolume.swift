@@ -158,27 +158,41 @@ struct MediaVolumeSelectionModel: Sendable, Equatable {
     /// The last plain click; a shift-click selects everything between it and the clicked file.
     private(set) var anchorID: String?
 
+    /// Files the user clicked or range-selected. Default selection (arrivals, Select All, and
+    /// late "already in library" tags) never overrides these.
+    private(set) var explicitIDs: Set<String> = []
+
     var count: Int { selectedIDs.count }
 
-    mutating func selectAll(in files: [MediaVolumeFile]) {
-        selectedIDs = Set(files.map(\.id))
+    /// Selects every file except `excluded` (files already in the library), as a fresh default.
+    mutating func selectAll(in files: [MediaVolumeFile], excluding excluded: Set<String> = []) {
+        selectedIDs = Set(files.map(\.id)).subtracting(excluded)
+        explicitIDs.removeAll()
     }
 
     mutating func clear() {
         selectedIDs.removeAll()
+        explicitIDs.removeAll()
         anchorID = nil
     }
 
     /// Adds files without touching the rest of the selection or the shift-click anchor, so a
     /// streamed batch never disturbs choices already made.
-    mutating func select(_ files: [MediaVolumeFile]) {
-        selectedIDs.formUnion(files.map(\.id))
+    mutating func select(_ files: [MediaVolumeFile], excluding excluded: Set<String> = []) {
+        selectedIDs.formUnion(files.map(\.id).filter { !excluded.contains($0) })
+    }
+
+    /// Drops files that were only selected by default and have since been identified as already
+    /// in the library. A file the user chose themselves keeps its state.
+    mutating func deselectDefaults(_ ids: Set<String>) {
+        selectedIDs.subtract(ids.subtracting(explicitIDs))
     }
 
     mutating func toggle(_ file: MediaVolumeFile) {
         if !selectedIDs.insert(file.id).inserted {
             selectedIDs.remove(file.id)
         }
+        explicitIDs.insert(file.id)
         anchorID = file.id
     }
 
@@ -193,6 +207,7 @@ struct MediaVolumeSelectionModel: Sendable, Equatable {
         }
         for item in files[min(from, to)...max(from, to)] {
             selectedIDs.insert(item.id)
+            explicitIDs.insert(item.id)
         }
     }
 

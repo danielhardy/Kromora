@@ -53,6 +53,12 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
     @Published private(set) var isRemovableMediaScanning = false
     @Published private(set) var removableMediaSelection = MediaVolumeSelectionModel()
     @Published private(set) var removableMediaImportProgress: MediaVolumeImportProgress?
+    /// Ids of scanned files whose bytes are already in the open library. Filled progressively.
+    @Published private(set) var removableMediaInLibrary: Set<String> = []
+    /// How many scanned files have been compared with the library so far.
+    @Published private(set) var removableMediaLibraryChecked = 0
+    @Published private(set) var isCheckingRemovableMediaLibrary = false
+    @Published var hidesInLibraryRemovableMedia = false
 
     private let provider: any MediaVolumeProviding
     private let fileDialog: any FileDialogProviding
@@ -66,6 +72,12 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
     /// Streamed files are selected on arrival until the user takes over the selection, which
     /// matches the select-everything default of a finished scan.
     private var selectsScanArrivals = true
+    private var libraryCheckTask: Task<Void, Never>?
+    private var libraryCheckInput: AsyncStream<[MediaVolumeFile]>.Continuation?
+
+    /// Loads the open library's content hashes off the main actor. Nil when no library is open,
+    /// in which case nothing is tagged.
+    var libraryMatcherLoader: (@Sendable () async throws -> LibraryMembershipMatcher)?
 
     var onStatus: (@MainActor (String) -> Void)?
     var onError: (@MainActor (String) -> Void)?
@@ -86,6 +98,12 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
 
     var selectedRemovableMediaFiles: [MediaVolumeFile] {
         removableMediaFiles.filter { removableMediaSelection.contains($0) }
+    }
+
+    /// The files the selector grid shows: everything, or only files not yet in the library.
+    var visibleRemovableMediaFiles: [MediaVolumeFile] {
+        guard hidesInLibraryRemovableMedia else { return removableMediaFiles }
+        return removableMediaFiles.filter { !removableMediaInLibrary.contains($0.id) }
     }
 
     func chooseSourceFolder(startingAt directoryURL: URL?) {
@@ -189,6 +207,7 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
         removableMediaSelection.clear()
         selectsScanArrivals = true
         removableMediaImportProgress = nil
+        startLibraryCheck()
         isRemovableMediaScanning = true
         isRemovableMediaSelectorPresented = true
 
@@ -243,12 +262,12 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
 
     func selectRemovableMediaRange(to file: MediaVolumeFile) {
         selectsScanArrivals = false
-        removableMediaSelection.selectRange(to: file, in: removableMediaFiles)
+        removableMediaSelection.selectRange(to: file, in: visibleRemovableMediaFiles)
     }
 
     func selectAllRemovableMedia() {
         selectsScanArrivals = true
-        removableMediaSelection.selectAll(in: removableMediaFiles)
+        removableMediaSelection.selectAll(in: removableMediaFiles, excluding: removableMediaInLibrary)
     }
 
     func selectNoRemovableMedia() {
@@ -260,6 +279,7 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
         _ = beginImportOperation()
         scanTask?.cancel()
         importRequestTask?.cancel()
+        stopLibraryCheck()
         isRemovableMediaScanning = false
         isRemovableMediaSelectorPresented = false
         removableMediaImportProgress = nil
@@ -347,6 +367,7 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
         guard isCurrentImport(operationID), !Task.isCancelled else { return }
         scanTask = nil
         isRemovableMediaScanning = false
+        libraryCheckInput?.finish()
         if removableMediaFiles.isEmpty {
             removableMediaWarnings.append("No supported images were found on this volume.")
         }
@@ -357,13 +378,71 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
         removableMediaFiles = MediaVolumeFile.merging(removableMediaFiles, batch.files)
         removableMediaWarnings.append(contentsOf: batch.warnings)
         if selectsScanArrivals, removableMediaFiles.count > previousCount {
-            removableMediaSelection.select(batch.files)
+            removableMediaSelection.select(batch.files, excluding: removableMediaInLibrary)
         }
+        libraryCheckInput?.yield(batch.files)
+    }
+
+    private func startLibraryCheck() {
+        stopLibraryCheck()
+        removableMediaInLibrary = []
+        removableMediaLibraryChecked = 0
+        hidesInLibraryRemovableMedia = false
+        guard let loader = libraryMatcherLoader else { return }
+        let (stream, continuation) = AsyncStream<[MediaVolumeFile]>.makeStream()
+        libraryCheckInput = continuation
+        isCheckingRemovableMediaLibrary = true
+        let operationID = importOperationID
+        libraryCheckTask = Task { [weak self] in
+            let matcher = try? await loader()
+            for await batch in stream {
+                for chunk in batch.chunked(into: Self.libraryCheckChunk) {
+                    guard !Task.isCancelled else { return }
+                    let members = await Self.members(of: chunk, in: matcher)
+                    guard let self, self.isCurrentImport(operationID), !Task.isCancelled else { return }
+                    self.recordLibraryMembers(members, checked: chunk.count)
+                }
+            }
+            guard let self, self.isCurrentImport(operationID) else { return }
+            self.isCheckingRemovableMediaLibrary = false
+        }
+    }
+
+    private func stopLibraryCheck() {
+        libraryCheckInput?.finish()
+        libraryCheckInput = nil
+        libraryCheckTask?.cancel()
+        libraryCheckTask = nil
+        isCheckingRemovableMediaLibrary = false
+    }
+
+    /// Tags matches and drops them from the default selection. Files the user already clicked
+    /// keep their selection state, so late results never undo a deliberate choice.
+    private func recordLibraryMembers(_ members: Set<String>, checked: Int) {
+        removableMediaLibraryChecked += checked
+        guard !members.isEmpty else { return }
+        removableMediaInLibrary.formUnion(members)
+        removableMediaSelection.deselectDefaults(members)
+    }
+
+    private static let libraryCheckChunk = 16
+
+    /// Hashing runs on a detached task so neither the main actor nor the caller's executor reads
+    /// file bytes; cancelling the caller cancels the hashing between chunks.
+    private nonisolated static func members(
+        of files: [MediaVolumeFile], in matcher: LibraryMembershipMatcher?
+    ) async -> Set<String> {
+        guard let matcher else { return [] }
+        let work = Task.detached(priority: .utility) {
+            matcher.memberIDs(in: files, isCancelled: { Task.isCancelled })
+        }
+        return await withTaskCancellationHandler { await work.value } onCancel: { work.cancel() }
     }
 
     /// An error part-way through a scan keeps the images already found, and says why it stopped.
     private func finishFailedScan(_ error: Error) {
         isRemovableMediaScanning = false
+        libraryCheckInput?.finish()
         removableMediaWarnings.append(error.localizedDescription)
     }
 
@@ -387,7 +466,9 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
         discoveryTask?.cancel()
         scanTask?.cancel()
         importRequestTask?.cancel()
-        let tasks = [discoveryTask, scanTask, importRequestTask]
+        let checkTask = libraryCheckTask
+        stopLibraryCheck()
+        let tasks = [discoveryTask, scanTask, importRequestTask, checkTask]
         discoveryTask = nil
         scanTask = nil
         importRequestTask = nil
@@ -405,5 +486,11 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
 
     private func isCurrentImport(_ id: UUID) -> Bool {
         importOperationID == id && !isShuttingDown
+    }
+}
+
+private extension Array {
+    func chunked(into size: Int) -> [[Element]] {
+        stride(from: 0, to: count, by: size).map { Array(self[$0..<Swift.min($0 + size, count)]) }
     }
 }

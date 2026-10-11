@@ -694,6 +694,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     var removableMediaVolume: MediaVolume? { libraryMediaWorkflow.removableMediaVolume }
     var removableMediaFiles: [MediaVolumeFile] { libraryMediaWorkflow.removableMediaFiles }
     var removableMediaWarnings: [String] { libraryMediaWorkflow.removableMediaWarnings }
+    var removableMediaInLibrary: Set<String> { libraryMediaWorkflow.removableMediaInLibrary }
+    var removableMediaLibraryChecked: Int { libraryMediaWorkflow.removableMediaLibraryChecked }
+    var isCheckingRemovableMediaLibrary: Bool { libraryMediaWorkflow.isCheckingRemovableMediaLibrary }
+    var visibleRemovableMediaFiles: [MediaVolumeFile] { libraryMediaWorkflow.visibleRemovableMediaFiles }
+    var hidesInLibraryRemovableMedia: Bool {
+        get { libraryMediaWorkflow.hidesInLibraryRemovableMedia }
+        set { libraryMediaWorkflow.hidesInLibraryRemovableMedia = newValue }
+    }
     var isRemovableMediaScanning: Bool { libraryMediaWorkflow.isRemovableMediaScanning }
     var removableMediaSelection: MediaVolumeSelectionModel {
         libraryMediaWorkflow.removableMediaSelection
@@ -1215,6 +1223,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             self?.refreshDurableEditHistory()
         }
 
+        if let package = portableLibrary?.package {
+            libraryMediaWorkflow.libraryMatcherLoader = {
+                try await Task.detached(priority: .utility) {
+                    try LibraryMembershipMatcher(package: package)
+                }.value
+            }
+        }
         libraryMediaWorkflow.onStatus = { [weak self] message in
             self?.statusMessage = message
         }
