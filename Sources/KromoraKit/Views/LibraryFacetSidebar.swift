@@ -107,6 +107,7 @@ struct LibraryFacetToolbarControls: View {
                     : "line.3.horizontal.decrease.circle")
             }
             .buttonStyle(.bordered)
+            .tint(isSidebarPresented ? KromoraTheme.primaryAccent : nil)
             .help("Show or hide the metadata filter sidebar")
             .accessibilityLabel(isSidebarPresented ? "Hide metadata filters" : "Show metadata filters")
         }

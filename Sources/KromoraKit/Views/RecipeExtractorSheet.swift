@@ -100,7 +100,7 @@ struct RecipeExtractorSheet: View {
             .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
 
             Button("Choose…") { onPick() }
-                .buttonStyle(.bordered)
+                .neutralActionButton()
         }
     }
 

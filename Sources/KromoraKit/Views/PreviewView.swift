@@ -459,7 +459,7 @@ struct PreviewView: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(!viewModel.canImportIntoPortableLibrary)
                 Button("Import from Photos…") { viewModel.importFromPhotos() }
-                    .buttonStyle(.bordered)
+                    .neutralActionButton()
                     .disabled(!viewModel.canImportIntoPortableLibrary)
             }
         }

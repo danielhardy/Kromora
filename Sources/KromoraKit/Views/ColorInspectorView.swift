@@ -64,6 +64,7 @@ struct ColorInspectorView: View {
                             .frame(width: 24, height: 22)
                     }
                     .buttonStyle(.bordered)
+                    .tint(viewModel.isWhiteBalanceSampling ? KromoraTheme.primaryAccent : nil)
                     .controlSize(.small)
                     .disabled(viewModel.isWhiteBalanceSampling
                         ? false

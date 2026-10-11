@@ -365,10 +365,9 @@ struct CropInspectorView: View {
             Label(title, systemImage: systemImage)
                 .labelStyle(.iconOnly)
         }
-        .buttonStyle(.bordered)
         // One-shot actions carry no state, so they stay neutral like an idle flip toggle; accent
         // colour is reserved for a flip that is on.
-        .tint(nil)
+        .neutralActionButton()
         .frame(width: 32, height: 32)
         .contentShape(Rectangle())
         .help(help)

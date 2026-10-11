@@ -186,7 +186,7 @@ struct WorkflowTourView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Button(page.actionTitle) { onAction(page) }
-                .buttonStyle(.bordered)
+                .neutralActionButton()
             HStack {
                 if page != .library {
                     Button("Back") { page = Page(rawValue: page.rawValue - 1) ?? .library }

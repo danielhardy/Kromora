@@ -543,7 +543,7 @@ struct LookInspectorView: View {
                 Button("Clear Look Reference") {
                     viewModel.selectLook(nil)
                 }
-                .buttonStyle(.bordered)
+                .neutralActionButton()
                 .controlSize(.small)
                 .help("Remove the unavailable Look from this photo")
             }

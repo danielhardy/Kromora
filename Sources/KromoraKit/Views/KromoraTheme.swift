@@ -171,3 +171,12 @@ enum KromoraTheme {
     static let analysisGrid = Color.white.opacity(0.10)
     static let analysisReference = Color.white.opacity(0.25)
 }
+
+extension View {
+    /// Bordered style for ordinary one-shot actions. The window-wide copper tint is reserved for
+    /// what is on or selected, so actions reset the inherited tint and read as plain buttons.
+    /// Stateful controls use `.buttonStyle(.bordered)` with an explicit state-driven `.tint`.
+    func neutralActionButton() -> some View {
+        buttonStyle(.bordered).tint(nil)
+    }
+}

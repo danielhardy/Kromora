@@ -155,7 +155,7 @@ struct PhotoAnalysisInspectSection: View {
                 Label("Use \(entry.title) as editing mask", systemImage: "wand.and.rays")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .buttonStyle(.bordered)
+            .neutralActionButton()
             .controlSize(.small)
             .accessibilityLabel("Use \(entry.title) as editing mask")
             .accessibilityHint("Create or select the \(entry.title) mask in the Masking workflow")

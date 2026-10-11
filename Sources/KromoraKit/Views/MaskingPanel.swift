@@ -85,7 +85,7 @@ struct MaskingPanel: View {
                         description: Text(model.errorMessage ?? "This photo has no selectable semantic regions.")
                     )
                     Button("Retry") { model.load() }
-                        .buttonStyle(.bordered)
+                        .neutralActionButton()
                         .accessibilityHint("Retry semantic mask generation for this photo")
                 }
             } else {

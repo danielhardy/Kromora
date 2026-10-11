@@ -40,7 +40,7 @@ struct LibraryGridView: View {
                 } label: {
                     Label("Delete", systemImage: "trash")
                 }
-                .buttonStyle(.bordered)
+                .neutralActionButton()
                 .help("Remove the selected photo(s) from the Library (Delete)")
                 .accessibilityHint(
                     "Move managed originals to the macOS Trash; keep referenced originals"
@@ -307,7 +307,7 @@ private struct LibraryEmptyState: View {
                 .font(.headline)
             if collection.filter.isFiltered {
                 Button("Clear filters") { collection.clearFilter() }
-                    .buttonStyle(.bordered)
+                    .neutralActionButton()
             } else if collection.items.isEmpty {
                 Text("Import photos to start a library, or try the bundled sample photos.")
                     .font(.callout)
@@ -320,7 +320,7 @@ private struct LibraryEmptyState: View {
                     Button("Try sample library") {
                         _ = viewModel.openImages(urls: StarterSampleLibrary.urls)
                     }
-                    .buttonStyle(.bordered)
+                    .neutralActionButton()
                     .disabled(!viewModel.canImportIntoPortableLibrary)
                 }
             }
