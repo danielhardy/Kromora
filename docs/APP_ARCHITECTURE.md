@@ -23,6 +23,9 @@ reservations, and UserDefaults culling state no longer have a product owner.
 collaborators, owns published cross-feature presentation state, and sequences source/revision
 fences. Feature workflows do not reach into one another's private state.
 
+`AppViewModel.swift` is 5,398 lines after the coordinator extractions. `PackageSettingsTests.testAppViewModelDoesNotRegrow`
+fails above 5,500 lines as a trend guard; extract new workflows into coordinators rather than raising the ceiling.
+
 ## Boundaries
 
 | Workflow | Owner | Values crossing the boundary |

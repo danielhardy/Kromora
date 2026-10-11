@@ -134,4 +134,23 @@ final class PackageSettingsTests: XCTestCase {
             "file-writing evaluation and Vision-aesthetics harnesses belong to KromoraKitTests"
         )
     }
+
+    /// Trend guard, not a goal: `AppViewModel.swift` stood at 5,398 lines after the KRMA-874…877
+    /// extractions. The ceiling leaves modest headroom; new workflows belong in a coordinator.
+    func testAppViewModelDoesNotRegrow() throws {
+        let ceiling = 5_500
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/KromoraKit/ViewModels/AppViewModel.swift")
+        let source = try String(contentsOf: url, encoding: .utf8)
+        let count = source.split(separator: "\n", omittingEmptySubsequences: false).count
+        XCTAssertLessThanOrEqual(
+            count,
+            ceiling,
+            """
+            AppViewModel.swift has \(count) lines (ceiling \(ceiling)). Extract the new workflow into \
+            a focused coordinator instead of growing the composition root; see docs/APP_ARCHITECTURE.md.
+            """
+        )
+    }
 }
