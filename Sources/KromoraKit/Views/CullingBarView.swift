@@ -65,7 +65,7 @@ private struct CullingSelectionControls: View {
             .buttonStyle(.bordered)
             .controlSize(isCompact ? .small : .regular)
             .tint(item.asset.flag == .pick ? .green : .secondary)
-            .help("Mark as Pick and advance (P)")
+            .help("Mark as Pick (P)")
             .accessibilityValue(item.asset.flag == .pick ? "On" : "Off")
 
             Button {
@@ -79,7 +79,7 @@ private struct CullingSelectionControls: View {
             .buttonStyle(.bordered)
             .controlSize(isCompact ? .small : .regular)
             .tint(item.asset.flag == .reject ? .red : .secondary)
-            .help("Mark as Reject and advance (X)")
+            .help("Mark as Reject (X)")
             .accessibilityValue(item.asset.flag == .reject ? "On" : "Off")
 
             HStack(spacing: 2) {
