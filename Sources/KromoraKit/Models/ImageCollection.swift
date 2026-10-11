@@ -839,11 +839,14 @@ final class ImageCollectionPresentationModel {
         guard !ids.isEmpty else { return }
         if !isThumbnailDemandDriven { beginThumbnailDemand() }
         var indexByID: [PhotoAssetID: Int] = [:]
-        indexByID.reserveCapacity(items.count)
-        for (index, item) in items.enumerated() { indexByID[item.id] = index }
+        indexByID.reserveCapacity(ids.count)
         var admitted: [PhotoAssetID] = []
         admitted.reserveCapacity(ids.count)
-        for id in ids where indexByID[id] != nil { admitted.append(id) }
+        for id in ids {
+            guard let index = itemIndex(for: id) else { continue }
+            indexByID[id] = index
+            admitted.append(id)
+        }
         onVisibleIDsPublished?(admitted)
         // Persisted frames are read for the whole window before any source decode or edited
         // render is admitted; both of those then find most of the window already painted.

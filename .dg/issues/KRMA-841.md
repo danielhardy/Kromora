@@ -47,7 +47,7 @@ creation_provenance:
   model: unknown
   actor: claude
 created: 2026-10-09T18:06:33.347Z
-updated: 2026-10-11T14:09:11.853Z
+updated: 2026-10-11T14:09:46.604Z
 blockers:
   - id: evt_mv2ik03a_q3fb9c
     type: human
@@ -58,6 +58,13 @@ blockers:
     resolved_by: cli
 order: h
 board: product
+claim:
+  actor: codex
+  session: 01MV3WGO6IAXZZEJGC
+  claimed_at: 2026-10-11T14:09:46.602Z
+  expires_at: 2026-10-11T15:09:46.602Z
+  model: gpt-6-luna
+  stage: verification
 blocked_reason: "Remaining acceptance evidence needs a mounted LibraryGridView profile (SwiftUI/main-actor frame behavior while thumbnails generate). That needs an unlocked, awake display and Instruments, which cannot record on this machine; CLAUDE.md also bars unattended display-bound runs. Window-independent pre-change vs post-change Release baselines are now in docs/TESTING.md: scans cost about 1 ms per selection op at 1500 items, 0 gaps over 33 ms either way."
 blocked_action: "Run a supervised Release session: swift run -c release, import ~1500 large RAWs, scroll and select-all while thumbnails fill, record SwiftUI/Hangs/Time Profiler results (hitches, select-all latency, fill time, peak memory) in docs/TESTING.md, or accept the model-level evidence and waive the mounted-grid criterion."
 blocked_from_status: ready

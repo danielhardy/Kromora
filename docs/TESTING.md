@@ -104,6 +104,16 @@ Measured state, Release, Apple M4 Pro, macOS 27.2, 8 local fixtures (two 126-129
 | 300 | 396 ms | 4.8 / 6.0 / 17.8 ms | 0 of 512 | 0.14-0.42 ms | 0.16 ms | 1812 MB |
 | 1500 | 2006 ms | 5.0 / 6.7 / 18.2 ms | 0 of 1291 | 0.57-1.10 ms | 0.76 ms | 1928 MB |
 
+Counterpoint verification reran the 1,500-file Release case twice on 2026-10-11 after the
+visible-window lookup was changed to use the collection's cached item index. The two runs filled
+the first 30 cells in 2430 ms and 2052 ms. Heartbeat p50/p95/p99/max was 4.9 / 5.1 / 5.8 / 54.7
+ms with 1 of 1451 gaps above 33 ms in the first run, then 4.8 / 5.1 / 5.5 / 19.6 ms with 0 of
+1383 gaps above 33 ms in the second. Select-all samples were 1.41, 0.62, 0.97, 0.75, 0.54 ms
+and 1.23, 0.60, 0.53, 0.62, 0.65 ms; shift-click was 0.66 and 0.85 ms; peak RSS was 1881 and
+1991 MB. The single 54.7 ms model-heartbeat outlier did not reproduce. These runs still do not
+mount SwiftUI or measure frame presentation; the owner waived that profile criterion on 2026-10-11
+after reporting acceptable in-use behavior.
+
 Root causes from the measurements:
 
 - Rejected: main-actor starvation. During sustained cold RAW decode the heartbeat never exceeded
@@ -121,6 +131,10 @@ Root causes from the measurements:
   selection operation at 1500 items (select-all and shift-click about 2x slower than after the
   fix) and did not produce frame-length stalls at the model level, so they were a real but small
   contributor; fill time and peak memory are unchanged within fixture-order noise.
+- Fixed in counterpoint verification: `requestVisibleThumbnails` rebuilt an ID-to-index dictionary
+  by scanning all loaded items on every viewport update. It now resolves only the requested
+  visible IDs through `itemIndex(for:)`, reusing the cached index and keeping repeated admission
+  work proportional to the viewport.
 - Remaining cost is decode time and transient memory, not UI-thread work. Filling a 30-cell window
   of cold RAWs takes 0.4-2.0 s depending on which fixtures lead, and four concurrent full decodes
   push peak RSS to about 1.9 GB (resident 1.3-1.5 GB afterwards). `PlatformThumbnailProvider`
