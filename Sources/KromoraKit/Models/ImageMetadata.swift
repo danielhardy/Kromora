@@ -279,14 +279,33 @@ extension ImageMetadata {
     /// all-zero placeholder some cameras write).
     static func sortableDate(_ raw: String?) -> String? {
         guard let raw = trimmed(raw) else { return nil }
-        let parts = raw.prefix(19).split(whereSeparator: { ": -T".contains($0) }).compactMap { Int($0) }
-        guard parts.count == 6, (1...9999).contains(parts[0]), (1...12).contains(parts[1]),
-              (1...31).contains(parts[2]), (0...23).contains(parts[3]),
-              (0...59).contains(parts[4]), (0...60).contains(parts[5])
+        let characters = Array(raw)
+        guard characters.count == 19, characters[4] == ":", characters[7] == ":",
+              characters[10] == " ", characters[13] == ":", characters[16] == ":"
+        else { return nil }
+        func component(_ range: Range<Int>) -> Int? {
+            let digits = characters[range]
+            guard digits.allSatisfy(\.isNumber) else { return nil }
+            return Int(String(digits))
+        }
+        guard let year = component(0..<4), let month = component(5..<7),
+              let day = component(8..<10), let hour = component(11..<13),
+              let minute = component(14..<16), let second = component(17..<19),
+              (1...9999).contains(year), (1...12).contains(month),
+              (1...Self.daysInMonth(month, year: year)).contains(day),
+              (0...23).contains(hour), (0...59).contains(minute), (0...60).contains(second)
         else { return nil }
         return String(
             format: "%04d-%02d-%02dT%02d:%02d:%02d",
-            parts[0], parts[1], parts[2], parts[3], parts[4], parts[5])
+            year, month, day, hour, minute, second)
+    }
+
+    static func daysInMonth(_ month: Int, year: Int) -> Int {
+        switch month {
+        case 2: (year.isMultiple(of: 4) && (!year.isMultiple(of: 100) || year.isMultiple(of: 400))) ? 29 : 28
+        case 4, 6, 9, 11: 30
+        default: 31
+        }
     }
 
     /// Rounds to whole degrees on-device. No geocoder or network lookup is involved.

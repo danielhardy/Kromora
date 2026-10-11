@@ -145,14 +145,20 @@ enum LibraryRangeFacet: String, CaseIterable, Codable, Sendable, Identifiable {
 
     /// Days since 1970-01-01 for the "yyyy-MM-dd…" prefix of a sortable capture time.
     static func dayNumber(_ iso: String) -> Double? {
-        let parts = iso.prefix(10).split(separator: "-").compactMap { Int($0) }
-        guard parts.count == 3 else { return nil }
+        let characters = Array(iso.prefix(10))
+        guard characters.count == 10, characters[4] == "-", characters[7] == "-",
+              let year = Int(String(characters[0..<4])),
+              let month = Int(String(characters[5..<7])),
+              let day = Int(String(characters[8..<10])),
+              (1...9999).contains(year), (1...12).contains(month),
+              (1...ImageMetadata.daysInMonth(month, year: year)).contains(day)
+        else { return nil }
         // Civil-from-days inverse (proleptic Gregorian), avoiding Calendar in the per-entry loop.
-        let year = parts[1] <= 2 ? parts[0] - 1 : parts[0]
-        let era = (year >= 0 ? year : year - 399) / 400
-        let yearOfEra = year - era * 400
-        let shiftedMonth = parts[1] + (parts[1] > 2 ? -3 : 9)
-        let dayOfYear = (153 * shiftedMonth + 2) / 5 + parts[2] - 1
+        let civilYear = month <= 2 ? year - 1 : year
+        let era = (civilYear >= 0 ? civilYear : civilYear - 399) / 400
+        let yearOfEra = civilYear - era * 400
+        let shiftedMonth = month + (month > 2 ? -3 : 9)
+        let dayOfYear = (153 * shiftedMonth + 2) / 5 + day - 1
         let dayOfEra = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear
         return Double(era * 146_097 + dayOfEra - 719_468)
     }

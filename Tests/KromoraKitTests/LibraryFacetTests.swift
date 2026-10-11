@@ -240,7 +240,11 @@ final class LibraryFacetTests: XCTestCase {
 
     func testSortableDateParsingRejectsMalformedValues() {
         XCTAssertEqual(ImageMetadata.sortableDate("2024:03:09 14:05:59"), "2024-03-09T14:05:59")
+        XCTAssertEqual(ImageMetadata.sortableDate("2024:02:29 14:05:59"), "2024-02-29T14:05:59")
         XCTAssertNil(ImageMetadata.sortableDate("0000:00:00 00:00:00"))
+        XCTAssertNil(ImageMetadata.sortableDate("2023:02:29 14:05:59"))
+        XCTAssertNil(ImageMetadata.sortableDate("2024:02:31 14:05:59"))
+        XCTAssertNil(ImageMetadata.sortableDate("2024::03 09 14:05:59"))
         XCTAssertNil(ImageMetadata.sortableDate("garbage"))
         XCTAssertNil(ImageMetadata.sortableDate(nil))
     }
@@ -250,6 +254,8 @@ final class LibraryFacetTests: XCTestCase {
         XCTAssertEqual(LibraryRangeFacet.dayNumber("2024-02-29T10:00:00"), 19_782)
         XCTAssertEqual(LibraryRangeFacet.dayNumber("2024-03-01"), 19_783)
         XCTAssertEqual(LibraryRangeFacet.dayNumber("1969-12-31"), -1)
+        XCTAssertNil(LibraryRangeFacet.dayNumber("2023-02-29"))
+        XCTAssertNil(LibraryRangeFacet.dayNumber("2024-13-01"))
     }
 
     func testCaptureDateRangeFacet() throws {
