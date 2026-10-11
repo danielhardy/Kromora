@@ -371,10 +371,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         get { previewAdmissionCoordinator.isPreviewInteractionActive }
         set { previewAdmissionCoordinator.isPreviewInteractionActive = newValue }
     }
-    /// LUTs a document can reference that no folder scan produces — a freshly derived LUT, and the
-    /// file it becomes once saved. See `DerivedLUTRegistry`; this is the Step 9 replacement for the
-    /// single `scratchLUT` slot that stood here.
-    private var derivedRegistry = DerivedLUTRegistry()
+    /// Owns Look resolution (library scan, then derived registry), the missing-reference report,
+    /// and selection/audition decisions. The document stays here; see `LookSelectionCoordinator`.
+    private lazy var lookSelection = LookSelectionCoordinator(library: library)
 
     /// The selected Look resolved from the active photo's persisted `LUTID`. Resolution is
     /// deliberately fresh: a library rescan may replace the in-memory `CubeLUT`, but it must not
@@ -1597,7 +1596,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// sidebar, and then save the derive from the still-open sheet; that must not steal the selection.
     private func adoptSavedLUT(at destination: URL) {
         guard let saved = try? CubeLUT(url: destination, category: "Derived") else { return }
-        derivedRegistry.register(saved)
+        lookSelection.register(saved)
 
         guard let current = document.lut.lutID, current == derive.derivedLUT?.lutID else { return }
         endUndoGrouping()
@@ -2282,7 +2281,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         KromoraObservability.photoSwitchPhase("documentActivated", since: presentationSelectionUptime)
         refreshDurableEditHistory()
         KromoraObservability.photoSwitchPhase("editHistoryRefreshed", since: presentationSelectionUptime)
-        lastReportedMissingLUT = nil
+        lookSelection.resetReportedStatus()
         lutResolutionStatus = nil
         refreshLUTResolutionStatus()
         KromoraObservability.photoSwitchPhase("lutStatusRefreshed", since: presentationSelectionUptime)
@@ -3824,10 +3823,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     // MARK: - Look selection
 
     func selectLook(_ look: CubeLUT?) {
-        // A derived LUT is in no library, so nothing but the registry can resolve it later. Remember
-        // it rather than replacing the last one: a document made now must still resolve after the
-        // user derives again.
-        if let look, look.lutID.isDerived { derivedRegistry.register(look) }
+        if let look, look.lutID.isDerived { lookSelection.register(look) }
         endUndoGrouping()
         updateDocument { $0.lut.lutID = look?.lutID }
         refreshLUTResolutionStatus()
@@ -3836,22 +3832,18 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Select a Look by its stable document ID. The browser binds to IDs rather than resolved LUT
     /// values so the explicit None row and a missing file remain distinct selections.
     func selectLook(id: LUTID?) {
-        guard let id else {
+        switch lookSelection.selection(for: id) {
+        case .clear:
             selectLook(nil)
-            return
+        case .select(let look):
+            selectLook(look)
+        case .loading(let message):
+            statusMessage = message
+        case .unresolved:
+            // Keep an unresolved persisted ID intact, but make an attempted selection
+            // observable and recoverable through the inspector's clear action.
+            refreshLUTResolutionStatus()
         }
-        guard let look = resolvedLUT(id) else {
-            if library.isScanning {
-                statusMessage =
-                    "Look is still loading. Try selecting it again when scanning finishes."
-            } else {
-                // Keep an unresolved persisted ID intact, but make an attempted selection
-                // observable and recoverable through the inspector's clear action.
-                refreshLUTResolutionStatus()
-            }
-            return
-        }
-        selectLook(look)
     }
 
     /// Historical model-name compatibility for existing integrations and persisted-workflow
@@ -4069,38 +4061,18 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
     }
 
-    /// Resolve a document's LUT reference: prefer the latest library scan, then the in-memory
-    /// registry. The library must win for file-backed IDs: the registry retains saved derived LUTs
-    /// so they work outside the library folder, but must not mask a replacement found by a scan.
-    private func resolvedLUT(_ id: LUTID?) -> CubeLUT? {
-        guard let id else { return nil }
-        if let scanned = library.allLUTs.first(matching: id) { return scanned }
-        return derivedRegistry.lut(for: id)
-    }
-
-    /// Report one missing-reference transition at a time. Waiting for scan completion avoids a false
-    /// warning while the library is still assembling, while the document retains the unresolved ID.
-    private var lastReportedMissingLUT: LUTID?
+    private func resolvedLUT(_ id: LUTID?) -> CubeLUT? { lookSelection.resolve(id) }
 
     private func refreshLUTResolutionStatus() {
-        guard let id = document.lut.lutID else {
-            lastReportedMissingLUT = nil
+        switch lookSelection.refreshStatus(for: document.lut.lutID) {
+        case .unchanged:
+            break
+        case .cleared:
             lutResolutionStatus = nil
-            return
+        case .missing(let message):
+            lutResolutionStatus = message
+            statusMessage = message
         }
-        guard !library.isScanning else { return }
-        guard resolvedLUT(id) == nil else {
-            lastReportedMissingLUT = nil
-            lutResolutionStatus = nil
-            return
-        }
-        guard lastReportedMissingLUT != id else { return }
-
-        let name = id.isDerived ? "derived look" : URL(fileURLWithPath: id.raw).lastPathComponent
-        let message = "Look “\(name)” is unavailable; the stored reference was kept."
-        lastReportedMissingLUT = id
-        lutResolutionStatus = message
-        statusMessage = message
     }
 
     func selectPreviousLook() {
@@ -4111,20 +4083,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         applyLookNavigation(.next)
     }
 
-    /// Audition the adjacent Look, treating the inspector's explicit None row as the slot before
-    /// the first library Look so Up from the first Look can clear the grade.
     private func applyLookNavigation(_ direction: LookNavigation.Direction) {
-        let looks = library.allLUTs
-        let currentIndex = selectedLook.flatMap { current in looks.firstIndex(of: current) }
-        let nextIndex = LookNavigation.adjacentIndex(
-            currentIndex: currentIndex,
-            count: looks.count,
-            direction: direction
-        )
-        if let nextIndex {
-            selectLook(looks[nextIndex])
-        } else if selectedLookID != nil {
-            selectLook(nil)
+        switch lookSelection.navigate(direction, from: selectedLook, currentID: selectedLookID) {
+        case .select(let look): selectLook(look)
+        case .clear: selectLook(nil)
+        case .none: break
         }
     }
 
