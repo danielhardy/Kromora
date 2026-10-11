@@ -170,6 +170,47 @@ final class EffectsInspectorTests: TempDirectoryTestCase {
         XCTAssertTrue(viewModel.hasEffects)
     }
 
+    /// The Advanced icon's band resets only its own refinements, as one undoable edit, and leaves
+    /// the row's primary slider alone.
+    func testResetAdvancedClearsOnlyTheRefinementsBehindTheIcon() async throws {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        try await openStandardImage(viewModel)
+
+        viewModel.detailBinding(for: .sharpeningAmount).wrappedValue = 40
+        viewModel.detailBinding(for: .sharpeningRadius).wrappedValue = 2.5
+        viewModel.detailBinding(for: .sharpeningMasking).wrappedValue = 30
+        viewModel.detailBinding(for: .luminanceNoise).wrappedValue = 25
+        viewModel.detailBinding(for: .luminanceDetail).wrappedValue = 70
+        viewModel.detailBinding(for: .colorContrast).wrappedValue = 15
+        viewModel.vignetteBinding(for: .amount).wrappedValue = -35
+        viewModel.vignetteBinding(for: .feather).wrappedValue = 80
+        viewModel.grainBinding(for: .amount).wrappedValue = 20
+        viewModel.grainBinding(for: .roughness).wrappedValue = 10
+
+        viewModel.resetSharpeningAdvanced()
+        XCTAssertEqual(viewModel.detailBinding(for: .sharpeningAmount).wrappedValue, 40)
+        XCTAssertEqual(viewModel.detailBinding(for: .sharpeningRadius).wrappedValue, DetailControl.sharpeningRadius.neutral)
+        XCTAssertEqual(viewModel.detailBinding(for: .sharpeningMasking).wrappedValue, 0)
+
+        viewModel.resetNoiseAdvanced()
+        XCTAssertEqual(viewModel.detailBinding(for: .luminanceNoise).wrappedValue, 25)
+        XCTAssertEqual(viewModel.detailBinding(for: .luminanceDetail).wrappedValue, DetailControl.luminanceDetail.neutral)
+        XCTAssertEqual(viewModel.detailBinding(for: .colorContrast).wrappedValue, 0)
+
+        viewModel.resetVignetteAdvanced()
+        XCTAssertEqual(viewModel.vignetteValue(for: .amount), -35)
+        XCTAssertEqual(viewModel.vignetteValue(for: .feather), VignetteControl.feather.neutral)
+
+        viewModel.resetGrainAdvanced()
+        XCTAssertEqual(viewModel.grainValue(for: .amount), 20)
+        XCTAssertEqual(viewModel.grainValue(for: .roughness), GrainControl.roughness.neutral)
+
+        // One edit per reset: undoing the Grain reset restores only Grain's roughness.
+        viewModel.undo()
+        XCTAssertEqual(viewModel.grainValue(for: .roughness), 10)
+        XCTAssertEqual(viewModel.vignetteValue(for: .feather), VignetteControl.feather.neutral)
+    }
+
     func testRetainedSubordinateValuesKeepEffectsResettableAtZeroAmount() async throws {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         try await openStandardImage(viewModel)

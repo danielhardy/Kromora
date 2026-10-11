@@ -32,6 +32,43 @@ extension AppViewModel {
         }
     }
 
+    /// Reset only the refinements behind a row's Advanced icon, as one undoable edit.
+    func resetSharpeningAdvanced() {
+        endUndoGrouping()
+        updateDocument { document in
+            for control in [DetailControl.sharpeningRadius, .sharpeningDetail, .sharpeningMasking] {
+                control.setting(control.neutral, in: &document.effects.detail)
+            }
+        }
+    }
+
+    func resetNoiseAdvanced() {
+        endUndoGrouping()
+        updateDocument { document in
+            for control in [DetailControl.luminanceDetail, .luminanceContrast, .colorDetail, .colorContrast] {
+                control.setting(control.neutral, in: &document.effects.detail)
+            }
+        }
+    }
+
+    func resetVignetteAdvanced() {
+        endUndoGrouping()
+        updateDocument { document in
+            for control in [VignetteControl.midpoint, .roundness, .feather, .highlights] {
+                document.effects.vignette = control.setting(control.neutral, in: document.effects.vignette)
+            }
+        }
+    }
+
+    func resetGrainAdvanced() {
+        endUndoGrouping()
+        updateDocument { document in
+            for control in [GrainControl.size, .roughness] {
+                document.effects.grain = control.setting(control.neutral, in: document.effects.grain)
+            }
+        }
+    }
+
     func resetAllNoiseReduction() {
         endUndoGrouping()
         updateDocument { document in
