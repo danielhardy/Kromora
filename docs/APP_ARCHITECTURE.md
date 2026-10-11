@@ -23,8 +23,8 @@ reservations, and UserDefaults culling state no longer have a product owner.
 collaborators, owns published cross-feature presentation state, and sequences source/revision
 fences. Feature workflows do not reach into one another's private state.
 
-`AppViewModel.swift` is 5,148 lines after the coordinator extractions. `PackageSettingsTests.testAppViewModelDoesNotRegrow`
-fails above 5,190 lines as a trend guard; extract new workflows into coordinators rather than raising the ceiling.
+`AppViewModel.swift` is 5,117 lines after the coordinator extractions. `PackageSettingsTests.testAppViewModelDoesNotRegrow`
+fails above 5,150 lines as a trend guard; extract new workflows into coordinators rather than raising the ceiling.
 
 ## Boundaries
 
@@ -32,7 +32,7 @@ fails above 5,190 lines as a trend guard; extract new workflows into coordinator
 | --- | --- | --- |
 | Source and library | `ImageCollection`, `SourceImportPlan`, `SourceSessionCoordinator`, `StoredEditAdoptionCoordinator`, `LibraryMediaWorkflowCoordinator`, `LibraryImportCoordinator`, `PackageSourceImportCoordinator`, `PhotosImportCoordinator`, and `LUTLibrary` | source plans, prepared source publications, media/import requests, stored-document results, metadata/capability values, collection items, import progress |
 | Library browsing | `LibraryBrowsingCoordinator` owns portable query-window paging, mirrored selection, culling-state persistence, and deletion confirmation; `AppViewModel` owns source loading, deletion cleanup, and the edit handoff | query values, page summaries/assets, selection IDs, deletion candidates/results, and open/status callbacks |
-| Editor document and history | `AppViewModel` owns the published active `EditDocument`; `EditorDocumentCoordinator` owns per-photo sessions and bounded undo/redo; package sidecars own durable commit history, named snapshots, and virtual-copy identity | `EditDocument`, `PhotoEditSession`, immutable revision numbers |
+| Editor document and history | `AppViewModel` owns the published active `EditDocument`; `EditorDocumentCoordinator` owns per-photo sessions and bounded undo/redo; `EditHistoryCoordinator` owns the published durable revision list/current revision and the history, restore, snapshot, and virtual-copy store I/O (stale-reference fenced, flush-before-write; it takes closures and a narrow store protocol, never `AppViewModel`); package sidecars own durable commit history, named snapshots, and virtual-copy identity | `EditDocument`, `PhotoEditSession`, immutable revision numbers |
 | Copy and paste edits | `EditClipboardCoordinator` owns clipboard values, selective-copy state/preferences, and single/batch paste routing; `EditorDocumentCoordinator` owns destination sessions/history; `AppViewModel` commits the active document and adapts persistence/thumbnail effects | `EditClipboardPayload`, category sets, `EditClipboardTarget`, source references, document commit/status callbacks |
 | Edited thumbnails | `EditedThumbnailCoordinator` owns per-asset request generations, debounce handles, and scheduler job IDs; `AppViewModel` owns documents and the collection projection | source/document revisions, cache identity, bounded raster thumbnail and edit/LUT revision |
 | Idle frame warming | `IdleFrameWarmerCoordinator` owns sequential background fills for original/edited thumbnails and canonical previews; `LibraryBrowsingCoordinator` supplies paged package candidates and launch-hint order; `AppViewModel` supplies readiness, activity, and system conditions | portable identities, source references, edit/look values, viewport distances, and progress |
@@ -354,7 +354,7 @@ source-identity late-result rejection, revision composition, and identity-docume
 
 `AppViewModel` is the composition root, the main-window command façade, and the sole publisher of
 the active `EditDocument`. The inventory below reflects the current `AppViewModel.swift` MARKs
-after the ownership stages; the main file is 5,148 lines, recorded here only as supporting context.
+after the ownership stages; the main file is 5,117 lines, recorded here only as supporting context.
 
 | MARK / remaining workflow | Owner and root responsibility |
 | --- | --- |

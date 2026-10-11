@@ -185,8 +185,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// loads. Their action methods still validate the active source before doing any work.
     @Published private(set) var toolbarPhotoActionsAvailable = false
     @Published private(set) var isToolbarPhotoTransitioning = false
-    @Published private(set) var durableEditHistory: [PortablePackageEditRevision] = []
-    @Published private(set) var durableCurrentEditRevision: UInt64 = 0
+    var durableEditHistory: [PortablePackageEditRevision] { editHistory.history }
+    var durableCurrentEditRevision: UInt64 { editHistory.currentRevision }
 
     /// Compatibility projection for the copy/paste coordinator's value-only clipboard.
     /// The payload contains no images; the root exposes it to existing views and commands.
@@ -369,6 +369,24 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Owns Look resolution (library scan, then derived registry), the missing-reference report,
     /// and selection/audition decisions. The document stays here; see `LookSelectionCoordinator`.
     private lazy var lookSelection = LookSelectionCoordinator(library: library)
+    /// Package-backed edit history, named snapshots, and virtual-copy I/O for the active photo.
+    private lazy var editHistory = EditHistoryCoordinator(
+        store: editStore,
+        environment: .init(
+            activeSourceReference: { [weak self] in self?.activeSourceReference },
+            currentDocument: { [weak self] in self?.document ?? EditDocument() },
+            endUndoGrouping: { [weak self] in self?.endUndoGrouping() },
+            flushPersistence: { [weak self] in
+                guard let persistence = self?.persistence else { return false }
+                return await persistence.flush() == .success
+            },
+            adoptRestoredRevision: { [weak self] restored, priorDocuments in
+                self?.adoptRestoredEditRevision(restored, priorDocuments: priorDocuments)
+            },
+            reportStatus: { [weak self] in self?.statusMessage = $0 }
+        ),
+        willChange: { [weak self] in self?.objectWillChange.send() }
+    )
 
     /// The selected Look resolved from the active photo's persisted `LUTID`. Resolution is
     /// deliberately fresh: a library rescan may replace the in-memory `CubeLUT`, but it must not
@@ -3885,71 +3903,19 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     var canRedo: Bool { editorDocument.canRedo }
     var undoDepth: Int { editorDocument.undoDepth }
 
-    func refreshDurableEditHistory() {
-        guard let reference = activeSourceReference else {
-            durableEditHistory = []
-            durableCurrentEditRevision = 0
-            return
-        }
-        Task { [weak self, editStore] in
-            do {
-                let history = try await editStore.history(for: reference)
-                let currentRevision = try await editStore.currentRevision(for: reference)
-                guard let self, self.activeSourceReference == reference else { return }
-                self.durableEditHistory = history
-                self.durableCurrentEditRevision = currentRevision
-            } catch {
-                self?.durableEditHistory = []
-                self?.durableCurrentEditRevision = 0
-            }
-        }
-    }
+    func refreshDurableEditHistory() { editHistory.refresh() }
 
     /// Navigate to a durable edit state without creating a new revision.
-    func restoreEditRevision(_ revision: UInt64) {
-        guard let value = durableEditHistory.first(where: { $0.revision == revision }) else { return }
-        endUndoGrouping()
-        guard let reference = activeSourceReference else { return }
-        Task { [weak self, persistence, editStore] in
-            guard await persistence.flush() == .success else { return }
-            do {
-                try await editStore.selectRevision(revision, for: reference)
-                guard let self, self.activeSourceReference == reference else { return }
-                self.durableCurrentEditRevision = revision
-                if let activeAssetID = self.activeAssetID {
-                    let priorDocuments = self.durableEditHistory
-                        .filter { $0.revision < revision && $0.snapshotName == nil }
-                        .map(\.document)
-                    self.editorDocument.adoptHistoryPosition(
-                        value.document, priorDocuments: priorDocuments, for: activeAssetID
-                    )
-                    self.editorDocument.activate(
-                        session: self.editorDocument.session(for: activeAssetID)
-                    )
-                }
-                self.applyHistoryDocument(value.document, persist: false)
-                self.refreshDurableEditHistory()
-            } catch {
-                self?.statusMessage = "Could not navigate edit history: \(error.localizedDescription)"
-            }
-        }
-    }
+    func restoreEditRevision(_ revision: UInt64) { editHistory.restore(revision) }
 
-    func saveEditSnapshot(named name: String) {
-        guard let reference = activeSourceReference else { return }
-        endUndoGrouping()
-        Task { [weak self, persistence, editStore, document] in
-            let flushed = await persistence.flush()
-            guard flushed == .success else { return }
-            do {
-                try await editStore.saveSnapshot(document, named: name, for: reference)
-                guard let self, self.activeSourceReference == reference else { return }
-                self.statusMessage = "Saved snapshot ‘\(name)’"
-                self.refreshDurableEditHistory()
-            } catch {
-                self?.statusMessage = "Could not save snapshot: \(error.localizedDescription)"
-            }
+    func saveEditSnapshot(named name: String) { editHistory.saveSnapshot(named: name) }
+
+    private func adoptRestoredEditRevision(_ restored: EditDocument, priorDocuments: [EditDocument]) {
+        if let activeAssetID {
+            editorDocument.adoptHistoryPosition(restored, priorDocuments: priorDocuments, for: activeAssetID)
+            editorDocument.activate(session: editorDocument.session(for: activeAssetID))
         }
+        applyHistoryDocument(restored, persist: false)
     }
 
     var virtualCopySourceDescription: String? {
@@ -3972,23 +3938,26 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             statusMessage = "Virtual copies are available for photos in a Kromora library"
             return
         }
-        endUndoGrouping()
-        Task { [weak self, persistence, editStore, document] in
-            guard await persistence.flush() == .success else { return }
-            do {
+        editHistory.createVirtualCopy(
+            of: reference,
+            makeCopy: {
                 let copy = try portableLibrary.createVirtualCopy(of: reference.portableAssetID)
-                try await editStore.save(document, for: EditSourceReference(
-                    portableIdentity: copy.identity,
-                    assetID: PhotoAssetID(rawValue: "portable:\(copy.assetID.raw)")
-                ))
-                guard let self, self.activeSourceReference == reference else { return }
+                return .init(
+                    sourceReference: EditSourceReference(
+                        portableIdentity: copy.identity,
+                        assetID: PhotoAssetID(rawValue: "portable:\(copy.assetID.raw)")
+                    ),
+                    displayName: copy.displayName,
+                    assetID: copy.assetID
+                )
+            },
+            didCreate: { [weak self] copy in
+                guard let self else { return }
                 try self.libraryBrowsingCoordinator.reloadPortableCollection()
                 self.statusMessage = "Created virtual copy ‘\(copy.displayName)’"
                 self.openPortableAsset(copy.assetID)
-            } catch {
-                self?.statusMessage = "Could not create virtual copy: \(error.localizedDescription)"
             }
-        }
+        )
     }
 
     func undo() {
