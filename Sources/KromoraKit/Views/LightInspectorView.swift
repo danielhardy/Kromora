@@ -59,21 +59,15 @@ struct LightInspectorView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text("Light").font(InspectorStyle.panelTitle).accessibilityAddTraits(.isHeader)
-                Spacer()
-                ResetIconButton(
-                    "Reset Light",
-                    accessibilityHint: "Reset all Light controls, including the tone curve",
-                    disabled: !viewModel.hasLightAdjustments,
-                    action: viewModel.resetAllLight
-                )
-            }
-            Text("Auto replaces global Light and Color values; other edits stay unchanged.")
-                .font(InspectorStyle.secondaryHelperText)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+        HStack {
+            Text("Light").font(InspectorStyle.panelTitle).accessibilityAddTraits(.isHeader)
+            Spacer()
+            ResetIconButton(
+                "Reset Light",
+                accessibilityHint: "Reset all Light controls, including the tone curve",
+                disabled: !viewModel.hasLightAdjustments,
+                action: viewModel.resetAllLight
+            )
         }
     }
 
