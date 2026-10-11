@@ -142,6 +142,73 @@ final class PackageEditProjectionTests: TempDirectoryTestCase {
         XCTAssertEqual(reopenedHistory, history)
     }
 
+    func testImportRecordsUprightSourceShapeSoUneditedCellsReserveTheirFinalRatio() throws {
+        let packageURL = tempDirectory.appendingPathComponent("ImportShape.kromoralibrary")
+        let package = try PortableLibraryPackage.create(at: packageURL)
+        let lease = try PortablePackageLease.acquire(at: packageURL)
+        defer { try? lease.release() }
+        // Stored 30x12 with EXIF orientation 6 displays upright as 12x30.
+        let sourceURL = try Fixtures.writeJPEG(
+            width: 30, height: 12, orientation: 6, named: "portrait.jpg", in: tempDirectory
+        )
+        let imported = try package.importSources([.init(url: sourceURL)], lease: lease)
+        let assetID = try XCTUnwrap(imported.imported.first?.assetID)
+
+        let summary = try XCTUnwrap(
+            package.readMembershipShard(PortableLibraryPackage.shard(for: assetID)).entries
+                .first { $0.assetID == assetID }?.summary
+        )
+        XCTAssertEqual(summary.dimensions, PhotoPixelDimensions(width: 12, height: 30))
+        XCTAssertEqual(try XCTUnwrap(summary.presentedAspectRatio), 12.0 / 30.0, accuracy: 1e-9)
+    }
+
+    func testRepairResolvesSourceShapeForUneditedLegacySummariesWithoutDimensions() async throws {
+        let packageURL = tempDirectory.appendingPathComponent("LegacyUnedited.kromoralibrary")
+        let package = try PortableLibraryPackage.create(at: packageURL)
+        let lease = try PortablePackageLease.acquire(at: packageURL)
+        defer { try? lease.release() }
+        let sourceURL = try Fixtures.writeJPEG(
+            width: 40, height: 20, orientation: 1, named: "legacy.jpg", in: tempDirectory
+        )
+        let imported = try package.importSources([.init(url: sourceURL)], lease: lease)
+        let assetID = try XCTUnwrap(imported.imported.first?.assetID)
+        let shardName = PortableLibraryPackage.shard(for: assetID)
+
+        // Reproduce a package written before import recorded the source shape.
+        var shard = try package.readMembershipShard(shardName)
+        let index = try XCTUnwrap(shard.entries.firstIndex { $0.assetID == assetID })
+        shard.entries[index].summary.dimensions = nil
+        shard.entries[index].summary.aspectRatio = nil
+        shard.entries[index].summary.presentedAspectRatio = nil
+        try package.writeMembershipShard(shard)
+
+        let repaired = try await package.repairPresentedAspectRatios(lease: lease)
+        XCTAssertEqual(repaired, [assetID])
+
+        let summary = try XCTUnwrap(
+            PortableLibraryPackage.open(at: packageURL).readMembershipShard(shardName).entries
+                .first { $0.assetID == assetID }?.summary
+        )
+        XCTAssertEqual(summary.dimensions, PhotoPixelDimensions(width: 40, height: 20))
+        XCTAssertEqual(try XCTUnwrap(summary.presentedAspectRatio), 2, accuracy: 1e-9)
+
+        // A browsing item built from the persisted summary has its final shape before any
+        // thumbnail or deferred metadata work runs.
+        let asset = PhotoAsset(
+            source: PhotoAssetSource(
+                browsingPortableAsset: assetID, embeddedURL: sourceURL, summary: summary
+            ),
+            filename: summary.displayName,
+            fileType: "jpg",
+            metadata: PhotoAssetMetadata(dimensions: summary.dimensions),
+            libraryState: PhotoAssetLibraryState(),
+            presentedAspectRatio: summary.presentedAspectRatio
+        )
+        let item = ImageCollectionPresentationModel.Item(asset: asset)
+        XCTAssertTrue(item.hasResolvedLibraryAspect)
+        XCTAssertEqual(item.libraryAspectRatio, 2, accuracy: 1e-9)
+    }
+
     func testPresentedAspectRatioRepairResumesAtCommittedShardBoundaries() async throws {
         let (package, lease, assets) = try makeLegacyGeometryPackage(
             name: "LegacyGeometryResume", assetCount: 3

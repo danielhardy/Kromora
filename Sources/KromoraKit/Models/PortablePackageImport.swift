@@ -501,14 +501,20 @@ struct PortablePackageImporter: Sendable {
                 )
                 try transaction.stage(data: try Self.encode(record), at: recordPath)
 
+                let sourceDimensions = PortablePackageAssetSummary.sourceDimensions(at: stagedOriginalURL)
+                let importedSummary = PortablePackageAssetSummary(
+                    dimensions: sourceDimensions,
+                    presentedAspectRatio: sourceDimensions.map {
+                        Double($0.width) / Double($0.height)
+                    },
+                    sourceFingerprint: identity.sourceFingerprint,
+                    displayName: source.name
+                )
                 var shard = try Self.requireShard(shardName, from: catalog.shards)
                 shard.entries.append(.init(
                     assetID: assetID,
                     recordPath: recordPath,
-                    summary: .init(
-                        sourceFingerprint: identity.sourceFingerprint,
-                        displayName: source.name
-                    )
+                    summary: importedSummary
                 ))
                 try transaction.stage(
                     data: try package.encodedMembershipShard(shard),
@@ -529,10 +535,7 @@ struct PortablePackageImporter: Sendable {
                 hashesSeenThisImport[staged.checksum] = assetID
                 let indexEntry = LibraryIndexEntry(
                     assetID: assetID, recordPath: recordPath,
-                    summary: .init(
-                        sourceFingerprint: identity.sourceFingerprint,
-                        displayName: source.name
-                    )
+                    summary: importedSummary
                 )
                 indexUpserts.append(indexEntry)
                 committed(indexEntry)

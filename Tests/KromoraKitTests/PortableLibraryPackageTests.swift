@@ -286,7 +286,12 @@ final class PortableLibraryPackageTests: TempDirectoryTestCase {
         ))
         XCTAssertEqual(try package.readAssetRecord(for: assetID).currentRevision, 0)
         let afterFailure = try package.readMembershipShard(shardName)
-        XCTAssertNil(afterFailure.entries.first(where: { $0.assetID == assetID })?.summary.presentedAspectRatio)
+        // The rolled-back edit leaves the unedited source shape that import recorded.
+        XCTAssertEqual(
+            try XCTUnwrap(afterFailure.entries.first(where: { $0.assetID == assetID })?.summary.presentedAspectRatio),
+            2,
+            accuracy: 1e-9
+        )
 
         _ = try package.commitEditRevision(for: assetID, document: document, lease: lease)
         XCTAssertEqual(try package.readAssetRecord(for: assetID).currentRevision, 1)

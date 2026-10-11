@@ -201,6 +201,14 @@ struct PortablePackageEditCommit: Sendable {
 }
 
 extension PortablePackageAssetSummary {
+    /// The upright pixel dimensions of an original, read from its header without decoding.
+    static func sourceDimensions(at url: URL) -> PhotoPixelDimensions? {
+        let metadata = ImageMetadata.read(from: url)
+        guard let width = metadata.pixelWidth, let height = metadata.pixelHeight,
+              width > 0, height > 0 else { return nil }
+        return PhotoPixelDimensions(width: width, height: height)
+    }
+
     /// The presented ratio for `document` over this summary's source geometry. Nil when the source
     /// aspect is unknown, which leaves cells on the fallback shape until dimensions are read.
     func presentedAspectRatio(for document: EditDocument) -> Double? {
@@ -616,18 +624,31 @@ extension PortableLibraryPackage {
             guard !missing.isEmpty else { return [] }
 
             var presentedRatios: [PortablePhotoAssetID: Double] = [:]
+            var resolvedDimensions: [PortablePhotoAssetID: PhotoPixelDimensions] = [:]
             presentedRatios.reserveCapacity(missing.count)
             for entry in missing {
                 if isCancelled() { throw CancellationError() }
                 let assetID = entry.assetID
+                var summary = entry.summary
+                let record = try? readAssetRecord(for: assetID)
+                // Packages written before import recorded pixel dimensions have no source
+                // shape, so an unedited photo could not reserve its cell before a raster
+                // arrived. Read the original's header once and publish the result.
+                if summary.sourceAspectRatio == nil, let record,
+                   record.source.storage == .embedded, let relativePath = record.source.relativePath,
+                   let url = try? packageURL(for: relativePath),
+                   let dimensions = PortablePackageAssetSummary.sourceDimensions(at: url) {
+                    summary.dimensions = dimensions
+                    resolvedDimensions[assetID] = dimensions
+                }
                 let document: EditDocument
-                if let record = try? readAssetRecord(for: assetID), record.currentRevision > 0,
+                if let record, record.currentRevision > 0,
                    let revision = try? readEditRevision(for: assetID) {
                     document = revision.document
                 } else {
                     document = EditDocument()
                 }
-                if let ratio = entry.summary.presentedAspectRatio(for: document) {
+                if let ratio = summary.presentedAspectRatio(for: document) {
                     presentedRatios[assetID] = ratio
                 }
             }
@@ -642,6 +663,10 @@ extension PortableLibraryPackage {
                       let ratio = presentedRatios[entry.assetID]
                 else { continue }
                 commitShard.entries[index].summary.presentedAspectRatio = ratio
+                if commitShard.entries[index].summary.sourceAspectRatio == nil,
+                   let dimensions = resolvedDimensions[entry.assetID] {
+                    commitShard.entries[index].summary.dimensions = dimensions
+                }
             }
             let repairedEntries = commitShard.entries
                 .filter { !$0.isTombstone && presentedRatios[$0.assetID] != nil
