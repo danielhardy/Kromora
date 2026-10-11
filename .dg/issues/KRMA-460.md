@@ -2,7 +2,7 @@
 id: KRMA-460
 title: "Continue AppViewModel decomposition: ownership first, file splits second"
 type: task
-status: done
+status: backlog
 priority: medium
 creation_provenance:
   runner: cursor
@@ -12,7 +12,7 @@ labels:
   - architecture
   - maintainability
 created: 2026-09-19T15:31:38.265Z
-updated: 2026-10-11T13:11:07.259Z
+updated: 2026-10-11T13:33:50.601Z
 depends_on:
   - KRMA-465
   - KRMA-466
@@ -21,8 +21,13 @@ depends_on:
   - KRMA-469
   - KRMA-564
   - KRMA-565
+  - KRMA-874
+  - KRMA-875
+  - KRMA-876
+  - KRMA-877
+  - KRMA-878
 blockers: []
-order: zzzv
+order: zzzzz
 board: product
 ---
 
@@ -189,3 +194,8 @@ Triage 2026-09-23: parent stays backlog. KRMA-464 withdrawn. KRMA-465 superseded
 ### Comment — claude @ 2026-10-11T13:11:06.839Z
 
 Closing: all children (465, 466, 467, 468, 469, 564, 565) are done.
+
+
+### Comment — human @ 2026-10-11T13:33:50.600Z
+
+Reopened 2026-10-11: AppViewModel.swift is 5,738 lines (4,293 at KRMA-469, 2026-09-25). Earlier stages are done; new children KRMA-874 KRMA-875 KRMA-876 KRMA-877 extract the remaining large MARK sections and KRMA-878 adds a regrowth guard.
