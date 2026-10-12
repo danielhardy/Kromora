@@ -21,6 +21,9 @@ final class CaptureMetadataBackfillTests: TempDirectoryTestCase {
         shard.entries[index].summary.captureSettings = nil
         shard.entries[index].summary.coarseLocation = nil
         shard.entries[index].summary.captureDateISO = nil
+        shard.entries[index].summary.cameraMake = nil
+        shard.entries[index].summary.cameraModel = nil
+        shard.entries[index].summary.lens = nil
         shard.entries[index].summary.rating = 4
         try package.writeMembershipShard(shard)
 
@@ -32,6 +35,9 @@ final class CaptureMetadataBackfillTests: TempDirectoryTestCase {
         XCTAssertEqual(summary.captureSettings, PortablePackageCaptureSettings())
         XCTAssertEqual(summary.coarseLocation, "")
         XCTAssertEqual(summary.captureDateISO, "")  // the generated JPEG carries no EXIF date
+        XCTAssertEqual(summary.cameraMake, "")
+        XCTAssertEqual(summary.cameraModel, "")
+        XCTAssertEqual(summary.lens, "")
         XCTAssertEqual(summary.rating, 4)
 
         // Resumable and idempotent: a repaired shard has nothing left to do.

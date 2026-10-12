@@ -6,6 +6,33 @@ import os.lock
 @testable import KromoraKit
 
 final class PortablePackageImportTests: TempDirectoryTestCase {
+    func testImportPersistsCameraAndLensMetadataInMembershipSummary() throws {
+        let packageURL = tempDirectory.appendingPathComponent("ImportMetadata.kromoralibrary")
+        let package = try PortableLibraryPackage.create(at: packageURL)
+        let sourceURL = try Fixtures.writeJPEG(
+            named: "camera.jpg",
+            in: tempDirectory,
+            exif: [kCGImagePropertyExifLensModel: "Kromora Prime 35mm"],
+            tiff: [
+                kCGImagePropertyTIFFMake: "Kromora",
+                kCGImagePropertyTIFFModel: "Test Body",
+            ]
+        )
+        let lease = try PortablePackageLease.acquire(at: packageURL)
+        defer { try? lease.release() }
+
+        let result = try package.importSources([.init(url: sourceURL)], lease: lease)
+        let imported = try XCTUnwrap(result.imported.first)
+        let summary = try XCTUnwrap(
+            package.readMembershipShard(PortableLibraryPackage.shard(for: imported.assetID))
+                .entries.first { $0.assetID == imported.assetID }?.summary
+        )
+
+        XCTAssertEqual(summary.cameraMake, "Kromora")
+        XCTAssertEqual(summary.cameraModel, "Test Body")
+        XCTAssertEqual(summary.lens, "Kromora Prime 35mm")
+    }
+
     func testImportHashesStagesAndPublishesEachAssetWithProgress() throws {
         let packageURL = tempDirectory.appendingPathComponent("Import.kromoralibrary")
         let package = try PortableLibraryPackage.create(at: packageURL)

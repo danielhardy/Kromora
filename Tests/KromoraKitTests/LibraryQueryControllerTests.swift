@@ -221,6 +221,42 @@ final class LibraryQueryControllerTests: TempDirectoryTestCase {
         )
     }
 
+    func testReconcileAdoptsBackfilledCaptureMetadataIntoStaleProjection() throws {
+        let package = try PortableLibraryPackage.create(
+            at: tempDirectory.appendingPathComponent("BackfilledProjection.kromoralibrary")
+        )
+        let assetID = PortablePhotoAssetID()
+        let shardName = PortableLibraryPackage.shard(for: assetID)
+        var shard = try package.readMembershipShard(shardName)
+        let recordPath = "Assets/\(shardName)/\(assetID.raw)/asset.json"
+        shard.entries = [.init(assetID: assetID, recordPath: recordPath, summary: .init(
+            sourceFingerprint: .init(contentHash: "test", decoderVersion: "test"),
+            displayName: "backfilled.jpg"
+        ))]
+        try package.writeMembershipShard(shard)
+
+        // Keep the index as it was before the package's canonical summary was repaired.
+        let staleProjection = try LibraryIndexProjection(package: package)
+        shard = try package.readMembershipShard(shardName)
+        let entryIndex = try XCTUnwrap(shard.entries.firstIndex { $0.assetID == assetID })
+        shard.entries[entryIndex].summary.captureDateISO = "2026-10-12T12:00:00Z"
+        shard.entries[entryIndex].summary.cameraMake = "Kromora"
+        shard.entries[entryIndex].summary.cameraModel = "Test Body"
+        shard.entries[entryIndex].summary.lens = "Prime 35mm"
+        shard.entries[entryIndex].summary.coarseLocation = "≈38° N, 122° W"
+        shard.entries[entryIndex].summary.captureSettings = PortablePackageCaptureSettings()
+        try package.writeMembershipShard(shard)
+
+        let reconciled = try staleProjection.reconcilingMembership(with: package)
+        let summary = try XCTUnwrap(reconciled.entry(for: assetID)?.summary)
+        XCTAssertEqual(summary.captureDateISO, "2026-10-12T12:00:00Z")
+        XCTAssertEqual(summary.cameraMake, "Kromora")
+        XCTAssertEqual(summary.cameraModel, "Test Body")
+        XCTAssertEqual(summary.lens, "Prime 35mm")
+        XCTAssertEqual(summary.coarseLocation, "≈38° N, 122° W")
+        XCTAssertNotNil(summary.captureSettings)
+    }
+
     func testIndexProjectionExcludesTombstonesAndKeepsSelectionUUIDBased() throws {
         let packageURL = tempDirectory.appendingPathComponent("DeletionProjection.kromoralibrary")
         let package = try PortableLibraryPackage.create(at: packageURL)
