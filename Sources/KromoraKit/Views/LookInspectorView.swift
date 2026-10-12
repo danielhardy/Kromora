@@ -304,6 +304,9 @@ struct LookInspectorView: View {
                 }
                 .buttonStyle(.plain)
                 .tag(nil as LUTID?)
+                .listRowInsets(LookRowStyle.insets)
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
             } header: {
                 HStack {
                     Text("Look")
@@ -314,6 +317,23 @@ struct LookInspectorView: View {
                         .font(.caption2)
                         .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
                 }
+            }
+
+            // The user's own Looks lead: they are the ones reached for most, and they must not sit
+            // below the long starter catalogue. While searching, an empty group stays out of the way.
+            if searchText.isEmpty || !filteredMyLooks.isEmpty {
+            Section {
+                if filteredMyLooks.isEmpty {
+                    collectionEmptyRow(
+                        collection: .my,
+                        hasUnfilteredLooks: !viewModel.library.myLooks.isEmpty
+                    )
+                } else {
+                    lookRows(filteredMyLooks)
+                }
+            } header: {
+                collectionHeader(.my, count: filteredMyLooks.count)
+            }
             }
 
             if filteredStarterLookCategories.isEmpty {
@@ -337,21 +357,9 @@ struct LookInspectorView: View {
                     }
                 }
             }
-
-            Section {
-                if filteredMyLooks.isEmpty {
-                    collectionEmptyRow(
-                        collection: .my,
-                        hasUnfilteredLooks: !viewModel.library.myLooks.isEmpty
-                    )
-                } else {
-                    lookRows(filteredMyLooks)
-                }
-            } header: {
-                collectionHeader(.my, count: filteredMyLooks.count)
-            }
         }
         .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
     }
 
     @ViewBuilder
@@ -370,6 +378,9 @@ struct LookInspectorView: View {
             }
             .buttonStyle(.plain)
             .tag(Optional(lut.lutID))
+            .listRowInsets(LookRowStyle.insets)
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
         }
     }
 
@@ -550,26 +561,66 @@ struct LookInspectorView: View {
 
 }
 
+/// Shared card chrome for Look rows: one rounded surface whose edge the thumbnail runs flush to,
+/// with selection carried by the whole card (tint, hairline, checkmark) instead of a tiny marker.
+private enum LookRowStyle {
+    static let insets = EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0)
+    static let cornerRadius: CGFloat = 8
+    static let height: CGFloat = LookPreviewLayout.rowMinHeight
+}
+
+private struct LookRowCard<Leading: View>: View {
+    let title: String
+    let isSelected: Bool
+    @ViewBuilder let leading: Leading
+    @State private var isHovering = false
+
+    var body: some View {
+        HStack(spacing: 12) {
+            leading
+            Text(title)
+                .font(.system(.body, design: .default).weight(isSelected ? .medium : .regular))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 0)
+            if isSelected {
+                Image(systemName: "checkmark.circle.fill")
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.white, KromoraTheme.primaryAccent)
+                    .font(.system(size: 16))
+                    .padding(.trailing, 12)
+                    .transition(.opacity)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: LookRowStyle.height, maxHeight: LookRowStyle.height, alignment: .leading)
+        .background(
+            isSelected
+                ? KromoraTheme.primaryAccent.opacity(0.14)
+                : Color.primary.opacity(isHovering ? 0.08 : 0.04)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: LookRowStyle.cornerRadius, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: LookRowStyle.cornerRadius, style: .continuous)
+                .strokeBorder(
+                    isSelected ? KromoraTheme.primaryAccent.opacity(0.8) : Color.clear, lineWidth: 1)
+        }
+        .contentShape(RoundedRectangle(cornerRadius: LookRowStyle.cornerRadius, style: .continuous))
+        .onHover { isHovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: isSelected)
+    }
+}
+
 private struct LookNoneRow: View {
     let isSelected: Bool
 
     var body: some View {
-        HStack(spacing: 8) {
-            RoundedRectangle(cornerRadius: 3)
-                .fill(isSelected ? KromoraTheme.primaryAccent : Color.secondary.opacity(0.3))
-                .frame(width: 4, height: 20)
+        LookRowCard(title: "None", isSelected: isSelected) {
             Image(systemName: "circle.slash")
+                .font(.system(size: 18, weight: .light))
                 .foregroundStyle(isSelected ? KromoraTheme.primaryAccent : .secondary)
-            Text("None")
-                .font(.system(.body, design: .default))
-            Spacer()
-            if isSelected {
-                Image(systemName: "checkmark")
-                    .foregroundStyle(KromoraTheme.primaryAccent)
-                    .font(.caption.weight(.semibold))
-            }
+                .frame(width: LookPreviewLayout.displaySize.width, height: LookRowStyle.height)
+                .background(Color.primary.opacity(0.05))
         }
-        .contentShape(Rectangle())
         .accessibilityLabel("None")
         .accessibilityValue(isSelected ? "Selected" : "Not selected")
     }
@@ -595,37 +646,15 @@ struct LookRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 8) {
-            RoundedRectangle(cornerRadius: 3)
-                .fill(isSelected ? KromoraTheme.primaryAccent : Color.secondary.opacity(0.3))
-                .frame(width: 4, height: 20)
-
+        // The collection heading already says Starter or My Looks, so the row carries no source
+        // badge; the accessibility label keeps the distinction for VoiceOver.
+        LookRowCard(title: look.name, isSelected: isSelected) {
             LookPreviewThumbnail(
                 look: look,
                 previewProvider: previewProvider,
                 taskID: previewTaskID
             )
-
-            Text(look.name)
-                .font(.system(.body, design: .default))
-                .lineLimit(1)
-
-            Spacer()
-            Text(look.source.displayName)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 4)
-                .padding(.vertical, 2)
-                .background(Color.primary.opacity(0.08), in: Capsule())
-                .accessibilityHidden(true)
-            if isSelected {
-                Image(systemName: "checkmark")
-                    .foregroundStyle(KromoraTheme.primaryAccent)
-                    .font(.caption.weight(.semibold))
-            }
         }
-        .frame(minHeight: LookPreviewLayout.rowMinHeight)
-        .contentShape(Rectangle())
         .accessibilityLabel("\(look.name), \(look.source.accessibilityDescription)")
         .accessibilityValue(isSelected ? "Selected" : "Not selected")
     }
@@ -644,6 +673,8 @@ private struct LookPreviewThumbnail: View {
     }
 
     var body: some View {
+        // Full bleed: the row's rounded card clips the outer corners, so the image runs flush to the
+        // leading, top, and bottom edges with no inner frame or stroke.
         Group {
             if let image {
                 Image(decorative: image, scale: 1, orientation: .up)
@@ -653,13 +684,8 @@ private struct LookPreviewThumbnail: View {
                 LookPreviewFallback(colors: colors)
             }
         }
-        .frame(width: LookPreviewLayout.displaySize.width, height: LookPreviewLayout.displaySize.height)
+        .frame(width: LookPreviewLayout.displaySize.width, height: LookRowStyle.height)
         .clipped()
-        .clipShape(RoundedRectangle(cornerRadius: 5))
-        .overlay {
-            RoundedRectangle(cornerRadius: 5)
-                .stroke(.white.opacity(0.18), lineWidth: 0.5)
-        }
         .accessibilityHidden(true)
         .task(id: taskID) {
             image = await previewProvider?.lookPreview(for: look)

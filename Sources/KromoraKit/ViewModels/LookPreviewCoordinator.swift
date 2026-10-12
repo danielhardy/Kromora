@@ -9,7 +9,7 @@ import Foundation
 enum LookPreviewLayout {
     static let displaySize = CGSize(width: 84, height: 56)
     static let renderSize = CGSize(width: 168, height: 112)
-    static let rowMinHeight: CGFloat = 72
+    static let rowMinHeight: CGFloat = 56
     static let cacheMaxEntries = 24
     static let cacheMaxCostBytes = 8 * 1024 * 1024
     static let renderDelay: Duration = .milliseconds(60)
