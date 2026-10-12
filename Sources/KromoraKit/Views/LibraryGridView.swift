@@ -131,10 +131,15 @@ struct LibraryGridView: View {
                 }
             }
             if isFacetSidebarPresented, collection.isPortableWindowed {
-                Divider()
-                LibraryFacetSidebar(viewModel: viewModel)
+                HStack(spacing: 0) {
+                    Divider()
+                    LibraryFacetSidebar(viewModel: viewModel)
+                }
+                .transition(.move(edge: .trailing))
             }
             }
+            .clipped()
+            .animation(.smooth(duration: 0.25), value: isFacetSidebarPresented)
         }
         .background(KromoraTheme.windowBackground)
         .onAppear {

@@ -4,7 +4,7 @@ import SwiftUI
 ///
 /// Counts come from the index off the main actor and are recomputed whenever the query changes.
 struct LibraryFacetSidebar: View {
-    let viewModel: AppViewModel
+    @ObservedObject var viewModel: AppViewModel
     @State private var counts = LibraryFacetCounts()
 
     private var query: LibraryQuery { viewModel.portableQuery }
@@ -67,7 +67,7 @@ struct LibraryFacetSidebar: View {
                 .padding(12)
             }
         }
-        .frame(width: 240)
+        .frame(width: 280)
         .background(KromoraTheme.secondaryChrome)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Metadata filters")
@@ -144,16 +144,11 @@ private struct RangeFacetSection: View {
                 }
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
-                Slider(value: $lower, in: lowerBound...upperBound, step: step) { editing in
-                    if !editing { commit() }
-                }
-                .accessibilityLabel("Minimum \(facet.title)")
-                .accessibilityValue(facet.format(lower))
-                Slider(value: $upper, in: lowerBound...upperBound, step: step) { editing in
-                    if !editing { commit() }
-                }
-                .accessibilityLabel("Maximum \(facet.title)")
-                .accessibilityValue(facet.format(upper))
+                RangeSlider(
+                    lower: $lower, upper: $upper, bounds: lowerBound...upperBound, step: step,
+                    lowerLabel: "Minimum \(facet.title)", upperLabel: "Maximum \(facet.title)",
+                    format: facet.format, onCommit: commit
+                )
             } else {
                 Text(facet.format(lowerBound)).font(.caption).foregroundStyle(.secondary)
             }
@@ -245,5 +240,100 @@ struct LibraryFacetToolbarControls: View {
             .accessibilityLabel(isSidebarPresented ? "Hide metadata filters" : "Show metadata filters")
         }
         .padding(.horizontal, 12)
+    }
+}
+
+/// A slider with two thumbs choosing an inclusive range. `onCommit` fires when a drag ends or an
+/// accessibility adjustment is made, so callers can defer expensive work until then.
+private struct RangeSlider: View {
+    @Binding var lower: Double
+    @Binding var upper: Double
+    let bounds: ClosedRange<Double>
+    let step: Double
+    let lowerLabel: String
+    let upperLabel: String
+    let format: (Double) -> String
+    let onCommit: () -> Void
+
+    /// The hit target and travel inset match AppKit's native knob, as in `NeutralOriginSlider`;
+    /// the drawn disc is the same fraction of it, so this slider reads as the same control.
+    private let thumbSize: CGFloat = {
+        let width = (NSSlider().cell as? NSSliderCell)?.knobRect(flipped: false).width ?? 0
+        return width > 0 ? width : 20
+    }()
+    private let trackHeight: CGFloat = 4
+
+    private var visualThumbSize: CGFloat { thumbSize * NeutralOriginSliderCell.knobVisualScale }
+    private var thumbRim: Color {
+        Color(nsColor: KromoraTheme.primaryAccentNSColor
+            .blended(withFraction: 0.45, of: .black) ?? KromoraTheme.primaryAccentNSColor)
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let travel = max(1, geometry.size.width - thumbSize)
+            // State can lag the bounds or each other for a frame; never build an inverted range.
+            let low = min(max(lower, bounds.lowerBound), bounds.upperBound)
+            let high = min(max(upper, low), bounds.upperBound)
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color(nsColor: .tertiaryLabelColor))
+                    .frame(height: trackHeight)
+                    .padding(.horizontal, thumbSize / 2)
+                Capsule()
+                    .fill(KromoraTheme.primaryAccent)
+                    .frame(
+                        width: max(0, position(high, travel) - position(low, travel)),
+                        height: trackHeight
+                    )
+                    .offset(x: position(low, travel) + thumbSize / 2)
+                thumb(value: $lower, shown: low, travel: travel, label: lowerLabel,
+                      range: bounds.lowerBound...high)
+                thumb(value: $upper, shown: high, travel: travel, label: upperLabel,
+                      range: low...bounds.upperBound)
+            }
+            .frame(maxHeight: .infinity)
+        }
+        .frame(height: 22)
+        .coordinateSpace(name: "rangeSlider")
+    }
+
+    private func position(_ value: Double, _ travel: CGFloat) -> CGFloat {
+        let span = bounds.upperBound - bounds.lowerBound
+        guard span > 0 else { return 0 }
+        return CGFloat((value - bounds.lowerBound) / span) * travel
+    }
+
+    private func thumb(
+        value: Binding<Double>, shown: Double, travel: CGFloat, label: String, range: ClosedRange<Double>
+    ) -> some View {
+        Circle()
+            .fill(KromoraTheme.primaryAccent)
+            .overlay(
+                Circle().strokeBorder(thumbRim, lineWidth: max(0.75, visualThumbSize * 0.045))
+            )
+            .frame(width: visualThumbSize, height: visualThumbSize)
+            .frame(width: thumbSize, height: thumbSize)
+            .contentShape(Circle())
+            .offset(x: position(shown, travel))
+            .gesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .named("rangeSlider"))
+                    .onChanged { drag in
+                        let fraction = Double((drag.location.x - thumbSize / 2) / travel)
+                        let span = bounds.upperBound - bounds.lowerBound
+                        let raw = bounds.lowerBound + min(max(fraction, 0), 1) * span
+                        let snapped = (raw / step).rounded() * step
+                        value.wrappedValue = min(max(snapped, range.lowerBound), range.upperBound)
+                    }
+                    .onEnded { _ in onCommit() }
+            )
+            .accessibilityElement()
+            .accessibilityLabel(label)
+            .accessibilityValue(format(shown))
+            .accessibilityAdjustableAction { direction in
+                let delta = direction == .increment ? step : -step
+                value.wrappedValue = min(max(shown + delta, range.lowerBound), range.upperBound)
+                onCommit()
+            }
     }
 }

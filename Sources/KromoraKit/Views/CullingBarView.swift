@@ -112,6 +112,7 @@ struct LibraryFilterControls: View {
     @Bindable var collection: ImageCollection
     @ObservedObject var viewModel: AppViewModel
     let isCompact: Bool
+    @State private var isFacetPopoverPresented = false
 
     private var isPortableWindowed: Bool { collection.isPortableWindowed }
 
@@ -130,9 +131,35 @@ struct LibraryFilterControls: View {
 
     var body: some View {
         HStack(spacing: isCompact ? 6 : 8) {
-            Label("Filter", systemImage: "line.3.horizontal.decrease.circle")
-                .font(isCompact ? .caption2 : .caption)
-                .foregroundStyle(.secondary)
+            if isCompact, isPortableWindowed {
+                // The filmstrip has no sidebar, so the metadata filters open in a popover.
+                Button {
+                    isFacetPopoverPresented.toggle()
+                } label: {
+                    Label(
+                        "Filter",
+                        systemImage: viewModel.portableQuery.facets.isActive
+                            ? "line.3.horizontal.decrease.circle.fill"
+                            : "line.3.horizontal.decrease.circle"
+                    )
+                    .font(.caption2)
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(
+                    viewModel.portableQuery.facets.isActive
+                        ? KromoraTheme.primaryAccent : Color.secondary
+                )
+                .help("Show or hide the metadata filters")
+                .accessibilityLabel("Metadata filters")
+                .popover(isPresented: $isFacetPopoverPresented, arrowEdge: .top) {
+                    LibraryFacetSidebar(viewModel: viewModel)
+                        .frame(height: 480)
+                }
+            } else {
+                Label("Filter", systemImage: "line.3.horizontal.decrease.circle")
+                    .font(isCompact ? .caption2 : .caption)
+                    .foregroundStyle(.secondary)
+            }
 
             Picker("Flag filter", selection: flagBinding) {
                 ForEach(LibraryFlagFilter.allCases, id: \.self) { filter in
