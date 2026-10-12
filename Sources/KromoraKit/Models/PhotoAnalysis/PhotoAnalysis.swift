@@ -46,6 +46,21 @@ struct AnalyzedRegion: Sendable, Codable, Equatable, Identifiable {
         self.coverage = Self.unit(coverage)
     }
 
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try c.decode(UUID.self, forKey: .id),
+            kind: try c.decode(RegionKind.self, forKey: .kind),
+            mask: try c.decode(RegionMaskReference.self, forKey: .mask),
+            bounds: try c.decodeIfPresent(NormalizedRect.self, forKey: .bounds),
+            confidence: try c.decode(Float.self, forKey: .confidence),
+            importance: try c.decode(Float.self, forKey: .importance),
+            tone: try c.decode(ToneStatistics.self, forKey: .tone),
+            color: try c.decode(ColorStatistics.self, forKey: .color),
+            coverage: try c.decode(Float.self, forKey: .coverage)
+        )
+    }
+
     private static func unit(_ value: Float) -> Float {
         guard value.isFinite else { return 0 }
         return min(max(value, 0), 1)

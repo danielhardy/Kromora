@@ -260,6 +260,19 @@ struct RegionMask: Codable, Sendable, Equatable, Identifiable {
         self.coverage = Self.unit(coverage)
     }
 
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try c.decode(UUID.self, forKey: .id),
+            kind: try c.decode(SemanticMaskKind.self, forKey: .kind),
+            bounds: try c.decode(NormalizedRect.self, forKey: .bounds),
+            quality: try c.decode(MaskQuality.self, forKey: .quality),
+            reference: try c.decode(RegionMaskReference.self, forKey: .reference),
+            confidence: try c.decode(Float.self, forKey: .confidence),
+            coverage: try c.decode(Float.self, forKey: .coverage)
+        )
+    }
+
     private static func unit(_ value: Float) -> Float {
         guard value.isFinite else { return 0 }
         return min(max(value, 0), 1)

@@ -11,6 +11,14 @@ struct NormalizedPoint: Codable, Sendable, Equatable, Hashable {
         self.y = Self.unit(y)
     }
 
+    /// Decoding routes through the validating initializer so persisted values obey the same
+    /// clamps as direct construction.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(x: try container.decode(Double.self, forKey: .x),
+                  y: try container.decode(Double.self, forKey: .y))
+    }
+
     init(_ point: CGPoint) {
         self.init(x: point.x, y: point.y)
     }
@@ -42,6 +50,14 @@ struct NormalizedRect: Codable, Sendable, Equatable, Hashable {
         self.y = originY
         self.width = Self.unit(min(width, 1 - originX))
         self.height = Self.unit(min(height, 1 - originY))
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(x: try container.decode(Double.self, forKey: .x),
+                  y: try container.decode(Double.self, forKey: .y),
+                  width: try container.decode(Double.self, forKey: .width),
+                  height: try container.decode(Double.self, forKey: .height))
     }
 
     init(_ rect: CGRect) {

@@ -101,6 +101,44 @@ final class PhotoAnalysisCacheTests: TempDirectoryTestCase {
         XCTAssertEqual(otherAfterRemoval, analysis)
     }
 
+    func testReadNormalizesAlteredNestedFactsAndMissesOnMalformedShape() async throws {
+        let cache = PhotoAnalysisCache(directory: tempDirectory)
+        let key = makeKey(version: .current)
+        let analysis = PhotoAnalysis(
+            version: .current, globalTone: ToneStatistics(mean: 0.4),
+            colorStatistics: .neutral, quality: .globalOnly
+        )
+        try await cache.store(analysis, for: key)
+        let file = try XCTUnwrap(FileManager.default.contentsOfDirectory(
+            at: tempDirectory, includingPropertiesForKeys: nil
+        ).first { $0.pathExtension == "json" })
+        let original = try Data(contentsOf: file)
+
+        var root = try XCTUnwrap(JSONSerialization.jsonObject(with: original) as? [String: Any])
+        var persisted = try XCTUnwrap(root["analysis"] as? [String: Any])
+        var tone = try XCTUnwrap(persisted["globalTone"] as? [String: Any])
+        tone["mean"] = 7.0
+        tone["shadowClippingFraction"] = -2.0
+        persisted["globalTone"] = tone
+        var color = try XCTUnwrap(persisted["colorStatistics"] as? [String: Any])
+        color["meanRGB"] = [-1.0, 0.5, 3.0]
+        persisted["colorStatistics"] = color
+        root["analysis"] = persisted
+        try JSONSerialization.data(withJSONObject: root).write(to: file)
+
+        let restored = try await cache.analysis(for: key)
+        XCTAssertEqual(restored?.globalTone.mean, 1)
+        XCTAssertEqual(restored?.globalTone.shadowClippingFraction, 0)
+        XCTAssertEqual(restored?.colorStatistics.meanRGB, SIMD3<Float>(0, 0.5, 1))
+
+        tone["mean"] = "not a number"
+        persisted["globalTone"] = tone
+        root["analysis"] = persisted
+        try JSONSerialization.data(withJSONObject: root).write(to: file)
+        let miss = try await cache.analysis(for: key)
+        XCTAssertNil(miss)
+    }
+
     private func makeKey(version: AnalysisVersion) -> AnalysisCacheKey {
         let bytes = Data("cache-test-source".utf8)
         return AnalysisCacheKey(

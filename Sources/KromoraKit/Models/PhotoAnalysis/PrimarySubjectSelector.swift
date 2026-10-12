@@ -63,6 +63,15 @@ struct PrimarySubjectSelection: Sendable, Codable, Equatable {
         self.rankedSubjects = rankedSubjects
     }
 
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            primaryRegionID: try c.decodeIfPresent(UUID.self, forKey: .primaryRegionID),
+            confidence: try c.decode(Float.self, forKey: .confidence),
+            rankedSubjects: try c.decode([PrimarySubjectScore].self, forKey: .rankedSubjects)
+        )
+    }
+
     static let none = PrimarySubjectSelection(primaryRegionID: nil, confidence: 0)
 
     private static func unit(_ value: Float) -> Float {

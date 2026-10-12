@@ -60,6 +60,27 @@ struct ToneStatistics: Codable, Sendable, Equatable {
         self.highlightClippingFraction = Self.finiteUnit(highlightClippingFraction)
     }
 
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            variant: try c.decode(LuminanceVariant.self, forKey: .variant),
+            minimum: try c.decode(Float.self, forKey: .minimum),
+            maximum: try c.decode(Float.self, forKey: .maximum),
+            mean: try c.decode(Float.self, forKey: .mean),
+            p01: try c.decode(Float.self, forKey: .p01),
+            p05: try c.decode(Float.self, forKey: .p05),
+            p10: try c.decode(Float.self, forKey: .p10),
+            p25: try c.decode(Float.self, forKey: .p25),
+            p50: try c.decode(Float.self, forKey: .p50),
+            p75: try c.decode(Float.self, forKey: .p75),
+            p90: try c.decode(Float.self, forKey: .p90),
+            p95: try c.decode(Float.self, forKey: .p95),
+            p99: try c.decode(Float.self, forKey: .p99),
+            shadowClippingFraction: try c.decode(Float.self, forKey: .shadowClippingFraction),
+            highlightClippingFraction: try c.decode(Float.self, forKey: .highlightClippingFraction)
+        )
+    }
+
     static let neutral = ToneStatistics()
 
     private static func finiteUnit(_ value: Float) -> Float {
@@ -89,6 +110,12 @@ struct LuminanceDistribution: Codable, Sendable, Equatable {
                                          highlightClippingFraction: perceptual.highlightClippingFraction)
     }
 
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(linear: try c.decode(ToneStatistics.self, forKey: .linear),
+                  perceptual: try c.decode(ToneStatistics.self, forKey: .perceptual))
+    }
+
     static let neutral = LuminanceDistribution()
 }
 
@@ -101,6 +128,13 @@ struct ChannelClipping: Codable, Sendable, Equatable {
         self.red = Self.finiteUnit(red)
         self.green = Self.finiteUnit(green)
         self.blue = Self.finiteUnit(blue)
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(red: try c.decode(Float.self, forKey: .red),
+                  green: try c.decode(Float.self, forKey: .green),
+                  blue: try c.decode(Float.self, forKey: .blue))
     }
 
     static let none = ChannelClipping()
@@ -138,6 +172,19 @@ struct ColorStatistics: Codable, Sendable, Equatable {
         self.colorfulness = Self.unit(colorfulness)
     }
 
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            meanRGB: try c.decode(SIMD3<Float>.self, forKey: .meanRGB),
+            medianRGB: try c.decode(SIMD3<Float>.self, forKey: .medianRGB),
+            saturationMedian: try c.decode(Float.self, forKey: .saturationMedian),
+            saturationP95: try c.decode(Float.self, forKey: .saturationP95),
+            channelClipping: try c.decode(ChannelClipping.self, forKey: .channelClipping),
+            estimatedNeutrality: try c.decode(Float.self, forKey: .estimatedNeutrality),
+            colorfulness: try c.decode(Float.self, forKey: .colorfulness)
+        )
+    }
+
     static let neutral = ColorStatistics()
 
     private static func unit(_ value: Float) -> Float {
@@ -172,6 +219,18 @@ struct AnalysisQuality: Codable, Sendable, Equatable {
         self.faceAnalysisAvailable = faceAnalysisAvailable
         self.peopleAnalysisAvailable = peopleAnalysisAvailable
         self.overallConfidence = overallConfidence.isFinite ? min(max(overallConfidence, 0), 1) : 0
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            globalToneAvailable: try c.decode(Bool.self, forKey: .globalToneAvailable),
+            attentionAvailable: try c.decode(Bool.self, forKey: .attentionAvailable),
+            foregroundAvailable: try c.decode(Bool.self, forKey: .foregroundAvailable),
+            faceAnalysisAvailable: try c.decode(Bool.self, forKey: .faceAnalysisAvailable),
+            peopleAnalysisAvailable: try c.decode(Bool.self, forKey: .peopleAnalysisAvailable),
+            overallConfidence: try c.decode(Float.self, forKey: .overallConfidence)
+        )
     }
 
     static let unavailable = AnalysisQuality()
