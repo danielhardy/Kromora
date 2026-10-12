@@ -340,7 +340,16 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
 
     private var activeAssetID: PhotoAssetID?
-    private var activeSourceReference: EditSourceReference?
+    private var activeSourceReference: EditSourceReference? {
+        didSet { virtualCopyMetadata?.activeAssetChanged(to: activeSourceReference?.portableAssetID) }
+    }
+    /// Cached copy-relationship snapshot for the inspector; nil without a portable library.
+    private lazy var virtualCopyMetadata: VirtualCopyMetadataCoordinator? = portableLibrary.map {
+        VirtualCopyMetadataCoordinator(
+            reader: VirtualCopyMetadataCoordinator.packageReader($0.package),
+            willChange: { [weak self] in self?.objectWillChange.send() }
+        )
+    }
     /// Source generation prevents delayed work from a previous navigation selection from publishing
     /// into the new image, even if the source values happen to compare equal.
     var sourceRevision: UInt64 { sourceSession.sourceRevision }
@@ -3864,19 +3873,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         applyHistoryDocument(restored, persist: false)
     }
 
-    var virtualCopySourceDescription: String? {
-        guard let portableLibrary, let assetID = activeSourceReference?.portableAssetID,
-              let record = try? portableLibrary.package.readAssetRecord(for: assetID),
-              let parent = record.copyOfAssetID else { return nil }
-        return "Virtual copy of \(parent.raw.prefix(8))"
-    }
+    var virtualCopySourceDescription: String? { virtualCopyMetadata?.sourceDescription }
 
-    var canCreateVirtualCopy: Bool {
-        guard let portableLibrary, let assetID = activeSourceReference?.portableAssetID else {
-            return false
-        }
-        return (try? portableLibrary.package.readAssetRecord(for: assetID)) != nil
-    }
+    var canCreateVirtualCopy: Bool { virtualCopyMetadata?.canCreate ?? false }
 
     func createVirtualCopy() {
         guard let portableLibrary, let reference = activeSourceReference,
@@ -4395,6 +4394,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let shutdownStore = editStore
         let embeddedLookTask = await shutdownStore.cancelEmbeddedLookLoading()
         await embeddedLookTask?.value
+        await virtualCopyMetadata?.shutdown()
         await retouchWorkflow.shutdown()
         previewAdmissionCoordinator.cancelAdjacentPreviewPrefetch()
         autoWorkflowCoordinator.invalidate { [weak self] state, progress in
