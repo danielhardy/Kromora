@@ -2,8 +2,53 @@
 id: KRMA-460
 title: "Continue AppViewModel decomposition: ownership first, file splits second"
 type: task
-status: ready
+status: done
 priority: medium
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: This ticket remains a plan/parent; implementation lands as one stage per PR (or as child tickets spawned from the stages above).
+      result: pass
+      notes: KRMA-465–469, KRMA-564–565, and KRMA-874–878 are all done; the scoped follow-up KRMA-889 is backlog.
+    - criterion: Stage 0, if done, moves only thin façades and does not relocate Auto/load/preview/thumbnail/histogram/undo/masking/shutdown.
+      result: pass
+      notes: No Stage 0 implementation was introduced; prior dispositions are reflected in the current architecture documentation.
+    - criterion: "Each ownership stage states: state owned, admitted commands, published values, revision checks, task handles, shutdown behavior, and resource limits."
+      result: pass
+      notes: Ownership boundaries and lifecycle responsibilities are documented. The remaining temporary Share export cleanup gap is tracked in KRMA-889.
+    - criterion: AppViewModel remains the sole published active-document owner; no second store or generic event bus.
+      result: pass
+      notes: Reviewed coordinator seams and documentation; document commits remain at AppViewModel.updateDocument.
+    - criterion: RenderRequest/RenderEngine funnel and source/document/display fences are unchanged.
+      result: pass
+      notes: The verified coordinator changes preserve the existing render and revision ownership boundaries.
+    - criterion: Collaborators are testable without constructing the full AppViewModel, real preferences, NSWorkspace, or GPU setup where the old coordinator tests already follow that pattern.
+      result: pass
+      notes: Focused coordinator test suites instantiate the new collaborators without AppViewModel; 14 tests passed.
+    - criterion: docs/APP_ARCHITECTURE.md matches the post-stage ownership table.
+      result: pass
+      notes: Reviewed current table and detailed coordinator ownership sections.
+    - criterion: Line count of AppViewModel.swift trends down because mutable state and task handles left the type, not because methods were renamed into extensions.
+      result: pass
+      notes: Ownership extractions are in place; the current file is 5,403 lines, below the 5,500-line trend guard.
+    - criterion: "Per-stage verification: focused tests, swift build, relevant scripts/ci-tests.sh lane, dg validate, git diff --check."
+      result: pass
+      notes: Focused coordinator tests 14/14, swift build, scripts/ci-tests.sh fast (1,637 tests), dg validate, and git diff --check passed.
+  checks_run:
+    - swift build (passed, exit 0)
+    - scripts/ci-tests.sh fast (passed, 1,637 tests)
+    - swift test --filter 'LookSelectionCoordinatorTests|EditClipboardCoordinatorTests|ExportWorkflowCoordinatorTests' (passed, 14 tests, 0 failures)
+    - dg validate --json (passed; no errors, existing repository warnings only)
+    - git diff --check (passed)
+    - Independent source and architecture documentation review
+  findings:
+    - Share export TIFFs and unique temporary directories have no cleanup owner, so repeated Share actions can accumulate temporary storage. Tracked as non-blocking backlog child KRMA-889 (verification).
+  fixes: []
+  verification_commits: []
+  actor: codex
+  resolved_model: gpt-6-luna
+  completed_at: 2026-10-11T17:12:38.547Z
+  session: 01MV42TBDGMVGJXQ1P
 creation_provenance:
   runner: cursor
   model: unknown
@@ -12,7 +57,7 @@ labels:
   - architecture
   - maintainability
 created: 2026-09-19T15:31:38.265Z
-updated: 2026-10-11T13:42:55.893Z
+updated: 2026-10-11T17:12:38.551Z
 depends_on:
   - KRMA-465
   - KRMA-466
@@ -26,9 +71,26 @@ depends_on:
   - KRMA-876
   - KRMA-877
   - KRMA-878
-blockers: []
-order: zx
+blockers:
+  - id: evt_mv40np38_xfvgis
+    type: human
+    reason: Dependency KRMA-874 remains human-blocked despite status done; it asks whether removable-media workflow ownership is already satisfied by LibraryMediaWorkflowCoordinator or should be re-scoped. Independent review confirms selection, scan, and import-admission state live in that coordinator, while AppViewModel retains the package transaction. Resolve KRMA-874's scope before closing this parent.
+    action: Decide whether to close KRMA-874 as already satisfied and clear its human blocker, or re-scope the child to a narrow, testable remaining ownership boundary; then resume KRMA-460 at verification.
+    created_at: 2026-10-11T16:07:12.836Z
+    resolved_at: 2026-10-11T16:45:48.063Z
+    resolved_by: web
+order: a0
 board: product
+blocked_reason: Dependency KRMA-874 remains human-blocked despite status done; it asks whether removable-media workflow ownership is already satisfied by LibraryMediaWorkflowCoordinator or should be re-scoped. Independent review confirms selection, scan, and import-admission state live in that coordinator, while AppViewModel retains the package transaction. Resolve KRMA-874's scope before closing this parent.
+blocked_action: Decide whether to close KRMA-874 as already satisfied and clear its human blocker, or re-scope the child to a narrow, testable remaining ownership boundary; then resume KRMA-460 at verification.
+blocked_from_status: verification
+footprint:
+  source: observed
+  paths: []
+  observed:
+    paths: []
+    captured_at: 2026-10-11T16:04:42.160Z
+    unavailable_reason: "missing_commits: no implementation commits are recorded"
 ---
 
 ## Current disposition (reviewed 2026-09-23)
@@ -199,3 +261,35 @@ Closing: all children (465, 466, 467, 468, 469, 564, 565) are done.
 ### Comment — human @ 2026-10-11T13:33:50.600Z
 
 Reopened 2026-10-11: AppViewModel.swift is 5,738 lines (4,293 at KRMA-469, 2026-09-25). Earlier stages are done; new children KRMA-874 KRMA-875 KRMA-876 KRMA-877 extract the remaining large MARK sections and KRMA-878 adds a regrowth guard.
+
+## Agent log
+
+- 2026-10-11T17:12:38.547Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] This ticket remains a plan/parent; implementation lands as one stage per PR (or as child tickets spawned from the stages above). (pass) — KRMA-465–469, KRMA-564–565, and KRMA-874–878 are all done; the scoped follow-up KRMA-889 is backlog.
+- [x] Stage 0, if done, moves only thin façades and does not relocate Auto/load/preview/thumbnail/histogram/undo/masking/shutdown. (pass) — No Stage 0 implementation was introduced; prior dispositions are reflected in the current architecture documentation.
+- [x] Each ownership stage states: state owned, admitted commands, published values, revision checks, task handles, shutdown behavior, and resource limits. (pass) — Ownership boundaries and lifecycle responsibilities are documented. The remaining temporary Share export cleanup gap is tracked in KRMA-889.
+- [x] AppViewModel remains the sole published active-document owner; no second store or generic event bus. (pass) — Reviewed coordinator seams and documentation; document commits remain at AppViewModel.updateDocument.
+- [x] RenderRequest/RenderEngine funnel and source/document/display fences are unchanged. (pass) — The verified coordinator changes preserve the existing render and revision ownership boundaries.
+- [x] Collaborators are testable without constructing the full AppViewModel, real preferences, NSWorkspace, or GPU setup where the old coordinator tests already follow that pattern. (pass) — Focused coordinator test suites instantiate the new collaborators without AppViewModel; 14 tests passed.
+- [x] docs/APP_ARCHITECTURE.md matches the post-stage ownership table. (pass) — Reviewed current table and detailed coordinator ownership sections.
+- [x] Line count of AppViewModel.swift trends down because mutable state and task handles left the type, not because methods were renamed into extensions. (pass) — Ownership extractions are in place; the current file is 5,403 lines, below the 5,500-line trend guard.
+- [x] Per-stage verification: focused tests, swift build, relevant scripts/ci-tests.sh lane, dg validate, git diff --check. (pass) — Focused coordinator tests 14/14, swift build, scripts/ci-tests.sh fast (1,637 tests), dg validate, and git diff --check passed.
+Checks run:
+- swift build (passed, exit 0)
+- scripts/ci-tests.sh fast (passed, 1,637 tests)
+- swift test --filter 'LookSelectionCoordinatorTests|EditClipboardCoordinatorTests|ExportWorkflowCoordinatorTests' (passed, 14 tests, 0 failures)
+- dg validate --json (passed; no errors, existing repository warnings only)
+- git diff --check (passed)
+- Independent source and architecture documentation review
+Findings:
+- Share export TIFFs and unique temporary directories have no cleanup owner, so repeated Share actions can accumulate temporary storage. Tracked as non-blocking backlog child KRMA-889 (verification).
+Fixes:
+- None
+Verification commits:
+- None
+Actor: codex
+Resolved model: gpt-6-luna
+Pickup session: 01MV42TBDGMVGJXQ1P
+Summary: Counterpoint verification passed; build, fast lane, focused coordinator tests, validation, and diff checks passed. Tracked temporary Share export cleanup as KRMA-889.

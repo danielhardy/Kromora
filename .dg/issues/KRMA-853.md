@@ -2,17 +2,37 @@
 id: KRMA-853
 title: "Failing: LightInspectorTests tone curve reset source assertion broken by ResetIconButton change"
 type: bug
-status: verification
+status: done
 priority: medium
 agent: codex
 verification_agent: codex
 human_review_required: false
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: LightInspectorTests passes and does not depend on the exact spelling of ResetIconButton's modifier chain.
+      result: pass
+      notes: The test constructs ResetIconButton and asserts its resolved accessibility label equals the reset title; it no longer asserts modifier-chain source text.
+    - criterion: scripts/ci-tests.sh fast has no failures from this test.
+      result: pass
+      notes: Fast lane exited 0 after running all 1,618 required tests.
+  checks_run:
+    - "swift test --filter LightInspectorTests.testToneCurveResetUsesAccessibleTrailingDisclosureAction: exit 0; 1 test passed, 0 failures."
+    - "scripts/ci-tests.sh fast: exit 0; all 1,618 required tests completed."
+    - Reviewed CropInspectorTests and InfoInspectorPresentationTests for the same fragile ResetIconButton modifier-chain assertion; none found.
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: codex
+  resolved_model: gpt-6-luna
+  completed_at: 2026-10-11T14:36:36.036Z
+  session: 01MV3XBB0SNFVV08R8
 creation_provenance:
   runner: claude
   model: unknown
   actor: claude
 created: 2026-10-10T13:02:41.164Z
-updated: 2026-10-11T13:56:49.385Z
+updated: 2026-10-11T14:36:36.040Z
 blockers: []
 order: v
 board: product
@@ -48,3 +68,24 @@ Confirmed still valid 2026-10-11: ResetIconButton uses resolvedAccessibilityLabe
 ### Comment — codex @ 2026-10-11T13:56:48.213Z
 
 Replaced the brittle ResetIconButton modifier source assertion with a behavioral accessibility-label assertion. Verified the focused LightInspector test and scripts/ci-tests.sh fast (1,612 tests passed). Commit: d2d1c72b.
+
+## Agent log
+
+- 2026-10-11T14:36:36.036Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] LightInspectorTests passes and does not depend on the exact spelling of ResetIconButton's modifier chain. (pass) — The test constructs ResetIconButton and asserts its resolved accessibility label equals the reset title; it no longer asserts modifier-chain source text.
+- [x] scripts/ci-tests.sh fast has no failures from this test. (pass) — Fast lane exited 0 after running all 1,618 required tests.
+Checks run:
+- swift test --filter LightInspectorTests.testToneCurveResetUsesAccessibleTrailingDisclosureAction: exit 0; 1 test passed, 0 failures.
+- scripts/ci-tests.sh fast: exit 0; all 1,618 required tests completed.
+- Reviewed CropInspectorTests and InfoInspectorPresentationTests for the same fragile ResetIconButton modifier-chain assertion; none found.
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: codex
+Resolved model: gpt-6-luna
+Pickup session: 01MV3XBB0SNFVV08R8

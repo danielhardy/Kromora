@@ -2,7 +2,7 @@
 id: KRMA-825
 title: Polish advanced Vignette/Grain/Sharpening controls and replace text Reset links with icons
 type: task
-status: review
+status: done
 priority: medium
 human_review_required: false
 creation_provenance:
@@ -14,7 +14,7 @@ labels:
   - inspector
   - polish
 created: 2026-10-07T14:00:40.296Z
-updated: 2026-10-08T15:40:13.701Z
+updated: 2026-10-11T19:59:08.518Z
 blockers:
   - id: evt_muyfdk7r_yrbc3f
     type: human
@@ -30,7 +30,7 @@ blockers:
     created_at: 2026-10-07T19:15:10.725Z
     resolved_at: 2026-10-08T13:57:43.014Z
     resolved_by: web
-order: zv
+order: zzzzzq
 board: product
 footprint:
   source: declared
@@ -170,3 +170,8 @@ Test Suite 'KromoraKitTests.xctest' passed at 2026-10-08 09:40:10.588.
 	 Executed 15 tests, with 0 failures (0 unexpected) in 3.136 (3.137) seconds
 Test Suite 'Selected tests' passed at 2026-10-08 09:40:10.588.
 	 Executed 15 tests, with 0 failures (0 unexpected) in 3.136 (3.138) seconds passed (15 tests), and  passed. Commit: a3bf97eb. Live visual review was unavailable because the computer-use bridge could not bind a Kromora window.
+
+
+### Comment - HUMAN
+
+Marked as complete after veirfying expierence in app worked as intended

@@ -2,9 +2,42 @@
 id: KRMA-862
 title: "Library metadata filters: advanced filter sidebar (camera, lens, location, exposure, date)"
 type: feature
-status: ready
+status: done
 priority: medium
 human_review_required: false
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: "Delivered slice: advanced filter sidebar toggles in the Library and remembers its state per window."
+      result: pass
+      notes: LibraryGridView toggles the sidebar and persists presentation with SceneStorage.
+    - criterion: "Delivered slice: camera and lens facets use OR within a facet, AND across facets, show value counts, and compose with existing filters and search."
+      result: pass
+      notes: Generated-fixture tests cover matching, counts, flag/rating, and search.
+    - criterion: "Delivered slice: facet counts use the index off the main actor and preserve selection across filter changes."
+      result: pass
+      notes: Facet counts use a detached task over the query-controller snapshot; selection is UUID-based.
+    - criterion: "Delivered slice: facets are part of Codable LibraryQuery and older payloads decode."
+      result: pass
+      notes: Round-trip and legacy-payload decoding are covered by LibraryFacetTests.
+    - criterion: Date range, exposure, location, and all-filter toolbar summary requirements remain in this issue slice.
+      result: not_applicable
+      notes: These broader items were split to KRMA-880 (date), KRMA-881 (exposure), KRMA-882 (location), and KRMA-883 (all-filter toolbar summary).
+    - criterion: Accessibility labels and keyboard navigation are present for the delivered sidebar controls.
+      result: pass
+      notes: Controls use standard SwiftUI buttons and checkbox toggles with accessibility labels; no manual assistive-technology audit was run.
+  checks_run:
+    - swift test --filter LibraryFacetTests — exit 0; 6 tests passed, 0 failures.
+    - git diff --check cbc6eca8^ cbc6eca8 — passed.
+    - Reviewed the implementation diff and query/sidebar integration; no security, maintainability, or performance blockers found.
+  findings:
+    - The toolbar summary and Clear action cover metadata facet selections only, not existing flag/rating filters or search. Follow-up KRMA-883 created with the verification label.
+  fixes: []
+  verification_commits: []
+  actor: codex
+  resolved_model: gpt-6-luna
+  completed_at: 2026-10-11T14:39:40.743Z
+  session: 01MV3XGPQ5OXPLYIQP
 creation_provenance:
   runner: claude
   model: unknown
@@ -15,10 +48,17 @@ labels:
   - metadata
   - ux
 created: 2026-10-10T15:45:36.939Z
-updated: 2026-10-11T13:43:15.702Z
+updated: 2026-10-11T14:39:40.746Z
 blockers: []
-order: zxh
+order: x
 board: product
+footprint:
+  source: observed
+  paths: []
+  observed:
+    paths: []
+    captured_at: 2026-10-11T14:33:33.706Z
+    unavailable_reason: "missing_commits: no implementation commits are recorded"
 ---
 
 ## Objective
@@ -54,6 +94,34 @@ Decisions the ticket must settle (recommendation first):
 - Start from `Sources/KromoraKit/Models/LibraryQueryController.swift` (`LibraryQuery`, `LibraryFilter`, matching around line 695) and `PortablePackageAssetSummary` in `Sources/KromoraKit/Models/PortableLibraryPackage.swift`; metadata parsing is in `Sources/KromoraKit/Models/ImageMetadata.swift`; the grid is `Sources/KromoraKit/Views/LibraryGridView.swift`.
 - Consider splitting into child tickets once decisions 1 and 2 are made: (a) sidebar shell + camera/lens/date facets (no format change), (b) summary schema + backfill for exposure fields, (c) location facet.
 
+### Comment — claude @ 2026-10-11T14:33:34.108Z
+
+Delivered slice (a): sidebar shell, camera+lens facets with OR/AND semantics and counts, active-filter summary + clear, SceneStorage per-window state, facets in Codable LibraryQuery, tests in LibraryFacetTests (commit cbc6eca8). Not delivered: date range (KRMA-880), focal/ISO/aperture (KRMA-881), location (KRMA-882), docs update (no format change yet), VoiceOver/keyboard audit beyond labeled checkboxes, and no manual UI run.
+
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-10-11T14:39:40.743Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Delivered slice: advanced filter sidebar toggles in the Library and remembers its state per window. (pass) — LibraryGridView toggles the sidebar and persists presentation with SceneStorage.
+- [x] Delivered slice: camera and lens facets use OR within a facet, AND across facets, show value counts, and compose with existing filters and search. (pass) — Generated-fixture tests cover matching, counts, flag/rating, and search.
+- [x] Delivered slice: facet counts use the index off the main actor and preserve selection across filter changes. (pass) — Facet counts use a detached task over the query-controller snapshot; selection is UUID-based.
+- [x] Delivered slice: facets are part of Codable LibraryQuery and older payloads decode. (pass) — Round-trip and legacy-payload decoding are covered by LibraryFacetTests.
+- [ ] Date range, exposure, location, and all-filter toolbar summary requirements remain in this issue slice. (not_applicable) — These broader items were split to KRMA-880 (date), KRMA-881 (exposure), KRMA-882 (location), and KRMA-883 (all-filter toolbar summary).
+- [x] Accessibility labels and keyboard navigation are present for the delivered sidebar controls. (pass) — Controls use standard SwiftUI buttons and checkbox toggles with accessibility labels; no manual assistive-technology audit was run.
+Checks run:
+- swift test --filter LibraryFacetTests — exit 0; 6 tests passed, 0 failures.
+- git diff --check cbc6eca8^ cbc6eca8 — passed.
+- Reviewed the implementation diff and query/sidebar integration; no security, maintainability, or performance blockers found.
+Findings:
+- The toolbar summary and Clear action cover metadata facet selections only, not existing flag/rating filters or search. Follow-up KRMA-883 created with the verification label.
+Fixes:
+- None
+Verification commits:
+- None
+Actor: codex
+Resolved model: gpt-6-luna
+Pickup session: 01MV3XGPQ5OXPLYIQP
+Summary: Verified the delivered camera/lens advanced-filter slice. Deferred date, exposure, location, and all-filter toolbar summary work are tracked in KRMA-880 through KRMA-883.
