@@ -142,6 +142,19 @@ target part is that same gradient; otherwise it draws a new gradient mask, and a
 becomes a gradient restores the previous selection. Combine controls (mode, solo, invert, ordering) live
 on the part rows and appear only once a mask has more than one part.
 
+Smart-mask creation emits presentation-only request, resolved-reference, and dismissal events to
+`MaskDiscoveryState`. `MaskDiscoveryOverlay` owns the replaceable optical treatment in a separate
+transparent Metal surface; `PreviewSurface` and the analysis implementation do not schedule its
+frames. The waiting treatment expresses no analysis progress. A successful edit commits immediately,
+then discovery reads the returned reference's existing pixels from `MaskStore` and uploads a
+disposable raster capped at 512 pixels per edge. Its inverse document-geometry mapping preserves
+rotation, flips, straighten, perspective, crop, and navigation. The drawable is capped at 960 pixels
+per edge, runs at 24 fps (12 under power or thermal constraints), and admits one frame in flight.
+Hidden/inactive windows pause animation, Reduce Motion uses a still treatment, and source changes
+or presentation teardown discard discovery. Request IDs reject stale completions. This subsystem
+never requests inference, rerenders the photo, changes overlay preferences, or enters edit/export
+state. Its shaders are precompiled with the presentation library by `scripts/build-metal-libraries.sh`.
+
 Range selectors are portable mask recipes. Luminance ranges keep normalized lower/upper thresholds
 and smoothness; the workspace shows the current luma histogram with draggable range handles. Color
 ranges retain up to eight sampled RGB values with falloff and refinement controls. Their mattes are

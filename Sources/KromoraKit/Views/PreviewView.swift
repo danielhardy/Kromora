@@ -381,6 +381,22 @@ struct PreviewView: View {
                 preview.allowsHitTesting(!canvasState.isCropToolActive)
 
                 if showsMaskOverlay, viewModel.isMaskingWorkspaceActive,
+                   !canvasState.isCropToolActive, !viewModel.isShowingOriginal,
+                   surface.image != nil, !isPreviewLoading {
+                    MaskDiscoveryOverlay(
+                        state: viewModel.maskingWorkflow.discoveryState,
+                        loadPixels: { [analysis = viewModel.photoAnalysisCoordinator] reference in
+                            await analysis.pixels(for: reference)
+                        },
+                        mapping: GeometryPointMapping(
+                            sourceSize: viewModel.sourceSize, rotation: viewModel.document.rotation,
+                            crop: viewModel.document.crop),
+                        navigation: canvasState.navigation,
+                        backingScale: maskOverlayBackingScale,
+                        reduceMotion: accessibilityReduceMotion)
+                }
+
+                if showsMaskOverlay, viewModel.isMaskingWorkspaceActive,
                     (maskingState.showOverlay || maskingState.overlayPreviewTarget != nil),
                     viewModel.sourceSize != .zero,
                     maskingState.selectedLayerID != nil || maskingState.hasDraft

@@ -129,6 +129,7 @@ final class MaskingWorkflowCoordinatorTests: XCTestCase {
         destination.maskingAssetID = PhotoAssetID(rawValue: "asset-1")
 
         coordinator.createSmartMask(.subject)
+        XCTAssertEqual(coordinator.discoveryState.request?.phase, .waiting)
         await coordinator.waitForInFlightSmartMask()
 
         XCTAssertEqual(destination.document.localAdjustments.count, 1)
@@ -140,6 +141,7 @@ final class MaskingWorkflowCoordinatorTests: XCTestCase {
         }
         XCTAssertEqual(destination.statusMessages.last, "Created Subject mask")
         XCTAssertNil(coordinator.smartMaskRetryContext)
+        XCTAssertEqual(coordinator.discoveryState.request?.phase, .resolved(regionMask().reference))
     }
 
     func testCreateSmartMaskWithoutOpenSourceReportsUnavailable() async {
@@ -168,7 +170,10 @@ final class MaskingWorkflowCoordinatorTests: XCTestCase {
         // second call, so its (still in-flight) provider result must never land.
         coordinator.createSmartMask(.subject)
         try? await Task.sleep(for: .milliseconds(10))
+        let previousDiscovery = coordinator.discoveryState.request?.id
         coordinator.createSmartMask(.background)
+        let currentDiscovery = coordinator.discoveryState.request?.id
+        XCTAssertNotEqual(previousDiscovery, currentDiscovery)
         await coordinator.waitForInFlightSmartMask()
 
         XCTAssertEqual(destination.document.localAdjustments.count, 1)
@@ -178,6 +183,10 @@ final class MaskingWorkflowCoordinatorTests: XCTestCase {
             return XCTFail("expected a semantic component")
         }
         XCTAssertEqual(definition.target, .background)
+        XCTAssertEqual(coordinator.discoveryState.request?.id, currentDiscovery)
+        guard case .resolved = coordinator.discoveryState.request?.phase else {
+            return XCTFail("the superseding request should reveal")
+        }
     }
 
     func testCreateSmartMaskCancellationLeavesNoLayer() async {
@@ -193,6 +202,7 @@ final class MaskingWorkflowCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(destination.document.localAdjustments.isEmpty)
         XCTAssertNil(coordinator.smartMaskRetryContext)
+        XCTAssertNil(coordinator.discoveryState.request)
     }
 
     func testCreateSmartMaskFailurePreparesRetryContext() async {
@@ -208,6 +218,9 @@ final class MaskingWorkflowCoordinatorTests: XCTestCase {
         XCTAssertTrue(destination.document.localAdjustments.isEmpty)
         XCTAssertEqual(coordinator.smartMaskRetryContext, .create(.subject))
         XCTAssertNotNil(destination.statusMessages.last)
+        guard case .ending = coordinator.discoveryState.request?.phase else {
+            return XCTFail("failed analysis must dismiss without a reveal")
+        }
     }
 
     func testRetryMaskAnalysisReplaysCreateContext() async {
@@ -227,6 +240,37 @@ final class MaskingWorkflowCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(destination.document.localAdjustments.count, 1)
         XCTAssertNil(coordinator.smartMaskRetryContext)
+    }
+
+    func testAddedSmartComponentRevealsItsReturnedMaskAfterCommit() async {
+        let analysis = FakeAnalysisProvider()
+        let result = regionMask()
+        await analysis.configure(delay: .zero, result: .success(result))
+        let (coordinator, destination, _) = makeCoordinator(analysis: analysis)
+        destination.maskingSource = makeSource()
+        destination.maskingAssetID = PhotoAssetID(rawValue: "asset-1")
+        let layer = LocalAdjustmentLayer(components: [MaskComponent(source: .brush(BrushMaskDefinition()))])
+        destination.document.localAdjustments = [layer]
+        coordinator.addSmartMaskComponent(to: layer.id, kind: .subject, mode: .subtract)
+        XCTAssertEqual(coordinator.discoveryState.request?.phase, .waiting)
+        await coordinator.waitForInFlightSmartMask()
+        XCTAssertEqual(destination.document.localAdjustments[0].components.count, 2)
+        XCTAssertEqual(destination.document.localAdjustments[0].components.last?.mode, .subtract)
+        XCTAssertEqual(coordinator.discoveryState.request?.phase, .resolved(result.reference))
+    }
+
+    func testEmptySmartMaskDismissesWithoutRevealingOrCommitting() async {
+        let analysis = FakeAnalysisProvider()
+        await analysis.configure(delay: .zero, result: .success(regionMask(coverage: 0)))
+        let (coordinator, destination, _) = makeCoordinator(analysis: analysis)
+        destination.maskingSource = makeSource()
+        destination.maskingAssetID = PhotoAssetID(rawValue: "asset-1")
+        coordinator.createSmartMask(.subject)
+        await coordinator.waitForInFlightSmartMask()
+        XCTAssertTrue(destination.document.localAdjustments.isEmpty)
+        guard case .ending = coordinator.discoveryState.request?.phase else {
+            return XCTFail("an empty mask must not reveal fabricated geometry")
+        }
     }
 
     func testShutdownCancelsInFlightWorkWithoutCrashing() async {

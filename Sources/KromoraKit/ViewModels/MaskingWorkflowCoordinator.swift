@@ -174,6 +174,7 @@ protocol MaskingWorkflowDestination: AnyObject {
 @MainActor
 final class MaskingWorkflowCoordinator {
     let interactionState = MaskInteractionState()
+    let discoveryState = MaskDiscoveryState()
 
     private var smartMaskCreationTask: Task<Void, Never>?
     private(set) var smartMaskRetryContext: SmartMaskRetryContext?
@@ -190,6 +191,7 @@ final class MaskingWorkflowCoordinator {
     /// Cancel any in-flight smart-mask request without a retry offer. Used when the active source
     /// is about to change: a stale analysis result must never land on the next photo.
     func cancelInFlightSmartMask() {
+        discoveryState.reset()
         smartMaskCreationTask?.cancel()
         smartMaskCreationTask = nil
         smartMaskRetryContext = nil
@@ -204,6 +206,7 @@ final class MaskingWorkflowCoordinator {
 
     /// Cancel in-flight work and wait for it to quiesce. Called once, from `AppViewModel.shutdown`.
     func shutdown() async {
+        discoveryState.reset()
         personSignalWarmingTask?.cancel()
         smartMaskCreationTask?.cancel()
         await personSignalWarmingTask?.value
@@ -248,6 +251,7 @@ final class MaskingWorkflowCoordinator {
             return
         }
 
+        discoveryState.reset()
         smartMaskCreationTask?.cancel()
         smartMaskCreationTask = nil
         smartMaskRetryContext = nil
@@ -485,6 +489,7 @@ final class MaskingWorkflowCoordinator {
             return
         }
         guard let destination else { return }
+        discoveryState.reset()
         smartMaskCreationTask?.cancel()
         smartMaskCreationTask = nil
         smartMaskRetryContext = .create(kind)
@@ -511,7 +516,9 @@ final class MaskingWorkflowCoordinator {
         interactionState.beginMaskResolution()
         let requestTitle = target == .face ? "Face \(faceIndex + 1)" : kind.title
         destination.setMaskingStatusMessage("Analyzing \(requestTitle) mask…")
+        let discoveryID = discoveryState.begin(title: requestTitle)
         smartMaskCreationTask = Task { @MainActor [weak self] in
+            defer { self?.discoveryState.end(discoveryID) }
             do {
                 // Person segmentation is deliberately gated by the shared provider. Detailed
                 // analysis establishes the face/foreground signal without exposing diagnostics.
@@ -554,6 +561,7 @@ final class MaskingWorkflowCoordinator {
                 self.insertDurableMask(kind, faceIndex: faceIndex, destination: destination)
                 self.smartMaskRetryContext = nil
                 self.interactionState.markMaskResolved()
+                self.discoveryState.resolve(discoveryID, reference: mask.reference)
                 let title = target == .face ? "Face \(faceIndex + 1)" : kind.title
                 destination.setMaskingStatusMessage("Created \(title) mask")
             } catch is CancellationError {
@@ -802,6 +810,7 @@ final class MaskingWorkflowCoordinator {
         guard let destination,
               destination.document.localAdjustments.contains(where: { $0.id == layerID })
         else { return }
+        discoveryState.reset()
         smartMaskCreationTask?.cancel()
         smartMaskRetryContext = .addComponent(layerID: layerID, kind: kind, mode: mode)
         guard let source = destination.maskingSource, let assetID = destination.maskingAssetID else {
@@ -820,7 +829,9 @@ final class MaskingWorkflowCoordinator {
         interactionState.beginMaskResolution()
         let requestTitle = target == .face ? "Face \(faceIndex + 1)" : kind.title
         destination.setMaskingStatusMessage("Analyzing \(requestTitle) component…")
+        let discoveryID = discoveryState.begin(title: requestTitle)
         smartMaskCreationTask = Task { @MainActor [weak self] in
+            defer { self?.discoveryState.end(discoveryID) }
             do {
                 if target == .person {
                     _ = try? await coordinator.analyze(
@@ -854,6 +865,7 @@ final class MaskingWorkflowCoordinator {
                     mode: mode)
                 self.smartMaskRetryContext = nil
                 self.interactionState.markMaskResolved()
+                self.discoveryState.resolve(discoveryID, reference: mask.reference)
                 let title = target == .face ? "Face \(faceIndex + 1)" : kind.title
                 destination.setMaskingStatusMessage("Added \(title) component")
             } catch is CancellationError {

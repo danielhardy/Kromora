@@ -80,8 +80,10 @@ final class MetalKernelParityTests: XCTestCase {
             .flatMap { String(data: $0, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) }
         // The script hashes the presentation Metal sources in declaration order.
         let preview = try XCTUnwrap(KromoraKitResourceBundle.metalSource(named: "PreviewSurface"))
+        let discovery = try XCTUnwrap(KromoraKitResourceBundle.metalSource(named: "MaskDiscovery"))
         var hasher = SHA256()
         hasher.update(data: Data(preview.utf8))
+        hasher.update(data: Data(discovery.utf8))
         XCTAssertEqual(
             hasher.finalize().hexString, recorded,
             "KromoraPresentation.metallib is stale — run scripts/build-metal-libraries.sh")
@@ -89,11 +91,82 @@ final class MetalKernelParityTests: XCTestCase {
             throw XCTSkip("no Metal device")
         }
         let library = try device.makeLibrary(URL: url)
-        for name in ["preview_quad_vertex", "preview_quad_fragment"] {
+        for name in ["preview_quad_vertex", "preview_quad_fragment",
+                     "mask_discovery_vertex", "mask_discovery_fragment"] {
             XCTAssertNotNil(
                 library.makeFunction(name: name),
                 "presentation library is missing \(name) — rebuild with scripts/build-metal-libraries.sh")
         }
+    }
+
+    func testDiscoveryShaderUsesActualCoverageAndLeavesPhotoPerimeterTransparent() throws {
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+        let library = try device.makeLibrary(URL: XCTUnwrap(KromoraKitResourceBundle.presentationMetallibURL()))
+        let descriptor = MTLRenderPipelineDescriptor()
+        descriptor.vertexFunction = library.makeFunction(name: "mask_discovery_vertex")
+        descriptor.fragmentFunction = library.makeFunction(name: "mask_discovery_fragment")
+        descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+        let pipeline = try device.makeRenderPipelineState(descriptor: descriptor)
+        let queue = try XCTUnwrap(device.makeCommandQueue())
+        let maskDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .r8Unorm, width: 8, height: 8, mipmapped: false)
+        maskDescriptor.storageMode = .shared
+        maskDescriptor.usage = .shaderRead
+        let mask = try XCTUnwrap(device.makeTexture(descriptor: maskDescriptor))
+        // An asymmetric mask catches an inverted y axis as well as fabricated full-frame fills.
+        var coverage = [UInt8](repeating: 0, count: 64)
+        for y in 0..<4 { for x in 0..<4 { coverage[y * 8 + x] = 255 } }
+        coverage.withUnsafeBytes {
+            mask.replace(region: MTLRegionMake2D(0, 0, 8, 8), mipmapLevel: 0,
+                         withBytes: $0.baseAddress!, bytesPerRow: 8)
+        }
+        let outputDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm, width: 64, height: 64, mipmapped: false)
+        outputDescriptor.storageMode = .shared
+        outputDescriptor.usage = .renderTarget
+        let output = try XCTUnwrap(device.makeTexture(descriptor: outputDescriptor))
+        var uniforms = MaskDiscoveryUniforms(
+            imageRect: SIMD4(0.125, 0.125, 0.75, 0.75), cropRect: SIMD4(0, 0, 1, 1),
+            sourceX: SIMD4(1, 0, 0, 0), sourceY: SIMD4(0, 1, 0, 0), sourceW: SIMD4(0, 0, 1, 0),
+            timing: SIMD4(5, 0, 0.35, 0), display: SIMD4(1, 1, 1, 0))
+        func render() throws -> [UInt8] {
+            let pass = MTLRenderPassDescriptor()
+            pass.colorAttachments[0].texture = output
+            pass.colorAttachments[0].loadAction = .clear
+            pass.colorAttachments[0].storeAction = .store
+            pass.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0)
+            let command = try XCTUnwrap(queue.makeCommandBuffer())
+            let encoder = try XCTUnwrap(command.makeRenderCommandEncoder(descriptor: pass))
+            encoder.setRenderPipelineState(pipeline)
+            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<MaskDiscoveryUniforms>.stride, index: 0)
+            encoder.setFragmentTexture(mask, index: 0)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            encoder.endEncoding()
+            command.commit()
+            command.waitUntilCompleted()
+            XCTAssertEqual(command.status, .completed)
+            var bytes = [UInt8](repeating: 0, count: 64 * 64 * 4)
+            bytes.withUnsafeMutableBytes {
+                output.getBytes($0.baseAddress!, bytesPerRow: 64 * 4,
+                                from: MTLRegionMake2D(0, 0, 64, 64), mipmapLevel: 0)
+            }
+            return bytes
+        }
+        let reveal = try render()
+        func alpha(_ bytes: [UInt8], _ x: Int, _ y: Int) -> UInt8 { bytes[(y * 64 + x) * 4 + 3] }
+        XCTAssertGreaterThan(alpha(reveal, 18, 18), 20)
+        XCTAssertEqual(alpha(reveal, 45, 45), 0)
+        XCTAssertEqual(alpha(reveal, 18, 45), 0)
+        XCTAssertEqual(alpha(reveal, 2, 2), 0)
+        uniforms.timing.z = 1
+        XCTAssertTrue(try render().allSatisfy { $0 == 0 }, "the reveal must recede completely")
+        uniforms.timing = SIMD4(30, 0.65, 0, 0)
+        uniforms.display.z = 0
+        let waiting = try render()
+        let waitingAlpha = stride(from: 3, to: waiting.count, by: 4).map { waiting[$0] }
+        XCTAssertGreaterThan(waitingAlpha.max() ?? 0, 0)
+        XCTAssertLessThan(waitingAlpha.max() ?? 255, 40, "waiting light must preserve the photo")
+        XCTAssertEqual(alpha(waiting, 2, 2), 0)
     }
 
     /// Acceptance criteria 1 and 3 as a source gate: no deprecated CIKL compilation and no
