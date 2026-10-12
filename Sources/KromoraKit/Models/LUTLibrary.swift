@@ -234,6 +234,11 @@ final class LUTLibrary: ObservableObject {
         preferences.set(value, forKey: Self.importedBookmarksKey)
     }
 
+    /// Security scopes backing the current Looks, for workers that must keep them open across a read.
+    var retainedAccesses: [SecurityScopedResourceAccess] {
+        (scopedAccess.map { [$0] } ?? []) + importedAccesses.map(\.access)
+    }
+
     func setFolder(_ url: URL, access: SecurityScopedResourceAccess? = nil) {
         saveBookmark(for: url)
         self.folderURL = url

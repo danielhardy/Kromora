@@ -1589,15 +1589,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// package sidecar remains self-contained even if a user later removes or relocates the
     /// external browser file.
     private func configureEmbeddedLooks() {
-        let values = library.allLUTs.reduce(into: [String: Data]()) { result, look in
-            if let data = try? Data(contentsOf: look.url) {
-                result[look.lutID.raw] = data
-            }
-        }
+        let sources = library.allLUTs.map { EmbeddedLookSource(id: $0.lutID.raw, url: $0.url) }
+        let accesses = library.retainedAccesses
         let store = editStore
-        Task {
-            await store.setEmbeddedLookBytes(values)
-        }
+        Task { await store.loadEmbeddedLooks(sources, retaining: accesses) }
     }
 
     /// Follow a derived LUT from memory onto disk.
@@ -4379,6 +4374,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // Invalidate every generation before awaiting anything. A renderer or framework call may
         // only observe cancellation when it returns, but it can no longer publish into this model.
         sourceSession.cancel()
+        let shutdownStore = editStore
+        Task { await shutdownStore.cancelEmbeddedLookLoading() }
         await retouchWorkflow.shutdown()
         previewAdmissionCoordinator.cancelAdjacentPreviewPrefetch()
         autoWorkflowCoordinator.invalidate { [weak self] state, progress in

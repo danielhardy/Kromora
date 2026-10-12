@@ -162,6 +162,8 @@ actor EditDocumentStore {
     private let packageRoot: URL?
     private let packageLease: PortablePackageLease?
     private var embeddedLookBytes: [String: Data] = [:]
+    private var embeddedLookTask: Task<Void, Never>?
+    private var embeddedLookGeneration: UInt64 = 0
     /// Receives the membership entry a package transaction committed beside an edit, so the
     /// disposable library index can carry the same `presentedAspectRatio` without a rebuild.
     private var membershipObserver: (@Sendable (PortablePackageMembershipEntry) -> Void)?
@@ -220,7 +222,44 @@ actor EditDocumentStore {
     }
 
     func setEmbeddedLookBytes(_ values: [String: Data]) {
+        cancelEmbeddedLookLoading()
         embeddedLookBytes = values
+    }
+
+    /// Loads Look bytes off the actor's caller and installs them only if no newer snapshot, cancel, or
+    /// direct `setEmbeddedLookBytes` has superseded this one. `save` awaits the latest pending load,
+    /// so an edit written right after a Look import still embeds that Look's bytes.
+    func loadEmbeddedLooks(
+        _ sources: [EmbeddedLookSource],
+        retaining accesses: [SecurityScopedResourceAccess],
+        reader: @escaping EmbeddedLookLoader.Reader = EmbeddedLookLoader.fileReader
+    ) {
+        embeddedLookTask?.cancel()
+        embeddedLookGeneration &+= 1
+        let generation = embeddedLookGeneration
+        embeddedLookTask = Task { [weak self] in
+            let values = await EmbeddedLookLoader.load(sources, retaining: accesses, reader: reader)
+            guard !Task.isCancelled else { return }
+            await self?.installEmbeddedLooks(values, generation: generation)
+        }
+    }
+
+    /// Cancels pending Look loading; nothing already in flight can publish afterwards.
+    func cancelEmbeddedLookLoading() {
+        embeddedLookTask?.cancel()
+        embeddedLookTask = nil
+        embeddedLookGeneration &+= 1
+    }
+
+    /// Suspends until the newest Look snapshot has been installed (or cancelled).
+    func awaitEmbeddedLooks() async {
+        await embeddedLookTask?.value
+    }
+
+    private func installEmbeddedLooks(_ values: [String: Data], generation: UInt64) {
+        guard generation == embeddedLookGeneration else { return }
+        embeddedLookBytes = values
+        embeddedLookTask = nil
     }
 
     func setMembershipObserver(_ observer: (@Sendable (PortablePackageMembershipEntry) -> Void)?) {
@@ -333,6 +372,7 @@ actor EditDocumentStore {
         _ document: EditDocument, for source: EditSourceReference, snapshotName: String?
     ) async throws {
         markIO()
+        await awaitEmbeddedLooks()
         // Encode before incrementing attempt counters or changing the cache. An invalid value must
         // not make a failed save look like a dirty durable revision.
         _ = try JSONEncoder().encode(document)
