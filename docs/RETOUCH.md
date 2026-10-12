@@ -144,8 +144,8 @@ separate deterministic low-frequency-grain profile (for example, smooth noise sa
 lattice and interpolated between points) before changing thresholds.
 
 The gate measures Heal and Clone quality against the unchanged KRMA-658 limits. Manual fixture
-offsets passed 3/36 Heal rows and 7/36 Clone rows; the automatic picker passed 5/36 Heal rows in
-the last recorded full corpus run. These are generated-fixture results, not claims about
+offsets passed 8/36 Heal rows and 7/36 Clone rows; the automatic picker passed 5/36 Heal rows in
+the corpus run of 2026-10-12. These are generated-fixture results, not claims about
 camera-image performance. The evaluation limits are a quality gate, not a timing benchmark. For
 real-camera coverage, use local RAW fixtures in `realworldtest/` or another fixture directory with
 `KROMORA_RAW_FIXTURE_DIR`; the normal quality suite does not use those images.

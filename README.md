@@ -35,7 +35,8 @@ MVP commitments.
 1. Create or open a `.kromoralibrary` and import still images from files, folders, Photos, or
    supported mounted removable media. Imports copy accepted originals into the package.
 2. Browse a virtualized Library, select several photos, and cull with picks, rejects, star ratings,
-   and filters. Removing a managed photo sends it to package trash; referenced import sources are
+   and filters, including an advanced sidebar with camera, lens, focal length, ISO, aperture,
+   capture-date, and coarse on-device location facets plus a one-action clear. Removing a managed photo sends it to package trash; referenced import sources are
    left alone.
 3. Edit non-destructively. Kromora stores value-based edit documents and uses one render pipeline
    for previews and full-resolution output.

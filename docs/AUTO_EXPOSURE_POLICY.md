@@ -73,8 +73,8 @@ selection weights the rendered colorfulness shortfall at 1.75 alongside tone and
 guardrails, so a safe color improvement can win alongside a tonal improvement. Relative contrast/noise
 costs are measured against the unchanged render. This protects shadow readability without
 accepting crushed blacks, clipped whites, or a washed-out result. Existing manual controls,
-curves, Looks, LUTs, and user-owned local layers remain unchanged; Auto provenance version 5
-invalidates older run fingerprints so the calibrated policy is evaluated once.
+curves, Looks, LUTs, and user-owned local layers remain unchanged; Auto algorithm version 6
+(`AutoEnhancementPolicy.algorithmVersion`) invalidates older run fingerprints so the calibrated policy is evaluated once.
 
 ## Quality rubric
 

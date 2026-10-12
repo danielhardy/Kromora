@@ -80,7 +80,9 @@ product decision with a concrete user need:
   model.
 - Tethered capture, video editing, generative large-object removal, or universal embedded-depth
   support.
-- Comprehensive proofing, print, HDR display/export, and output-sharpening workflows.
+- Comprehensive proofing, print, and HDR display/export workflows. Export offers only the basic
+  output-sharpening choice (screen, matte, or glossy at low/standard/high) described in the
+  [engineering guide](ENGINEERING_GUIDE.md).
 - Every camera maker's proprietary controls, profiles, or pixel-matched output relative to another
   editor.
 

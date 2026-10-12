@@ -40,8 +40,8 @@ the tests and are not committed; the photo-intelligence resource exception is do
 
 `PresentationBudgetTests` is part of `serial`. It uses generated package fixtures and two distinct
 `AppViewModel` lifetimes for the exact-frame relaunch cases; the cold canonical-write case uses the
-real renderer. The ten-test suite took 6.3 seconds to execute on an Apple M4 Pro running macOS 27.2
-(targeted serialized run, excluding build time).
+real renderer. When the suite had ten tests it took 6.3 seconds to execute on an Apple M4 Pro running macOS 27.2
+(targeted serialized run, excluding build time); it has since grown to 17 and has not been re-timed.
 
 The photo-intelligence corpus has two intentionally separate checks. The fast
 `PhotoIntelligenceDecisionLogicTests` suite uses deterministic fakes to test scene/Auto decision
@@ -262,12 +262,12 @@ boundary suites so injected failures stay reproducible and do not depend on a sc
 | Same-ID Look replacement and unchanged Look scans | `LUTLibraryTests`, `AppViewModelTests`, `EditedThumbnailCoordinatorTests` |
 | Transactional edit plus presented geometry and rollback | `PortableLibraryPackageTests.testEditRevisionAndPresentedGeometryPublishOrRollbackTogether` |
 | Packed-frame stable keys, read-window bounds, compaction, write interruptions, and retry | `ThumbnailFrameStoreTests`, `PortablePackageMaintenanceTests` |
+| Launch-hint schema faults, wrong library, removed IDs, viewport supersession, and stale completion | `LaunchHintsTests`, `LibraryBrowsingCoordinatorTests` |
+| Rapid selection, newest-pending work, stale render/thumbnail publication, and actual drawable callbacks | `FilmstripNavigationTests`, `ThumbnailSwitchLifecycleTests`, `IdentityRegressionGateTests`, `PreviewSurfaceTests` |
 
 Persisted presentation frame reads are recorded by `FrameLookupLedger` with their surface, outcome,
 and monotonic timestamp; the ledger stores no paths or image data. The one-line `FrameLookupSummary`
 signpost groups outcomes by surface and names the most frequent rejection reason for quick cache-miss triage.
-| Launch-hint schema faults, wrong library, removed IDs, viewport supersession, and stale completion | `LaunchHintsTests`, `LibraryBrowsingCoordinatorTests` |
-| Rapid selection, newest-pending work, stale render/thumbnail publication, and actual drawable callbacks | `FilmstripNavigationTests`, `ThumbnailSwitchLifecycleTests`, `IdentityRegressionGateTests`, `PreviewSurfaceTests` |
 
 Run this matrix with `swift test`, then `scripts/ci-tests.sh fast`, `serial`, and `identity`. These
 assertions establish correctness and bounded work; fake renderer timings remain orchestration data
