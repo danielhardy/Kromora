@@ -365,4 +365,23 @@ final class StoredEditAdoptionTests: TempDirectoryTestCase {
             viewModel.collection.items.first { $0.displayName == "one.png" }?.asset.source
                 .portableIdentity.sourceFingerprint.isBrowsingPlaceholder ?? false)
     }
+
+    func testOpeningCollectionAssetAfterShutdownDoesNotChangeNavigation() async throws {
+        let packageURL = try await makePackage(storedExposures: ["one.png": 1.5])
+        try makeLegacyPlaceholders(in: packageURL)
+        let (viewModel, _, session) = try await reopen(
+            packageURL, browsingAssets: true, holdPreparation: false)
+        let id = try portableID("one.png", in: viewModel)
+        let gate = MaterializationGate(holding: [id])
+        session.materializationGate = { await gate.arrive($0) }
+        let url = try XCTUnwrap(
+            viewModel.collection.items.first { $0.displayName == "one.png" }?.url)
+
+        await viewModel.shutdown()
+        viewModel.openImage(url: url)
+
+        XCTAssertTrue(viewModel.navigation.isGrid)
+        let arrivals = await gate.arrivals
+        XCTAssertTrue(arrivals.isEmpty, "shutdown must reject new materialization")
+    }
 }

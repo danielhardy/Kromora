@@ -2057,6 +2057,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         url: URL, assetID: PhotoAssetID, selectionUptime: UInt64? = nil,
         collectionAlreadySelected: Bool = false
     ) {
+        guard !isShuttingDown else { return }
         previewAdmissionCoordinator.cancelAdjacentPreviewPrefetch()
         cancelPendingPreviewDebounce()
         // Assign the value so @Published sends immediately. This open path can now suspend while
