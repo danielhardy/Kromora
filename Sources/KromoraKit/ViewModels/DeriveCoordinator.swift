@@ -45,6 +45,7 @@ final class DeriveCoordinator: ObservableObject {
     /// Identity of the current operation. Bumped synchronously by `derive`, `dismiss` and
     /// `shutdown`, so any callback carrying an older value is stale and must not publish.
     private var generation = 0
+    private var isShutdown = false
     /// Every worker not yet finished, including ones retired by `dismiss`, so `shutdown` can
     /// await them all.
     private var workers: [Int: Task<Void, Never>] = [:]
@@ -99,6 +100,7 @@ final class DeriveCoordinator: ObservableObject {
     /// `dismiss()`, before their source pair or scratch directory is removed by a test fixture.
     /// Nothing publishes after this starts.
     func shutdown() async {
+        isShutdown = true
         generation += 1
         let outstanding = Array(workers.values)
         for worker in outstanding { worker.cancel() }
@@ -142,7 +144,7 @@ final class DeriveCoordinator: ObservableObject {
     /// Derive a LUT from a (RAW, JPG) pair. The result lives in `derivedLUT`
     /// and `report` until the user explicitly saves it.
     func derive(rawURL: URL, jpgURL: URL) {
-        guard !isDeriving else { return }
+        guard !isShutdown, !isDeriving else { return }
         generation += 1
         let operation = generation
         isDeriving = true
@@ -157,6 +159,7 @@ final class DeriveCoordinator: ObservableObject {
         let extractor = self.extractor
         workers[operation] = Task.detached {
             let outcome: Outcome
+            var scratchDirectory: URL?
             do {
                 let result = try extractor(
                     rawURL, jpgURL,
@@ -176,6 +179,7 @@ final class DeriveCoordinator: ObservableObject {
                 let directory = FileManager.default.temporaryDirectory
                     .appendingPathComponent("KromoraDerive-\(UUID().uuidString)", isDirectory: true)
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                scratchDirectory = directory
                 let scratch = directory.appendingPathComponent("\(name).cube")
                 try CubeLUT.write(cube: result.cube, size: result.size, title: name, to: scratch)
                 try Task.checkCancellation()
@@ -183,8 +187,10 @@ final class DeriveCoordinator: ObservableObject {
                 let lut = Self.makeDerivedLUT(cube: result.cube, size: result.size, name: name)
                 outcome = .finished(lut: lut, report: result.report, scratch: scratch)
             } catch is CancellationError {
+                if let scratchDirectory { try? FileManager.default.removeItem(at: scratchDirectory) }
                 outcome = .cancelled
             } catch {
+                if let scratchDirectory { try? FileManager.default.removeItem(at: scratchDirectory) }
                 outcome = .failed("Derive failed: \(error.localizedDescription)")
             }
             await self.complete(outcome, operation: operation)
