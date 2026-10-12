@@ -211,6 +211,20 @@ extension RetouchWorkflowCoordinatorTests {
         XCTAssertTrue(destination.statuses.isEmpty)
     }
 
+    func testLateDetectionFailureForPreviousPhotoDoesNotPublishOnNextPhoto() async {
+        let (destination, workflow, gate) = makeGated()
+        destination.proxyProvider = { _ in await gate.arrive(); return nil }
+        destination.retouchAnalysisSource = Self.source("A")
+        workflow.detectDust()
+        await gate.waitForArrivals(1)
+        destination.retouchAnalysisSource = Self.source("B")
+        workflow.activeSourceDidChange()
+        gate.releaseAll()
+        await workflow.shutdown()
+        XCTAssertTrue(workflow.interactionState.dustSuggestions.isEmpty)
+        XCTAssertTrue(destination.statuses.isEmpty)
+    }
+
     func testCompletedSuggestionsAreClearedAndStaleAcceptIsHarmless() async {
         let (destination, workflow, gate) = makeGated()
         destination.retouchAnalysisSource = Self.source("A")
