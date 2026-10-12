@@ -332,6 +332,23 @@ private actor SmartTestProvider: SemanticMaskProviding {
     }
 
     func mask(for kind: SemanticMaskKind, image: AnalysisImage, quality: MaskQuality) async throws -> RegionMask {
+        // Like the production provider, own the durable lookup. A background request re-enters the
+        // coordinator for foreground; when the first foreground task has already finished, that
+        // repeat must be a store hit rather than a second segmentation, whatever the task ordering.
+        if !returnsWrongAsset {
+            let cachedKey = MaskCacheKey(
+                assetID: image.assetID ?? PhotoAnalysisCoordinator.assetID(for: image.source),
+                sourceFingerprint: PhotoAnalysisCoordinator.sourceFingerprint(for: image.source),
+                kind: kind, quality: quality, providerVersion: "smart-test-1"
+            )
+            if let reference = await store.mask(for: cachedKey, quality: quality),
+               let pixels = await store.pixels(for: reference) {
+                return RegionMask(
+                    kind: kind, bounds: NormalizedRect(x: 0, y: 0, width: 1, height: 1),
+                    quality: quality, reference: reference, confidence: 1, coverage: pixels.coverage
+                )
+            }
+        }
         callCount += 1
         if renderIsUnavailable && quality == .render {
             throw VisionSemanticMaskError.unsupportedQuality(.render, kind)
