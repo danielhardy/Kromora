@@ -44,6 +44,64 @@ final class RegionMaskTests: XCTestCase {
         XCTAssertThrowsError(try NormalizedMask(size: size, values: [0, .nan, 1, 0]))
     }
 
+    func testNormalizedMaskRejectsInvalidDimensionsWithoutTrapping() throws {
+        for (width, height) in [(0, 0), (0, 3), (3, 0), (-2, 2), (-1, -1), (Int.max, 2), (Int.min, -1)] {
+            XCTAssertThrowsError(
+                try NormalizedMask(size: PixelDimensions(width: width, height: height), values: [0, 1, 0, 1]),
+                "\(width)x\(height)"
+            ) { XCTAssertEqual($0 as? RegionMaskError, .invalidPixelCount) }
+        }
+        let overflow = Data(#"{"size":{"width":9223372036854775807,"height":2},"values":[]}"#.utf8)
+        XCTAssertThrowsError(try JSONDecoder().decode(NormalizedMask.self, from: overflow))
+        let negative = Data(#"{"size":{"width":-1,"height":-2},"values":[0,1]}"#.utf8)
+        XCTAssertThrowsError(try JSONDecoder().decode(NormalizedMask.self, from: negative))
+    }
+
+    func testNormalizedMaskSupportsSingleRowAndColumn() throws {
+        let row = try NormalizedMask(size: PixelDimensions(width: 4, height: 1), values: [0, 1, 0, 1])
+        XCTAssertEqual(row.coverage, 0.5, accuracy: 0.0001)
+        XCTAssertTrue(row.isBinary)
+        let column = try NormalizedMask(size: PixelDimensions(width: 1, height: 2), values: [0.25, 2])
+        XCTAssertEqual(column.values, [0.25, 1])
+        XCTAssertFalse(column.isBinary)
+    }
+
+    func testMaskStoreTreatsMalformedLegacyDimensionsAsMiss() async throws {
+        struct LegacyFile: Codable {
+            let key: MaskCacheKey
+            let mask: NormalizedMask
+        }
+        let directory = try Fixtures.makeTempDirectory("MaskStoreMalformedTests")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let key = MaskCacheKey(
+            assetID: .photos(localIdentifier: "malformed"),
+            sourceFingerprint: PhotoSourceFingerprint(
+                byteCount: 8, modificationDate: nil,
+                resourceIdentifier: "malformed", sampleDigest: "digest"
+            ),
+            kind: .face, quality: .analysis, providerVersion: "vision-1"
+        )
+        let exactKey = key.with(quality: .analysis)
+        let valid = try NormalizedMask(size: PixelDimensions(width: 2, height: 1), values: [0, 1])
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(LegacyFile(key: exactKey, mask: valid))
+        ) as? [String: Any])
+        var mask = try XCTUnwrap(object["mask"] as? [String: Any])
+        mask["size"] = ["width": Int.max, "height": 2]
+        mask["values"] = [Double]()
+        object["mask"] = mask
+        try JSONSerialization.data(withJSONObject: object).write(
+            to: directory.appendingPathComponent(MaskStoreTestSupport.filename(for: exactKey))
+        )
+
+        let store = MaskStore(directory: directory)
+        let reference = RegionMaskReference(
+            cacheKey: exactKey, size: PixelDimensions(width: 2, height: 1), quality: .analysis
+        )
+        let loaded = await store.pixels(for: reference)
+        XCTAssertNil(loaded)
+    }
+
     func testTrustedMaskCarriesGenerationCoverageAndKeepsCodableSchema() throws {
         let size = PixelDimensions(width: 2, height: 2)
         let mask = NormalizedMask(

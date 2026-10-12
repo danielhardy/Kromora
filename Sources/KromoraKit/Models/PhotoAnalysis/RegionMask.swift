@@ -172,7 +172,9 @@ struct NormalizedMask: Codable, Sendable, Equatable {
     let isBinary: Bool
 
     init(size: PixelDimensions, values: [Float]) throws {
-        guard values.count == size.width * size.height else { throw RegionMaskError.invalidPixelCount }
+        guard size.width > 0, size.height > 0 else { throw RegionMaskError.invalidPixelCount }
+        let (pixelCount, overflow) = size.width.multipliedReportingOverflow(by: size.height)
+        guard !overflow, values.count == pixelCount else { throw RegionMaskError.invalidPixelCount }
         var normalized: [Float] = []
         normalized.reserveCapacity(values.count)
         var total: Float = 0
@@ -199,7 +201,8 @@ struct NormalizedMask: Codable, Sendable, Equatable {
         coverage: Float? = nil,
         isBinary: Bool? = nil
     ) {
-        precondition(values.count == size.width * size.height, "mask values must match mask size")
+        let (pixelCount, overflow) = size.width.multipliedReportingOverflow(by: size.height)
+        precondition(!overflow && values.count == pixelCount, "mask values must match mask size")
         self.size = size
         self.values = values
         self.coverage = coverage ?? (values.isEmpty ? 0 : values.reduce(0, +) / Float(values.count))
