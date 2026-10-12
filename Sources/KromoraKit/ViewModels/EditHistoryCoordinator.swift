@@ -67,28 +67,68 @@ final class EditHistoryCoordinator {
         self.willChange = willChange
     }
 
+    private var isShutDown = false
+    private var operations: [UInt64: Task<Void, Never>] = [:]
+    private var nextOperationID: UInt64 = 0
+
     private func clear() {
         history = []
         currentRevision = 0
     }
 
+    /// Publication fence: the lifecycle is live and the active photo is still the one the operation
+    /// was issued for.
+    private func isCurrent(_ reference: EditSourceReference) -> Bool {
+        !isShutDown && environment.activeSourceReference() == reference
+    }
+
+    /// Own `body` until it finishes. Rejected once shutdown has begun, so no operation (nested
+    /// refreshes included) can start behind the barrier.
+    private func spawn(_ body: @escaping @MainActor () async -> Void) -> Task<Void, Never>? {
+        guard !isShutDown else { return nil }
+        nextOperationID &+= 1
+        let id = nextOperationID
+        let task = Task { [weak self] in
+            await body()
+            self?.operations[id] = nil
+        }
+        operations[id] = task
+        return task
+    }
+
+    /// Stop publishing and reject new work, synchronously. Obsolete reads are cancelled; accepted
+    /// restore/snapshot/copy writes keep running so they settle before the package lease goes.
+    func beginShutdown() {
+        guard !isShutDown else { return }
+        isShutDown = true
+        for task in operations.values { task.cancel() }
+    }
+
+    /// Idempotent barrier: returns once every owned operation, including cancellation-oblivious
+    /// store calls, has finished. Call while the store, persistence and package lease are usable.
+    func shutdown() async {
+        beginShutdown()
+        while let task = operations.values.first { await task.value }
+    }
+
     /// Reload the active photo's history. Clears it when no photo is active or the read fails.
     @discardableResult
     func refresh() -> Task<Void, Never>? {
+        guard !isShutDown else { return nil }
         guard let reference = environment.activeSourceReference() else {
             clear()
             return nil
         }
-        return Task { [weak self, store] in
+        return spawn { [self, store] in
             do {
                 let history = try await store.history(for: reference)
                 let currentRevision = try await store.currentRevision(for: reference)
-                guard let self, self.environment.activeSourceReference() == reference else { return }
+                guard isCurrent(reference) else { return }
                 self.history = history
                 self.currentRevision = currentRevision
             } catch {
-                guard let self, self.environment.activeSourceReference() == reference else { return }
-                self.clear()
+                guard isCurrent(reference) else { return }
+                clear()
             }
         }
     }
@@ -96,22 +136,22 @@ final class EditHistoryCoordinator {
     /// Navigate to a durable edit state without creating a new revision.
     @discardableResult
     func restore(_ revision: UInt64) -> Task<Void, Never>? {
-        guard let value = history.first(where: { $0.revision == revision }) else { return nil }
+        guard !isShutDown, let value = history.first(where: { $0.revision == revision }) else { return nil }
         environment.endUndoGrouping()
         guard let reference = environment.activeSourceReference() else { return nil }
-        return Task { [weak self, store, environment] in
+        return spawn { [self, store, environment] in
             guard await environment.flushPersistence() else { return }
             do {
                 try await store.selectRevision(revision, for: reference)
-                guard let self, environment.activeSourceReference() == reference else { return }
-                self.currentRevision = revision
-                let priorDocuments = self.history
+                guard isCurrent(reference) else { return }
+                currentRevision = revision
+                let priorDocuments = history
                     .filter { $0.revision < revision && $0.snapshotName == nil }
                     .map(\.document)
                 environment.adoptRestoredRevision(value.document, priorDocuments)
-                self.refresh()
+                refresh()
             } catch {
-                guard environment.activeSourceReference() == reference else { return }
+                guard isCurrent(reference) else { return }
                 environment.reportStatus("Could not navigate edit history: \(error.localizedDescription)")
             }
         }
@@ -119,18 +159,18 @@ final class EditHistoryCoordinator {
 
     @discardableResult
     func saveSnapshot(named name: String) -> Task<Void, Never>? {
-        guard let reference = environment.activeSourceReference() else { return nil }
+        guard !isShutDown, let reference = environment.activeSourceReference() else { return nil }
         environment.endUndoGrouping()
         let document = environment.currentDocument()
-        return Task { [weak self, store, environment] in
+        return spawn { [self, store, environment] in
             guard await environment.flushPersistence() else { return }
             do {
                 try await store.saveSnapshot(document, named: name, for: reference)
-                guard let self, environment.activeSourceReference() == reference else { return }
+                guard isCurrent(reference) else { return }
                 environment.reportStatus("Saved snapshot ‘\(name)’")
-                self.refresh()
+                refresh()
             } catch {
-                guard environment.activeSourceReference() == reference else { return }
+                guard isCurrent(reference) else { return }
                 environment.reportStatus("Could not save snapshot: \(error.localizedDescription)")
             }
         }
@@ -138,25 +178,26 @@ final class EditHistoryCoordinator {
 
     /// Flush, create the copy through `makeCopy`, give it the current edits, then hand it to
     /// `didCreate` (which reloads the collection, reports and opens it). A throw from any step is
-    /// reported once.
+    /// reported once. Shutdown lets an accepted copy finish writing but suppresses `didCreate`.
     @discardableResult
     func createVirtualCopy(
         of reference: EditSourceReference,
         makeCopy: @escaping @MainActor () throws -> VirtualCopy,
         didCreate: @escaping @MainActor (VirtualCopy) throws -> Void
-    ) -> Task<Void, Never> {
+    ) -> Task<Void, Never>? {
+        guard !isShutDown else { return nil }
         environment.endUndoGrouping()
         let document = environment.currentDocument()
-        return Task { [store, environment] in
+        return spawn { [self, store, environment] in
             guard await environment.flushPersistence() else { return }
             guard environment.activeSourceReference() == reference else { return }
             do {
                 let copy = try makeCopy()
                 try await store.save(document, for: copy.sourceReference)
-                guard environment.activeSourceReference() == reference else { return }
+                guard isCurrent(reference) else { return }
                 try didCreate(copy)
             } catch {
-                guard environment.activeSourceReference() == reference else { return }
+                guard isCurrent(reference) else { return }
                 environment.reportStatus("Could not create virtual copy: \(error.localizedDescription)")
             }
         }

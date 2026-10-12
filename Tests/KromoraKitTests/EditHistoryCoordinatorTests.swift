@@ -12,6 +12,29 @@ final class EditHistoryCoordinatorTests: XCTestCase {
         var failSelect = false
         private(set) var calls: [String] = []
         private(set) var snapshots: [String] = []
+        private var gate: CheckedContinuation<Void, Never>?
+        private var gateEntered: CheckedContinuation<Void, Never>?
+        private var gating = false
+
+        func armGate() { gating = true }
+        /// Suspends until the gated call (history read or snapshot write) has begun.
+        func waitUntilGateEntered() async {
+            if gate != nil { return }
+            await withCheckedContinuation { gateEntered = $0 }
+        }
+        func releaseGate() {
+            gate?.resume()
+            gate = nil
+        }
+        private func passGate() async {
+            guard gating else { return }
+            gating = false
+            await withCheckedContinuation { continuation in
+                gate = continuation
+                gateEntered?.resume()
+                gateEntered = nil
+            }
+        }
 
         func set(revisions: [PortablePackageEditRevision], current: UInt64) {
             self.revisions = revisions
@@ -22,6 +45,7 @@ final class EditHistoryCoordinatorTests: XCTestCase {
 
         func history(for source: EditSourceReference) async throws -> [PortablePackageEditRevision] {
             calls.append("history")
+            await passGate()
             if failReads { throw CocoaError(.fileReadUnknown) }
             return revisions
         }
@@ -36,6 +60,7 @@ final class EditHistoryCoordinatorTests: XCTestCase {
         }
         func saveSnapshot(_ document: EditDocument, named name: String, for source: EditSourceReference) async throws {
             calls.append("snapshot")
+            await passGate()
             snapshots.append(name)
         }
         func save(_ document: EditDocument, for source: EditSourceReference) async throws {
@@ -269,7 +294,7 @@ final class EditHistoryCoordinatorTests: XCTestCase {
 
         await coordinator.createVirtualCopy(
             of: referenceA, makeCopy: { copy }, didCreate: { created.append($0.displayName) }
-        ).value
+        )?.value
         XCTAssertEqual(created, ["Copy"])
         let calls = await store.calls
         XCTAssertEqual(calls.filter { $0 == "save" }.count, 1)
@@ -278,7 +303,58 @@ final class EditHistoryCoordinatorTests: XCTestCase {
             of: referenceA, makeCopy: { throw CocoaError(.fileWriteUnknown) }, didCreate: { _ in
                 XCTFail("must not hand off a failed copy")
             }
-        ).value
+        )?.value
         XCTAssertTrue(host.statuses.last?.hasPrefix("Could not create virtual copy") == true)
+    }
+
+    func testShutdownSuppressesGatedRefreshPublication() async throws {
+        let store = FakeStore()
+        await store.set(revisions: [revision(1, exposure: 0.1)], current: 1)
+        let host = Host()
+        host.reference = referenceA
+        var changeCount = 0
+        let coordinator = makeCoordinator(store: store, host: host) { changeCount += 1 }
+        await store.armGate()
+        _ = coordinator.refresh()
+        await store.waitUntilGateEntered()
+
+        let shutdown = Task { await coordinator.shutdown() }
+        await Task.yield()
+        XCTAssertNil(coordinator.refresh(), "new work is rejected once shutdown starts")
+        await store.releaseGate()
+        await shutdown.value
+
+        XCTAssertTrue(coordinator.history.isEmpty)
+        XCTAssertEqual(coordinator.currentRevision, 0)
+        XCTAssertEqual(changeCount, 0)
+    }
+
+    func testShutdownDrainsAcceptedSnapshotWithoutPublishing() async throws {
+        let store = FakeStore()
+        let host = Host()
+        host.reference = referenceA
+        let coordinator = makeCoordinator(store: store, host: host)
+        await store.armGate()
+        XCTAssertNotNil(coordinator.saveSnapshot(named: "Keep"))
+        await store.waitUntilGateEntered()
+
+        var finished = false
+        let shutdown = Task {
+            await coordinator.shutdown()
+            finished = true
+        }
+        await Task.yield()
+        XCTAssertFalse(finished, "shutdown waits for the accepted write")
+        await store.releaseGate()
+        await shutdown.value
+
+        let snapshots = await store.snapshots
+        XCTAssertEqual(snapshots, ["Keep"], "accepted snapshot is not lost")
+        XCTAssertTrue(host.statuses.isEmpty)
+        let calls = await store.calls
+        XCTAssertEqual(calls.filter { $0 == "history" }.count, 0, "no nested refresh after shutdown")
+        await coordinator.shutdown()
+        XCTAssertNil(coordinator.saveSnapshot(named: "Late"))
+        XCTAssertNil(coordinator.createVirtualCopy(of: referenceA, makeCopy: { throw CocoaError(.fileReadUnknown) }, didCreate: { _ in }))
     }
 }

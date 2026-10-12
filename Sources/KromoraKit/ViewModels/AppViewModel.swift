@@ -4400,6 +4400,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // Invalidate every generation before awaiting anything. A renderer or framework call may
         // only observe cancellation when it returns, but it can no longer publish into this model.
         sourceSession.cancel()
+        editHistory.beginShutdown()
         loadRequestGeneration &+= 1
         let materializationTasks = Array(placeholderMaterializationTasks.values)
         for task in materializationTasks { task.cancel() }
@@ -4482,6 +4483,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // Drain placeholder resolution (cancellation-oblivious worker I/O included) before the
         // package scheduler and writer lease are torn down.
         for task in materializationTasks { await task.value }
+        // Accepted snapshot/restore/copy writes settle while persistence and the lease are live.
+        await editHistory.shutdown()
 
         await library.shutdown()
         await export.shutdown()
