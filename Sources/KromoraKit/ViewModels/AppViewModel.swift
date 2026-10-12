@@ -919,6 +919,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private let previewPresentation: PreviewPresentationCoordinator
     private let firstFrames: FirstFramePresentationCoordinator
     private var loadRequestGeneration: UInt64 = 0
+    /// In-flight browsing-placeholder resolutions keyed by their request generation.
+    private var placeholderMaterializationTasks: [UInt64: Task<Void, Never>] = [:]
 
     /// Value-only counters used by the opt-in Release presentation qualification harness.
     var presentationSessionForDiagnostics: PreviewPresentationCoordinator.PresentationSession? {
@@ -2084,12 +2086,17 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             previewSurface.clearForSourceSwitch()
             originalPreviewSurface.clear()
             statusMessage = "Loading \(item.displayName)..."
-            Task { @MainActor [weak self] in
+            // The root owns the task so shutdown can drain it before the package lease is released.
+            // A superseded request stays registered until it returns; dropping the handle would
+            // neither cancel nor await it.
+            placeholderMaterializationTasks[resolutionGeneration] = Task { @MainActor [weak self] in
                 guard let self else { return }
+                defer { self.placeholderMaterializationTasks[resolutionGeneration] = nil }
                 await Task.yield()
                 do {
+                    guard !self.isShuttingDown else { return }
                     let resolved = try await portableLibrary.materializedAsset(for: portableAssetID)
-                    guard self.loadRequestGeneration == resolutionGeneration,
+                    guard !self.isShuttingDown, self.loadRequestGeneration == resolutionGeneration,
                         let current = self.collection.items.first(where: { $0.id == assetID })
                     else { return }
                     // Keep the actual identity on the collection item so later ImageSource values
@@ -2110,7 +2117,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                         collectionAlreadySelected: true
                     )
                 } catch {
-                    guard self.loadRequestGeneration == resolutionGeneration else { return }
+                    guard !self.isShuttingDown, self.loadRequestGeneration == resolutionGeneration
+                    else { return }
                     self.isToolbarPhotoTransitioning = false
                     self.isLoading = false
                     self.isNavigationLoading = false
@@ -4391,6 +4399,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // Invalidate every generation before awaiting anything. A renderer or framework call may
         // only observe cancellation when it returns, but it can no longer publish into this model.
         sourceSession.cancel()
+        loadRequestGeneration &+= 1
+        let materializationTasks = Array(placeholderMaterializationTasks.values)
+        for task in materializationTasks { task.cancel() }
         let shutdownStore = editStore
         let embeddedLookTask = await shutdownStore.cancelEmbeddedLookLoading()
         await embeddedLookTask?.value
@@ -4467,6 +4478,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         packageSourceImports.shutdown()
         await libraryImportCoordinator.shutdown()
         await sourceSession.shutdown()
+        // Drain placeholder resolution (cancellation-oblivious worker I/O included) before the
+        // package scheduler and writer lease are torn down.
+        for task in materializationTasks { await task.value }
 
         await library.shutdown()
         await export.shutdown()

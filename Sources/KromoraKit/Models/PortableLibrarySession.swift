@@ -1248,6 +1248,10 @@ final class PortableLibrarySession {
     /// and import/reload do not open non-visible records.
     var assetRecordReadObserver: ((PortablePhotoAssetID) -> Void)?
 
+    /// Test seam awaited by `materializedAsset(for:)` before the worker read begins. It lets a
+    /// lifecycle test hold a cancellation-oblivious resolution open at a deterministic point.
+    var materializationGate: (@Sendable (PortablePhotoAssetID) async -> Void)?
+
     func materializedAssets(pageIndex: Int, query: LibraryQuery = .all) throws -> [PhotoAsset] {
         try materialize(page(at: pageIndex, query: query).items)
     }
@@ -1342,6 +1346,7 @@ final class PortableLibrarySession {
             throw CocoaError(.fileNoSuchFile)
         }
         assetRecordReadObserver?(assetID)
+        await materializationGate?(assetID)
         let summary = entry.summary
         let package = self.package
         let resolved = try await Task.detached {

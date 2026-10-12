@@ -180,7 +180,10 @@ debounce tasks, portable-package maintenance admission, and observer/maintenance
 callbacks are refresh signals only. `AppViewModel` retains the compatibility façade and orders
 shutdown by disconnecting callbacks, stopping the shell and media workflow, stopping collection and
 provider work, awaiting editor/render collaborators, cancelling the shared scheduler, and then
-discarding only explicitly abandoned persistence snapshots.
+discarding only explicitly abandoned persistence snapshots. Browsing-placeholder resolution in
+`openImage` is a root-owned task keyed by its request generation: shutdown bumps the generation and
+cancels, every post-suspension step checks `isShuttingDown` and the generation, and shutdown awaits
+all registered tasks (including superseded ones) before the scheduler and writer lease are released.
 
 `LibraryImportCoordinator` is the shared package-write boundary for URL and in-memory imports from
 Open, folders, Photos, and removable media. It owns the replaceable import generation, active

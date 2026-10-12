@@ -252,4 +252,117 @@ final class StoredEditAdoptionTests: TempDirectoryTestCase {
                 && !viewModel.isInspectorSourceDocumentPending
         }
     }
+
+    // MARK: - KRMA-904 placeholder materialization fencing
+
+    /// Holds `materializedAsset` for chosen assets until released, ignoring cancellation, the way a
+    /// worker read that has already crossed its cancellable boundary behaves.
+    private actor MaterializationGate {
+        private var held: Set<PortablePhotoAssetID>
+        private var waiters: [PortablePhotoAssetID: CheckedContinuation<Void, Never>] = [:]
+        private(set) var arrivals: [PortablePhotoAssetID] = []
+        init(holding ids: Set<PortablePhotoAssetID>) { held = ids }
+
+        func arrive(_ id: PortablePhotoAssetID) async {
+            arrivals.append(id)
+            guard held.contains(id) else { return }
+            await withCheckedContinuation { waiters[id] = $0 }
+        }
+
+        func release(_ id: PortablePhotoAssetID) {
+            held.remove(id)
+            waiters.removeValue(forKey: id)?.resume()
+        }
+    }
+
+    /// Reproduces a legacy package whose summaries predate persisted fingerprints, so the grid
+    /// projects browsing placeholders that opening must resolve against the record.
+    private func makeLegacyPlaceholders(in packageURL: URL) throws {
+        let package = try PortableLibraryPackage.open(at: packageURL)
+        for shardName in PortableLibraryPackage.allShards {
+            var shard = try package.readMembershipShard(shardName)
+            for index in shard.entries.indices {
+                shard.entries[index].summary.sourceFingerprint = nil
+            }
+            try package.writeMembershipShard(shard)
+        }
+    }
+
+    private func waitForArrival(_ gate: MaterializationGate) async throws {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while await gate.arrivals.isEmpty {
+            if ContinuousClock.now >= deadline {
+                throw TestSynchronizationError.timedOut(
+                    "materialization to start", "no placeholder resolution began")
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    private func portableID(_ name: String, in viewModel: AppViewModel) throws
+        -> PortablePhotoAssetID
+    {
+        try XCTUnwrap(
+            viewModel.collection.items.first { $0.displayName == name }?.asset.source
+                .portableIdentity.assetID)
+    }
+
+    func testShutdownWaitsForPlaceholderMaterializationAndSuppressesItsResult() async throws {
+        let packageURL = try await makePackage(storedExposures: ["one.png": 1.5])
+        try makeLegacyPlaceholders(in: packageURL)
+        let (viewModel, fake, session) = try await reopen(
+            packageURL, browsingAssets: true, holdPreparation: false)
+        let id = try portableID("one.png", in: viewModel)
+        let gate = MaterializationGate(holding: [id])
+        session.materializationGate = { await gate.arrive($0) }
+
+        try select("one.png", in: viewModel)
+        try await waitForArrival(gate)
+
+        let preparationsBeforeShutdown = await fake.sourcePreparationCount
+        var shutdownFinished = false
+        let shutdown = Task { @MainActor in
+            await viewModel.shutdown()
+            shutdownFinished = true
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertFalse(shutdownFinished, "shutdown must wait for the in-flight materialization")
+
+        await gate.release(id)
+        await shutdown.value
+        XCTAssertTrue(
+            viewModel.collection.items.first { $0.displayName == "one.png" }?.asset.source
+                .portableIdentity.sourceFingerprint.isBrowsingPlaceholder ?? false,
+            "a result arriving after shutdown must not replace the collection item")
+        let preparations = await fake.sourcePreparationCount
+        XCTAssertEqual(preparations, preparationsBeforeShutdown)
+        XCTAssertNil(viewModel.sourceImage)
+        await viewModel.shutdown()
+    }
+
+    func testSlowMaterializationCannotReopenSupersededPhoto() async throws {
+        let packageURL = try await makePackage(storedExposures: ["one.png": 1.5, "two.png": -0.5])
+        try makeLegacyPlaceholders(in: packageURL)
+        let (viewModel, _, session) = try await reopen(
+            packageURL, browsingAssets: true, holdPreparation: false)
+        let oneID = try portableID("one.png", in: viewModel)
+        let gate = MaterializationGate(holding: [oneID])
+        session.materializationGate = { await gate.arrive($0) }
+
+        try select("one.png", in: viewModel)
+        try await waitForArrival(gate)
+        try select("two.png", in: viewModel)
+        try await waitUntil("the second photo to settle") {
+            viewModel.sourceName == "two.png" && viewModel.previewState == .ready
+        }
+
+        await gate.release(oneID)
+        for _ in 0..<20 {
+            XCTAssertEqual(viewModel.sourceName, "two.png")
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(
+            viewModel.collection.items.first { $0.displayName == "one.png" }?.asset.source
+                .portableIdentity.sourceFingerprint.isBrowsingPlaceholder ?? false)
+    }
 }
