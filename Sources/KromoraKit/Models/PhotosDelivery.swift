@@ -163,11 +163,16 @@ final class PhotoKitDelivery: PhotosDelivering {
         }
 
         if let existing {
-            guard let change = PHAssetCollectionChangeRequest(for: existing) else {
-                throw PhotosDeliveryError.libraryUnavailable("the album cannot be edited")
-            }
+            // `PHAssetCollectionChangeRequest(for:)` also requires an active change block. The
+            // closure cannot throw, so report an unavailable request through a flag.
+            var requestAvailable = false
             try await library.performChanges {
+                guard let change = PHAssetCollectionChangeRequest(for: existing) else { return }
                 change.addAssets(NSArray(object: asset))
+                requestAvailable = true
+            }
+            guard requestAvailable else {
+                throw PhotosDeliveryError.libraryUnavailable("the album cannot be edited")
             }
         } else {
             // `creationRequestForAssetCollection` must be called from within the change block

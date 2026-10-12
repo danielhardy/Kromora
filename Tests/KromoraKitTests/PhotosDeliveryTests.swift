@@ -145,4 +145,32 @@ final class PhotosDeliveryTests: TempDirectoryTestCase {
         ))
         XCTAssertTrue(ExportCoordinator.summary(for: outcome, folder: folder).contains("Photos: 1 failed"))
     }
+
+    /// Structural guard for PhotoKit's transaction rule: every `PHAssetCollectionChangeRequest`
+    /// factory must be called inside a `performChanges` closure. Behavior needs real Photos
+    /// authorization and a live library, so it is verified manually, not here.
+    func testAlbumChangeRequestsAreCreatedInsidePerformChanges() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/KromoraKit/Models/PhotosDelivery.swift")
+        let lines = try String(contentsOf: sourceURL, encoding: .utf8)
+            .components(separatedBy: "\n")
+        let factories = ["PHAssetCollectionChangeRequest(for:", "creationRequestForAssetCollection("]
+
+        var openBlocks: [Int] = []  // brace depth at which each `performChanges {` opened
+        var depth = 0
+        var found = 0
+        for line in lines {
+            let code = line.trimmingCharacters(in: .whitespaces)
+            if code.hasPrefix("//") { continue }
+            if factories.contains(where: code.contains) {
+                found += 1
+                XCTAssertFalse(openBlocks.isEmpty, "change request created outside performChanges: \(code)")
+            }
+            if code.contains("performChanges {") { openBlocks.append(depth) }
+            depth += code.filter { $0 == "{" }.count - code.filter { $0 == "}" }.count
+            while let last = openBlocks.last, depth <= last { openBlocks.removeLast() }
+        }
+        XCTAssertEqual(found, 2, "expected the existing- and new-album factories")
+    }
 }
