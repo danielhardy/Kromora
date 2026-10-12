@@ -1,6 +1,7 @@
-# Documentation map and audit — 2026-09-28
+# Documentation map — 2026-10-12
 
-This audit establishes the current reading order after KRMA-669. Product intent has one home in
+This audit establishes the current reading order after KRMA-669 and was refreshed on 2026-10-12
+against the source tree (link, path, symbol, script, and test-name checks; see the end of this file). Product intent has one home in
 [`PRODUCT_SCOPE.md`](PRODUCT_SCOPE.md). The [README](../README.md) is the concise description of
 the running product; feature and engineering guides own their detailed contracts. Historical plans,
 dated evaluations, and proposal archives remain available with their provenance and do not define
@@ -18,6 +19,8 @@ the active MVP or roadmap.
 | [`STORAGE_POLICY.md`](STORAGE_POLICY.md) | Current data-safety contract | Canonical package data, projections, caches, backup, restore, and output. |
 | [`TESTING.md`](TESTING.md) | Current operations | Required and optional verification lanes, profiling, manual UI checks. |
 | [`PACKAGING.md`](PACKAGING.md) | Current operations | App bundle, identity, sandbox, signing, and release workflow. |
+| [`APP_STORE_SUBMISSION.md`](APP_STORE_SUBMISSION.md) | Current operations | App Store Connect submission checklist, privacy, and review notes. |
+| [`APP_STORE_ACCEPTANCE.md`](APP_STORE_ACCEPTANCE.md) | Current operations | App Store acceptance criteria and verification record. |
 | [`ONBOARDING.md`](ONBOARDING.md) | Current feature guide | First-run choices, sample photos, tour, guided editing. |
 | [`AUTO_EXPOSURE_POLICY.md`](AUTO_EXPOSURE_POLICY.md) | Current feature contract | Renderer-backed Auto decisions and quality guardrails. |
 | [`AUTO_PERFORMANCE.md`](AUTO_PERFORMANCE.md) | Dated diagnostic evidence | Auto measurement method and machine-specific baseline, not a speed promise. |
@@ -39,8 +42,9 @@ the active MVP or roadmap.
 | [`LIBRARY_PACKAGE_PLAN.md`](LIBRARY_PACKAGE_PLAN.md) | Historical implementation plan and design rationale | The package library shipped. Retained for format/migration provenance; the completed phase sequence is not an execution queue. Current contracts are in APP_ARCHITECTURE and STORAGE_POLICY. |
 | [`LIBRARY_PACKAGE_BASELINE.md`](LIBRARY_PACKAGE_BASELINE.md) | Frozen pre-package baseline | Retained to explain historical measurements. It describes a folder-backed implementation that is no longer the product. |
 | [`LIBRARY_SCALE_REGRESSION.md`](LIBRARY_SCALE_REGRESSION.md) | Dated regression evidence | Retained as benchmark provenance. Values describe named fixtures, machines, and methods. |
+| [`APP_STORE_SANDBOX_AUDIT.md`](APP_STORE_SANDBOX_AUDIT.md) | Dated audit evidence | Sandbox entitlement and file-access review. Source line references describe the audited checkout and may have drifted; re-verify before relying on them. |
+| [`evidence/`](evidence/) | Dated benchmark data | Raw JSON for LIBRARY_SCALE_REGRESSION (KRMA-829/831). |
 | [`EDIT_STORE_IDENTITY_DISPOSITION.md`](EDIT_STORE_IDENTITY_DISPOSITION.md) | Superseded migration record | Retained to explain old standalone stores; current authority is STORAGE_POLICY. |
-| [`REPOSITORY_IMPROVEMENT_PLAN.md`](REPOSITORY_IMPROVEMENT_PLAN.md) | Superseded review and execution plan | Retained as dated findings/provenance. Its ordering and acceptance text are not the live backlog. Re-triage through current issues. |
 
 ## Project context and deferred ideas
 
@@ -48,22 +52,28 @@ the active MVP or roadmap.
 | --- | --- | --- |
 | [`.context/initial_concept.md`](../.context/initial_concept.md) | Historical project provenance | Its pre-fork feature brief, milestone sequence, exclusions, and commands are superseded. Use PRODUCT_SCOPE and current guides. |
 | [`.context/2026-09-22-professional-polish-evaluation.md`](../.context/2026-09-22-professional-polish-evaluation.md) | Deferred idea archive | Preserves competitor-gap analysis and removed proposal specifications. Proposals may be reconsidered through future product decisions; none is an MVP commitment or active roadmap. |
-| [`.context/2026-09-25-stability-performance-review.md`](../.context/2026-09-25-stability-performance-review.md) | Dated review evidence | Findings are tied to its recorded checkout and environment. Later implementation may have changed them; consult current code, tests, and issue status before acting. |
-| [`.context/2026-09-27-heal-remove-plan.md`](../.context/2026-09-27-heal-remove-plan.md) | Historical feature implementation plan | Retained for decisions and provenance. Retouch is now described by RETOUCH.md and current source/tests; planned phases are not an open implementation queue. |
-| [`.context/CODE_QUALITY_CLEANUP_PLAN.md`](../.context/CODE_QUALITY_CLEANUP_PLAN.md) | Superseded cleanup proposal | Its issue-sized proposals are historical analysis, not current backlog. Re-triage from current code before scheduling. |
-| [`.context/review-evidence-2026-09-25/ReviewProbes.swift`](../.context/review-evidence-2026-09-25/ReviewProbes.swift) | Dated review artifact | Probe source for the 2026-09-25 review, not production or a supported verification command. |
+| [`.context/2026-10-03-icloud-sync-plan.md`](../.context/2026-10-03-icloud-sync-plan.md) | Deferred proposal | iCloud library sync evaluation and phased plan. Sync is a post-MVP boundary in PRODUCT_SCOPE; current storage authority stays STORAGE_POLICY. |
 | [`.dg/decisions/`](../.dg/decisions/) | Accepted decision history | Decision records explain choices; implementation and current guides define present behavior. |
 | [`.dg/issues/`](../.dg/issues/) | Canonical issue history | Lifecycle and implementation records, not user-facing product documentation. |
 
-## Consolidation and retention
+## Retention
 
-Earlier audits consolidated volatile or duplicate implementation notes into the current engineering,
-testing, and Look guides; those merges and deletions are recorded in git history and in the prior
-audit. KRMA-669 adds a product-intent document and replaces the README's long feature-by-feature
-implementation inventory with a workflow overview, verified capability summary, and explicit
-limits. No source guide or deferred proposal archive was removed.
+Superseded plans, one-off reviews, run records, and scratch artifacts are deleted rather than
+archived; git history preserves them. Documents stay only if a current guide, test, or evidence
+file depends on them, or if they preserve a decision or idea set that may be reconsidered (the
+package plan, pre-package baseline, scale-regression evidence, the edit-store disposition, and the
+two `.context` archives above). Update this map when a document is added, retired, or changes role.
 
-The package plan, pre-package benchmark, package-scale evidence, review plans, and proposal archive
-remain separate because they preserve migration decisions, reproducibility details, or ideas that
-may be reconsidered. They are labeled here so historical detail cannot be mistaken for current
-behavior or a commitment. Update this map when a document is added, retired, or changes role.
+## Refresh record (2026-10-12)
+
+Checked every relative link, referenced script, symbol, and test name against the tree, and read the
+engineering, storage, architecture, testing, package-format, feature, and packaging guides against
+source. Fixed a duplicated block in APP_ARCHITECTURE, split tables in STORAGE_POLICY and TESTING,
+misplaced LUT-cache bullets and stale statements in ENGINEERING_GUIDE (removed
+`AdjustInspectorView`, crossfade already animated, launch-hint read limit), the Auto algorithm
+version (6), the Retouch manual-Heal pass count (8/36), output-sharpening wording in PRODUCT_SCOPE,
+shipped-as-pending wording in LIBRARY_PACKAGE_FORMAT, and four missing entries in `scripts/README.md`.
+Removed: nine obsolete `.context/` files (stale patch and screenshots, the 2026-09-25 review and its
+probes, the code-quality cleanup, heal-remove, last-known-frame, and App Store release plans), plus `REPOSITORY_IMPROVEMENT_PLAN.md` and `KRMA-818-SANDBOX-RUN.md`.
+Known gap: APP_STORE_SANDBOX_AUDIT's `File.swift:line` citations describe commit `b78b888c` and have
+drifted; its banner says so.

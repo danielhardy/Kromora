@@ -257,7 +257,7 @@ Open defects / DispatchGraph issue IDs:
 - [App Store sandbox audit](APP_STORE_SANDBOX_AUDIT.md), section 1 runtime cases: A5–A10 and
   A17–A23; section 2 runtime cases: A13–A26. Section 3's packaged resource-bundle uncertainty:
   A2. Signed entitlement verification: A1 and A27.
-- [Mac App Store release plan](../.context/2026-09-30-app-store-release-plan.md), success criteria:
+- Mac App Store release success criteria:
   Release build/archive and TestFlight upload/install: A1 and A27–A28; sandbox launch, imports,
   exports, Photos, and persistent access: A5–A26 and A30; SwiftPM build/test/run and CI checks: A29. These
   development-lane checks do not substitute for the signed-app checks.

@@ -5,8 +5,9 @@
 > so Phase 0 below starts with a product decision. Current storage authority remains
 > [`STORAGE_POLICY.md`](../docs/STORAGE_POLICY.md) until a phase ships and that document is updated.
 >
-> **Prerequisite:** the [Mac App Store release plan](2026-09-30-app-store-release-plan.md)
-> (Workstreams 0–4: sandbox audit, Xcode app target, xcconfig, usage strings, entitlements). Mac App
+> **Prerequisite (since shipped):** the Mac App Store packaging described in
+> [`PACKAGING.md`](../docs/PACKAGING.md) (sandbox audit, Xcode app target, xcconfig, usage strings,
+> entitlements). Mac App
 > Store and TestFlight are the only binary distribution channels, so this plan assumes no Developer ID,
 > DMG or notarization path. The CloudKit entitlements land in that plan's `App/Kromora.entitlements`.
 
@@ -520,7 +521,7 @@ Phase 1, before any CloudKit code, so the format is stable when sync arrives.
 
 ## 10. Entitlements, signing and environments
 
-- **Distribution is Mac App Store and TestFlight only** (see the App Store release plan). There is no
+- **Distribution is Mac App Store and TestFlight only** (see `docs/PACKAGING.md`). There is no
   Developer ID, DMG or notarization path, so none of that signing work is needed here.
 - Add to `App/Kromora.entitlements` (owned by the Xcode app target, not the SwiftPM launcher):
   `com.apple.developer.icloud-container-identifiers = [iCloud.com.last8.kromora.photo]`,
