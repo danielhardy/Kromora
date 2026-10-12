@@ -32,13 +32,15 @@ public struct KromoraScene: Scene {
     }
 }
 
+/// Deliberately not `private`: SwiftUI derives the window-frame autosave key from this type's
+/// name, and a private type's name embeds a per-build context address, so the saved frame would
+/// never be found again on the next launch.
 @MainActor
-private struct KromoraRootView: View {
+struct KromoraRootView: View {
     let viewModel: AppViewModel
 
     var body: some View {
         ContentView(viewModel: viewModel)
-            .background(WindowFrameAutosave(name: "KromoraMainWindow"))
     }
 }
 

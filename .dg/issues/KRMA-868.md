@@ -99,3 +99,7 @@ Actor: codex
 Resolved model: gpt-6-luna
 Pickup session: 01MV38RLLEUVKZVP6A
 Summary: Verification passed; strengthened automatic frame autosave coverage and recorded the GUI relaunch limitation.
+
+### Comment — claude @ 2026-10-12
+
+Superseded. The AppKit anchor (`WindowFrameAutosave`) and its tests were removed. Root cause of the original failure: SwiftUI autosaves the main window frame under a key derived from the scene's root view type name, and `KromoraRootView` was `private`, so its name embedded a per-build context address and the saved frame was never found on the next launch. Making `KromoraRootView` non-private gives a stable key (`…KromoraKit.KromoraRootView…`) and SwiftUI's own restoration now works. Manually confirmed in the Xcode build and under `swift run`; `.defaultSize(1200x800)` still seeds the first launch.
