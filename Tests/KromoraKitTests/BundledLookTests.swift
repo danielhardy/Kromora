@@ -180,9 +180,20 @@ final class BundledLookTests: TempDirectoryTestCase {
         XCTAssertEqual(resolved.source, .bundled)
 
         let library = makeLibrary()
+        library.allLUTs = otherBuild
         let coordinator = LookSelectionCoordinator(library: library)
-        let starter = try XCTUnwrap(library.starterLooks.first)
-        XCTAssertEqual(coordinator.resolve(starter.lutID)?.id, starter.id)
-        XCTAssertTrue(starter.id.hasPrefix("kromora.starter."))
+        let reloadedDocument = EditDocument(lut: LUTSettings(lutID: saved.lutID, intensity: 0.72))
+        let resolvedAfterRelocation = try XCTUnwrap(coordinator.resolve(reloadedDocument.lut.lutID))
+        let request = LookPreviewRequest(
+            source: ImageSource(data: Data([1]), nativeExtent: CGSize(width: 8, height: 8)),
+            document: reloadedDocument,
+            look: resolvedAfterRelocation,
+            targetSize: CGSize(width: 8, height: 8)
+        ).renderRequest
+        XCTAssertEqual(request.document.lut.lutID, reloadedDocument.lut.lutID)
+        XCTAssertEqual(request.document.lut.intensity, 1)
+        XCTAssertEqual(request.lut?.lutID, saved.lutID)
+        XCTAssertEqual(request.lut?.url, resolved.url)
+        XCTAssertTrue(resolved.id.hasPrefix("kromora.starter."))
     }
 }
