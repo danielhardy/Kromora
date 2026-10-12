@@ -68,7 +68,11 @@ final class EditHistoryCoordinator {
     }
 
     private var isShutDown = false
-    private var operations: [UInt64: Task<Void, Never>] = [:]
+    private struct Operation {
+        let task: Task<Void, Never>
+        let cancelOnShutdown: Bool
+    }
+    private var operations: [UInt64: Operation] = [:]
     private var nextOperationID: UInt64 = 0
 
     private func clear() {
@@ -84,7 +88,10 @@ final class EditHistoryCoordinator {
 
     /// Own `body` until it finishes. Rejected once shutdown has begun, so no operation (nested
     /// refreshes included) can start behind the barrier.
-    private func spawn(_ body: @escaping @MainActor () async -> Void) -> Task<Void, Never>? {
+    private func spawn(
+        cancelOnShutdown: Bool = false,
+        _ body: @escaping @MainActor () async -> Void
+    ) -> Task<Void, Never>? {
         guard !isShutDown else { return nil }
         nextOperationID &+= 1
         let id = nextOperationID
@@ -92,7 +99,7 @@ final class EditHistoryCoordinator {
             await body()
             self?.operations[id] = nil
         }
-        operations[id] = task
+        operations[id] = Operation(task: task, cancelOnShutdown: cancelOnShutdown)
         return task
     }
 
@@ -101,14 +108,16 @@ final class EditHistoryCoordinator {
     func beginShutdown() {
         guard !isShutDown else { return }
         isShutDown = true
-        for task in operations.values { task.cancel() }
+        for operation in operations.values where operation.cancelOnShutdown {
+            operation.task.cancel()
+        }
     }
 
     /// Idempotent barrier: returns once every owned operation, including cancellation-oblivious
     /// store calls, has finished. Call while the store, persistence and package lease are usable.
     func shutdown() async {
         beginShutdown()
-        while let task = operations.values.first { await task.value }
+        while let operation = operations.values.first { await operation.task.value }
     }
 
     /// Reload the active photo's history. Clears it when no photo is active or the read fails.
@@ -119,7 +128,7 @@ final class EditHistoryCoordinator {
             clear()
             return nil
         }
-        return spawn { [self, store] in
+        return spawn(cancelOnShutdown: true) { [self, store] in
             do {
                 let history = try await store.history(for: reference)
                 let currentRevision = try await store.currentRevision(for: reference)

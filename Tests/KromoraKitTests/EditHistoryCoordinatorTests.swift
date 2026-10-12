@@ -68,12 +68,39 @@ final class EditHistoryCoordinatorTests: XCTestCase {
         }
     }
 
+    @MainActor
     private final class Host {
         var reference: EditSourceReference?
         var flushResult = true
         var events: [String] = []
         var adopted: [(EditDocument, [EditDocument])] = []
         var statuses: [String] = []
+        private var flushContinuation: CheckedContinuation<Void, Never>?
+        private var flushEntered: CheckedContinuation<Void, Never>?
+        var gateFlush = false
+
+        func waitForFlush() async {
+            if flushContinuation != nil { return }
+            await withCheckedContinuation { flushEntered = $0 }
+        }
+
+        func releaseFlush() {
+            flushContinuation?.resume()
+            flushContinuation = nil
+        }
+
+        func flush() async -> Bool {
+            events.append("flush")
+            if gateFlush {
+                gateFlush = false
+                await withCheckedContinuation { continuation in
+                    flushContinuation = continuation
+                    flushEntered?.resume()
+                    flushEntered = nil
+                }
+            }
+            return flushResult
+        }
     }
 
     private let referenceA = EditSourceReference(assetID: PhotoAssetID(rawValue: "a"))
@@ -96,10 +123,7 @@ final class EditHistoryCoordinatorTests: XCTestCase {
                 activeSourceReference: { host.reference },
                 currentDocument: { EditDocument() },
                 endUndoGrouping: { host.events.append("endGrouping") },
-                flushPersistence: {
-                    host.events.append("flush")
-                    return host.flushResult
-                },
+                flushPersistence: { await host.flush() },
                 adoptRestoredRevision: { document, prior in host.adopted.append((document, prior)) },
                 reportStatus: { host.statuses.append($0) }
             ),
@@ -356,5 +380,26 @@ final class EditHistoryCoordinatorTests: XCTestCase {
         await coordinator.shutdown()
         XCTAssertNil(coordinator.saveSnapshot(named: "Late"))
         XCTAssertNil(coordinator.createVirtualCopy(of: referenceA, makeCopy: { throw CocoaError(.fileReadUnknown) }, didCreate: { _ in }))
+    }
+
+    func testShutdownDoesNotCancelAcceptedSnapshotWhileItWaitsForFlush() async throws {
+        let store = FakeStore()
+        let host = Host()
+        host.reference = referenceA
+        host.gateFlush = true
+        let coordinator = makeCoordinator(store: store, host: host)
+        XCTAssertNotNil(coordinator.saveSnapshot(named: "Keep"))
+        await host.waitForFlush()
+
+        let shutdown = Task { await coordinator.shutdown() }
+        await Task.yield()
+        host.releaseFlush()
+        await shutdown.value
+
+        let snapshots = await store.snapshots
+        XCTAssertEqual(snapshots, ["Keep"])
+        let calls = await store.calls
+        XCTAssertTrue(calls.contains("snapshot"))
+        XCTAssertFalse(calls.contains("history"), "shutdown rejects the snapshot's nested refresh")
     }
 }
