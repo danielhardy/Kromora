@@ -149,9 +149,9 @@ final class EmbeddedLookLoaderTests: XCTestCase {
             gate.wait(); return data
         }
         await Task.detached { gate.waitUntilEntered() }.value
-        await h.store.cancelEmbeddedLookLoading()
+        let cancelledTask = await h.store.cancelEmbeddedLookLoading()
         gate.open()
-        try await Task.sleep(for: .milliseconds(50))
+        await cancelledTask?.value
 
         let id = LUTID(raw: "c")
         try await h.store.save(EditDocument(lut: LUTSettings(lutID: id, intensity: 1)), for: h.reference)

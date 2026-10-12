@@ -4393,7 +4393,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // only observe cancellation when it returns, but it can no longer publish into this model.
         sourceSession.cancel()
         let shutdownStore = editStore
-        Task { await shutdownStore.cancelEmbeddedLookLoading() }
+        let embeddedLookTask = await shutdownStore.cancelEmbeddedLookLoading()
+        await embeddedLookTask?.value
         await retouchWorkflow.shutdown()
         previewAdmissionCoordinator.cancelAdjacentPreviewPrefetch()
         autoWorkflowCoordinator.invalidate { [weak self] state, progress in

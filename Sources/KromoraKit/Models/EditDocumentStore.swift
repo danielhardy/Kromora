@@ -222,7 +222,7 @@ actor EditDocumentStore {
     }
 
     func setEmbeddedLookBytes(_ values: [String: Data]) {
-        cancelEmbeddedLookLoading()
+        _ = cancelPendingEmbeddedLookLoading()
         embeddedLookBytes = values
     }
 
@@ -245,10 +245,16 @@ actor EditDocumentStore {
     }
 
     /// Cancels pending Look loading; nothing already in flight can publish afterwards.
-    func cancelEmbeddedLookLoading() {
-        embeddedLookTask?.cancel()
+    func cancelEmbeddedLookLoading() -> Task<Void, Never>? {
+        cancelPendingEmbeddedLookLoading()
+    }
+
+    private func cancelPendingEmbeddedLookLoading() -> Task<Void, Never>? {
+        let task = embeddedLookTask
+        task?.cancel()
         embeddedLookTask = nil
         embeddedLookGeneration &+= 1
+        return task
     }
 
     /// Suspends until the newest Look snapshot has been installed (or cancelled).
