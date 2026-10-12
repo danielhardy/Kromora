@@ -1,5 +1,11 @@
 # App Store Sandbox Audit
 
+> **Dated evidence (reviewed at commit `b78b888c`, 2026-10-04).** The `File.swift:line` citations
+> below describe that checkout; at least one (`KromoraSettingsView.swift:244-260`) now points past
+> the end of its file. Treat the conclusions as the 2026-10-04 review and re-verify any citation
+> against current source before relying on it. The entitlement set it analyses is unchanged
+> (see [`PACKAGING.md`](PACKAGING.md)).
+
 This document records a source review of Kromora's App Sandbox access paths. Section 1 references
 the code reviewed for KRMA-783; section 2 references the write/output paths reviewed for KRMA-784.
 A static review cannot confirm the entitlements embedded in a signed app or the sandbox extensions

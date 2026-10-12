@@ -38,7 +38,7 @@ The repository evidence supports this answer for the current macOS app:
   package ([product scope](PRODUCT_SCOPE.md#L20-L35), [storage policy](STORAGE_POLICY.md)).
   Photos imports are user-selected through PhotosPicker; Photos authorization is used for optional
   export delivery and album placement ([sandbox audit, protected resources](APP_STORE_SANDBOX_AUDIT.md#L322-L328),
-  [Info.plist usage description](../App/Info.plist#L34-L40)).
+  [Info.plist usage description](../App/Info.plist#L34-L41)).
 - Apple's answers cover collection by the app and its third-party partners across platforms. Apple
   says to select “No, we do not collect data from this app” when neither the app nor its partners
   collect data ([App Store Connect privacy guidance](https://developer.apple.com/help/app-store-connect/manage-app-information/manage-app-privacy/)).
