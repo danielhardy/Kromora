@@ -47,6 +47,12 @@ final class RetouchInteractionState: ObservableObject {
         activeHandle = nil; draftSamples = []; shiftClickAnchor = nil; solvingSpotIDs = []
         isSpacePanning = false
     }
+    /// Clears everything tied to the previously open photo; keeps arming and user preferences.
+    func resetPhotoState() {
+        selectedSpotID = nil; hoveredSpotID = nil; hoverPoint = nil
+        activeHandle = nil; draftSamples = []; shiftClickAnchor = nil; solvingSpotIDs = []
+        dustSuggestions = []; visualizationCandidates = []
+    }
     func select(_ id: UUID?) { selectedSpotID = id }
     func hover(_ id: UUID?) { hoveredSpotID = id }
     func hover(_ id: UUID?, at point: CGPoint?) { hoveredSpotID = id; hoverPoint = point }

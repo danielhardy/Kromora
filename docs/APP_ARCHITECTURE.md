@@ -230,6 +230,16 @@ coordinates; the coordinator commits each finished brush or handle gesture throu
 `AppViewModel.updateDocument` once. `AppViewModel` remains the recipe, undo, and render owner.
 Entering Retouch closes crop and masking so only one canvas tool captures pointer input.
 
+The coordinator also owns the dust-analysis lifecycle (Detect Dust and the visualization overlay).
+Each request captures the source fingerprint, a monotonically bumped generation, and the threshold;
+after its suspension it publishes only if the owner is live, the generation is current, the source is
+unchanged (and, for visualization, still enabled). Generations are bumped before anything is awaited
+because cancellation alone does not stop a proxy provider that ignores it. `AppViewModel` calls
+`activeSourceDidChange()` when `imageSource` changes, which clears suggestions, candidates, and
+gesture selection (thresholds and overlay policy persist), and `shutdown()` before releasing
+renderer resources. Accept and Accept All verify the suggestions' owning source still matches the
+open photo.
+
 ## Edited-thumbnail ownership
 
 `EditedThumbnailCoordinator` owns edited-thumbnail demand admission, per-asset generations,

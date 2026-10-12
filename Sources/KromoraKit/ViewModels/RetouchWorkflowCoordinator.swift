@@ -11,9 +11,10 @@ protocol RetouchWorkflowDestination: AnyObject {
     func setRetouchCanvasActive(_ active: Bool)
     func beginUndoGrouping()
     func endUndoGrouping()
-}
-
-extension RetouchWorkflowDestination {
+    /// The open photo, or `nil` when none is installed. Analysis results are only valid for it.
+    var retouchAnalysisSource: ImageSource? { get }
+    func retouchAnalysisProxy(source: ImageSource) async -> RetouchAnalysisProxy?
+    func publishRetouchStatus(_ message: String)
 }
 
 /// Owns transient retouch selection and gestures; each completed pointer action is one document edit.
@@ -35,6 +36,17 @@ final class RetouchWorkflowCoordinator {
     private var startSuggestion: RetouchDustSuggestion?
     private var suggestionWasMoved = false
     private var isResizingSuggestion = false
+
+    // Analysis lifecycle. A generation is bumped to invalidate a request *before* anything is
+    // awaited, because cancellation alone cannot stop a cancellation-oblivious proxy provider from
+    // returning and publishing.
+    private var isShutDown = false
+    private var detectGeneration = 0
+    private var visualizationGeneration = 0
+    private var detectTask: Task<Void, Never>?
+    private var visualizationTask: Task<Void, Never>?
+    /// Fingerprint of the photo that owns `interactionState.dustSuggestions`.
+    private var suggestionOwner: String?
 
     init(destination: (any RetouchWorkflowDestination)? = nil) {
         self.destination = destination
@@ -212,11 +224,13 @@ final class RetouchWorkflowCoordinator {
         if interactionState.shiftClickAnchor != nil { interactionState.setShiftClickAnchor(nil) }
     }
     func acceptDustSuggestion(_ id: UUID) {
+        guard suggestionsBelongToCurrentSource() else { return }
         guard let suggestion = interactionState.dustSuggestions.first(where: { $0.id == id }) else { return }
         addDustSpot(suggestion)
         interactionState.removeDustSuggestion(id)
     }
     func acceptAllDustSuggestions() {
+        guard suggestionsBelongToCurrentSource() else { return }
         let suggestions = interactionState.dustSuggestions
         guard !suggestions.isEmpty else { return }
         destination?.beginUndoGrouping()
@@ -226,6 +240,116 @@ final class RetouchWorkflowCoordinator {
     }
     func dismissDustSuggestion(_ id: UUID) { interactionState.removeDustSuggestion(id) }
     func dismissAllDustSuggestions() { interactionState.setDustSuggestions([]) }
+    /// A stale command must never insert one photo's coordinates into another photo's document.
+    private func suggestionsBelongToCurrentSource() -> Bool {
+        if interactionState.dustSuggestions.isEmpty { return false }
+        if let owner = suggestionOwner, owner == destination?.retouchAnalysisSource?.cacheFingerprint { return true }
+        interactionState.setDustSuggestions([])
+        suggestionOwner = nil
+        return false
+    }
+
+    // MARK: Analysis lifecycle
+
+    func detectDust() {
+        guard !isShutDown else { return }
+        detectTask?.cancel()
+        detectGeneration &+= 1
+        let generation = detectGeneration
+        guard let destination, let source = destination.retouchAnalysisSource else {
+            detectTask = nil
+            destination?.publishRetouchStatus("Dust detection could not analyze this photo")
+            return
+        }
+        let fingerprint = source.cacheFingerprint
+        let threshold = interactionState.visualizationThreshold
+        detectTask = Task { [weak self] in
+            let proxy = await destination.retouchAnalysisProxy(source: source)
+            guard let self, self.isCurrentDetect(generation, fingerprint) else { return }
+            guard let proxy else {
+                destination.publishRetouchStatus("Dust detection could not analyze this photo")
+                return
+            }
+            let found = RetouchDustDetector.detect(in: proxy, threshold: threshold)
+            self.install(found, owner: fingerprint)
+            destination.publishRetouchStatus("Found \(found.count) dust suggestions")
+        }
+    }
+
+    /// Publishes suggestions together with the photo that owns them.
+    func install(_ suggestions: [RetouchDustSuggestion], owner: String) {
+        suggestionOwner = owner
+        interactionState.setDustSuggestions(suggestions)
+    }
+
+    func toggleVisualization() {
+        interactionState.visualizationEnabled.toggle()
+        refreshVisualization()
+    }
+
+    func setVisualizationThreshold(_ threshold: Double) {
+        interactionState.visualizationThreshold = min(0.12, max(0.005, threshold))
+        guard interactionState.visualizationEnabled else { return }
+        refreshVisualization()
+    }
+
+    private func refreshVisualization() {
+        visualizationTask?.cancel()
+        visualizationTask = nil
+        visualizationGeneration &+= 1
+        let generation = visualizationGeneration
+        guard !isShutDown, interactionState.visualizationEnabled,
+              let destination, let source = destination.retouchAnalysisSource else {
+            interactionState.setVisualizationCandidates([])
+            return
+        }
+        let fingerprint = source.cacheFingerprint
+        let threshold = interactionState.visualizationThreshold
+        visualizationTask = Task { [weak self] in
+            let proxy = await destination.retouchAnalysisProxy(source: source)
+            guard let self, self.isCurrentVisualization(generation, fingerprint) else { return }
+            self.interactionState.setVisualizationCandidates(
+                proxy.map { RetouchDustDetector.detect(in: $0, threshold: threshold, maximum: 1_000) } ?? [])
+        }
+    }
+
+    private func isCurrentDetect(_ generation: Int, _ fingerprint: String) -> Bool {
+        !isShutDown && generation == detectGeneration
+            && destination?.retouchAnalysisSource?.cacheFingerprint == fingerprint
+    }
+
+    private func isCurrentVisualization(_ generation: Int, _ fingerprint: String) -> Bool {
+        !isShutDown && generation == visualizationGeneration && interactionState.visualizationEnabled
+            && destination?.retouchAnalysisSource?.cacheFingerprint == fingerprint
+    }
+
+    /// The open photo changed or was removed: drop everything that belonged to the previous one.
+    /// User preferences (threshold, overlay policy, visualization toggle) are preserved.
+    func activeSourceDidChange() {
+        invalidateAnalysis()
+        cancelGesture()
+        interactionState.resetPhotoState()
+        if !isShutDown { refreshVisualization() }
+    }
+
+    func shutdown() async {
+        isShutDown = true
+        let owned = [detectTask, visualizationTask]
+        invalidateAnalysis()
+        cancelGesture()
+        interactionState.resetPhotoState()
+        interactionState.setVisualizationCandidates([])
+        for task in owned { await task?.value }
+    }
+
+    private func invalidateAnalysis() {
+        detectGeneration &+= 1
+        visualizationGeneration &+= 1
+        detectTask?.cancel(); visualizationTask?.cancel()
+        detectTask = nil; visualizationTask = nil
+        suggestionOwner = nil
+    }
+
     private func addDustSpot(_ suggestion: RetouchDustSuggestion) {
         let sample = BrushSample(point: suggestion.point)
         let spot = RetouchSpot(id: suggestion.id, mode: .heal,

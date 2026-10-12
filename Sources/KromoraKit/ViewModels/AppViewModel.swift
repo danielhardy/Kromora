@@ -212,7 +212,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     /// How to reproduce the open image. Held instead of a decoded `CIImage` because a RAW has to be
     /// re-developed to honour `document.rawDevelop` (§4.2).
-    private var imageSource: ImageSource?
+    private var imageSource: ImageSource? {
+        didSet { if oldValue?.cacheFingerprint != imageSource?.cacheFingerprint { retouchWorkflow.activeSourceDidChange() } }
+    }
 
     /// What the open image's RAW decoder can do, and where its own defaults sit. `nil` for a
     /// standard image, which has no develop stage at all — **and also `nil` while the probe is still
@@ -3453,41 +3455,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
     }
 
-    func toggleRetouchVisualization() {
-        retouchInteractionState.visualizationEnabled.toggle()
-        Task { await refreshRetouchVisualization() }
-    }
+    func toggleRetouchVisualization() { retouchWorkflow.toggleVisualization() }
+    func setRetouchVisualizationThreshold(_ threshold: Double) { retouchWorkflow.setVisualizationThreshold(threshold) }
+    func detectRetouchDust() { retouchWorkflow.detectDust() }
 
-    func setRetouchVisualizationThreshold(_ threshold: Double) {
-        retouchInteractionState.visualizationThreshold = min(0.12, max(0.005, threshold))
-        guard retouchInteractionState.visualizationEnabled else { return }
-        Task { await refreshRetouchVisualization() }
+    var retouchAnalysisSource: ImageSource? { imageSource }
+    func retouchAnalysisProxy(source: ImageSource) async -> RetouchAnalysisProxy? {
+        await engine.retouchAnalysisProxy(source: source)
     }
-
-    func detectRetouchDust() {
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            guard let source = self.imageSource,
-                  let proxy = await self.engine.retouchAnalysisProxy(source: source) else {
-                self.statusMessage = "Dust detection could not analyze this photo"
-                return
-            }
-            let found = RetouchDustDetector.detect(in: proxy, threshold: self.retouchInteractionState.visualizationThreshold)
-            self.retouchInteractionState.setDustSuggestions(found)
-            self.statusMessage = "Found \(found.count) dust suggestions"
-        }
-    }
-
-    private func refreshRetouchVisualization() async {
-        guard retouchInteractionState.visualizationEnabled, let source = imageSource,
-              let proxy = await engine.retouchAnalysisProxy(source: source) else {
-            retouchInteractionState.setVisualizationCandidates([])
-            return
-        }
-        retouchInteractionState.setVisualizationCandidates(
-            RetouchDustDetector.detect(in: proxy, threshold: retouchInteractionState.visualizationThreshold, maximum: 1_000)
-        )
-    }
+    func publishRetouchStatus(_ message: String) { statusMessage = message }
 
     private func isAutomaticRetouchSource(_ source: RetouchSource?) -> Bool {
         if case .auto? = source { return true }
@@ -4403,6 +4379,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // Invalidate every generation before awaiting anything. A renderer or framework call may
         // only observe cancellation when it returns, but it can no longer publish into this model.
         sourceSession.cancel()
+        await retouchWorkflow.shutdown()
         previewAdmissionCoordinator.cancelAdjacentPreviewPrefetch()
         autoWorkflowCoordinator.invalidate { [weak self] state, progress in
             self?.publishAutoAdjustmentState(state, progress: progress)
