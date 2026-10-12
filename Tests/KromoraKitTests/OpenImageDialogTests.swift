@@ -1,4 +1,5 @@
 import XCTest
+import os
 @testable import KromoraKit
 
 private extension URL {
@@ -106,6 +107,44 @@ final class OpenImageDialogTests: TempDirectoryTestCase {
         try await waitUntil("the terminal summary") { !completions.isEmpty }
         XCTAssertEqual(completions.count, 1)
         XCTAssertEqual(completions.first??.imported, 1)
+        XCTAssertEqual(viewModel.collection.items.count, 1)
+    }
+
+    func testOpenImagesReturnsWhilePackageWorkerIsGated() async throws {
+        let image = try Fixtures.writeGradientPNG(
+            width: 20, height: 12, named: "gated.png", in: tempDirectory
+        )
+        let scheduler = ImageWorkScheduler()
+        let blockerStarted = OSAllocatedUnfairLock(initialState: false)
+        let releaseBlocker = OSAllocatedUnfairLock(initialState: false)
+        defer { releaseBlocker.withLock { $0 = true } }
+        XCTAssertTrue(scheduler.enqueuePackageIO(
+            id: .init("open-image-dialog-worker-gate"), lane: .maintenance
+        ) {
+            blockerStarted.withLock { $0 = true }
+            while !releaseBlocker.withLock({ $0 }) { await Task.yield() }
+        })
+        for _ in 0..<10_000 where !blockerStarted.withLock({ $0 }) { await Task.yield() }
+        XCTAssertTrue(blockerStarted.withLock { $0 })
+
+        let packageURL = tempDirectory.appendingPathComponent(
+            "Gated Library.kromoralibrary", isDirectory: true
+        )
+        let session = try PortableLibrarySession(at: packageURL, scheduler: scheduler)
+        let viewModel = makeAppViewModel(
+            portablePackageURL: packageURL, portableLibrarySession: session
+        )
+        var completed = false
+        viewModel.openImages(urls: [image]) { _ in completed = true }
+
+        var sentinelRan = false
+        await Task { @MainActor in sentinelRan = true }.value
+        XCTAssertTrue(sentinelRan)
+        XCTAssertFalse(completed)
+        XCTAssertTrue(viewModel.collection.items.isEmpty)
+
+        releaseBlocker.withLock { $0 = true }
+        try await waitUntil("the gated import completion") { completed }
         XCTAssertEqual(viewModel.collection.items.count, 1)
     }
 
