@@ -152,9 +152,8 @@ float4 effectsGrain(
 
 // MARK: - Eight-channel HSL mixer (RenderPipeline)
 
-// Channel weights are raised cosine windows around the fixed Lightroom-style centers
-// (R/O/Y/G/A/B/P/M). A 45-degree support radius gives adjacent channels a smooth overlap,
-// while the circular distance makes the red window continuous across hue 0/1.
+// HSL mixer weights use raised-cosine interpolation between neighboring band centers. The
+// intervals partition the hue circle, and the last interval connects magenta back to red.
 float wrappedHue(float value) {
     return value - floor(value);
 }

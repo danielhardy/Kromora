@@ -225,21 +225,26 @@ final class MetalKernelParityTests: XCTestCase {
     }
 
     func testHSLMixerMatchesGolden() throws {
-        let hues: [CGFloat] = [0, 30, 60, 120, 180, 240, 270, 300]
+        // Use distinct sRGB samples across all eight current band centers. This keeps the golden
+        // sensitive to the KRMA-821 band rebalance, including green.
+        let colors: [(UInt8, UInt8, UInt8)] = [
+            (204, 41, 41),   // red, 0°
+            (204, 122, 41), // orange, 30°
+            (204, 204, 41), // yellow, 60°
+            (41, 204, 41),  // green, 120°
+            (41, 204, 204), // cyan, 180°
+            (41, 82, 204),  // blue, 225°
+            (122, 41, 204), // purple, 270°
+            (204, 41, 163), // magenta, 315°
+        ]
         let space = CGColorSpace(name: CGColorSpace.sRGB)!
         var px = [UInt8]()
-        for hue in hues {
-            let h = hue / 60
-            let (r, g, b): (CGFloat, CGFloat, CGFloat)
-            switch h {
-            case 0..<1: (r, g, b) = (0.8, 0.8 * (1 - abs(h - 1)), 0)
-            default: (r, g, b) = (0.2, 0.3, 0.7)
-            }
-            px += [UInt8(r * 255), UInt8(g * 255), UInt8(b * 255), 255]
+        for (red, green, blue) in colors {
+            px += [red, green, blue, 255]
         }
         let strip = try XCTUnwrap(CIImage(
-            bitmapData: Data(px), bytesPerRow: hues.count * 4,
-            size: CGSize(width: hues.count, height: 1), format: .RGBA8, colorSpace: space))
+            bitmapData: Data(px), bytesPerRow: colors.count * 4,
+            size: CGSize(width: colors.count, height: 1), format: .RGBA8, colorSpace: space))
         let mixer = ColorMixerAdjustments(
             red: ColorMixerChannel(hue: 20, saturation: -30, luminance: 40),
             green: ColorMixerChannel(luminance: -25),

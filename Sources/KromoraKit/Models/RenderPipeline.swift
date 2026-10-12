@@ -1420,11 +1420,11 @@ enum RenderPipeline {
 
     /// Apply the eight-channel mixer in one Core Image color kernel.
     ///
-    /// Channel weights are raised cosine windows around the fixed Lightroom-style centers
-    /// (R/O/Y/G/A/B/P/M). A 45° support radius gives adjacent channels a smooth overlap, while the
-    /// circular distance makes the red window continuous across hue 0/1. The kernel computes all
-    /// weights from the original pixel hue, then applies one combined HSL adjustment; there are no
-    /// CPU per-pixel operations and no sequence of hard channel masks that could leave seams.
+    /// Neighboring band centers are joined by raised-cosine interpolation across the full hue
+    /// circle. At most two adjacent channels contribute and their weights sum to one, including
+    /// the magenta-to-red interval across hue zero. The kernel computes all weights from the
+    /// original pixel hue, then applies one combined HSL adjustment; there are no CPU per-pixel
+    /// operations and no sequence of hard channel masks that could leave seams.
     ///
     /// Hue is limited to ±``ColorMixerChannel.hueEndpointDegrees`` at the UI endpoints, while
     /// Saturation is a ±1 HSL delta and Luminance is a ±0.5 lightness delta. HSL is used only as
