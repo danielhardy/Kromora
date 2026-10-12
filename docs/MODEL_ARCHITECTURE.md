@@ -20,7 +20,7 @@ values to AppKit, SwiftUI, ImageIO, Photos, or window services.
 | --- | --- | --- |
 | Domain/value | `PhotoAsset`, `PhotoAssetID`, `EditDocument`, adjustment values, `LibrarySelectionModel`, `RenderRequest` | Durable identity, edits, selection, and render contracts |
 | Application | `KromoraSettings`, `LUTLibrary`, edit stores, render coordinators | Persistence, folder/library workflows, scheduling, and orchestration |
-| Platform/presentation | `ImageCollectionPresentationModel`, `PlatformThumbnailProvider`, `AppKitWindowAppearanceController`, `MaskInteractionPresentationBridge`, `PhotoAssetImageMetadataAdapter` | Observable UI state, `NSImage`, window appearance, SwiftUI colors, and ImageIO translation |
+| Platform/presentation | `ImageCollectionPresentationModel`, `PlatformThumbnailProvider`, `AppKitWindowAppearanceController`, the `MaskInteractionPresentationBridge` and `PhotoAssetImageMetadataAdapter` extension files | Observable UI state, `NSImage`, window appearance, SwiftUI colors, and ImageIO translation |
 
 `Models/` is retained as the package's historical source grouping. The explicit type and adapter
 names identify ownership even while the package is incrementally reorganized. Compatibility

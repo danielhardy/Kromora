@@ -22,12 +22,6 @@ are not opened as a fallback or alternate authority; see
 | Edit revisions and embedded Look bytes | `PortableLibraryPackage` | Package `Assets/<shard>/<asset>/Edits/` and content-addressed `Looks/` blobs | Durable and immutable by revision | Required and checksum-verified; an edit never depends on the external Look browser |
 | Latest presentation frame (one 2048 px preview per asset) | `LatestPreviewFrameStore` | Package `Derived/Previews/<asset-hash>.kframe` | Optional package-derived cache; one atomically replaced envelope per asset, 1 GB LRU cap, safe to delete and regenerate | Optional; omitted from verified backup and reported only as a rebuildable gap |
 | Packed thumbnails | `ThumbnailFrameStore` (actor facade over `PortablePackagePackedThumbnailStore`) | Package `Derived/Thumbnails/` | Optional package-derived cache; at most two live records per asset (`original` and latest `edited`) under stable asset-UUID keys; a replacement appends bytes and moves the index pointer; compacted during maintenance | Optional; missing, stale, or corrupt records regenerate from originals and never block open |
-
-Both frame stores accept and retain frames only when the frame identity and its signature refer to
-resolved source identities. A browsing placeholder contains no source-byte fingerprint, so writes
-with one are skipped; legacy placeholder records become misses and are removed when read or during
-bounded, background-priority idle sweeps. Sweeps inspect at most eight records per tick and yield
-to visible frame work. These records are optional presentation caches and are never package truth.
 | Recovery journals, transaction staging, quarantine and audit | `PortableLibraryPackage` | Package `Recovery/` | Package-local recovery boundary; journals/staging are removed after commit, while quarantine remains until reclaim/restore | Recovery is resolved before open; the built-in backup omits transient `Recovery/` internals and restore starts with a clean recovery boundary |
 | Library query/index projection | `LibraryIndexProjection` | `~/Library/Application Support/Kromora/Indexes/<library-id>/LibraryIndex.store` | Rebuildable projection; never package truth | Optional; restore rebuilds it from membership shards |
 | Launch hints | `LaunchHintsStore` | `~/Library/Application Support/Kromora/LaunchHints.json` | Device-local, bounded, atomically replaced operational hint; safe to delete and regenerate | Excluded from backup; never required to open or navigate the package |
@@ -40,6 +34,12 @@ to visible frame work. These records are optional presentation caches and are ne
 | User-created/imported reusable Looks | `LUTLibrary` | Configured folder, otherwise `~/Pictures/Kromora Looks/` | User-owned output; visible and independently reusable | Finder/Time Machine/iCloud behavior follows the chosen folder; edits remain safe through embedded Look bytes |
 | Preferences and security-scoped bookmarks | `KromoraSettings` / workflow owners | `UserDefaults` | Operational configuration, not library content | Not required for package portability; users may need to reselect external folders on another Mac |
 | Import/save scratch files and partial export files | Coordinating workflow | System temporary directory or destination-adjacent `.partial` file | Transient; removed on completion/failure | Never required; cancellation cleanup is best-effort |
+
+Both frame stores accept and retain frames only when the frame identity and its signature refer to
+resolved source identities. A browsing placeholder contains no source-byte fingerprint, so writes
+with one are skipped; legacy placeholder records become misses and are removed when read or during
+bounded, background-priority idle sweeps. Sweeps inspect at most eight records per tick and yield
+to visible frame work. These records are optional presentation caches and are never package truth.
 
 ## Latest presentation frame
 
@@ -144,3 +144,14 @@ remaining summaries for the next package open. Successful batches update the dis
 current grid cells through ratio-only deltas, without reopening asset records or requesting new
 thumbnails. The repair is automatic and idempotent: once all live summaries have the field, later
 opens skip the work.
+
+## Membership summary capture metadata
+
+Older packages also lack the optional `captureSettings` (focal length, ISO, aperture),
+`coarseLocation`, and `captureDateISO` summary fields that back the Library facet sidebar. Import
+fills them for new photos; for existing packages a resumable, background-priority pass runs after
+the other summary repairs, one membership shard per job, merging into a freshly read shard under the
+writer lock. A still-missing field is the durable resume marker, unreadable originals stay missing,
+and an interrupted open continues at the remaining shards. Coarse location is a one-degree grid cell
+rounded on-device; precise GPS is never copied into the index. The field definitions are in
+[`LIBRARY_PACKAGE_FORMAT.md`](LIBRARY_PACKAGE_FORMAT.md). The package format version does not change.

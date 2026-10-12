@@ -173,6 +173,14 @@ from its stored reference.
 - `none` never equals `unresolved`. An `unresolved` signature labels provisional (ungraded) pixels
   only: it is never written to `LatestPreviewFrameStore`, never classifies as exact, and is
   never an exact edited-thumbnail match, so those pixels are replaced when the Look resolves.
+- `LUTFilterCache` and engine preview keys include the content hash, so a `.cube` replaced in place
+  under the same `LUTID` can never be served stale; invalidation is memory hygiene, not correctness.
+- `LUTLibrary` publishes a `[LUTID: contentHash]` snapshot with each scan or import and reports a
+  `LookLibraryDelta` (changed, appeared, disappeared). `AppViewModel` intersects it with the Looks the
+  active document and published edited thumbnails reference. A byte-identical rescan, or a change to
+  an unreferenced Look, does no engine or image work; a referenced change releases only those
+  `LUTID`s (`invalidateLUTCache(ids:)`) and re-admits only the affected canvas and thumbnails.
+
 ## Presentation frames and freshness
 
 `LatestPreviewFrameStore` keeps the latest presented 2048 px preview of each asset. Three value types
@@ -216,8 +224,8 @@ performed.
 library ID, last active asset, and at most 64 de-duplicated visible asset IDs, validated by schema
 version and bounds. It is never navigation or library truth: Kromora still launches into Library, a
 missing, corrupt, or stale hint is ignored, and the real viewport supersedes it. Hinted frame reads
-run concurrently with index and Look startup under the same read limit and perform no decode or
-render.
+run concurrently with index and Look startup under their own limit (`LaunchHintReadPolicy`: two
+concurrent reads) and perform no decode or render.
 
 Rules that keep this safe:
 
@@ -244,16 +252,8 @@ Rules that keep this safe:
   `storageFormatVersion` only when the envelope cannot be decoded.
 - `FrameRefinementPolicy` decides how a stale frame is replaced: one 120 ms crossfade when the digest
   distance exceeds `crossfadeDigestThreshold` (pinned by `FrameRefinementPolicyTests`), otherwise an
-  immediate swap; Reduce Motion always swaps. The policy and digest are in place; the presentation
-  surface does not yet animate the swap.
-
-- `LUTFilterCache` and engine preview keys include the content hash, so a `.cube` replaced in place
-  under the same `LUTID` can never be served stale; invalidation is memory hygiene, not correctness.
-- `LUTLibrary` publishes a `[LUTID: contentHash]` snapshot with each scan or import and reports a
-  `LookLibraryDelta` (changed, appeared, disappeared). `AppViewModel` intersects it with the Looks the
-  active document and published edited thumbnails reference. A byte-identical rescan, or a change to
-  an unreferenced Look, does no engine or image work; a referenced change releases only those
-  `LUTID`s (`invalidateLUTCache(ids:)`) and re-admits only the affected canvas and thumbnails.
+  immediate swap; Reduce Motion always swaps. `PreviewSurface.present` applies the policy only when a
+  stale-compatible frame is being refined by a complete canonical preview.
 
 ## Presentation budget
 
@@ -296,7 +296,7 @@ range's midpoint nor zero is reliable: `AdjustmentControl.highlights` is neutral
 `ColorGradingGlobalControl.blending` is neutral at 50 within an unsigned 0…100, and a genuinely
 unipolar control passes `range.lowerBound` to get the ordinary left-origin fill from the same path.
 Controls in slider space must map the neutral the same way the binding does — see the temperature
-row in `AdjustInspectorView`.
+row in `ColorInspectorView`.
 
 The split between `SliderFill` (pure, deterministic lane) and the cell (AppKit, serial lane) is
 deliberate: `NeutralOriginSliderTests.testTheCellsBarDrawingIsReachedWhenTheControlDraws` is the

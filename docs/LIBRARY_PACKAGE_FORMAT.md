@@ -4,8 +4,9 @@
 > format's design origin. Current runtime ownership and backup/restore behavior are specified in
 > [`STORAGE_POLICY.md`](STORAGE_POLICY.md) and [`APP_ARCHITECTURE.md`](APP_ARCHITECTURE.md).
 
-Phase 2.1 defines the format-only layer. It is a read/write contract; transaction journals, import,
-edit sidecars, and catalog canonicalisation are separate phases.
+The format began as a read/write contract; the transaction journal, import, edit sidecars, and
+catalog canonicalisation have since shipped on top of it, and their runtime behavior is governed by
+the storage and architecture guides.
 
 ```text
 <library>.kromoralibrary/
@@ -17,6 +18,9 @@ edit sidecars, and catalog canonicalisation are separate phases.
   Assets/<first-two-uuid-hex>/<asset-uuid>/Metadata/<revision>.xmp
   Looks/<sha256>.cube
   Recovery/Quarantine/<asset-uuid>/          # package-owned removed assets
+  Recovery/Transactions/, Recovery/Staging/  # in-flight journals and same-volume staging
+  Recovery/Backup/                           # verified-backup metadata
+  Derived/Previews/, Derived/Thumbnails/     # optional, rebuildable caches (STORAGE_POLICY)
 ```
 
 All JSON objects are UTF-8. Writers emit sorted known keys. Unknown top-level members are retained
@@ -33,7 +37,7 @@ schema evolution without silently deleting fields from a newer producer.
 | `writerVersion`, `minimumReaderVersion` | string | Compatibility markers. |
 | `membershipShardCount`, `membershipShardPrefixLength` | integers | `256` shards selected by two lowercase hex UUID characters. |
 | `featureFlags` | string → boolean | Additive capabilities. |
-| `recoveryFormatVersion` | integer | Reserved for the transaction/recovery phase. |
+| `recoveryFormatVersion` | integer | Version of the `Recovery/` journal layout (currently 1). |
 
 Each membership shard has `shard` and `entries`. An entry contains `assetID`, the package-relative
 `recordPath`, `addedRevision`, optional `deletedRevision`, `isTombstone`, and a `summary`. The summary
@@ -82,7 +86,7 @@ Every edit commit appends a new immutable `Edits/<revision>.json` document. The 
 the complete `EditDocument` plus content-addressed Look references. The matching
 `Metadata/<revision>.xmp` packet carries the asset UUID, revision, and the exact Kromora document in
 the `kromora:` namespace, so an XMP-aware tool can identify the revision without understanding
-Kromora's render graph, so a reader validates that the two representations agree. Native revision
+Kromora's render graph; a reader validates that the two representations agree. Native revision
 records may also carry an optional `snapshotName`; this names an intentional saved interpretation
 without changing the XMP edit payload. Named snapshots are retained during ordinary revision
 compaction. The editor's history browser reads the immutable revision list and restoring an older
@@ -97,7 +101,7 @@ same content hash, so one byte-identical Look is stored once while each revision
 self-contained from the user-facing Look browser.
 
 The `source.storage = "referenced"` form and its optional security-scoped bookmark are reserved
-schema fields. This phase round-trips them but exposes no referenced-asset UI or resolver behavior;
+schema fields. The format round-trips them but exposes no referenced-asset UI or resolver behavior;
 copy-on-import remains the only product workflow.
 
 The format creates all 256 shard files, including empty shards. Asset and shard writes validate UUID
