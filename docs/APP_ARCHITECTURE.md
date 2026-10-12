@@ -253,6 +253,12 @@ gesture selection (thresholds and overlay policy persist), and `shutdown()` befo
 renderer resources. Accept and Accept All verify the suggestions' owning source still matches the
 open photo.
 
+CPU work runs in `RetouchDustAnalysisWorker`, an actor, never on the main actor. Each lane (Detect Dust,
+overlay) runs one request and keeps one replaceable pending request, so a slider burst collapses to
+the active request plus the latest threshold. The worker retains the threshold-independent blur and
+difference-of-Gaussians products for the current photo; threshold changes redo only peak selection.
+Source change and shutdown invalidate the lanes, and shutdown awaits the owned loops.
+
 ## Edited-thumbnail ownership
 
 `EditedThumbnailCoordinator` owns edited-thumbnail demand admission, per-asset generations,

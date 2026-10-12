@@ -11,20 +11,52 @@ struct RetouchDustSuggestion: Sendable, Equatable, Identifiable {
     let seed: UInt32
 }
 
+/// Threshold-independent products of one proxy: the luminance plane and the two difference-of-Gaussians
+/// responses. Building them costs three separable blurs; selecting suggestions from them is cheap.
+struct RetouchDustAnalysis: Sendable {
+    let width: Int
+    let height: Int
+    let luminance: [Double]
+    let dog: [Double]
+    let dog2: [Double]
+
+    var isEmpty: Bool { luminance.isEmpty }
+}
+
 enum RetouchDustDetector {
     static func detect(in proxy: RetouchAnalysisProxy, threshold: Double = 0.025,
                        maximum: Int = 500) -> [RetouchDustSuggestion] {
-        guard proxy.isUsable, proxy.width >= 9, proxy.height >= 9 else { return [] }
+        guard let analysis = try? analyze(proxy) else { return [] }
+        return (try? select(from: analysis, threshold: threshold, maximum: maximum)) ?? []
+    }
+
+    /// Source-dependent stage. Throws `CancellationError` between blurs when the calling task is cancelled.
+    static func analyze(_ proxy: RetouchAnalysisProxy) throws -> RetouchDustAnalysis {
+        guard proxy.isUsable, proxy.width >= 9, proxy.height >= 9 else {
+            return RetouchDustAnalysis(width: 0, height: 0, luminance: [], dog: [], dog2: [])
+        }
         let width = proxy.width, height = proxy.height
         let luminance = proxy.pixels.map { Double($0.x) / 100 }
         let small = blur(luminance, width: width, height: height, sigma: 1.2)
+        try Task.checkCancellation()
         let medium = blur(luminance, width: width, height: height, sigma: 2.4)
+        try Task.checkCancellation()
         let large = blur(luminance, width: width, height: height, sigma: 4.8)
-        let dog = zip(small, medium).map { abs($0 - $1) }
-        let dog2 = zip(medium, large).map { abs($0 - $1) }
+        return RetouchDustAnalysis(width: width, height: height, luminance: luminance,
+                                   dog: zip(small, medium).map { abs($0 - $1) },
+                                   dog2: zip(medium, large).map { abs($0 - $1) })
+    }
+
+    /// Threshold-dependent stage: gate, peak search, ordering and de-duplication.
+    static func select(from analysis: RetouchDustAnalysis, threshold: Double,
+                       maximum: Int = 500) throws -> [RetouchDustSuggestion] {
+        guard !analysis.isEmpty else { return [] }
+        let width = analysis.width, height = analysis.height
+        let luminance = analysis.luminance, dog = analysis.dog, dog2 = analysis.dog2
         let gate = max(0.005, threshold)
         var peaks: [(x: Int, y: Int, strength: Double, sigma: Double)] = []
         for y in 4..<(height - 4) {
+            if y % 32 == 0 { try Task.checkCancellation() }
             for x in 4..<(width - 4) {
                 let i = y * width + x
                 let response = max(dog[i], dog2[i])

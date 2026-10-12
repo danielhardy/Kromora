@@ -1,4 +1,5 @@
 import AppKit
+import os
 import XCTest
 @testable import KromoraKit
 
@@ -265,31 +266,18 @@ extension RetouchWorkflowCoordinatorTests {
         XCTAssertTrue(workflow.interactionState.visualizationCandidates.isEmpty)
     }
 
-    func testSlowEarlierRequestCannotReplaceLaterRequestOutput() async {
-        let destination = FakeRetouchDestination()
-        let first = Gate(), second = Gate()
-        var calls = 0
-        destination.proxyProvider = { _ in
-            calls += 1
-            if calls == 1 { await first.arrive(); return RetouchAnalysisProxy(width: 0, height: 0, pixels: []) }
-            await second.arrive(); return Self.speckProxy()
-        }
+    func testSupersededRequestCannotPublishAndOnlyLatestDoes() async {
+        let (destination, workflow, gate) = makeGated()
         destination.retouchAnalysisSource = Self.source("A")
-        let workflow = RetouchWorkflowCoordinator(destination: destination)
         workflow.detectDust()
-        await first.waitForArrivals(1)
-        workflow.detectDust()
-        await second.waitForArrivals(1)
-        second.releaseAll()
+        await gate.waitForArrivals(1)
+        workflow.detectDust() // replaces nothing active; becomes the single pending request
+        workflow.detectDust() // replaces the pending request
+        gate.releaseAll()
         while workflow.interactionState.dustSuggestions.isEmpty { await Task.yield() }
-        let published = workflow.interactionState.dustSuggestions
-        let statuses = destination.statuses
-        first.releaseAll()
         await workflow.shutdown()
-        XCTAssertEqual(statuses.count, 1)
-        XCTAssertTrue(workflow.interactionState.dustSuggestions.isEmpty) // shutdown clears
-        XCTAssertFalse(published.isEmpty)
-        XCTAssertEqual(destination.statuses, statuses)
+        XCTAssertEqual(gate.arrivals, 1) // the analysis built for the first request served the rest
+        XCTAssertEqual(destination.statuses.count, 1)
     }
 
     func testShutdownRejectsNewRequestsAndAwaitsOwnedWork() async {
@@ -320,6 +308,106 @@ extension RetouchWorkflowCoordinatorTests {
         XCTAssertEqual(destination.document.retouch.spots.count, count)
         XCTAssertEqual(destination.undoGroupingDepth, 0)
     }
+
+    // MARK: KRMA-901 — off-main, coalesced, reusable analysis
+
+    private final class StageLog: Sendable {
+        private let state = OSAllocatedUnfairLock(initialState: (analyze: 0, select: 0, onMain: false))
+        var analyzeCount: Int { state.withLock { $0.analyze } }
+        var selectCount: Int { state.withLock { $0.select } }
+        var anyOnMain: Bool { state.withLock { $0.onMain } }
+        func record(_ stage: RetouchDustAnalysisWorker.Stage) {
+            state.withLock {
+                if stage == .analyze { $0.analyze += 1 } else { $0.select += 1 }
+                if Thread.isMainThread { $0.onMain = true }
+            }
+        }
+    }
+
+    private func makeObserved(log: StageLog, hold: DispatchSemaphore? = nil)
+        -> (FakeRetouchDestination, RetouchWorkflowCoordinator, Gate) {
+        let destination = FakeRetouchDestination()
+        let gate = Gate()
+        destination.proxyProvider = { _ in await gate.arrive(); return Self.speckProxy() }
+        let worker = RetouchDustAnalysisWorker { stage in
+            log.record(stage)
+            if stage == .analyze { hold?.wait() }
+        }
+        return (destination, RetouchWorkflowCoordinator(destination: destination, worker: worker), gate)
+    }
+
+    func testDetectionRunsOffMainActorWhileMainActorProgresses() async {
+        let log = StageLog()
+        let hold = DispatchSemaphore(value: 0)
+        let (destination, workflow, gate) = makeObserved(log: log, hold: hold)
+        destination.retouchAnalysisSource = Self.source("A")
+        workflow.detectDust()
+        await gate.waitForArrivals(1)
+        gate.releaseAll()
+        while log.analyzeCount == 0 { await Task.yield() }
+        // The worker is parked inside the expensive stage; the main actor must still make progress.
+        var sentinel = 0
+        for _ in 0..<50 { sentinel += 1; await Task.yield() }
+        XCTAssertEqual(sentinel, 50)
+        XCTAssertTrue(workflow.interactionState.dustSuggestions.isEmpty)
+        hold.signal()
+        while workflow.interactionState.dustSuggestions.isEmpty { await Task.yield() }
+        XCTAssertFalse(log.anyOnMain)
+        await workflow.shutdown()
+    }
+
+    func testThresholdBurstCoalescesAndFinalThresholdWins() async {
+        let log = StageLog()
+        let (destination, workflow, gate) = makeObserved(log: log)
+        destination.retouchAnalysisSource = Self.source("A")
+        workflow.toggleVisualization()
+        await gate.waitForArrivals(1)
+        for step in 1...40 { workflow.setVisualizationThreshold(0.005 + Double(step) * 0.001) }
+        workflow.setVisualizationThreshold(0.05)
+        gate.releaseAll()
+        let expected = RetouchDustDetector.detect(in: Self.speckProxy(), threshold: 0.05, maximum: 1_000)
+        XCTAssertFalse(expected.isEmpty)
+        while workflow.interactionState.visualizationCandidates != expected { await Task.yield() }
+        XCTAssertEqual(gate.arrivals, 1)
+        XCTAssertEqual(log.analyzeCount, 1)
+        XCTAssertEqual(log.selectCount, 1) // 41 requests collapsed into one active plus one pending
+        await workflow.shutdown()
+    }
+
+    func testRepeatedThresholdsReuseAnalysisAndSourceChangeInvalidatesIt() async {
+        let log = StageLog()
+        let (destination, workflow, gate) = makeObserved(log: log)
+        destination.retouchAnalysisSource = Self.source("A")
+        workflow.toggleVisualization()
+        await gate.waitForArrivals(1)
+        gate.releaseAll()
+        while log.selectCount < 1 { await Task.yield() }
+        for (index, threshold) in [0.03, 0.04, 0.06].enumerated() {
+            workflow.setVisualizationThreshold(threshold)
+            while log.selectCount < index + 2 { await Task.yield() }
+        }
+        XCTAssertEqual(log.analyzeCount, 1)
+        XCTAssertEqual(gate.arrivals, 1)
+        destination.retouchAnalysisSource = Self.source("B")
+        workflow.activeSourceDidChange()
+        await gate.waitForArrivals(2)
+        gate.releaseAll()
+        while log.analyzeCount < 2 { await Task.yield() }
+        XCTAssertEqual(log.analyzeCount, 2)
+        await workflow.shutdown()
+    }
+
+    func testThresholdSelectionMatchesDirectDetectionAcrossThresholdsAndCaps() throws {
+        let proxy = Self.speckProxy()
+        let analysis = try RetouchDustDetector.analyze(proxy)
+        for threshold in [0.005, 0.025, 0.06, 0.12] {
+            for maximum in [0, 1, 500] {
+                XCTAssertEqual(try RetouchDustDetector.select(from: analysis, threshold: threshold, maximum: maximum),
+                               RetouchDustDetector.detect(in: proxy, threshold: threshold, maximum: maximum))
+            }
+        }
+    }
+
 }
 
 

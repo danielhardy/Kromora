@@ -39,17 +39,35 @@ final class RetouchWorkflowCoordinator {
 
     // Analysis lifecycle. A generation is bumped to invalidate a request *before* anything is
     // awaited, because cancellation alone cannot stop a cancellation-oblivious proxy provider from
-    // returning and publishing.
+    // returning and publishing. Each lane runs at most one request and holds one replaceable pending one.
+    private struct AnalysisRequest {
+        let generation: Int
+        let epoch: Int
+        let source: ImageSource
+        let fingerprint: String
+        let threshold: Double
+    }
+    @MainActor private final class Lane {
+        let maximum: Int
+        var generation = 0
+        /// Bumped by invalidation; a loop belonging to an older epoch drains nothing further.
+        var epoch = 0
+        var runningEpoch: Int?
+        var task: Task<Void, Never>?
+        var pending: AnalysisRequest?
+        init(maximum: Int) { self.maximum = maximum }
+    }
     private var isShutDown = false
-    private var detectGeneration = 0
-    private var visualizationGeneration = 0
-    private var detectTask: Task<Void, Never>?
-    private var visualizationTask: Task<Void, Never>?
+    private let detectLane = Lane(maximum: 500)
+    private let visualizationLane = Lane(maximum: 1_000)
+    private let worker: RetouchDustAnalysisWorker
     /// Fingerprint of the photo that owns `interactionState.dustSuggestions`.
     private var suggestionOwner: String?
 
-    init(destination: (any RetouchWorkflowDestination)? = nil) {
+    init(destination: (any RetouchWorkflowDestination)? = nil,
+         worker: RetouchDustAnalysisWorker = RetouchDustAnalysisWorker()) {
         self.destination = destination
+        self.worker = worker
     }
 
     func setArmed(_ armed: Bool) {
@@ -253,27 +271,12 @@ final class RetouchWorkflowCoordinator {
 
     func detectDust() {
         guard !isShutDown else { return }
-        detectTask?.cancel()
-        detectGeneration &+= 1
-        let generation = detectGeneration
         guard let destination, let source = destination.retouchAnalysisSource else {
-            detectTask = nil
+            invalidate(detectLane)
             destination?.publishRetouchStatus("Dust detection could not analyze this photo")
             return
         }
-        let fingerprint = source.cacheFingerprint
-        let threshold = interactionState.visualizationThreshold
-        detectTask = Task { [weak self] in
-            let proxy = await destination.retouchAnalysisProxy(source: source)
-            guard let self, self.isCurrentDetect(generation, fingerprint) else { return }
-            guard let proxy else {
-                destination.publishRetouchStatus("Dust detection could not analyze this photo")
-                return
-            }
-            let found = RetouchDustDetector.detect(in: proxy, threshold: threshold)
-            self.install(found, owner: fingerprint)
-            destination.publishRetouchStatus("Found \(found.count) dust suggestions")
-        }
+        submit(source: source, to: detectLane)
     }
 
     /// Publishes suggestions together with the photo that owns them.
@@ -294,33 +297,79 @@ final class RetouchWorkflowCoordinator {
     }
 
     private func refreshVisualization() {
-        visualizationTask?.cancel()
-        visualizationTask = nil
-        visualizationGeneration &+= 1
-        let generation = visualizationGeneration
         guard !isShutDown, interactionState.visualizationEnabled,
-              let destination, let source = destination.retouchAnalysisSource else {
+              let source = destination?.retouchAnalysisSource else {
+            invalidate(visualizationLane)
             interactionState.setVisualizationCandidates([])
             return
         }
-        let fingerprint = source.cacheFingerprint
-        let threshold = interactionState.visualizationThreshold
-        visualizationTask = Task { [weak self] in
-            let proxy = await destination.retouchAnalysisProxy(source: source)
-            guard let self, self.isCurrentVisualization(generation, fingerprint) else { return }
-            self.interactionState.setVisualizationCandidates(
-                proxy.map { RetouchDustDetector.detect(in: $0, threshold: threshold, maximum: 1_000) } ?? [])
+        submit(source: source, to: visualizationLane)
+    }
+
+    /// Latest request wins: it replaces any pending one, and starts a drain loop only when none is alive
+    /// for the current epoch. A loop that outlives an invalidation is awaited, never run concurrently.
+    private func submit(source: ImageSource, to lane: Lane) {
+        lane.generation &+= 1
+        lane.pending = AnalysisRequest(generation: lane.generation, epoch: lane.epoch, source: source,
+                                       fingerprint: source.cacheFingerprint,
+                                       threshold: interactionState.visualizationThreshold)
+        guard lane.runningEpoch != lane.epoch else { return }
+        let epoch = lane.epoch
+        let previous = lane.task
+        lane.runningEpoch = epoch
+        lane.task = Task { [weak self] in
+            await previous?.value
+            while let self, lane.epoch == epoch, let request = lane.pending {
+                lane.pending = nil
+                await self.run(request, in: lane)
+            }
+            if lane.runningEpoch == epoch { lane.runningEpoch = nil }
         }
     }
 
-    private func isCurrentDetect(_ generation: Int, _ fingerprint: String) -> Bool {
-        !isShutDown && generation == detectGeneration
-            && destination?.retouchAnalysisSource?.cacheFingerprint == fingerprint
+    private func invalidate(_ lane: Lane) {
+        lane.generation &+= 1
+        lane.epoch &+= 1
+        lane.pending = nil
+        lane.task?.cancel()
     }
 
-    private func isCurrentVisualization(_ generation: Int, _ fingerprint: String) -> Bool {
-        !isShutDown && generation == visualizationGeneration && interactionState.visualizationEnabled
-            && destination?.retouchAnalysisSource?.cacheFingerprint == fingerprint
+    private func run(_ request: AnalysisRequest, in lane: Lane) async {
+        guard let destination, isLive(request, in: lane) else { return }
+        let isDetect = lane === detectLane
+        if !(await worker.hasAnalysis(for: request.fingerprint)) {
+            let proxy = await destination.retouchAnalysisProxy(source: request.source)
+            // A superseded request on the same photo still builds the shared analysis for its successor.
+            guard isLive(request, in: lane) else { return }
+            guard let proxy else {
+                if isCurrent(request, in: lane) {
+                    if isDetect { destination.publishRetouchStatus("Dust detection could not analyze this photo") }
+                    else { interactionState.setVisualizationCandidates([]) }
+                }
+                return
+            }
+            guard await worker.prepare(key: request.fingerprint, proxy: proxy) else { return }
+        }
+        guard isCurrent(request, in: lane) else { return }
+        let found = await worker.select(key: request.fingerprint, threshold: request.threshold, maximum: lane.maximum)
+        guard isCurrent(request, in: lane), let found else { return }
+        if isDetect {
+            install(found, owner: request.fingerprint)
+            destination.publishRetouchStatus("Found \(found.count) dust suggestions")
+        } else {
+            interactionState.setVisualizationCandidates(found)
+        }
+    }
+
+    /// The request still targets the open photo in a live epoch, even if a newer request supersedes it.
+    private func isLive(_ request: AnalysisRequest, in lane: Lane) -> Bool {
+        !isShutDown && request.epoch == lane.epoch
+            && destination?.retouchAnalysisSource?.cacheFingerprint == request.fingerprint
+    }
+
+    private func isCurrent(_ request: AnalysisRequest, in lane: Lane) -> Bool {
+        isLive(request, in: lane) && request.generation == lane.generation
+            && (lane !== visualizationLane || interactionState.visualizationEnabled)
     }
 
     /// The open photo changed or was removed: drop everything that belonged to the previous one.
@@ -329,24 +378,25 @@ final class RetouchWorkflowCoordinator {
         invalidateAnalysis()
         cancelGesture()
         interactionState.resetPhotoState()
+        if destination?.retouchAnalysisSource == nil { Task { [worker] in await worker.reset() } }
         if !isShutDown { refreshVisualization() }
     }
 
     func shutdown() async {
         isShutDown = true
-        let owned = [detectTask, visualizationTask]
         invalidateAnalysis()
         cancelGesture()
         interactionState.resetPhotoState()
         interactionState.setVisualizationCandidates([])
-        for task in owned { await task?.value }
+        // Each loop chains after its predecessor, so the latest task covers all owned work.
+        await detectLane.task?.value
+        await visualizationLane.task?.value
+        await worker.reset()
     }
 
     private func invalidateAnalysis() {
-        detectGeneration &+= 1
-        visualizationGeneration &+= 1
-        detectTask?.cancel(); visualizationTask?.cancel()
-        detectTask = nil; visualizationTask = nil
+        invalidate(detectLane)
+        invalidate(visualizationLane)
         suggestionOwner = nil
     }
 
