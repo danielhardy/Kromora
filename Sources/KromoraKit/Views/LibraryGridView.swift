@@ -10,6 +10,7 @@ import SwiftUI
 /// the grid also admits every photo in the visible grid, originals first and edited renders
 /// immediately after.
 struct LibraryGridView: View {
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @Bindable var collection: ImageCollection
     let viewModel: AppViewModel
     let onOpen: (PhotoAssetID) -> Void
@@ -135,11 +136,14 @@ struct LibraryGridView: View {
                     Divider()
                     LibraryFacetSidebar(viewModel: viewModel)
                 }
-                .transition(.move(edge: .trailing))
+                .transition(accessibilityReduceMotion ? .opacity : .move(edge: .trailing))
             }
             }
             .clipped()
-            .animation(.smooth(duration: 0.25), value: isFacetSidebarPresented)
+            .animation(
+                accessibilityReduceMotion ? nil : .smooth(duration: 0.25),
+                value: isFacetSidebarPresented
+            )
         }
         .background(KromoraTheme.windowBackground)
         .onAppear {
