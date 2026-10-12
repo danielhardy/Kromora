@@ -15,9 +15,8 @@ files are left untouched for backup/recovery and are not read as a library fallb
 referenced assets, if product requirements return, will be represented as package `.referenced`
 records rather than by reintroducing a source bookmark or folder-backed collection mode.
 
-The cleanup is intentionally measurable: `ImageCollection.swift` is now 653 lines, down from
-2,010 lines at the pre-cleanup baseline, because scan/discovery, bookmark recovery, legacy
-reservations, and UserDefaults culling state no longer have a product owner.
+The cleanup removed scan/discovery, bookmark recovery, legacy reservations, and UserDefaults culling
+state from `ImageCollection`, which no longer has a folder-backed mode.
 
 `AppViewModel` is the application composition root and a façade for the main window. It wires
 collaborators, owns published cross-feature presentation state, and sequences source/revision
@@ -38,8 +37,8 @@ fails above 5,120 lines as a trend guard; extract new workflows into coordinator
 | Idle frame warming | `IdleFrameWarmerCoordinator` owns sequential background fills for original/edited thumbnails and canonical previews; `LibraryBrowsingCoordinator` supplies paged package candidates and launch-hint order; `AppViewModel` supplies readiness, activity, and system conditions | portable identities, source references, edit/look values, viewport distances, and progress |
 | Preview and comparison | `PreviewAdmissionCoordinator` owns preview, histogram, adjacent-prefetch, debounce, and comparison-retry admission; `PreviewPublicationCoordinator` owns settled/interactive publication and presented-frame state; `PreviewPresentationCoordinator` owns display/comparison generations, resolution planners, cache identity/access, and canonical cache writes; `PreviewCoordinator` owns render submission; `FirstFramePresentationCoordinator` owns deferred thumbnail/camera-JPEG first-paint candidates, the stored-frame fallback timer, and generation-fenced release decisions (returning value outcomes; no surface or `AppViewModel` reference); `AppViewModel` owns the published document and presentation surfaces and paints released candidates; `ComparisonFramePolicy` owns pure baseline rules | `RenderRequest`, `PreviewCoordinator.Publication`, source/document/display revisions |
 | Crop, rotation, and canvas navigation | `CanvasWorkflowCoordinator` owns crop-session commands and presentation snapshot, crop/rotation commands, and fit/fill/zoom/pan navigation; `CanvasInteractionState` owns observable draft and viewport values; `AppViewModel` owns document history, persistence, and render scheduling | crop presentation snapshot, `EditDocument` mutation closures, source size, image extent, and render/navigation callbacks |
-| Analysis and masking | `PhotoAnalysisCoordinator` owns analysis/cache work; `MaskingWorkflowCoordinator` owns masking-workspace selection, transient creation, and smart-mask analysis lifecycle | analysis value results, mask recipes, asset/source revisions |
-| Export and Looks | `ExportWorkflowCoordinator`, `ExportCoordinator`, `DeriveCoordinator`, `LookSaveCoordinator`, `LookSelectionCoordinator`, and `LUTLibrary` | render requests, export items, LUT IDs/values, status/error callbacks |
+| Analysis, Auto, and masking | `PhotoAnalysisCoordinator` owns analysis/cache work; `AutoWorkflowCoordinator` owns Auto invocation state and cancellation, and the pure `AutoEnhancementCoordinator` scores bounded candidates through the renderer; `MaskingWorkflowCoordinator` owns masking-workspace selection, transient creation, and smart-mask analysis lifecycle | analysis value results, mask recipes, asset/source revisions |
+| Export and Looks | `ExportWorkflowCoordinator`, `ExportCoordinator`, `DeriveCoordinator`, `LookSaveCoordinator`, `LookSelectionCoordinator`, `LookPreviewCoordinator`, and `LUTLibrary` | render requests, export items, LUT IDs/values, status/error callbacks |
 | Lifecycle and shutdown | `ApplicationShellCoordinator` owns process observers and package-maintenance admission; `AppViewModel` remains the shutdown composition root; each collaborator owns cancellation and resource release within its boundary | explicit `shutdown()`/flush calls; observer tokens, maintenance triggers, and provider tasks do not escape their owner |
 
 The active `EditDocument` is intentionally still published by `AppViewModel`: preview, histogram,
@@ -166,110 +165,6 @@ before import. The package does not record Photos local identifiers, so each pic
 transferred and hashed with the same content digest, one at a time off the main actor, and the
 import then transfers only the confirmed items.
 
-`ApplicationShellCoordinator` owns process observers and package-maintenance admission; `AppViewModel` remains the shutdown composition root; each collaborator owns cancellation and resource release within its boundary | explicit `shutdown()`/flush calls; observer tokens, maintenance triggers, and provider tasks do not escape their owner |
-
-The active `EditDocument` is intentionally still published by `AppViewModel`: preview, histogram,
-comparison, persistence, and the existing view façade all consume that one value. The editor and
-clipboard coordinators own the value-state companion data, so history and clipboard changes do not
-create a second document store or hidden mutation channel.
-
-## Copy/paste ownership
-
-`EditClipboardCoordinator` owns the value-only clipboard, chosen category mask, selective-copy
-sheet state, remembered settings, status text, and active/batch routing. Its weak
-`EditClipboardDestination` exposes source/document values, selected `EditClipboardTarget` snapshots,
-and focused commit/persistence callbacks; it never retains `AppViewModel`. Source classification and
-portable persistence identity are projected at the root's library adapter.
-
-Active pastes commit through `updateDocument`. During a filmstrip load, matching the displayed
-source reference restores the matching asset/history before that commit. Non-active pastes use
-`EditorDocumentCoordinator.apply` to record per-photo history and revisions, skip unchanged
-sessions, then request forced thumbnail/persistence updates and a batch flush. The root retains
-thin command and presentation forwards, with synchronous child observation for existing views.
-`EditClipboardCoordinatorTests` cover source validation, remembered selection/cancel, selective
-active commits, RAW/raster batch behavior, selection transitions, per-photo undo, and no-op writes
-without constructing `AppViewModel`.
-
-## Source-session ownership
-
-`SourceSessionCoordinator` is constructed from a renderer, edit store, and first-frame provider.
-It owns the replaceable source-preparation worker, source generation, stored-edit lookup, metadata
-and RAW capability tasks, and embedded first-frame lifetime. It publishes only tagged
-`PreparationPublication`, `StoredDocumentPublication`, `MetadataPublication`,
-`CapabilitiesPublication`, and `FirstFramePublication` values. The root decides how those values
-update the published document, source marker, inspector, and surfaces. Cancellation invalidates
-the generation before any asynchronous result can call back; shutdown awaits the worker and its
-child tasks.
-
-## Preview-presentation ownership
-
-`PreviewAdmissionCoordinator` owns request admission, debounce handles, histogram jobs,
-adjacent prefetch, and comparison-preview admission, including its scheduled and retried revision
-state and retry task. `IdleFrameWarmerCoordinator` handles all-photo package warming separately:
-it waits for the first index page and viewport, chooses by viewport distance and launch-hint
-recency, then admits one `.background` editor operation per photo. It asks the frame stores for
-metadata before opening a source, skips exact tiers, and writes only original/edited thumbnail
-records and complete canonical preview frames. It never publishes to a canvas or histogram
-surface. `AppViewModel` cancels it for selection, navigation, visible interaction, export, library
-activity, app deactivation, shutdown, Low Power Mode, or serious thermal pressure; low-water
-admission leaves room below the preview-store cap while the normal pin-aware LRU protects the
-active and visible photos. Progress reports completed and remaining photos. `PreviewPublicationCoordinator` owns the settled and
-interactive publication funnel, presented-frame state, and latest-wins publication fences;
-`PreviewPresentationCoordinator` owns display/comparison generations, per-surface
-resolution-planner hysteresis, the selection-time stored-frame lookup and its classification, and
-canonical complete-frame writes to `LatestPreviewFrameStore` (an actor in `Derived/Previews`). `ThumbnailFrameStore` (an actor over the packed store in `Derived/Thumbnails`) is owned by `AppViewModel` and read by `ImageCollection` and `EditedThumbnailCoordinator` for cell pixels; `LibraryBrowsingCoordinator` owns `LaunchHints` (read at launch, written coalesced) and package-photo identity resolution for `AppViewModel.openImage`, which fences the canvas before resolving a browsing record.
-`PreviewAdmissionCoordinator` holds a settled submission back while a stored frame can still make it
-unnecessary, and presents an exact hit instead of rendering. `PreviewCoordinator` remains the only render-submission owner. The root supplies
-value-only document/source/navigation inputs and retains the `PreviewSurface` instances, so there
-is no second document store or surface reference in these collaborators.
-
-## Canvas workflow ownership
-
-`CanvasWorkflowCoordinator` owns crop entry, commit, cancel, reset, transient straighten/flip/
-perspective updates, quarter-turn behavior, and viewport fit/fill/zoom/pan commands. Its
-`CanvasInteractionState` owns the observable crop draft and viewport navigation values so
-pointer-frequency changes continue to invalidate only the canvas. Crop presentation restoration
-crosses the `CanvasWorkflowDestination` seam as a value snapshot; the coordinator has no inspector
-or source-browser references. The destination provides the active document/source geometry and
-callbacks for ordinary document updates, undo-group completion, status, and preview scheduling.
-
-`AppViewModel` remains the sole owner of `EditDocument`, history, persistence, preview/revision
-fences, and compatibility entry points. Canvas navigation never enters document history. The
-coordinator has no asynchronous work or retained external resources; `shutdown()` clears a draft
-and its presentation snapshot, and source replacement resets the interaction state. Fake-only
-`CanvasWorkflowCoordinatorTests` cover crop cancellation and commit, document rotation, and
-presentation-only navigation without constructing `AppViewModel`.
-
-## Library browsing ownership
-
-`LibraryBrowsingCoordinator` sequences portable query pages into `ImageCollection`, mirrors the
-query controller's selection for the visible window, and owns grid selection, keyboard paging,
-portable asset page-faulting, culling persistence, and deletion confirmation. Its
-`LibraryBrowsingDestination` is limited to presentation values and callbacks for status/errors,
-selection-to-edit, source opening, and deletion. `AppViewModel` remains responsible for opening and
-preparing the active photo and `clearActiveSourceAfterLibraryDeletion`; the coordinator never
-stores the application model. `LibraryDeletionCoordinator` owns the post-deletion cleanup sequence
-through `LibraryDeletionCleanupDestination` and returns a `LibraryDeletionOutcome` (active-photo
-action plus status/error message) that the root applies.
-`LibraryBrowsingCoordinatorTests` exercise paging, query no-op behavior, off-window opens, culling
-persistence, and the grid-only confirmation rule with a fake query provider and destination.
-
-## Library/media and application-shell ownership
-
-`LibraryMediaWorkflowCoordinator` owns mounted-volume discovery, debounced scan replacement,
-selection state, security-scoped validation, source-folder dialog/drop classification, and the
-cancelable media-import validation task. It publishes narrow state and a
-`RemovableMediaImportRequest` value to the composition root. The root remains responsible for the
-final package or managed-copy transaction, then reports the result back through `finishImport`; no
-workflow creates a second authoritative library.
-
-The removable-media selector tags files already in the open library. `LibraryMembershipMatcher`
-compares each file's SHA-256 with the package import catalog's content hashes (the same rule
-`PortablePackageImporter` uses for duplicates), hashing lazily and cancellably on a detached task as
-scan batches arrive. Tagged files are left out of default selection and Select All unless the user
-clicked them; the library is the only authority, so other libraries and deleted assets are not
-remembered. Folder import and the system Photos picker have no in-app selector to tag.
-
 `ApplicationShellCoordinator` owns workspace mount/unmount observers, app-activation observers,
 debounce tasks, portable-package maintenance admission, and observer/maintenance teardown. Its
 callbacks are refresh signals only. `AppViewModel` retains the compatibility façade and orders
@@ -371,6 +266,7 @@ after the ownership stages; the main file is 5,105 lines, recorded here only as 
 | Import and library commands | `LibraryImportCoordinator`, `PackageSourceImportCoordinator`, `PhotosImportCoordinator`, `PhotosImportBatchCoordinator`, `LibraryMediaWorkflowCoordinator`, and `LibraryBrowsingCoordinator` own their worker, provider, batch bridge, validation, query-window, and selection state. The root keeps view-compatible entry points, final package/import publication, source-to-edit handoff, and cross-feature deletion cleanup. |
 | Launch hints | `LibraryBrowsingCoordinator` coalesces device-local viewport/active-ID hints, reads at most two hinted packed-frame windows below current viewport priority, and cancels remaining speculative reads when the grid publishes its real viewport. Hints never alter selection, scroll position, or package truth. |
 | Edited thumbnails | `EditedThumbnailCoordinator` owns request state. Root demand, refresh, debounce, and invalidation hooks are forwards; collection/document publication remains at the root boundary. |
+| Look browser previews | `LookPreviewCoordinator` owns the browser's lazy 168×112 thumbnails and their bounded cache (24 entries, 8 MB). It renders through the shared `RenderEngine` so RAW development, global edits, LUT interpolation, and crop ordering match the canvas, and it never changes the document or history. The root forwards `lookPreview(for:)` and keys invalidation on source and document revision. |
 | Copy/paste and Looks | `EditClipboardCoordinator` owns clipboard values, selective-copy presentation/preferences, and paste sequencing through a narrow destination. `EditorDocumentCoordinator` owns per-photo sessions/history. `LookSelectionCoordinator` owns Look resolution against `LUTLibrary`/`DerivedLUTRegistry`, the one-shot missing-reference report, and selection/audition decisions; it returns outcomes and never mutates the document. Root commands apply those outcomes through `updateDocument` and preserve multi-photo persistence semantics. |
 | Document commit and history | `updateDocument` is the sole ordinary edit commit path: it records history, updates the published document and crop, queues persistence, advances revisions, and admits preview/thumbnail work. `applyHistoryDocument` is the restore sequencer for undo/redo and reset, using the same published document, persistence, revision, and render boundaries. |
 | Preview, canvas, and inspector | Preview admission, publication, and presentation collaborators own scheduling, publication fences, cache/planner state, histogram work, and comparison retry. `PreviewCoordinator` remains the render submitter. Canvas workflow owns crop/viewport commands; the root retains surfaces and presentation state. Inspector chrome and displayed histogram values remain root-published. |
