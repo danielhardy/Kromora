@@ -179,7 +179,8 @@ final class AppViewModelTests: TempDirectoryTestCase {
         await engine.gateSourcePreparation()
         let viewModel = makeAppViewModel(engine: engine)
 
-        let summary = try XCTUnwrap(viewModel.openImages(urls: [importedURL, missingURL]))
+        let importSummary = await viewModel.openImagesAndWait(urls: [importedURL, missingURL])
+        let summary = try XCTUnwrap(importSummary)
 
         XCTAssertEqual(summary.imported, 1)
         XCTAssertEqual(summary.failed, 1)

@@ -15,8 +15,11 @@ protocol PackageSourceImportDestination: AnyObject {
     func presentOutcome(_ summary: ImportOutcomeSummary, prefix: String)
     func presentStatus(_ message: String)
     func presentError(_ message: String)
-    /// Synchronous dialog-style open used for URLs redeemed from a Photos drop.
-    func openImages(urls: [URL], operationID: UUID) -> ImportOutcomeSummary?
+    /// Worker-backed dialog-style open used for URLs redeemed from a Photos drop. `completion`
+    /// fires once for the current operation and not at all when it is superseded.
+    func openImages(
+        urls: [URL], operationID: UUID,
+        completion: @escaping @MainActor (ImportOutcomeSummary?) -> Void)
     func finishMediaImport(_ summary: ImportOutcomeSummary, operationID: UUID)
     func cancelMediaImport()
 }
@@ -220,38 +223,49 @@ final class PackageSourceImportCoordinator {
                 self.droppedPromiseTask = nil
                 return
             }
-            defer { ImageDrop.purgeDropDirectories() }
 
             let result = await self.receivePromises(receivers, directory)
             guard self.imports.isCurrent(operationID), let destination = self.destination else {
+                ImageDrop.purgeDropDirectories()
                 return
             }
-            var summary: ImportOutcomeSummary?
-            if !result.urls.isEmpty {
-                // Promise URLs are already known to be files. Use the same durable multi-file
-                // path as other library imports rather than opening a Photos derivative URL.
-                summary = destination.openImages(urls: result.urls, operationID: operationID)
+            // The worker reads the redeemed files after this task body returns, so the drop
+            // directory is purged on completion; a superseded import leaves it for the next drop
+            // or shutdown to purge.
+            let finish: @MainActor (ImportOutcomeSummary?) -> Void = { [weak self] summary in
+                ImageDrop.purgeDropDirectories()
+                guard let self, let destination = self.destination else { return }
+                if !result.failures.isEmpty {
+                    let promiseSummary = ImportOutcomeSummary(
+                        total: result.failures.count,
+                        failed: result.failures.count,
+                        failureReasons: result.failures
+                    )
+                    let combined = (summary ?? ImportOutcomeSummary(total: 0))
+                        .adding(promiseSummary)
+                    destination.presentOutcome(combined, prefix: "Photos drop")
+                } else if let summary {
+                    destination.presentOutcome(summary, prefix: "Photos drop")
+                } else {
+                    destination.presentStatus(
+                        "Photos drop complete — 0 imported, 0 duplicate, 0 skipped, 0 failed")
+                }
+                self.droppedPromiseTask = nil
             }
-            if !result.failures.isEmpty {
-                let promiseSummary = ImportOutcomeSummary(
-                    total: result.failures.count,
-                    failed: result.failures.count,
-                    failureReasons: result.failures
-                )
-                let combined = (summary ?? ImportOutcomeSummary(total: 0)).adding(promiseSummary)
-                destination.presentOutcome(combined, prefix: "Photos drop")
-            } else if let summary {
-                destination.presentOutcome(summary, prefix: "Photos drop")
+            if result.urls.isEmpty {
+                finish(nil)
             } else {
-                destination.presentStatus(
-                    "Photos drop complete — 0 imported, 0 duplicate, 0 skipped, 0 failed")
+                // Promise URLs are already known to be files. Use the same durable multi-file
+                // path as other library imports; the drop outcome is reported on completion.
+                destination.openImages(
+                    urls: result.urls, operationID: operationID, completion: finish)
             }
-            self.droppedPromiseTask = nil
         }
     }
 
     func shutdown() {
         droppedPromiseTask?.cancel()
         droppedPromiseTask = nil
+        ImageDrop.purgeDropDirectories()
     }
 }

@@ -62,7 +62,7 @@ final class FileIntegrationBoundaryTests: TempDirectoryTestCase {
         )
         let dialog = StubFileDialog()
         let viewModel = makeAppViewModel(fileDialog: dialog)
-        viewModel.openImages(urls: [image])
+        await viewModel.openImagesAndWait(urls: [image])
         try await waitUntilSourceIsLoaded(viewModel)
 
         let existingIDs = viewModel.collection.items.map(\.id)
@@ -74,12 +74,12 @@ final class FileIntegrationBoundaryTests: TempDirectoryTestCase {
         XCTAssertEqual(dialog.imageStartingURL, viewModel.settings.defaultSourceFolderURL)
     }
 
-    func testInvalidDropLeavesCurrentEditUntouched() throws {
+    func testInvalidDropLeavesCurrentEditUntouched() async throws {
         let image = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "existing.png", in: tempDirectory
         )
         let viewModel = makeAppViewModel()
-        viewModel.openImages(urls: [image])
+        await viewModel.openImagesAndWait(urls: [image])
         let existingIDs = viewModel.collection.items.map(\.id)
         let missing = tempDirectory.appendingPathComponent("missing.png")
 

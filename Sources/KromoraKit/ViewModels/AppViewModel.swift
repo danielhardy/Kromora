@@ -2712,68 +2712,86 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         )
     }
 
-    /// Replace the one-off library with the selected files and open the first item. Keeping this
-    /// separate from the AppKit panel makes the selection behavior deterministic to test and
-    /// ensures an empty/cancelled result does not disturb the current edit.
-    @discardableResult
+    /// Import the selected files through the worker-backed package path and open the first item.
+    /// Returns immediately; package I/O runs off the main actor and security-scoped `access` is
+    /// owned by that operation until it reaches a terminal state. `completion` receives the
+    /// terminal summary exactly once for a current operation. It is not called when a newer import
+    /// or shutdown supersedes this one, and gets `nil` for empty input or an unavailable package.
+    /// Empty input is a no-op that does not cancel unrelated work or disturb the current edit.
     func openImages(
         urls: [URL],
         operationID: UUID? = nil,
-        access: [SecurityScopedResourceAccess] = []
-    ) -> ImportOutcomeSummary? {
-        defer { access.forEach { $0.release() } }
-        guard !urls.isEmpty else { return nil }
+        access: [SecurityScopedResourceAccess] = [],
+        completion: (@MainActor (ImportOutcomeSummary?) -> Void)? = nil
+    ) {
+        guard !urls.isEmpty else {
+            access.forEach { $0.release() }
+            completion?(nil)
+            return
+        }
         let operationID = operationID ?? beginImportOperation()
         guard portableLibrary != nil else {
+            access.forEach { $0.release() }
             reportPortableLibraryUnavailable()
-            return nil
+            completion?(nil)
+            return
         }
+        let prefix = "Photo import"
         do {
-            // Opening from the dialog has a synchronous publication contract: the caller must be
-            // able to inspect the newly admitted, sorted collection as soon as this method
-            // returns. The worker-backed import API is appropriate for streamed Photos/folder
-            // workflows, but deferring this boundary leaves the dialog with an empty collection.
-            let result = try libraryImportCoordinator.importURLs(urls, access: access)
-            guard isCurrentImport(operationID) else { return nil }
-            try reloadPortableCollection()
-
-            // The package keeps the original filename (including its extension) so the embedded
-            // source remains self-describing. The old Open Image… presentation showed stems, so
-            // apply that convention only to the assets admitted by this dialog operation.
-            var dialogNames: [PortablePhotoAssetID: String] = [:]
-            for imported in result.imported {
-                dialogNames[imported.assetID] =
-                    URL(fileURLWithPath: imported.source.name)
-                    .deletingPathExtension().lastPathComponent
-            }
-            for duplicate in result.duplicates {
-                dialogNames[duplicate.existingAssetID] =
-                    URL(fileURLWithPath: duplicate.source.name)
-                    .deletingPathExtension().lastPathComponent
-            }
-            for item in collection.items {
-                let assetID = item.asset.source.portableIdentity.assetID
-                item.setDisplayNameOverride(dialogNames[assetID])
-            }
-
-            // Import results retain input order, while the browsing projection is sorted by the
-            // visible display name. Open the first displayed item so selection agrees with what
-            // the user sees, including when the panel returned URLs in another order or repeated
-            // one URL and the importer deduplicated it.
-            if let firstItem = collection.items.first {
-                let assetID = firstItem.asset.source.portableIdentity.assetID
-                openPortableAsset(assetID)
-            }
-            let summary = ImportOutcomeSummary(result: result, total: urls.count)
-            presentImportOutcome(summary, prefix: "Photo import")
-            return summary
-        } catch {
-            guard isCurrentImport(operationID) else { return nil }
-            presentImportOutcome(
-                .failure(total: urls.count, reason: error.localizedDescription),
-                prefix: "Photo import"
+            let handle = try libraryImportCoordinator.startImportURLs(urls, access: access)
+            packageSourceImports.observe(
+                handle, operationID: operationID, total: urls.count, prefix: prefix,
+                onSuccess: { [weak self] result in
+                    guard let self else { return }
+                    do {
+                        try self.reloadPortableCollection()
+                        self.applyDialogNames(from: result)
+                        // Import results retain input order, while the browsing projection is
+                        // sorted by display name. Open the first displayed item so selection
+                        // agrees with what the user sees.
+                        if let firstItem = self.collection.items.first {
+                            self.openPortableAsset(firstItem.asset.source.portableIdentity.assetID)
+                        }
+                        let summary = ImportOutcomeSummary(result: result, total: urls.count)
+                        self.presentImportOutcome(summary, prefix: prefix)
+                        completion?(summary)
+                    } catch {
+                        let summary = ImportOutcomeSummary.failure(
+                            total: urls.count, reason: error.localizedDescription)
+                        self.presentImportOutcome(summary, prefix: prefix)
+                        completion?(summary)
+                    }
+                },
+                onFailure: { [weak self] error in
+                    guard let self, self.isCurrentImport(operationID) else { return }
+                    let summary = ImportOutcomeSummary.failure(
+                        total: urls.count, reason: error.localizedDescription)
+                    self.presentImportOutcome(summary, prefix: prefix)
+                    completion?(summary)
+                }
             )
-            return .failure(total: urls.count, reason: error.localizedDescription)
+        } catch {
+            guard isCurrentImport(operationID) else { return }
+            let summary = ImportOutcomeSummary.failure(
+                total: urls.count, reason: error.localizedDescription)
+            presentImportOutcome(summary, prefix: prefix)
+            completion?(summary)
+        }
+    }
+
+    /// The package keeps each original filename (with extension) so the embedded source stays
+    /// self-describing; Open Image… presents stems, so apply that only to assets this import named.
+    private func applyDialogNames(from result: PortablePackageImportResult) {
+        var names: [PortablePhotoAssetID: String] = [:]
+        func stem(_ name: String) -> String {
+            URL(fileURLWithPath: name).deletingPathExtension().lastPathComponent
+        }
+        for imported in result.imported { names[imported.assetID] = stem(imported.source.name) }
+        for duplicate in result.duplicates {
+            names[duplicate.existingAssetID] = stem(duplicate.source.name)
+        }
+        for item in collection.items {
+            item.setDisplayNameOverride(names[item.asset.source.portableIdentity.assetID])
         }
     }
 
@@ -5067,8 +5085,11 @@ extension AppViewModel: PackageSourceImportDestination {
 
     func presentStatus(_ message: String) { statusMessage = message }
 
-    func openImages(urls: [URL], operationID: UUID) -> ImportOutcomeSummary? {
-        openImages(urls: urls, operationID: operationID, access: [])
+    func openImages(
+        urls: [URL], operationID: UUID,
+        completion: @escaping @MainActor (ImportOutcomeSummary?) -> Void
+    ) {
+        openImages(urls: urls, operationID: operationID, access: [], completion: completion)
     }
 
     func finishMediaImport(_ summary: ImportOutcomeSummary, operationID: UUID) {

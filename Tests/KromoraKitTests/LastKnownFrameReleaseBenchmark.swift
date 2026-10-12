@@ -144,7 +144,7 @@ final class LastKnownFrameReleaseBenchmark: TempDirectoryTestCase {
             libraryFolderURL: tempDirectory.appendingPathComponent("managed-library"),
             previewFrameStoreDirectory: tempDirectory.appendingPathComponent("last-known-frames")
         )
-        let importSummary = model.openImages(urls: urls + [sourceInGrid])
+        let importSummary = await model.openImagesAndWait(urls: urls + [sourceInGrid])
         guard let importSummary,
             importSummary.imported + importSummary.duplicates == Self.gridCellCount
         else {

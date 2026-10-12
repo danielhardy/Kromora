@@ -32,7 +32,10 @@ final class PackageSourceImportCoordinatorTests: XCTestCase {
             onTerminal?()
         }
         func presentError(_ message: String) { errors.append(message) }
-        func openImages(urls: [URL], operationID: UUID) -> ImportOutcomeSummary? { nil }
+        func openImages(
+            urls: [URL], operationID: UUID,
+            completion: @escaping @MainActor (ImportOutcomeSummary?) -> Void
+        ) { completion(nil) }
         func finishMediaImport(_ summary: ImportOutcomeSummary, operationID: UUID) {
             mediaFinishes.append((summary, operationID))
             onTerminal?()

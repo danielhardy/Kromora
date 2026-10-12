@@ -44,7 +44,7 @@ final class LibraryCellClickTests: TempDirectoryTestCase {
             await thumbnailWork.load()
             return nil
         })
-        _ = viewModel.openImages(urls: [original])
+        await viewModel.openImagesAndWait(urls: [original])
         XCTAssertTrue(viewModel.navigate(to: .grid))
         let clicked = try XCTUnwrap(viewModel.collection.items.first)
         let clickedURL = try XCTUnwrap(clicked.url)
@@ -62,7 +62,7 @@ final class LibraryCellClickTests: TempDirectoryTestCase {
 
         // Import publication inserts an earlier-sorted photo and changes the active selection.
         // The second event must still open the photo beneath the original click, not its offset.
-        _ = viewModel.openImages(urls: [imported])
+        await viewModel.openImagesAndWait(urls: [imported])
         XCTAssertTrue(viewModel.navigate(to: .grid))
         XCTAssertNotEqual(viewModel.collection.selection.activeID, clicked.id)
         XCTAssertNil(clicked.originalThumbnailForPresentation)

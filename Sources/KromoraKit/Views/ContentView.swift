@@ -109,7 +109,7 @@ public struct ContentView: View {
                     },
                     onSamples: {
                         isWelcomePresented = false
-                        _ = viewModel.openImages(urls: StarterSampleLibrary.urls)
+                        viewModel.openImages(urls: StarterSampleLibrary.urls)
                     },
                     onTour: {
                         isWelcomePresented = false

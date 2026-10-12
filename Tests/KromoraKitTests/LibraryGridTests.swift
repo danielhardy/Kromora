@@ -58,7 +58,7 @@ final class LibraryGridTests: TempDirectoryTestCase {
             width: 1_200, height: 600, named: "grid-render.png", in: tempDirectory
         )
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
-        _ = viewModel.openImages(urls: [source])
+        await viewModel.openImagesAndWait(urls: [source])
         let deadline = Date().addingTimeInterval(5)
         while viewModel.collection.items.first?.thumbnail == nil {
             if Date() > deadline { XCTFail("the visible grid thumbnail did not arrive"); break }

@@ -1,6 +1,24 @@
 import XCTest
 @testable import KromoraKit
 
+private extension URL {
+    /// The compatibility `libraryFolderURL` fixture is keyed by object identity and can go stale
+    /// when addresses are reused across tests, so assert the package-embedded location directly.
+    var isEmbeddedInPackage: Bool {
+        pathComponents.contains { $0.hasSuffix(".kromoralibrary") }
+    }
+}
+
+extension AppViewModel {
+    /// Starts an Open Image import and suspends until its terminal summary is published.
+    @discardableResult
+    func openImagesAndWait(urls: [URL]) async -> ImportOutcomeSummary? {
+        await withCheckedContinuation { continuation in
+            openImages(urls: urls) { continuation.resume(returning: $0) }
+        }
+    }
+}
+
 @MainActor
 final class OpenImageDialogTests: TempDirectoryTestCase {
 
@@ -27,11 +45,11 @@ final class OpenImageDialogTests: TempDirectoryTestCase {
         )
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
 
-        viewModel.openImages(urls: [later, first])
+        await viewModel.openImagesAndWait(urls: [later, first])
 
         XCTAssertEqual(viewModel.collection.items.map(\.displayName), ["first", "later"])
         XCTAssertTrue(viewModel.collection.items.allSatisfy {
-            $0.url?.path.hasPrefix(viewModel.collection.libraryFolderURL.path + "/") == true
+            $0.url?.isEmbeddedInPackage == true
         })
         XCTAssertTrue(viewModel.collection.items.allSatisfy { $0.imageData == nil })
         XCTAssertTrue(viewModel.navigation.isEdit)
@@ -46,14 +64,10 @@ final class OpenImageDialogTests: TempDirectoryTestCase {
         )
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
 
-        viewModel.openImages(urls: [image, image])
+        await viewModel.openImagesAndWait(urls: [image, image])
 
         XCTAssertEqual(viewModel.collection.items.count, 1)
-        XCTAssertTrue(
-            viewModel.collection.items.first?.url?.path.hasPrefix(
-                viewModel.collection.libraryFolderURL.path + "/"
-            ) == true
-        )
+        XCTAssertTrue(viewModel.collection.items.first?.url?.isEmbeddedInPackage == true)
         XCTAssertTrue(viewModel.navigation.isEdit)
         try await waitUntil("the single image") {
             viewModel.sourceName == image.lastPathComponent && viewModel.sourceImage != nil
@@ -65,15 +79,56 @@ final class OpenImageDialogTests: TempDirectoryTestCase {
             width: 20, height: 12, named: "existing.png", in: tempDirectory
         )
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
-        viewModel.openImages(urls: [image])
+        await viewModel.openImagesAndWait(urls: [image])
         try await waitUntil("the existing image") { viewModel.sourceImage != nil }
 
         let existingIDs = viewModel.collection.items.map(\.id)
         let existingSource = viewModel.sourceName
-        viewModel.openImages(urls: [])
+        await viewModel.openImagesAndWait(urls: [])
 
         XCTAssertEqual(viewModel.collection.items.map(\.id), existingIDs)
         XCTAssertEqual(viewModel.sourceName, existingSource)
         XCTAssertTrue(viewModel.navigation.isEdit)
+    }
+
+    func testOpenImagesReturnsBeforePublishingAndReportsOneTerminalSummary() async throws {
+        let image = try Fixtures.writeGradientPNG(
+            width: 20, height: 12, named: "async.png", in: tempDirectory
+        )
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        var completions: [ImportOutcomeSummary?] = []
+
+        viewModel.openImages(urls: [image]) { completions.append($0) }
+
+        // Publication needs a main-actor turn, so nothing can have been admitted yet.
+        XCTAssertTrue(viewModel.collection.items.isEmpty)
+        XCTAssertTrue(completions.isEmpty)
+        try await waitUntil("the terminal summary") { !completions.isEmpty }
+        XCTAssertEqual(completions.count, 1)
+        XCTAssertEqual(completions.first??.imported, 1)
+        XCTAssertEqual(viewModel.collection.items.count, 1)
+    }
+
+    func testSupersededOpenImagesDoesNotPublishOrComplete() async throws {
+        let first = try Fixtures.writeGradientPNG(
+            width: 20, height: 12, named: "first-superseded.png", in: tempDirectory
+        )
+        let second = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "second-winner.png", in: tempDirectory
+        )
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        var supersededCompleted = false
+
+        viewModel.openImages(urls: [first]) { _ in supersededCompleted = true }
+        let summary = await viewModel.openImagesAndWait(urls: [second])
+
+        XCTAssertEqual(summary?.imported, 1)
+        XCTAssertFalse(supersededCompleted)
+    }
+
+    func testOpenImagesCompletesNilForEmptyInput() async throws {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let summary = await viewModel.openImagesAndWait(urls: [])
+        XCTAssertNil(summary)
     }
 }

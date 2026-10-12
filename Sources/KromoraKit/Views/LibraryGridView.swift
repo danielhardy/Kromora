@@ -327,7 +327,7 @@ private struct LibraryEmptyState: View {
                         .buttonStyle(.borderedProminent)
                         .disabled(!viewModel.canImportIntoPortableLibrary)
                     Button("Try sample library") {
-                        _ = viewModel.openImages(urls: StarterSampleLibrary.urls)
+                        viewModel.openImages(urls: StarterSampleLibrary.urls)
                     }
                     .neutralActionButton()
                     .disabled(!viewModel.canImportIntoPortableLibrary)

@@ -74,6 +74,12 @@ update the published document, source marker, inspector, and surfaces. Cancellat
 the generation before any asynchronous result can call back; shutdown awaits the worker and its
 child tasks.
 
+Open Image (`AppViewModel.openImages`) uses the same scheduler-backed `startImportURLs` path and
+`LibraryImportCoordinator` operation as folder imports. It returns immediately, transfers
+security-scoped access to the worker (released on every terminal path), and reports its terminal
+`ImportOutcomeSummary` through an optional completion that never fires for a superseded or
+shut-down operation.
+
 ## Stored-edit adoption ownership
 
 `StoredEditAdoptionCoordinator` owns the rules for adopting a photo's stored edits while it loads,
