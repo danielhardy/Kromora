@@ -848,7 +848,8 @@ final class RelaunchParityTests: TempDirectoryTestCase {
                 in: tempDirectory
             )
         }
-        let seedSession = try PortableLibrarySession(at: packageURL)
+        let indexURL = tempDirectory.appendingPathComponent("IdleWarmParity/index.json")
+        let seedSession = try PortableLibrarySession(at: packageURL, indexURL: indexURL)
         _ = try seedSession.importURLs(sourceURLs, duplicatePolicy: .importAnyway)
         let seedAssets = try seedSession.materializedAssets()
         XCTAssertEqual(seedAssets.count, sourceURLs.count)
@@ -866,7 +867,7 @@ final class RelaunchParityTests: TempDirectoryTestCase {
         try seedSession.refreshIndex()
         await seedSession.shutdown()
 
-        let warmSession = try PortableLibrarySession(at: packageURL)
+        let warmSession = try PortableLibrarySession(at: packageURL, indexURL: indexURL)
         let assets = try warmSession.browsingAssets()
         XCTAssertEqual(assets.count, sourceURLs.count)
         let candidates = assets.enumerated().map { index, asset in
@@ -903,7 +904,9 @@ final class RelaunchParityTests: TempDirectoryTestCase {
             scheduler: scheduler, engine: warmEngine,
             editStore: EditDocumentStore(package: warmSession.package, lease: warmSession.lease),
             thumbnailStore: warmThumbnailStore, previewPresentation: warmPresentation,
-            idleDelay: .zero, observesSystemChanges: false, destination: destination
+            idleDelay: .zero, observesSystemChanges: false,
+            planProvider: { [destination] _ in await destination.rankedEntries() },
+            destination: destination
         )
         warmer.schedule()
         try await waitUntil("idle warm persisted all presentation tiers") {

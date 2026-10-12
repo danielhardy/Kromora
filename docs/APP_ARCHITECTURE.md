@@ -100,8 +100,12 @@ race and the in-memory-session-wins cases without constructing `AppViewModel`.
 `PreviewAdmissionCoordinator` owns request admission, debounce handles, histogram jobs,
 adjacent prefetch, and comparison-preview admission, including its scheduled and retried revision
 state and retry task. `IdleFrameWarmerCoordinator` handles all-photo package warming separately:
-it waits for the first index page and viewport, chooses by viewport distance and launch-hint
-recency, then admits one `.background` editor operation per photo. It asks the frame stores for
+it waits for the first index page and viewport, then ranks the whole library once per index
+generation off the main actor (`IdleFrameWarmPlanner`, a value snapshot of `LibraryQueryController`
+ordered by viewport distance, launch-hint recency, then index position). It keeps only lightweight
+ranked IDs, asks `AppViewModel` to materialize bounded pages of candidates, and abandons and
+replans (a bounded number of times) if the index generation changes. It admits one `.background`
+editor operation per photo. It asks the frame stores for
 metadata before opening a source, skips exact tiers, and writes only original/edited thumbnail
 records and complete canonical preview frames. It never publishes to a canvas or histogram
 surface. `AppViewModel` cancels it for selection, navigation, visible interaction, export, library

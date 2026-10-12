@@ -4934,39 +4934,33 @@ extension AppViewModel: IdleFrameWarmerDestination {
         )
     }
 
-    var idleFrameWarmerCandidates: [IdleFrameWarmCandidate] {
-        guard let portableLibrary, idleFrameWarmerIsReady else { return [] }
-        var assets: [PhotoAsset] = []
-        var pageIndex = 0
-        while true {
-            guard let window = try? portableLibrary.browsingWindow(
-                pageIndex: pageIndex, query: .all
-            ) else { return [] }
-            guard !window.assets.isEmpty || assets.count >= window.totalCount else { return [] }
-            assets.append(contentsOf: window.assets)
-            guard assets.count < window.totalCount else { break }
-            pageIndex += 1
-        }
-
-        let visibleIDs = idleFrameWarmerVisiblePortableAssetIDs
-        var anchorIDs = visibleIDs
+    func idleFrameWarmerPlanInput() -> IdleFrameWarmPlanInput? {
+        guard let portableLibrary, idleFrameWarmerIsReady else { return nil }
+        var anchorIDs = idleFrameWarmerVisiblePortableAssetIDs
         if let active = portableLibrary.portableActiveID { anchorIDs.insert(active) }
-        // Pages are read one at a time, so an asset can appear twice if membership shifts
-        // between reads; keep the first position instead of trapping on a duplicate key.
-        let positions = Dictionary(assets.enumerated().map {
-            ($0.element.source.portableIdentity.assetID, $0.offset)
-        }, uniquingKeysWith: { first, _ in first })
-        let anchorPositions = anchorIDs.compactMap { positions[$0] }
-        let fallbackSelection = min(max(collection.selectedIndex, 0), max(assets.count - 1, 0))
-        let recencyRanks = Dictionary(
-            libraryBrowsingCoordinator.launchHintRecencyOrder.enumerated().map {
-                ($0.element, $0.offset)
-            },
+        return IdleFrameWarmPlanInput(
+            controller: portableLibrary.queryController, anchorIDs: anchorIDs,
+            fallbackSelection: collection.selectedIndex,
+            recencyOrder: libraryBrowsingCoordinator.launchHintRecencyOrder,
+            generation: portableLibrary.indexGeneration
+        )
+    }
+
+    func idleFrameWarmerPlanIsCurrent(generation: UInt64) -> Bool {
+        portableLibrary?.indexGeneration == generation
+    }
+
+    func idleFrameWarmerCandidates(for entries: [IdleFrameWarmPlanEntry]) -> [IdleFrameWarmCandidate] {
+        guard let portableLibrary,
+              let assets = try? portableLibrary.browsingAssets(forIDs: entries.map(\.assetID))
+        else { return [] }
+        let byID = Dictionary(
+            assets.map { ($0.source.portableIdentity.assetID, $0) },
             uniquingKeysWith: { first, _ in first }
         )
-
-        return assets.enumerated().compactMap { index, asset in
-            guard let dimensions = asset.dimensions,
+        return entries.compactMap { entry in
+            guard let asset = byID[entry.assetID],
+                  let dimensions = asset.dimensions,
                   dimensions.width > 0, dimensions.height > 0,
                   let url = asset.url else { return nil }
             let identity = asset.source.portableIdentity
@@ -4977,17 +4971,15 @@ extension AppViewModel: IdleFrameWarmerDestination {
                 ), portableIdentity: identity,
                 existingFileChangeSignature: asset.source.fingerprint
             )
-            let distance = anchorPositions.map { abs(index - $0) }.min()
-                ?? abs(index - fallbackSelection)
             return IdleFrameWarmCandidate(
-                index: index, assetID: asset.id, source: source,
+                index: entry.index, assetID: asset.id, source: source,
                 reference: EditSourceReference(
                     assetID: asset.id, portableIdentity: identity, url: url
                 ),
                 inMemoryDocument: editorDocument.session(for: asset.id)?.document,
                 inMemoryLookSignature: idleFrameWarmerSavedLookSignature(for: asset.id),
-                distanceFromViewport: distance,
-                launchHintRecencyRank: recencyRanks[identity.assetID] ?? Int.max
+                distanceFromViewport: entry.distanceFromViewport,
+                launchHintRecencyRank: entry.launchHintRecencyRank
             )
         }
     }

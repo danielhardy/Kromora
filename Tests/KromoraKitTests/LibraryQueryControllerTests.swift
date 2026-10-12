@@ -133,6 +133,24 @@ final class LibraryQueryControllerTests: TempDirectoryTestCase {
         XCTAssertFalse(thirdPage.hasNextPage)
     }
 
+    func testOrderedAssetIDsMatchTheConcatenatedPagesForAnyQuery() throws {
+        let ids = (0..<7).map { _ in PortablePhotoAssetID() }
+        let entries = ids.enumerated().map { index, assetID in
+            LibraryIndexEntry(from: .init(
+                assetID: assetID,
+                recordPath: "Assets/" + PortableLibraryPackage.shard(for: assetID)
+                    + "/" + assetID.raw + "/asset.json",
+                summary: .init(rating: index % 3, displayName: "Frame \(index % 4)")
+            ))
+        }
+        let controller = LibraryQueryController(
+            index: try LibraryIndexProjection(libraryID: UUID(), entries: entries), pageSize: 3
+        )
+        let query = LibraryQuery(sort: .init(key: .displayName, direction: .descending))
+        let paged = (0..<3).flatMap { controller.page(at: $0, query: query).items.map(\.assetID) }
+        XCTAssertEqual(controller.orderedAssetIDs(query: query), paged)
+    }
+
     func testFilteringAndSortingUseSummaryValuesAndSelectionStaysUUIDKeyed() throws {
         let ids = (0..<6).map { _ in PortablePhotoAssetID() }
         let names = ["Zeta", "Alpha", "Echo", "Bravo", "Delta", "Charlie"]

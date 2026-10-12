@@ -10,6 +10,34 @@ actor IdleWarmDecodeProbe {
     func record() { count += 1 }
 }
 
+/// Counts planning runs and can hold one open so a test can interleave main-actor work.
+actor IdleWarmPlanProbe {
+    private(set) var runCount = 0
+    private var gateEnabled = false
+    private var gate: CheckedContinuation<Void, Never>?
+    private var startWaiter: CheckedContinuation<Void, Never>?
+
+    func enableGate() { gateEnabled = true }
+
+    func record() async {
+        runCount += 1
+        startWaiter?.resume()
+        startWaiter = nil
+        if gateEnabled { await withCheckedContinuation { gate = $0 } }
+    }
+
+    func waitUntilStarted() async {
+        if runCount > 0 { return }
+        await withCheckedContinuation { startWaiter = $0 }
+    }
+
+    func release() {
+        gateEnabled = false
+        gate?.resume()
+        gate = nil
+    }
+}
+
 actor IdleWarmTestEngine: RenderEngining {
     private let image: CGImage
     private(set) var thumbnailRequests: [RenderRequest] = []
@@ -86,6 +114,54 @@ final class IdleWarmTestDestination: IdleFrameWarmerDestination {
         isApplicationActive: true
     )
     var idleFrameWarmerCandidates: [IdleFrameWarmCandidate] = []
+    var planGeneration: UInt64 = 0
+    private(set) var materializedPageSizes: [Int] = []
+    private(set) var planInputRequestCount = 0
+    var onMaterialize: (@MainActor () -> Void)?
+
+    func idleFrameWarmerPlanInput() -> IdleFrameWarmPlanInput? {
+        planInputRequestCount += 1
+        guard let index = try? LibraryIndexProjection(libraryID: UUID(), entries: []) else {
+            return nil
+        }
+        return IdleFrameWarmPlanInput(
+            controller: LibraryQueryController(index: index), anchorIDs: [],
+            fallbackSelection: 0, recencyOrder: [], generation: planGeneration
+        )
+    }
+
+    func idleFrameWarmerPlanIsCurrent(generation: UInt64) -> Bool {
+        generation == planGeneration
+    }
+
+    func idleFrameWarmerCandidates(
+        for entries: [IdleFrameWarmPlanEntry]
+    ) -> [IdleFrameWarmCandidate] {
+        materializedPageSizes.append(entries.count)
+        onMaterialize?()
+        return entries.compactMap { entry in
+            idleFrameWarmerCandidates.first { $0.identity.assetID == entry.assetID }
+        }
+    }
+
+    /// The candidate list ranked exactly as the production planner ranks index entries.
+    func rankedEntries() -> [IdleFrameWarmPlanEntry] {
+        idleFrameWarmerCandidates.map {
+            IdleFrameWarmPlanEntry(
+                assetID: $0.identity.assetID, index: $0.index,
+                distanceFromViewport: $0.distanceFromViewport,
+                launchHintRecencyRank: $0.launchHintRecencyRank
+            )
+        }.sorted {
+            if $0.distanceFromViewport != $1.distanceFromViewport {
+                return $0.distanceFromViewport < $1.distanceFromViewport
+            }
+            if $0.launchHintRecencyRank != $1.launchHintRecencyRank {
+                return $0.launchHintRecencyRank < $1.launchHintRecencyRank
+            }
+            return $0.index < $1.index
+        }
+    }
     var idleFrameWarmerActivePortableAssetID: PortablePhotoAssetID?
     var idleFrameWarmerVisiblePortableAssetIDs: Set<PortablePhotoAssetID> = []
     var savedLooks: [PhotoAssetID: LookSignature] = [:]
@@ -130,11 +206,13 @@ final class IdleFrameWarmerCoordinatorTests: TempDirectoryTestCase {
         let previewStore: LatestPreviewFrameStore
         let presentation: PreviewPresentationCoordinator
         let package: PortableLibrarySession
+        let planProbe: IdleWarmPlanProbe
     }
 
     private func makeHarness(
         names: [String], previewCapBytes: Int64 = LatestPreviewFrameStore.defaultCapBytes,
-        decodeProbe: IdleWarmDecodeProbe? = nil
+        decodeProbe: IdleWarmDecodeProbe? = nil, pageSize: Int = 24,
+        planProbe: IdleWarmPlanProbe = IdleWarmPlanProbe()
     ) async throws -> Harness {
         let urls = try names.enumerated().map { index, name in
             try Fixtures.writeGradientPNG(
@@ -142,7 +220,8 @@ final class IdleFrameWarmerCoordinatorTests: TempDirectoryTestCase {
             )
         }
         let package = try PortableLibrarySession(
-            at: tempDirectory.appendingPathComponent("\(UUID().uuidString).kromoralibrary")
+            at: tempDirectory.appendingPathComponent("\(UUID().uuidString).kromoralibrary"),
+            indexURL: tempDirectory.appendingPathComponent("index-\(UUID().uuidString).json")
         )
         _ = try package.importURLs(urls, duplicatePolicy: .importAnyway)
         let assets = try package.browsingAssets()
@@ -189,12 +268,18 @@ final class IdleFrameWarmerCoordinatorTests: TempDirectoryTestCase {
             scheduler: scheduler, engine: engine,
             editStore: makeInMemoryEditStore(), thumbnailStore: thumbnailStore,
             previewPresentation: presentation, originalDecodeObserver: observer,
-            idleDelay: .zero, observesSystemChanges: false, destination: destination
+            idleDelay: .zero, observesSystemChanges: false,
+            planProvider: { _ in
+                await planProbe.record()
+                return await destination.rankedEntries()
+            },
+            pageSize: pageSize, destination: destination
         )
         return Harness(
             coordinator: coordinator, scheduler: scheduler, engine: engine,
             destination: destination, thumbnailStore: thumbnailStore,
-            previewStore: previewStore, presentation: presentation, package: package
+            previewStore: previewStore, presentation: presentation, package: package,
+            planProbe: planProbe
         )
     }
 
@@ -221,6 +306,108 @@ final class IdleFrameWarmerCoordinatorTests: TempDirectoryTestCase {
         await harness.previewStore.waitForPendingWrites()
         await harness.scheduler.cancelAllAndWait()
         await harness.package.shutdown()
+    }
+
+    // MARK: Planning
+
+    func testMultiPageLibraryIsOrderedOncePerSnapshotAndMaterializedInBoundedPages() async throws {
+        let harness = try await makeHarness(
+            names: ["a.png", "b.png", "c.png", "d.png", "e.png"], pageSize: 2
+        )
+        harness.coordinator.schedule()
+        try await waitUntil("five warmed photos") {
+            harness.coordinator.progress == IdleFrameWarmerProgress(done: 5, remaining: 0)
+        }
+        let planRuns = await harness.planProbe.runCount
+        XCTAssertEqual(planRuns, 1, "one full ordering per stable snapshot, not per page")
+        XCTAssertEqual(harness.destination.materializedPageSizes, [2, 2, 1])
+        await finish(harness)
+    }
+
+    func testGatedPlannerLetsMainActorRunAndCancelStopsBeforeAnyMaterialization() async throws {
+        let harness = try await makeHarness(names: ["gated.png", "gated2.png"])
+        await harness.planProbe.enableGate()
+        harness.coordinator.schedule()
+        await harness.planProbe.waitUntilStarted()
+
+        var sentinelRan = false
+        await Task { @MainActor in sentinelRan = true }.value
+        XCTAssertTrue(sentinelRan, "planning must not hold the main actor")
+        XCTAssertTrue(harness.destination.materializedPageSizes.isEmpty)
+
+        harness.coordinator.cancel()
+        await harness.planProbe.release()
+        await harness.coordinator.shutdown()
+        XCTAssertTrue(harness.destination.materializedPageSizes.isEmpty)
+        let requests = await harness.engine.requestSources()
+        XCTAssertTrue(requests.thumbnails.isEmpty)
+        XCTAssertTrue(requests.previews.isEmpty)
+        await finish(harness)
+    }
+
+    func testStalePlanIsAbandonedWhenLibraryGenerationChangesDuringPlanning() async throws {
+        let harness = try await makeHarness(names: ["stale.png"])
+        await harness.planProbe.enableGate()
+        harness.coordinator.schedule()
+        await harness.planProbe.waitUntilStarted()
+        harness.destination.planGeneration &+= 1
+        await harness.planProbe.release()
+        await harness.coordinator.shutdown()
+        XCTAssertTrue(harness.destination.materializedPageSizes.isEmpty)
+        let requests = await harness.engine.requestSources()
+        XCTAssertTrue(requests.thumbnails.isEmpty)
+        await finish(harness)
+    }
+
+    func testGenerationChangeBetweenPagesAbandonsPlanAndReplansOnce() async throws {
+        let harness = try await makeHarness(names: ["p1.png", "p2.png", "p3.png"], pageSize: 1)
+        var bumped = false
+        harness.destination.onMaterialize = { [destination = harness.destination] in
+            guard !bumped else { return }
+            bumped = true
+            destination.planGeneration &+= 1
+        }
+        harness.coordinator.schedule()
+        try await waitUntil("replanned pass completes") {
+            harness.coordinator.progress == IdleFrameWarmerProgress(done: 3, remaining: 0)
+        }
+        // The first plan stops after its first page; the second plan pages through all three.
+        XCTAssertEqual(harness.destination.materializedPageSizes, [1, 1, 1, 1])
+        let planRuns = await harness.planProbe.runCount
+        XCTAssertEqual(planRuns, 2)
+        await finish(harness)
+    }
+
+    func testPlannerRanksByDistanceThenRecencyThenIndexWithoutMaterializingAssets() throws {
+        let ids = (0..<9).map { _ in PortablePhotoAssetID() }
+        let entries = ids.enumerated().map { offset, id in
+            LibraryIndexEntry(from: .init(
+                assetID: id,
+                recordPath: "Assets/" + PortableLibraryPackage.shard(for: id) + "/" + id.raw
+                    + "/asset.json",
+                summary: .init(displayName: String(format: "IMG_%02d.png", offset))
+            ))
+        }
+        let controller = LibraryQueryController(
+            index: try LibraryIndexProjection(libraryID: UUID(), entries: entries), pageSize: 2
+        )
+        let order = controller.orderedAssetIDs()
+        XCTAssertEqual(Set(order), Set(ids))
+        let ranked = IdleFrameWarmPlanner.rank(IdleFrameWarmPlanInput(
+            controller: controller, anchorIDs: [order[2], order[6], PortablePhotoAssetID()],
+            fallbackSelection: 0, recencyOrder: [order[3], order[1], order[3]], generation: 0
+        ))
+        XCTAssertEqual(ranked.count, ids.count)
+        // Distances to the nearest of positions 2 and 6; ties break on recency, then index.
+        XCTAssertEqual(ranked.map(\.index), [2, 6, 3, 1, 5, 7, 0, 4, 8])
+        XCTAssertEqual(ranked.map(\.assetID), [2, 6, 3, 1, 5, 7, 0, 4, 8].map { order[$0] })
+        XCTAssertEqual(ranked.map(\.distanceFromViewport), [0, 0, 1, 1, 1, 1, 2, 2, 2])
+
+        let fallback = IdleFrameWarmPlanner.rank(IdleFrameWarmPlanInput(
+            controller: controller, anchorIDs: [PortablePhotoAssetID()],
+            fallbackSelection: 100, recencyOrder: [], generation: 0
+        ))
+        XCTAssertEqual(fallback.map(\.index), [8, 7, 6, 5, 4, 3, 2, 1, 0])
     }
 
     func testWarmsAllThreePersistedTiersInViewportAndLaunchHintOrderWithoutPublishing() async throws {
@@ -321,7 +508,11 @@ final class IdleFrameWarmerCoordinatorTests: TempDirectoryTestCase {
             editStore: makeInMemoryEditStore(), thumbnailStore: harness.thumbnailStore,
             previewPresentation: harness.presentation,
             originalDecodeObserver: { await decodeProbe.record() },
-            idleDelay: .zero, observesSystemChanges: false, destination: harness.destination
+            idleDelay: .zero, observesSystemChanges: false,
+            planProvider: { [destination = harness.destination] _ in
+                await destination.rankedEntries()
+            },
+            destination: harness.destination
         )
         exactHitCoordinator.schedule()
         try await waitUntil("exact-hit pass") {
@@ -417,7 +608,11 @@ final class IdleFrameWarmerCoordinatorTests: TempDirectoryTestCase {
             scheduler: harness.scheduler, engine: harness.engine,
             editStore: makeInMemoryEditStore(), thumbnailStore: harness.thumbnailStore,
             previewPresentation: harness.presentation, originalDecodeObserver: observer,
-            idleDelay: .zero, observesSystemChanges: false, destination: harness.destination
+            idleDelay: .zero, observesSystemChanges: false,
+            planProvider: { [destination = harness.destination] _ in
+                await destination.rankedEntries()
+            },
+            destination: harness.destination
         )
         coordinator.schedule()
         try await waitUntil("capacity stop") {

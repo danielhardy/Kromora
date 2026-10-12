@@ -58,6 +58,9 @@ final class PortableLibrarySession {
     let indexURL: URL
 
     private(set) var queryController: LibraryQueryController
+    /// Advances whenever the published index is replaced, so an index-side plan built from an
+    /// earlier `queryController` value can be recognized as stale.
+    private(set) var indexGeneration: UInt64 = 0
     private var startupFirstPage: LibraryQueryPage?
     private var importCatalog: PortablePackageImportCatalog?
     private let leaseDuration: TimeInterval
@@ -238,6 +241,7 @@ final class PortableLibrarySession {
             await MainActor.run {
                 guard let self, !self.isShuttingDown else { return }
                 if let projection {
+                    self.indexGeneration &+= 1
                     self.queryController = LibraryQueryController(
                         index: projection, pageSize: pageSize,
                         selectedAssetIDs: self.queryController.selectedIDs,
@@ -787,6 +791,7 @@ final class PortableLibrarySession {
         startupFirstPage = nil
         let projection = try LibraryIndexProjection(package: package)
         try projection.write(to: indexURL)
+        indexGeneration &+= 1
         queryController = LibraryQueryController(
             index: projection,
             pageSize: queryController.pageSize,
@@ -808,6 +813,7 @@ final class PortableLibrarySession {
         let projection = try queryController.index.applying(delta)
         let selectedAssetIDs = queryController.selectedIDs
         let activeAssetID = queryController.activeID
+        indexGeneration &+= 1
         queryController = LibraryQueryController(
             index: projection,
             pageSize: queryController.pageSize,
@@ -1274,6 +1280,19 @@ final class PortableLibrarySession {
     /// merge materializes only what is new.
     func browsingAssets(for items: [LibraryQueryItem]) throws -> [PhotoAsset] {
         try items.map { try browsingAsset(for: $0) }
+    }
+
+    /// Browsing assets for specific IDs, in the order given. IDs no longer in the published index
+    /// are dropped; only the requested entries are materialized.
+    func browsingAssets(forIDs ids: [PortablePhotoAssetID]) throws -> [PhotoAsset] {
+        try ids.compactMap { id in
+            guard let entry = queryController.index.entry(for: id), entry.deletedRevision == nil
+            else { return nil }
+            return try browsingAsset(for: LibraryQueryItem(
+                assetID: id, recordPath: entry.recordPath, summary: entry.summary,
+                isSelected: queryController.selectedIDs.contains(id)
+            ))
+        }
     }
 
     func browsingAssets(query: LibraryQuery = .all) throws -> [PhotoAsset] {

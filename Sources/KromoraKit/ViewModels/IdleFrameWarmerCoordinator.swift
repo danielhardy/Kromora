@@ -33,12 +33,92 @@ struct IdleFrameWarmCandidate: Sendable {
     var identity: PortablePhotoIdentity { source.cacheIdentity }
 }
 
+/// Immutable inputs for ranking the library once, off the main actor.
+struct IdleFrameWarmPlanInput: Sendable {
+    let controller: LibraryQueryController
+    let anchorIDs: Set<PortablePhotoAssetID>
+    let fallbackSelection: Int
+    let recencyOrder: [PortablePhotoAssetID]
+    /// The destination's index generation when the input was captured.
+    let generation: UInt64
+}
+
+/// One lightweight ranked slot: no asset, source, or record is materialized for it.
+struct IdleFrameWarmPlanEntry: Sendable, Equatable {
+    let assetID: PortablePhotoAssetID
+    let index: Int
+    let distanceFromViewport: Int
+    let launchHintRecencyRank: Int
+}
+
+typealias IdleFrameWarmPlanProvider = @Sendable (IdleFrameWarmPlanInput) async -> [IdleFrameWarmPlanEntry]
+
+enum IdleFrameWarmPlanner {
+    /// Orders the whole library once by viewport distance, launch-hint recency, then stable
+    /// index position, and runs that work off the main actor.
+    static let detached: IdleFrameWarmPlanProvider = { input in
+        let task = Task.detached(priority: .background) { rank(input) }
+        return await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+    }
+
+    static func rank(_ input: IdleFrameWarmPlanInput) -> [IdleFrameWarmPlanEntry] {
+        let ids = input.controller.orderedAssetIDs()
+        // Keep the first position of a repeated ID rather than trapping on a duplicate key.
+        var positions: [PortablePhotoAssetID: Int] = [:]
+        positions.reserveCapacity(ids.count)
+        for (offset, id) in ids.enumerated() where positions[id] == nil { positions[id] = offset }
+        let anchors = input.anchorIDs.compactMap { positions[$0] }.sorted()
+        let fallback = min(max(input.fallbackSelection, 0), max(ids.count - 1, 0))
+        var recency: [PortablePhotoAssetID: Int] = [:]
+        for (offset, id) in input.recencyOrder.enumerated() where recency[id] == nil {
+            recency[id] = offset
+        }
+        var entries: [IdleFrameWarmPlanEntry] = []
+        entries.reserveCapacity(positions.count)
+        for (offset, id) in ids.enumerated() where positions[id] == offset {
+            entries.append(IdleFrameWarmPlanEntry(
+                assetID: id, index: offset,
+                distanceFromViewport: nearestDistance(to: offset, in: anchors)
+                    ?? abs(offset - fallback),
+                launchHintRecencyRank: recency[id] ?? Int.max
+            ))
+        }
+        return entries.sorted {
+            if $0.distanceFromViewport != $1.distanceFromViewport {
+                return $0.distanceFromViewport < $1.distanceFromViewport
+            }
+            if $0.launchHintRecencyRank != $1.launchHintRecencyRank {
+                return $0.launchHintRecencyRank < $1.launchHintRecencyRank
+            }
+            return $0.index < $1.index
+        }
+    }
+
+    private static func nearestDistance(to position: Int, in sorted: [Int]) -> Int? {
+        guard !sorted.isEmpty else { return nil }
+        var low = 0, high = sorted.count
+        while low < high {
+            let mid = (low + high) / 2
+            if sorted[mid] < position { low = mid + 1 } else { high = mid }
+        }
+        var best = Int.max
+        if low < sorted.count { best = sorted[low] - position }
+        if low > 0 { best = min(best, position - sorted[low - 1]) }
+        return best
+    }
+}
+
 @MainActor
 protocol IdleFrameWarmerDestination: AnyObject {
     var idleFrameWarmerIsReady: Bool { get }
     var idleFrameWarmerIsBlocked: Bool { get }
     var idleFrameWarmerConditions: IdleFrameWarmerConditions { get }
-    var idleFrameWarmerCandidates: [IdleFrameWarmCandidate] { get }
+    /// An immutable snapshot for ranking, or nil when there is no library to warm.
+    func idleFrameWarmerPlanInput() -> IdleFrameWarmPlanInput?
+    /// Whether a plan captured at `generation` still matches the published library.
+    func idleFrameWarmerPlanIsCurrent(generation: UInt64) -> Bool
+    /// Materializes one bounded page of ranked entries; ineligible or removed assets are omitted.
+    func idleFrameWarmerCandidates(for entries: [IdleFrameWarmPlanEntry]) -> [IdleFrameWarmCandidate]
     var idleFrameWarmerActivePortableAssetID: PortablePhotoAssetID? { get }
     var idleFrameWarmerVisiblePortableAssetIDs: Set<PortablePhotoAssetID> { get }
     func idleFrameWarmerSavedLookSignature(for assetID: PhotoAssetID) -> LookSignature?
@@ -86,6 +166,8 @@ final class IdleFrameWarmerCoordinator {
     private let originalDecodeObserver: (@Sendable () async -> Void)?
     private let idleDelay: Duration
     private let notificationCenter: NotificationCenter
+    private let planProvider: IdleFrameWarmPlanProvider
+    private let pageSize: Int
     private weak var destination: (any IdleFrameWarmerDestination)?
     private var idleTask: Task<Void, Never>?
     private var generation: UInt64 = 0
@@ -104,6 +186,8 @@ final class IdleFrameWarmerCoordinator {
         idleDelay: Duration = .milliseconds(1500),
         notificationCenter: NotificationCenter = .default,
         observesSystemChanges: Bool = true,
+        planProvider: @escaping IdleFrameWarmPlanProvider = IdleFrameWarmPlanner.detached,
+        pageSize: Int = 24,
         destination: (any IdleFrameWarmerDestination)? = nil
     ) {
         self.scheduler = scheduler
@@ -115,6 +199,8 @@ final class IdleFrameWarmerCoordinator {
         self.idleDelay = idleDelay
         self.notificationCenter = notificationCenter
         self.destination = destination
+        self.planProvider = planProvider
+        self.pageSize = max(1, pageSize)
         if observesSystemChanges { observeSystemChanges() }
     }
 
@@ -162,44 +248,73 @@ final class IdleFrameWarmerCoordinator {
         await waitForEditorLane(generation: scheduledGeneration)
         guard canContinue(generation: scheduledGeneration) else { return }
 
-        let candidates = destination.idleFrameWarmerCandidates.sorted {
-            if $0.distanceFromViewport != $1.distanceFromViewport {
-                return $0.distanceFromViewport < $1.distanceFromViewport
-            }
-            if $0.launchHintRecencyRank != $1.launchHintRecencyRank {
-                return $0.launchHintRecencyRank < $1.launchHintRecencyRank
-            }
-            return $0.index < $1.index
+        // A membership change while planning or paging abandons the snapshot; replan a bounded
+        // number of times so a steady stream of mutations cannot spin the warmer.
+        for _ in 0..<Self.maximumPlanAttempts {
+            guard await warmPlan(destination: destination, generation: scheduledGeneration) == .stale
+            else { return }
         }
-        progress = IdleFrameWarmerProgress(done: 0, remaining: candidates.count)
-        guard !candidates.isEmpty else { return }
+    }
+
+    private enum PlanOutcome { case finished, stale }
+
+    private static let maximumPlanAttempts = 4
+
+    private func warmPlan(
+        destination: any IdleFrameWarmerDestination, generation scheduledGeneration: UInt64
+    ) async -> PlanOutcome {
+        guard let input = destination.idleFrameWarmerPlanInput() else { return .finished }
+        let plan = await planProvider(input)
+        guard canContinue(generation: scheduledGeneration) else { return .finished }
+        guard destination.idleFrameWarmerPlanIsCurrent(generation: input.generation) else {
+            return .stale
+        }
+        progress = IdleFrameWarmerProgress(done: 0, remaining: plan.count)
+        guard !plan.isEmpty else { return .finished }
         await previewPresentation.setPinnedFrameAssets(pinnedAssetIDs(for: destination))
 
-        for candidate in candidates {
-            await waitForEditorLane(generation: scheduledGeneration)
-            guard canContinue(generation: scheduledGeneration) else { return }
-            let outcome = await withCheckedContinuation {
-                (continuation: CheckedContinuation<PhotoOutcome, Never>) in
-                let completion = PhotoCompletion(continuation)
-                _ = scheduler.enqueue(
-                    id: jobID, lane: .editor, priority: .background,
-                    onTerminal: { _ in completion.finish() }
-                ) { [weak self] in
-                    guard let self else { return }
-                    let outcome = await self.performOnePhoto(
-                        candidate, generation: scheduledGeneration
-                    )
-                    completion.set(outcome)
-                }
+        var pageStart = 0
+        while pageStart < plan.count {
+            guard canContinue(generation: scheduledGeneration) else { return .finished }
+            guard destination.idleFrameWarmerPlanIsCurrent(generation: input.generation) else {
+                return .stale
             }
-            guard canContinue(generation: scheduledGeneration) else { return }
-            if outcome == .capacityReached { return }
-            guard outcome == .completed else { return }
+            let slice = Array(plan[pageStart..<min(plan.count, pageStart + pageSize)])
+            pageStart += slice.count
+            let candidates = destination.idleFrameWarmerCandidates(for: slice)
+            let skipped = slice.count - candidates.count
             progress = IdleFrameWarmerProgress(
-                done: progress.done + 1,
-                remaining: max(0, progress.remaining - 1)
+                done: progress.done, remaining: max(0, progress.remaining - skipped)
             )
+            for candidate in candidates {
+                await waitForEditorLane(generation: scheduledGeneration)
+                guard canContinue(generation: scheduledGeneration) else { return .finished }
+                guard destination.idleFrameWarmerPlanIsCurrent(generation: input.generation)
+                else { return .stale }
+                let outcome = await withCheckedContinuation {
+                    (continuation: CheckedContinuation<PhotoOutcome, Never>) in
+                    let completion = PhotoCompletion(continuation)
+                    _ = scheduler.enqueue(
+                        id: jobID, lane: .editor, priority: .background,
+                        onTerminal: { _ in completion.finish() }
+                    ) { [weak self] in
+                        guard let self else { return }
+                        let outcome = await self.performOnePhoto(
+                            candidate, generation: scheduledGeneration
+                        )
+                        completion.set(outcome)
+                    }
+                }
+                guard canContinue(generation: scheduledGeneration) else { return .finished }
+                if outcome == .capacityReached { return .finished }
+                guard outcome == .completed else { return .finished }
+                progress = IdleFrameWarmerProgress(
+                    done: progress.done + 1,
+                    remaining: max(0, progress.remaining - 1)
+                )
+            }
         }
+        return .finished
     }
 
     private func performOnePhoto(

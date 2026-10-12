@@ -650,11 +650,7 @@ struct LibraryQueryController: Sendable {
         query: LibraryQuery = .all
     ) -> LibraryQueryPage {
         let safePageIndex = max(0, pageIndex)
-        let foldedSearchText = query.searchText?.foldedForLibrarySearch
-        let matching = index.entries.filter {
-            matches($0, query: query, foldedSearchText: foldedSearchText)
-        }
-        let ordered = matching.sorted { precedes($0, $1, by: query.sort) }
+        let ordered = orderedEntries(query: query)
         let start = min(ordered.count, safePageIndex * pageSize)
         let end = min(ordered.count, start + pageSize)
         let items = ordered[start..<end].map { entry in
@@ -671,6 +667,20 @@ struct LibraryQueryController: Sendable {
             totalCount: ordered.count,
             items: Array(items)
         )
+    }
+
+    /// Every matching asset ID in query order, from one filter and one sort. Index-side planners
+    /// (idle warming) use this instead of walking `page(at:)`, which repeats the full ordering
+    /// for each requested page.
+    func orderedAssetIDs(query: LibraryQuery = .all) -> [PortablePhotoAssetID] {
+        orderedEntries(query: query).map(\.assetID)
+    }
+
+    private func orderedEntries(query: LibraryQuery) -> [LibraryIndexEntry] {
+        let foldedSearchText = query.searchText?.foldedForLibrarySearch
+        return index.entries
+            .filter { matches($0, query: query, foldedSearchText: foldedSearchText) }
+            .sorted { precedes($0, $1, by: query.sort) }
     }
 
     func page(number: Int, query: LibraryQuery = .all) -> LibraryQueryPage {
