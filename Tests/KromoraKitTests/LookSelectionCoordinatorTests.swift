@@ -46,6 +46,35 @@ final class LookSelectionCoordinatorTests: TempDirectoryTestCase {
         }
     }
 
+    func testNavigationWalksMyLooksAlphabeticallyThenStarterLooks() {
+        let starter1 = makeLook("Starter One", source: .bundled)
+        let starter2 = makeLook("Starter Two", source: .bundled)
+        let zeta = makeLook("Zeta")
+        let alpha = makeLook("alpha")
+        let (coordinator, library) = makeCoordinator(looks: [starter1, starter2, zeta, alpha])
+        library.categories = [
+            LUTLibrary.Category(
+                id: "bundled:Test", name: "Test", luts: [starter1, starter2], source: .bundled),
+            LUTLibrary.Category(id: "user:Test", name: "Mine", luts: [zeta, alpha], source: .user),
+        ]
+
+        // From None, Down lands on the first of My Looks, not the first Starter Look.
+        var current: CubeLUT?
+        var visited: [String] = []
+        for _ in 0..<4 {
+            guard case .select(let next) = coordinator.navigate(
+                .next, from: current, currentID: current?.lutID) else {
+                return XCTFail("expected a selection")
+            }
+            visited.append(next.name)
+            current = next
+        }
+        XCTAssertEqual(visited, ["alpha", "Zeta", "Starter One", "Starter Two"])
+        XCTAssertEqual(
+            coordinator.navigate(.next, from: current, currentID: current?.lutID), .select(starter2),
+            "the end of the list is an intentional no-op")
+    }
+
     func testMissingReferenceIsReportedOncePerTransition() {
         let (coordinator, library) = makeCoordinator()
         let missing = makeLook("Gone").lutID

@@ -113,13 +113,13 @@ final class LookSelectionCoordinator {
     }
 
     /// Audition the adjacent Look, treating the explicit None row as the slot before the first
-    /// library Look so Up from the first Look can clear the grade.
+    /// Look in browser order (My Looks, then Starter) so Up from the first Look can clear the grade.
     func navigate(
         _ direction: LookNavigation.Direction,
         from current: CubeLUT?,
         currentID: LUTID?
     ) -> NavigationOutcome {
-        let looks = library.allLUTs
+        let looks = library.browserOrderedLooks
         let currentIndex = current.flatMap { looks.firstIndex(of: $0) }
         let nextIndex = LookNavigation.adjacentIndex(
             currentIndex: currentIndex, count: looks.count, direction: direction)

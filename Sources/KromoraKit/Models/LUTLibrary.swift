@@ -104,6 +104,10 @@ final class LUTLibrary: ObservableObject {
         cachedMyLooks = (libraryRevision, value)
         return value
     }
+    /// Every Look in the order the browser shows them: My Looks alphabetically, then the Starter
+    /// categories. Keyboard auditioning walks this order so Down always moves to the row below.
+    var browserOrderedLooks: [CubeLUT] { myLooks + starterLooks }
+
     var lookCollections: [LookCollection] {
         if let cached = cachedLookCollections, cached.revision == libraryRevision {
             return cached.value
