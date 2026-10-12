@@ -150,4 +150,39 @@ final class BundledLookTests: TempDirectoryTestCase {
         XCTAssertEqual(loaded.warnings.count, 1)
         XCTAssertTrue(loaded.warnings[0].contains("Missing"))
     }
+
+    func testStarterLookIDIsIndependentOfInstallLocation() throws {
+        let entry = BundledLookManifest.Entry(
+            id: "kromora.starter.relocated", name: "Relocated", category: "Test", resource: "relocated.cube",
+            sourceAuthor: "Tests", source: "Original", license: "MIT License (Kromora project license)", attribution: "None",
+            redistribution: "Allowed", approval: .init(status: "approved", recordID: "test-3", reviewer: "Tests", approvedAt: "2026-01-01", notes: "Test")
+        )
+        let manifest = BundledLookManifest(schemaVersion: 1, acknowledgement: "Test", looks: [entry])
+
+        let firstInstall = try Fixtures.makeTempDirectory("StarterLookInstallA")
+        let secondInstall = try Fixtures.makeTempDirectory("StarterLookInstallB")
+        defer {
+            try? FileManager.default.removeItem(at: firstInstall)
+            try? FileManager.default.removeItem(at: secondInstall)
+        }
+        for directory in [firstInstall, secondInstall] {
+            _ = try Fixtures.writeCube(Fixtures.identityCubeText(size: 2), named: "relocated.cube", in: directory)
+        }
+
+        let saved = try XCTUnwrap(
+            BundledLookLibrary.load(manifest: manifest, resourceDirectory: firstInstall).looks.first
+        )
+        let otherBuild = BundledLookLibrary.load(manifest: manifest, resourceDirectory: secondInstall).looks
+        XCTAssertNotEqual(saved.url, otherBuild.first?.url)
+
+        let resolved = try XCTUnwrap(otherBuild.first(matching: saved.lutID))
+        XCTAssertEqual(resolved.id, "kromora.starter.relocated")
+        XCTAssertEqual(resolved.source, .bundled)
+
+        let library = makeLibrary()
+        let coordinator = LookSelectionCoordinator(library: library)
+        let starter = try XCTUnwrap(library.starterLooks.first)
+        XCTAssertEqual(coordinator.resolve(starter.lutID)?.id, starter.id)
+        XCTAssertTrue(starter.id.hasPrefix("kromora.starter."))
+    }
 }

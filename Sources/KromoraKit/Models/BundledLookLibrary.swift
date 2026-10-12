@@ -119,7 +119,8 @@ struct BundledLookLibrary: Sendable {
                     url: resourceURL,
                     category: entry.category,
                     source: .bundled,
-                    displayName: entry.name
+                    displayName: entry.name,
+                    stableID: entry.id
                 )
                 guard seenIDs.insert(lut.id).inserted else {
                     throw ValidationError.duplicate("resource identity \(lut.id)")
@@ -201,7 +202,7 @@ struct BundledLookLibrary: Sendable {
             throw ValidationError.missingResource(entry.resource)
         }
         do {
-            let lut = try CubeLUT(url: url, category: entry.category, source: .bundled, displayName: entry.name)
+            let lut = try CubeLUT(url: url, category: entry.category, source: .bundled, displayName: entry.name, stableID: entry.id)
             guard lut.source == .bundled, lut.name == entry.name, lut.category == entry.category else {
                 throw ValidationError.invalid("\(entry.id) metadata does not match the parsed LUT")
             }

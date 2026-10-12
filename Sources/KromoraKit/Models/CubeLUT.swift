@@ -45,7 +45,7 @@ struct CubeLUT: Identifiable, Hashable, Sendable {
     static let maximumMetadataLines = 4096
     static let supportedFileExtensions = Set(["cube", "look"])
 
-    let id: String          // full file path (or a synthetic id for in-memory LUTs)
+    let id: String          // full file path for user Looks, the manifest id for starter Looks, or a synthetic id for in-memory LUTs
     let name: String        // display name (cleaned)
     let category: String    // folder name or "General"
     let url: URL
@@ -135,10 +135,11 @@ struct CubeLUT: Identifiable, Hashable, Sendable {
         url: URL,
         category: String = "General",
         source: LUTSource = .user,
-        displayName: String? = nil
+        displayName: String? = nil,
+        stableID: String? = nil
     ) throws {
         self.url = url
-        self.id = Self.canonicalPath(url)
+        self.id = stableID ?? Self.canonicalPath(url)
         self.category = category
         self.source = source
 

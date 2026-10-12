@@ -6,7 +6,9 @@ import Foundation
 /// make `EditDocument` non-`Codable` and would copy the whole table into every undo snapshot, so the
 /// document stores an ID and resolves it against the library.
 ///
-/// **The wrapped value is a `String`, and deliberately so.** `CubeLUT.id` is a file path (or
+/// **The wrapped value is a `String`, and deliberately so.** `CubeLUT.id` is a file path for user
+/// Looks and the manifest ID (`kromora.starter.*`) for starter Looks, so those survive a moved or
+/// different build (or
 /// `derived://…` for an in-memory LUT), which makes it deterministic: the same file scanned twice
 /// yields the same ID. A `UUID`-backed ID would mint a fresh value on every `LUTLibrary.scan` — and
 /// `saveDerivedLUT` triggers a rescan — so every persisted and undo document would silently stop
