@@ -227,12 +227,23 @@ enum LibraryFacet: String, CaseIterable, Codable, Sendable, Identifiable {
     /// under `missingValue`.
     static let noLocationValue = "No location"
 
+    /// "Make Model", without repeating the make when the model already begins with it
+    /// (e.g. "SONY ILCE-7M4" stays distinct, but "Canon Canon EOS R5" collapses).
+    static func cameraName(make: String?, model: String?) -> String {
+        let make = make?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let model = model?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if make.isEmpty { return model }
+        if model.isEmpty { return make }
+        let firstWord = make.split(separator: " ").first.map(String.init) ?? make
+        return model.range(of: firstWord, options: [.caseInsensitive, .anchored]) != nil
+            ? model : "\(make) \(model)"
+    }
+
     func value(in summary: PortablePackageAssetSummary) -> String {
         let raw: String?
         switch self {
         case .camera:
-            raw = [summary.cameraMake, summary.cameraModel].compactMap { $0 }
-                .joined(separator: " ")
+            raw = Self.cameraName(make: summary.cameraMake, model: summary.cameraModel)
         case .lens:
             raw = summary.lens
         case .location:

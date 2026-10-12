@@ -272,12 +272,27 @@ struct LibraryIndexProjection: Codable, Equatable, Sendable {
                     reconciled.append(LibraryIndexEntry(from: membership))
                     continue
                 }
-                guard existing.summary.sourceFingerprint != membership.summary.sourceFingerprint else {
+                var updated = existing.summary
+                updated.sourceFingerprint = membership.summary.sourceFingerprint
+                // The capture-metadata backfill may have run in another process (or an earlier
+                // build) and committed to the package after this index was written. The index is
+                // only a projection, so adopt what the package has and the index still lacks.
+                if PortableLibraryPackage.needsCaptureMetadata(updated),
+                   !PortableLibraryPackage.needsCaptureMetadata(membership.summary) {
+                    let source = membership.summary
+                    updated.captureSettings = updated.captureSettings ?? source.captureSettings
+                    updated.coarseLocation = updated.coarseLocation ?? source.coarseLocation
+                    updated.captureDateISO = updated.captureDateISO ?? source.captureDateISO
+                    if updated.cameraModel == nil {
+                        updated.cameraMake = source.cameraMake
+                        updated.cameraModel = source.cameraModel
+                        updated.lens = source.lens
+                    }
+                }
+                guard updated != existing.summary else {
                     reconciled.append(existing)
                     continue
                 }
-                var updated = existing.summary
-                updated.sourceFingerprint = membership.summary.sourceFingerprint
                 reconciled.append(LibraryIndexEntry(
                     assetID: existing.assetID, recordPath: existing.recordPath,
                     addedRevision: existing.addedRevision, deletedRevision: existing.deletedRevision,

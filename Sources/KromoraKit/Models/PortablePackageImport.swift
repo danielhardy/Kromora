@@ -507,6 +507,9 @@ struct PortablePackageImporter: Sendable {
                 let sourceDimensions = PortablePackageAssetSummary.sourceDimensions(from: sourceMetadata)
                 let importedSummary = PortablePackageAssetSummary(
                     captureDateISO: sourceMetadata.dateTakenISO,
+                    cameraMake: sourceMetadata.make ?? "",
+                    cameraModel: sourceMetadata.model ?? "",
+                    lens: sourceMetadata.lens ?? "",
                     coarseLocation: sourceMetadata.coarseLocation,
                     captureSettings: PortablePackageCaptureSettings(sourceMetadata),
                     dimensions: sourceDimensions,

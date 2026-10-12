@@ -286,4 +286,13 @@ final class LibraryFacetTests: XCTestCase {
             PortablePackageAssetSummary.self, from: Data(json.utf8))
         XCTAssertNil(summary.captureDateISO)
     }
+
+    func testCameraNameDoesNotRepeatTheMakeAlreadyInTheModel() {
+        XCTAssertEqual(LibraryFacet.cameraName(make: "Canon", model: "Canon EOS R5"), "Canon EOS R5")
+        XCTAssertEqual(LibraryFacet.cameraName(make: "SONY", model: "ILCE-7M4"), "SONY ILCE-7M4")
+        XCTAssertEqual(LibraryFacet.cameraName(make: "NIKON CORPORATION", model: "NIKON Z 6"), "NIKON Z 6")
+        XCTAssertEqual(LibraryFacet.cameraName(make: " ", model: "X100V"), "X100V")
+        XCTAssertEqual(LibraryFacet.cameraName(make: "FUJIFILM", model: nil), "FUJIFILM")
+        XCTAssertEqual(LibraryFacet.cameraName(make: nil, model: nil), "")
+    }
 }

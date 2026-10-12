@@ -732,10 +732,10 @@ extension PortableLibraryPackage {
     /// Whether a summary still lacks the metadata the Library facets read from the original.
     static func needsCaptureMetadata(_ summary: PortablePackageAssetSummary) -> Bool {
         summary.captureSettings == nil || summary.coarseLocation == nil
-            || summary.captureDateISO == nil
+            || summary.captureDateISO == nil || summary.cameraModel == nil
     }
 
-    /// Fills `captureSettings`, `coarseLocation`, and `captureDateISO` from embedded originals, one membership shard
+    /// Fills camera and lens names, `captureSettings`, `coarseLocation`, and `captureDateISO` from embedded originals, one membership shard
     /// per call. Originals that cannot be read stay nil, so a later open retries them. The writer
     /// mutation lock is held across the reads and the commit, and the commit merges into a fresh
     /// shard read, so concurrent ratings, flags, and tombstones are preserved. Each committed shard
@@ -780,6 +780,12 @@ extension PortableLibraryPackage {
                 }
                 if entry.summary.coarseLocation == nil {
                     commitShard.entries[index].summary.coarseLocation = metadata.coarseLocation
+                }
+                if entry.summary.cameraModel == nil {
+                    // Empty string records "read, nothing embedded" so the repair does not retry.
+                    commitShard.entries[index].summary.cameraMake = metadata.make ?? ""
+                    commitShard.entries[index].summary.cameraModel = metadata.model ?? ""
+                    commitShard.entries[index].summary.lens = metadata.lens ?? ""
                 }
                 if entry.summary.captureDateISO == nil {
                     commitShard.entries[index].summary.captureDateISO = metadata.dateTakenISO
