@@ -1,5 +1,6 @@
 import XCTest
 import simd
+import Synchronization
 @testable import KromoraKit
 
 /// The derive *pipeline* still needs a RAW fixture to test end to end, but its
@@ -214,5 +215,153 @@ final class DeriveCoordinatorTests: TempDirectoryTestCase {
             try await Task.sleep(for: .milliseconds(10))
         }
         XCTAssertEqual(errorCount, 1, "the second request should have been ignored, not queued")
+    }
+
+    // MARK: - Cancellation and supersession fences
+
+    private struct FakeFailure: Error {}
+
+    /// Scripted extractor: call N blocks on `release[N]` after signalling `started[N]`, emits late
+    /// progress, then returns normally (or throws) even if it was cancelled meanwhile.
+    private final class Script: Sendable {
+        let started = (0..<2).map { _ in DispatchSemaphore(value: 0) }
+        let release = (0..<2).map { _ in DispatchSemaphore(value: 0) }
+        let throwsOrdinary: Bool
+        private let calls = Mutex(0)
+
+        init(throwsOrdinary: Bool = false) { self.throwsOrdinary = throwsOrdinary }
+
+        var extractor: DeriveCoordinator.Extractor {
+            { [self] _, _, progress, _ in
+                let index = calls.withLock { value -> Int in defer { value += 1 }; return value }
+                progress(0.5, "call \(index) early")
+                started[index].signal()
+                release[index].wait()
+                progress(0.9, "call \(index) late")
+                if throwsOrdinary && index == 0 { throw FakeFailure() }
+                let cube = [SIMD3<Float>](repeating: SIMD3(Float(index), 0.5, 0.5), count: 8)
+                return RecipeExtractor.Result(
+                    cube: cube, size: 2,
+                    report: RecipeReport(
+                        toneCurve: [], saturationRatio: 1, sharpeningRatio: 1,
+                        sampleCount: index, cubeCoveragePercent: 0,
+                        alignmentShift: (dx: 0, dy: 0), cameraInfo: nil
+                    )
+                )
+            }
+        }
+
+        func waitStarted(_ index: Int) async {
+            let semaphore = started[index]
+            await Task.detached { Self.block(on: semaphore) }.value
+        }
+
+        private static func block(on semaphore: DispatchSemaphore) { semaphore.wait() }
+    }
+
+    private func pair() throws -> (raw: URL, jpg: URL) {
+        (tempDirectory.appendingPathComponent("a.dng"),
+         try Fixtures.writeJPEG(width: 16, height: 16, orientation: 1, named: "a.jpg", in: tempDirectory))
+    }
+
+    private func scratchDirectories() throws -> [String] {
+        try FileManager.default.contentsOfDirectory(atPath: FileManager.default.temporaryDirectory.path)
+            .filter { $0.hasPrefix("KromoraDerive-") }
+    }
+
+    func testStaleSuccessAfterDismissDoesNotPublish() async throws {
+        let script = Script()
+        let coordinator = DeriveCoordinator(extractor: script.extractor)
+        var derived = 0, errors = 0
+        coordinator.onDerived = { _ in derived += 1 }
+        coordinator.onError = { _ in errors += 1 }
+        let (raw, jpg) = try pair()
+        let before = Set(try scratchDirectories())
+
+        coordinator.derive(rawURL: raw, jpgURL: jpg)
+        await script.waitStarted(0)
+        coordinator.dismiss()
+        script.release[0].signal()
+        await coordinator.shutdown()
+
+        XCTAssertEqual(derived, 0)
+        XCTAssertEqual(errors, 0)
+        XCTAssertNil(coordinator.derivedLUT)
+        XCTAssertFalse(coordinator.isDeriving)
+        XCTAssertEqual(coordinator.progress, 0, "queued progress must not restore state after dismissal")
+        XCTAssertEqual(coordinator.stage, "")
+        XCTAssertEqual(Set(try scratchDirectories()), before, "stale scratch output is discarded")
+    }
+
+    func testStaleOrdinaryFailureAfterDismissDoesNotReport() async throws {
+        let script = Script(throwsOrdinary: true)
+        let coordinator = DeriveCoordinator(extractor: script.extractor)
+        var errors = 0
+        coordinator.onError = { _ in errors += 1 }
+        let (raw, jpg) = try pair()
+
+        coordinator.derive(rawURL: raw, jpgURL: jpg)
+        await script.waitStarted(0)
+        coordinator.dismiss()
+        script.release[0].signal()
+        await coordinator.shutdown()
+
+        XCTAssertEqual(errors, 0)
+    }
+
+    func testSupersededWorkerCannotAffectTheNewDerive() async throws {
+        let script = Script()
+        let coordinator = DeriveCoordinator(extractor: script.extractor)
+        var derived: [CubeLUT] = []
+        coordinator.onDerived = { derived.append($0) }
+        let (raw, jpg) = try pair()
+
+        coordinator.derive(rawURL: raw, jpgURL: jpg)   // A
+        await script.waitStarted(0)
+        coordinator.dismiss()
+        coordinator.derive(rawURL: raw, jpgURL: jpg)   // B
+        await script.waitStarted(1)
+        XCTAssertTrue(coordinator.isDeriving)
+
+        // A finishes (normally, despite cancellation) while B is still running.
+        script.release[0].signal()
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertTrue(coordinator.isDeriving, "A must not clear B's busy state")
+        XCTAssertNil(coordinator.derivedLUT)
+        XCTAssertTrue(derived.isEmpty)
+        XCTAssertNotEqual(coordinator.stage, "Done")
+
+        script.release[1].signal()
+        while coordinator.isDeriving { await Task.yield() }
+
+        XCTAssertEqual(derived.count, 1)
+        XCTAssertEqual(coordinator.report?.sampleCount, 1, "result belongs to B")
+        XCTAssertEqual(coordinator.stage, "Done")
+        // B's scratch survives A's cleanup and is saveable.
+        try coordinator.performSave(to: tempDirectory.appendingPathComponent("B.cube"))
+        let saved = try CubeLUT(url: tempDirectory.appendingPathComponent("B.cube"))
+        XCTAssertEqual(saved.tableFloats.first ?? -1, 1, accuracy: 0.001)
+        await coordinator.shutdown()
+    }
+
+    func testShutdownAwaitsWorkersRetiredByDismissAndSuppressesCallbacks() async throws {
+        let script = Script()
+        let coordinator = DeriveCoordinator(extractor: script.extractor)
+        var derived = 0
+        coordinator.onDerived = { _ in derived += 1 }
+        let (raw, jpg) = try pair()
+
+        coordinator.derive(rawURL: raw, jpgURL: jpg)
+        await script.waitStarted(0)
+        coordinator.dismiss()   // handle must stay tracked
+
+        let release = script.release[0]
+        let shutdown = Task { await coordinator.shutdown() }
+        for _ in 0..<20 { await Task.yield() }
+        release.signal()
+        await shutdown.value
+
+        XCTAssertEqual(derived, 0)
+        XCTAssertNil(coordinator.derivedLUT)
     }
 }

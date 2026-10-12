@@ -226,6 +226,7 @@ struct RecipeExtractor {
 
         progress?(0.80, "Building cube…")
 
+        try checkCancelled()
         // 8 + 9. Average + smooth + anchor empty cells to identity
         let cube = buildCube(
             sums: sums,
@@ -259,6 +260,7 @@ struct RecipeExtractor {
             satRatio = 1
         }
 
+        try checkCancelled()
         progress?(0.92, "Reading EXIF…")
         let cameraInfo = readCameraInfo(from: jpgURL)
 
@@ -285,6 +287,7 @@ struct RecipeExtractor {
             cameraInfo: cameraInfo
         )
 
+        try checkCancelled()
         progress?(1.0, "Done")
 
         return Result(cube: cube, size: cubeN, report: report)

@@ -39,7 +39,37 @@ final class DeriveCoordinator: ObservableObject {
     /// The in-memory cube serialized to a temp .cube, so saving later is a
     /// single `FileManager.copy`. Cleared when a new derive starts.
     private var scratchURL: URL?
-    private var task: Task<Void, Never>?
+    /// Operation-owned directory holding `scratchURL`; nil for test-installed results.
+    private var scratchDirectory: URL?
+
+    /// Identity of the current operation. Bumped synchronously by `derive`, `dismiss` and
+    /// `shutdown`, so any callback carrying an older value is stale and must not publish.
+    private var generation = 0
+    /// Every worker not yet finished, including ones retired by `dismiss`, so `shutdown` can
+    /// await them all.
+    private var workers: [Int: Task<Void, Never>] = [:]
+
+    /// The extraction seam. Production runs `RecipeExtractor.derive`; tests inject a controllable
+    /// one. Parameters: RAW, JPG, progress, isCancelled.
+    typealias Extractor = @Sendable (
+        URL, URL, @escaping @Sendable (Double, String) -> Void, @escaping @Sendable () -> Bool
+    ) throws -> RecipeExtractor.Result
+
+    private let extractor: Extractor
+
+    init(extractor: @escaping Extractor = { raw, jpg, progress, isCancelled in
+        try RecipeExtractor.derive(
+            rawURL: raw, jpgURL: jpg, progress: progress, isCancelled: isCancelled
+        )
+    }) {
+        self.extractor = extractor
+    }
+
+    private enum Outcome: Sendable {
+        case finished(lut: CubeLUT, report: RecipeReport, scratch: URL)
+        case failed(String)
+        case cancelled
+    }
 
     // MARK: - Sheet
 
@@ -57,21 +87,23 @@ final class DeriveCoordinator: ObservableObject {
     func dismiss() {
         isSheetPresented = false
         guard isDeriving else { return }
-        task?.cancel()
-        task = nil
+        generation += 1
+        for worker in workers.values { worker.cancel() }
         isDeriving = false
         progress = 0
         stage = ""
         onStatus?("Derive cancelled")
     }
 
-    /// Cancel extraction and wait for the detached extractor before its source pair or scratch
-    /// directory is removed by a test fixture.
+    /// Cancel extraction and wait for every detached extractor, including ones already retired by
+    /// `dismiss()`, before their source pair or scratch directory is removed by a test fixture.
+    /// Nothing publishes after this starts.
     func shutdown() async {
-        let current = task
-        current?.cancel()
-        if let current { await current.value }
-        task = nil
+        generation += 1
+        let outstanding = Array(workers.values)
+        for worker in outstanding { worker.cancel() }
+        for worker in outstanding { await worker.value }
+        workers.removeAll()
         isDeriving = false
         progress = 0
         stage = ""
@@ -111,6 +143,8 @@ final class DeriveCoordinator: ObservableObject {
     /// and `report` until the user explicitly saves it.
     func derive(rawURL: URL, jpgURL: URL) {
         guard !isDeriving else { return }
+        generation += 1
+        let operation = generation
         isDeriving = true
         progress = 0
         stage = "Starting…"
@@ -118,57 +152,93 @@ final class DeriveCoordinator: ObservableObject {
         report = nil
         onStatus?("Deriving recipe…")
 
-        // Clean up any previous scratch file.
-        if let previous = scratchURL {
-            try? FileManager.default.removeItem(at: previous)
-            scratchURL = nil
-        }
+        removeScratch()
 
-        task = Task.detached {
+        let extractor = self.extractor
+        workers[operation] = Task.detached {
+            let outcome: Outcome
             do {
-                let result = try RecipeExtractor.derive(
-                    rawURL: rawURL,
-                    jpgURL: jpgURL,
-                    progress: { progress, stage in
+                let result = try extractor(
+                    rawURL, jpgURL,
+                    { progress, stage in
                         Task { @MainActor in
-                            self.progress = progress
-                            self.stage = stage
+                            self.applyProgress(progress, stage, operation: operation)
                         }
                     },
-                    isCancelled: { Task.isCancelled }
+                    { Task.isCancelled }
                 )
+                // The extractor may return normally after cancellation; never serialize for it.
+                try Task.checkCancellation()
 
                 let name = Self.derivedName(forJPG: jpgURL, size: result.size)
-                let scratch = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("\(name).cube")
+                // Operation-specific directory: a retired worker can never overwrite or delete
+                // the scratch file of the current one.
+                let directory = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("KromoraDerive-\(UUID().uuidString)", isDirectory: true)
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                let scratch = directory.appendingPathComponent("\(name).cube")
                 try CubeLUT.write(cube: result.cube, size: result.size, title: name, to: scratch)
+                try Task.checkCancellation()
 
                 let lut = Self.makeDerivedLUT(cube: result.cube, size: result.size, name: name)
-
-                await MainActor.run {
-                    self.derivedLUT = lut
-                    self.report = result.report
-                    self.scratchURL = scratch
-                    self.isDeriving = false
-                    self.progress = 1.0
-                    self.stage = "Done"
-                    self.onStatus?("Recipe derived (\(result.report.sampleCount) samples)")
-                    self.onDerived?(lut)
-                }
+                outcome = .finished(lut: lut, report: result.report, scratch: scratch)
             } catch is CancellationError {
-                // Nothing to undo: the scratch .cube is only written after
-                // `derive` returns, and `dismiss()` — the only thing that
-                // cancels — has already reset the UI state.
-                return
+                outcome = .cancelled
             } catch {
-                await MainActor.run {
-                    self.isDeriving = false
-                    self.progress = 0
-                    self.stage = ""
-                    self.onError?("Derive failed: \(error.localizedDescription)")
-                }
+                outcome = .failed("Derive failed: \(error.localizedDescription)")
             }
+            await self.complete(outcome, operation: operation)
         }
+    }
+
+    private func applyProgress(_ progress: Double, _ stage: String, operation: Int) {
+        guard operation == generation, isDeriving else { return }
+        self.progress = progress
+        self.stage = stage
+    }
+
+    /// Final main-actor hop of a worker. Only the current operation may publish; a stale one
+    /// discards its unpublished scratch output instead.
+    private func complete(_ outcome: Outcome, operation: Int) {
+        workers[operation] = nil
+        let isCurrent = operation == generation && isDeriving
+
+        switch outcome {
+        case .finished(let lut, let report, let scratch):
+            guard isCurrent else {
+                try? FileManager.default.removeItem(at: scratch.deletingLastPathComponent())
+                return
+            }
+            derivedLUT = lut
+            self.report = report
+            scratchURL = scratch
+            scratchDirectory = scratch.deletingLastPathComponent()
+            isDeriving = false
+            progress = 1.0
+            stage = "Done"
+            onStatus?("Recipe derived (\(report.sampleCount) samples)")
+            onDerived?(lut)
+        case .failed(let message):
+            guard isCurrent else { return }
+            isDeriving = false
+            progress = 0
+            stage = ""
+            onError?(message)
+        case .cancelled:
+            // `dismiss()`/`shutdown()` already reset the UI state.
+            return
+        }
+    }
+
+    private func removeScratch() {
+        let fm = FileManager.default
+        if let scratchDirectory {
+            try? fm.removeItem(at: scratchDirectory)
+        } else if let scratchURL {
+            try? fm.removeItem(at: scratchURL)
+        }
+        scratchURL = nil
+        scratchDirectory = nil
     }
 
     // MARK: - Saving
