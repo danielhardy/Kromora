@@ -121,30 +121,75 @@ final class RegionMaskTests: XCTestCase {
         ))
     }
 
-    func testFeatherMatchesClippedWindowReference() throws {
-        let size = PixelDimensions(width: 5, height: 3)
-        let values: [Float] = [
-            0, 0.25, 0.5, 0.75, 1,
-            1, 0.8, 0.6, 0.4, 0.2,
-            0.1, 0.3, 0.5, 0.7, 0.9,
-        ]
-        let mask = try NormalizedMask(size: size, values: values)
+    func testFeatherMatchesNaiveReferenceAcrossDeterministicMasks() throws {
+        let randomSize = PixelDimensions(width: 37, height: 23)
+        let randomValues = seededValues(count: randomSize.width * randomSize.height, seed: 0x854)
+        try assertFeatherMatchesReference(
+            values: randomValues, size: randomSize, radii: [1, 2, 5, 40]
+        )
 
-        for radius in [1, 2, 7] {
-            let actual = try MaskOperations.feather(mask, radius: radius)
-            let expected = clippedBoxBlur(values, width: size.width, height: size.height, radius: radius)
+        let oneByN = PixelDimensions(width: 1, height: 17)
+        try assertFeatherMatchesReference(
+            values: seededValues(count: oneByN.width * oneByN.height, seed: 0x1A),
+            size: oneByN, radii: [1, 4, 20]
+        )
 
-            XCTAssertEqual(actual.values.count, expected.count)
-            for (actualValue, expectedValue) in zip(actual.values, expected) {
-                XCTAssertEqual(actualValue, expectedValue, accuracy: 0.000_001)
-            }
-            XCTAssertEqual(actual.coverage, expected.reduce(0, +) / Float(expected.count), accuracy: 0.000_001)
-            XCTAssertFalse(actual.isBinary)
+        let nByOne = PixelDimensions(width: 17, height: 1)
+        try assertFeatherMatchesReference(
+            values: seededValues(count: nByOne.width * nByOne.height, seed: 0xA1),
+            size: nByOne, radii: [1, 4, 20]
+        )
+
+        let constantSize = PixelDimensions(width: 8, height: 5)
+        try assertFeatherMatchesReference(
+            values: Array(repeating: 0, count: constantSize.width * constantSize.height),
+            size: constantSize, radii: [1, 3, 10]
+        )
+        try assertFeatherMatchesReference(
+            values: Array(repeating: 1, count: constantSize.width * constantSize.height),
+            size: constantSize, radii: [1, 3, 10]
+        )
+    }
+
+    func testFeatherSoftensAHalfPlaneAcrossTheOriginalEdge() throws {
+        let size = PixelDimensions(width: 25, height: 7)
+        let radius = 4
+        let edge = 12
+        let values = (0..<size.height).flatMap { _ in
+            (0..<size.width).map { $0 < edge ? Float(1) : Float(0) }
         }
+        let mask = try NormalizedMask(size: size, values: values)
+        let softened = try MaskOperations.feather(mask, radius: radius)
+        let row = 3 * size.width
+
+        XCTAssertEqual(softened.values[row + edge - 1], 0.5, accuracy: 0.06)
+        XCTAssertEqual(softened.values[row + edge], 0.5, accuracy: 0.06)
+        for x in (edge - radius)..<edge {
+            XCTAssertGreaterThan(softened.values[row + x], 0)
+            XCTAssertLessThan(softened.values[row + x], 1)
+        }
+        for x in edge..<(edge + radius) {
+            XCTAssertGreaterThan(softened.values[row + x], 0)
+            XCTAssertLessThan(softened.values[row + x], 1)
+        }
+        XCTAssertEqual(softened.values[row + edge - radius - 1], 1)
+        XCTAssertEqual(softened.values[row + edge + radius], 0)
+        XCTAssertFalse(softened.isBinary)
+    }
+
+    func testFeatherRadiusZeroPreservesBinaryMaskAndMetadata() throws {
+        let size = PixelDimensions(width: 4, height: 2)
+        let mask = try NormalizedMask(size: size, values: [0, 1, 1, 0, 1, 0, 0, 1])
+
+        let result = try MaskOperations.feather(mask, radius: 0)
+
+        XCTAssertEqual(result, mask)
+        XCTAssertEqual(result.coverage, result.values.reduce(0, +) / Float(result.values.count), accuracy: 0.000_001)
+        XCTAssertTrue(result.isBinary)
     }
 
     func testFeatherChecksCancellation() async throws {
-        let size = PixelDimensions(width: 128, height: 128)
+        let size = PixelDimensions(width: 4_000, height: 3_000)
         let mask = try NormalizedMask(size: size, values: Array(repeating: 0.5, count: size.width * size.height))
         let task = Task {
             withUnsafeCurrentTask { $0?.cancel() }
@@ -159,7 +204,46 @@ final class RegionMaskTests: XCTestCase {
         }
     }
 
-    private func clippedBoxBlur(_ values: [Float], width: Int, height: Int, radius: Int) -> [Float] {
+    private func assertFeatherMatchesReference(
+        values: [Float], size: PixelDimensions, radii: [Int],
+        file: StaticString = #filePath, line: UInt = #line
+    ) throws {
+        let mask = try NormalizedMask(size: size, values: values)
+        for radius in radii {
+            let actual = try MaskOperations.feather(mask, radius: radius)
+            let expected = naiveClippedBoxBlur(
+                values, width: size.width, height: size.height, radius: radius
+            )
+
+            XCTAssertEqual(actual.values.count, expected.count, file: file, line: line)
+            for (actualValue, expectedValue) in zip(actual.values, expected) {
+                XCTAssertEqual(actualValue, expectedValue, accuracy: 0.000_01, file: file, line: line)
+            }
+            XCTAssertEqual(
+                actual.coverage, expected.reduce(0, +) / Float(expected.count),
+                accuracy: 0.000_01, file: file, line: line
+            )
+            XCTAssertEqual(
+                actual.coverage, actual.values.reduce(0, +) / Float(actual.values.count),
+                accuracy: 0.000_001, file: file, line: line
+            )
+            XCTAssertEqual(
+                actual.isBinary, actual.values.allSatisfy { $0 == 0 || $0 == 1 },
+                file: file, line: line
+            )
+        }
+    }
+
+    private func seededValues(count: Int, seed: UInt64) -> [Float] {
+        var state = seed
+        return (0..<count).map { _ in
+            state = state &* 6_364_136_223_846_793_005 &+ 1
+            return Float(state >> 40) / Float(1 << 24)
+        }
+    }
+
+    /// Test-only copy of the original window scan, including its clipped-edge denominator.
+    private func naiveClippedBoxBlur(_ values: [Float], width: Int, height: Int, radius: Int) -> [Float] {
         var result = [Float](repeating: 0, count: values.count)
         for y in 0..<height {
             for x in 0..<width {
