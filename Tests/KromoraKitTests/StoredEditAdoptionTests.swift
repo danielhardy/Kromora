@@ -56,9 +56,9 @@ final class StoredEditAdoptionTests: TempDirectoryTestCase {
     /// Reopens the package with source preparation held open.
     private func reopen(
         _ packageURL: URL, freshFrameStore: Bool = false, browsingAssets: Bool = false,
-        holdPreparation: Bool = true
+        holdPreparation: Bool = true, scheduler: ImageWorkScheduler? = nil
     ) async throws -> (AppViewModel, FakeRenderEngine, PortableLibrarySession) {
-        let session = try PortableLibrarySession(at: packageURL)
+        let session = try PortableLibrarySession(at: packageURL, scheduler: scheduler)
         let fake = FakeRenderEngine()
         if holdPreparation { await fake.gateSourcePreparation() }
         let viewModel = makeAppViewModel(
@@ -401,5 +401,55 @@ final class StoredEditAdoptionTests: TempDirectoryTestCase {
         XCTAssertTrue(viewModel.navigation.isGrid)
         let arrivals = await gate.arrivals
         XCTAssertTrue(arrivals.isEmpty, "shutdown must reject new materialization")
+    }
+
+    func testLegacyOpenReturnsBeforeFingerprintRepairCommits() async throws {
+        let packageURL = try await makePackage(storedExposures: ["one.png": 1.5])
+        try makeLegacyPlaceholders(in: packageURL)
+        let (viewModel, _, session) = try await reopen(
+            packageURL, browsingAssets: true, holdPreparation: false,
+            scheduler: ImageWorkScheduler())
+        let id = try portableID("one.png", in: viewModel)
+        let repairGate = MaterializationGate(holding: [id])
+        session.fingerprintRepairGate = { await repairGate.arrive($0) }
+        addTeardownBlock { await repairGate.releaseAll() }
+
+        let asset = try await session.materializedAsset(for: id)
+        let resolved = asset.source.portableIdentity.sourceFingerprint
+        XCTAssertFalse(resolved.isBrowsingPlaceholder)
+        try await waitForArrival(repairGate)
+        // Returning above, while the repair is held at its gate, proves the open did not wait.
+
+        // A repeat open coalesces onto the pending repair.
+        _ = try await session.materializedAsset(for: id)
+
+        await repairGate.release(id)
+        try await waitUntil("the repaired fingerprint to publish") {
+            session.queryController.index.entry(for: id)?.summary.sourceFingerprint == resolved
+        }
+        let package = try PortableLibraryPackage.open(at: packageURL)
+        let shard = try package.readMembershipShard(PortableLibraryPackage.shard(for: id))
+        XCTAssertEqual(
+            shard.entries.first { $0.assetID == id }?.summary.sourceFingerprint, resolved)
+        let arrivals = await repairGate.arrivals
+        XCTAssertEqual(arrivals.count, 1)
+        await viewModel.shutdown()
+    }
+
+    func testShutdownWithPendingFingerprintRepairDoesNotHang() async throws {
+        let packageURL = try await makePackage(storedExposures: ["one.png": 1.5])
+        try makeLegacyPlaceholders(in: packageURL)
+        let (viewModel, _, session) = try await reopen(
+            packageURL, browsingAssets: true, holdPreparation: false,
+            scheduler: ImageWorkScheduler())
+        let id = try portableID("one.png", in: viewModel)
+        let repairGate = MaterializationGate(holding: [id])
+        session.fingerprintRepairGate = { await repairGate.arrive($0) }
+        addTeardownBlock { await repairGate.releaseAll() }
+
+        _ = try await session.materializedAsset(for: id)
+        try await waitForArrival(repairGate)
+        await repairGate.release(id)
+        await viewModel.shutdown()
     }
 }

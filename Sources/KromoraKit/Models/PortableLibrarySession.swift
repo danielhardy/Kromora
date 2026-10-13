@@ -1,4 +1,5 @@
 import Foundation
+import os
 import os.lock
 
 /// Injectable time hooks keep lease-lifetime tests deterministic while production uses wall-clock
@@ -74,6 +75,8 @@ final class PortableLibrarySession {
     private let indexLoadJobID: ImageWorkScheduler.JobID
     private let presentedAspectRatioRepairJobID: ImageWorkScheduler.JobID
     private let sourceFingerprintBackfillJobID: ImageWorkScheduler.JobID
+    /// Open-time fingerprint repairs in flight, keyed by asset so repeated opens coalesce.
+    private var pendingFingerprintRepairs: [PortablePhotoAssetID: ImageWorkScheduler.JobID] = [:]
     private let captureMetadataBackfillJobID: ImageWorkScheduler.JobID
     private(set) var indexLoadingState: LibraryIndexLoadingState?
     private(set) var isLoadingIndex = false
@@ -693,6 +696,10 @@ final class PortableLibrarySession {
         if libraryStateIndexWriteMayBeLost { try? queryController.index.write(to: indexURL) }
         await scheduler?.cancelAndWait(id: indexLoadJobID)
         await scheduler?.cancelAndWait(id: presentedAspectRatioRepairJobID)
+        for jobID in pendingFingerprintRepairs.values {
+            await scheduler?.cancelAndWait(id: jobID)
+        }
+        pendingFingerprintRepairs.removeAll()
         await scheduler?.cancelAndWait(id: sourceFingerprintBackfillJobID)
         await scheduler?.cancelAndWait(id: captureMetadataBackfillJobID)
         detachedIndexLoadTask?.cancel()
@@ -1481,21 +1488,67 @@ final class PortableLibrarySession {
                 presentedAspectRatio: summary.presentedAspectRatio
             )
         }.value
-        if summary.sourceFingerprint != resolved.source.portableIdentity.sourceFingerprint,
-           let updated = try package.replaceSourceFingerprint(
-               for: assetID,
-               with: resolved.source.portableIdentity.sourceFingerprint,
-               lease: lease,
-               now: clock.now()
-        ) {
-            try applyIndexDelta(.init(upserts: [updated]))
+        let fingerprint = resolved.source.portableIdentity.sourceFingerprint
+        if summary.sourceFingerprint != fingerprint {
+            try repairSourceFingerprintOnOpen(for: assetID, to: fingerprint)
         }
-        assert(
-            queryController.index.entry(for: assetID)?.summary.sourceFingerprint
-                == resolved.source.portableIdentity.sourceFingerprint,
-            "The resolved asset fingerprint must repair and agree with its published grid summary."
-        )
         return resolved
+    }
+
+    /// Test seam awaited inside the off-main open-time fingerprint repair, before its write.
+    var fingerprintRepairGate: (@Sendable (PortablePhotoAssetID) async -> Void)?
+
+    nonisolated private static let repairLog = Logger(
+        subsystem: "com.kromora.app", category: "portable-library")
+
+    /// Persists a legacy summary's resolved fingerprint without making the open wait for the
+    /// durable write. With a scheduler the write runs on the package-I/O lane and the index entry
+    /// is updated when it commits; a repeat open of the same asset coalesces onto the pending job.
+    /// A session without a scheduler repairs inline. Failures are logged and never fail the open.
+    private func repairSourceFingerprintOnOpen(
+        for assetID: PortablePhotoAssetID, to fingerprint: PortablePhotoSourceFingerprint
+    ) throws {
+        let package = self.package
+        let lease = self.lease
+        let clock = self.clock
+        guard let scheduler else {
+            if let updated = try package.replaceSourceFingerprint(
+                for: assetID, with: fingerprint, lease: lease, now: clock.now()
+            ) {
+                try applyIndexDelta(.init(upserts: [updated]))
+            }
+            return
+        }
+        guard !isShuttingDown, pendingFingerprintRepairs[assetID] == nil else { return }
+        let jobID = ImageWorkScheduler.JobID(
+            "portable-package-source-fingerprint-repair-\(assetID.raw)-\(lease.ownerID.uuidString)"
+        )
+        pendingFingerprintRepairs[assetID] = jobID
+        let gate = fingerprintRepairGate
+        let admitted = scheduler.enqueuePackageIO(
+            id: jobID,
+            lane: .maintenance,
+            priority: .background,
+            onTerminal: { [weak self] _ in self?.pendingFingerprintRepairs[assetID] = nil },
+            operation: { [weak self] in
+                await gate?(assetID)
+                guard !Task.isCancelled else { return }
+                do {
+                    guard let updated = try package.replaceSourceFingerprint(
+                        for: assetID, with: fingerprint, lease: lease, now: clock.now()
+                    ) else { return }
+                    await MainActor.run {
+                        guard let self, !self.isShuttingDown else { return }
+                        _ = try? self.applyIndexDelta(.init(upserts: [updated]))
+                    }
+                } catch {
+                    Self.repairLog.error(
+                        "Source fingerprint repair failed for \(assetID.raw, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                    )
+                }
+            }
+        )
+        if !admitted { pendingFingerprintRepairs[assetID] = nil }
     }
 
     private func browsingAsset(for item: LibraryQueryItem) throws -> PhotoAsset {
