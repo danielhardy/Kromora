@@ -197,6 +197,10 @@ final class MenuCommandTests: XCTestCase {
         XCTAssertTrue(contentView.contains("Label(\"Cancel\", systemImage: \"xmark\")"))
         XCTAssertTrue(contentView.contains("Label(\"Undo\", systemImage: \"arrow.uturn.backward\")"))
         XCTAssertTrue(contentView.contains(".disabled(!hasImage || !viewModel.canUndo)"))
+        XCTAssertEqual(
+            contentView.components(separatedBy: ".tint(nil)").count - 1, 3,
+            "Cancel, Undo and the Import/Export pill reset the window accent; only Save keeps it"
+        )
 
         let cropInspector = try String(
             contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/CropInspectorView.swift"),

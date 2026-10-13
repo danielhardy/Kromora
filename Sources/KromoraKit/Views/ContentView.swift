@@ -497,6 +497,9 @@ public struct ContentView: View {
         }
         .controlGroupStyle(.navigation)
         .labelStyle(.iconOnly)
+        // Import and Export are peers with no single primary action, so the pill stays neutral
+        // instead of inheriting the window-wide accent.
+        .tint(nil)
         .fixedSize()
     }
 
@@ -594,7 +597,8 @@ struct EditorSidebarToolbarButton: View {
 }
 
 /// Crop owns the window toolbar while its draft is open. Undo and Redo use the normal document
-/// history; applying a history state re-seeds the transient draft before a later Save.
+/// history; applying a history state re-seeds the transient draft before a later Save. Save is the
+/// only control that keeps the window accent; Cancel and Undo reset the inherited tint.
 private struct CropToolbarControls: View {
     let viewModel: AppViewModel
     let hasImage: Bool
@@ -629,6 +633,7 @@ private struct CropToolbarControls: View {
         }
         .accessibilityLabel("Cancel")
         .help("Cancel the current crop (Escape)")
+        .tint(nil)
         .disabled(!hasImage)
         .glassEffectUnion(id: "crop", namespace: glassNamespace)
 
@@ -639,6 +644,7 @@ private struct CropToolbarControls: View {
         }
         .accessibilityLabel("Undo")
         .help("Undo the last committed edit")
+        .tint(nil)
         .disabled(!hasImage || !viewModel.canUndo)
         .glassEffectUnion(id: "crop", namespace: glassNamespace)
     }
