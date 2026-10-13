@@ -145,6 +145,23 @@ final class PreviewSurfaceTests: XCTestCase {
         )
     }
 
+    func testPreviewCanvasColorSpaceMatchesWorkingSpaceAcrossViewUpdates() throws {
+        let surface = PreviewSurface()
+        let hostingView = NSHostingView(rootView: PreviewSurfaceView(surface: surface))
+        let size = CGSize(width: 320, height: 240)
+        let view = try hostedPreviewView(in: hostingView, size: size)
+        let colorSpace = try XCTUnwrap(view.colorspace)
+        XCTAssertEqual(colorSpace.name, WorkingSpace.current.cgColorSpace.name)
+
+        let viewportSize = CGSize(width: 320, height: 130)
+        hostingView.rootView = PreviewSurfaceView(surface: surface, viewportSize: viewportSize)
+        let updatedView = try hostedPreviewView(in: hostingView, size: size)
+        XCTAssertTrue(updatedView === view, "SwiftUI should update the existing canvas")
+        XCTAssertEqual(try XCTUnwrap(updatedView as? PreviewMTKView).viewportSize, viewportSize)
+        let updatedColorSpace = try XCTUnwrap(updatedView.colorspace)
+        XCTAssertEqual(updatedColorSpace.name, WorkingSpace.current.cgColorSpace.name)
+    }
+
     private func hostedPreviewView(
         in hostingView: NSHostingView<some View>, size: CGSize
     ) throws -> MTKView {

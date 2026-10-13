@@ -196,6 +196,11 @@ from its stored reference.
 
 ## Presentation frames and freshness
 
+The editing canvas's `MTKView` is tagged with `WorkingSpace.current.cgColorSpace`, matching the
+preview texture's output encoding. The tag persists across SwiftUI view updates so Core Animation
+can color-match the canvas to the display, keeping it consistent with color-managed thumbnails and
+exports on Display P3 screens.
+
 `LatestPreviewFrameStore` keeps the latest presented 2048 px preview of each asset. Three value types
 define what a stored frame means:
 

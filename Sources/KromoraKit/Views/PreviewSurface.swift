@@ -1176,6 +1176,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
         view.isPaused = true
         view.framebufferOnly = false
         view.colorPixelFormat = .bgra8Unorm
+        view.colorspace = WorkingSpace.current.cgColorSpace
         view.autoResizeDrawable = true
         view.onEffectiveAppearanceChange = { [weak coordinator = context.coordinator] appearance in
             coordinator?.appearanceDidChange(appearance)
