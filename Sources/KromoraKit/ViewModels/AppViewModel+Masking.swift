@@ -6,7 +6,7 @@ import SwiftUI
 /// Thin forwarding surface for the masking workspace. `MaskingWorkflowCoordinator` owns selection,
 /// transient creation, and smart-mask analysis lifecycle (`Sources/KromoraKit/ViewModels/
 /// MaskingWorkflowCoordinator.swift`); AppViewModel keeps these entry points so existing call sites
-/// in Views and KeyboardShortcuts do not need to know about the coordinator.
+/// in Views and keyboard command routing do not need to know about the coordinator.
 extension AppViewModel {
     func useInfoAnalysisMask(
         _ kind: SemanticMaskKind,

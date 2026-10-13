@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// A key press reduced to the values Kromora's shortcuts care about. Both entry points build one
-/// of these — the focus-scoped `.onKeyPress` surface (`KeyboardSurface`) and the menu bar's
-/// plain-key `Commands` items — so there is exactly one dispatch table and no `NSEvent` anywhere.
+/// A key press reduced to the values Kromora's shortcuts care about. The responder-chain tail
+/// (`KeyboardChainTail`) and the menu bar's plain-key `Commands` items both build one, so there is
+/// exactly one dispatch table and no `NSEvent` monitor.
 struct KeyInput: Equatable, Sendable {
     enum Arrow: Hashable, Sendable { case left, right, up, down }
 
@@ -81,10 +81,9 @@ struct KeyboardContext: Equatable, Sendable {
 /// had to guess whether a control or text field should keep a key; every wrong guess returned the
 /// event unclaimed and AppKit played the system alert. Here the responder chain decides:
 /// text fields and value-editing controls see their keys first, plain letters/digits/brackets arrive
-/// as menu key equivalents (AppKit's last chance before the beep — the real-window
-/// `KeyRoutingProbeTests` pin that behavior), and arrows, Space, Return, Esc, Delete and the
-/// hold-to-compare gestures arrive through `.onKeyPress(phases: .all)` on the focusable app surface,
-/// which always reports `.handled` for a key the app owns — including an intentional no-op.
+/// as menu key equivalents (AppKit's last chance before the beep — the real-window keyboard tests
+/// pin that behavior), and arrows, Space, Return, Esc, Delete and hold-to-compare gestures arrive at
+/// `KeyboardChainTail`, which claims keys the app owns — including intentional no-ops.
 @MainActor
 final class KeyboardCommandRouter {
     private weak var viewModel: AppViewModel?
