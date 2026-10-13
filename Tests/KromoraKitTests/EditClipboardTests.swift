@@ -215,7 +215,8 @@ final class CopyPasteTests: TempDirectoryTestCase {
         try await waitUntil("the dust test photo") { viewModel.sourceName == "dust.png" }
         let suggestion = RetouchDustSuggestion(id: UUID(), point: CGPoint(x: 0.4, y: 0.5),
             radius: 0.02, confidence: 0.9, seed: 824)
-        viewModel.retouchInteractionState.setDustSuggestions([suggestion])
+        let owner = try XCTUnwrap(viewModel.retouchAnalysisSource?.cacheFingerprint)
+        viewModel.retouchWorkflow.install([suggestion], owner: owner)
         viewModel.retouchWorkflow.acceptDustSuggestion(suggestion.id)
         XCTAssertEqual(viewModel.document.retouch.spots.map(\.id), [suggestion.id])
         XCTAssertEqual(viewModel.undoDepth, 1)
