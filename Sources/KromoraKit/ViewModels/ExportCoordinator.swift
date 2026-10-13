@@ -363,6 +363,38 @@ final class ExportCoordinator {
         )).data
     }
 
+    /// Renders one batch item to encoded data without writing it, for lazy Share. The item's own
+    /// edit snapshot wins; `document` and `lut` apply only when the item carries none.
+    func renderEncodedData(
+        for item: BatchItem, document: EditDocument, lut: CubeLUT?, options: ExportOptions
+    ) async throws -> Data {
+        try options.validate()
+        guard let sourceAccess = await Self.sourceAccess(for: item) else {
+            throw ImageError.exportFailed
+        }
+        let itemAssetID = await item.resolvedAssetID()
+        let resolution = await resolvedDocument(for: item, assetID: itemAssetID, fallback: document)
+        let itemLUT: CubeLUT?
+        if let itemLUTValue = item.lut {
+            itemLUT = itemLUTValue
+        } else if resolution.isPerAsset {
+            itemLUT = lutResolver?(resolution.document.lut.lutID)
+        } else {
+            itemLUT = lutResolver?(resolution.document.lut.lutID) ?? lut
+        }
+        let hasSourceScope = sourceAccess.url?.startAccessingSecurityScopedResource() ?? false
+        defer {
+            if hasSourceScope { sourceAccess.url?.stopAccessingSecurityScopedResource() }
+        }
+        return try await exportEngine.render(RenderRequest(
+            source: sourceAccess.source, assetID: itemAssetID, document: resolution.document,
+            lut: itemLUT, quality: .export,
+            output: .encoded(format: options.format, quality: CGFloat(options.quality)),
+            space: options.colorSpace,
+            exportOptions: options
+        )).data
+    }
+
     /// Start a single export using the file destination embedded in options.
     func performExport(
         source: ImageSource,

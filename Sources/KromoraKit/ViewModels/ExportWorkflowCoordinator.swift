@@ -52,6 +52,10 @@ final class ExportWorkflowCoordinator {
     private var activeShareDirectories: Set<URL> = []
     private var sharePickerSessions: [URL: SharePickerSession] = [:]
     private let shareRoot: URL
+    /// Presents the picker at the Share control. Tests replace it to observe ordering.
+    var showPicker: ([Any], NSSharingServicePicker, NSView) -> Void = { _, picker, view in
+        picker.show(relativeTo: view.bounds, of: view, preferredEdge: .minY)
+    }
 
     init(
         export: ExportCoordinator,
@@ -274,26 +278,50 @@ final class ExportWorkflowCoordinator {
             destination.presentExportError("Could not prepare share exports: \(error.localizedDescription)")
             return
         }
-        destination.setExportStatus("Preparing selected photos for sharing…")
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            let outcome = await self.export.performBatchExport(
-                request.items,
-                document: request.document,
-                lut: request.lut,
-                options: ShareExportPolicy.options(destination: .folder(directory)),
-                to: directory
-            )
-            guard outcome.exported > 0,
-                  let urls = try? FileManager.default.contentsOfDirectory(
-                    at: directory, includingPropertiesForKeys: nil
-                  ).filter({ $0.pathExtension.lowercased() == ShareExportPolicy.preferredFormat.fileExtension }),
-                  !urls.isEmpty else {
-                self.removeShareExport(at: directory)
-                return
+        // The picker appears before any render. Each item is a lazy file representation that
+        // renders only when the chosen service loads it, from the snapshot taken here.
+        var usedNames = Set<String>()
+        let providers = request.items.map { item -> NSItemProvider in
+            let stem = URL(fileURLWithPath: item.name).deletingPathExtension().lastPathComponent
+            let base = stem.isEmpty ? "Photo" : stem
+            var candidate = base
+            var counter = 2
+            while !usedNames.insert(candidate).inserted {
+                candidate = "\(base) \(counter)"
+                counter += 1
             }
-            self.presentSharePicker(for: urls, in: directory)
+            let name = candidate
+            let provider = NSItemProvider()
+            provider.suggestedName = name
+            provider.registerFileRepresentation(
+                forTypeIdentifier: ShareExportPolicy.preferredFormat.utType.identifier,
+                fileOptions: [],
+                visibility: .all
+            ) { [weak self] completion in
+                Task { @MainActor in
+                    guard let self else {
+                        completion(nil, false, CocoaError(.userCancelled))
+                        return
+                    }
+                    do {
+                        let url = try await self.renderShareFile(
+                            name: name, into: directory
+                        ) { options in
+                            try await self.export.renderEncodedData(
+                                for: item, document: request.document, lut: request.lut,
+                                options: options
+                            )
+                        }
+                        completion(url, false, nil)
+                    } catch {
+                        completion(nil, false, error)
+                    }
+                }
+                return nil
+            }
+            return provider
         }
+        presentSharePicker(for: providers, in: directory)
     }
 
     /// Shows the picker at once. The photo renders when the user picks a service, so there is no
@@ -342,23 +370,31 @@ final class ExportWorkflowCoordinator {
     func renderShareFile(
         _ request: SingleRequest, assetID: PhotoAssetID?, into directory: URL
     ) async throws -> URL {
+        try await renderShareFile(name: request.baseName, into: directory) { options in
+            try await self.export.renderEncodedData(
+                source: request.source, assetID: assetID, document: request.document,
+                lut: request.lut, options: options
+            )
+        }
+    }
+
+    /// Encodes with the share policy, retrying as JPEG when HEIC fails so no item is dropped.
+    func renderShareFile(
+        name: String, into directory: URL,
+        encode: (ExportOptions) async throws -> Data
+    ) async throws -> URL {
         var format = ShareExportPolicy.preferredFormat
         let data: Data
         do {
-            data = try await export.renderEncodedData(
-                source: request.source, assetID: assetID, document: request.document,
-                lut: request.lut, options: ShareExportPolicy.options(format: format)
-            )
+            data = try await encode(ShareExportPolicy.options(format: format))
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             format = ShareExportPolicy.fallbackFormat
-            data = try await export.renderEncodedData(
-                source: request.source, assetID: assetID, document: request.document,
-                lut: request.lut, options: ShareExportPolicy.options(format: format)
-            )
+            data = try await encode(ShareExportPolicy.options(format: format))
         }
-        let url = directory.appendingPathComponent(
-            request.baseName + "_share." + format.fileExtension
-        )
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent(name + "_share." + format.fileExtension)
         try await Self.write(data, to: url)
         return url
     }
@@ -368,9 +404,7 @@ final class ExportWorkflowCoordinator {
     }
 
     private func presentSharePicker(for items: [Any], in directory: URL) {
-        let anchor = shareAnchorView.flatMap { $0.window == nil ? nil : $0 }
-            ?? NSApplication.shared.keyWindow?.contentView
-        guard let view = anchor else {
+        guard let view = shareAnchorView, view.window != nil else {
             removeShareExport(at: directory)
             destination?.setExportStatus("Share unavailable: no window to present the sharing menu")
             return
@@ -384,7 +418,7 @@ final class ExportWorkflowCoordinator {
             picker: picker,
             delegate: delegate
         )
-        picker.show(relativeTo: view.bounds, of: view, preferredEdge: .minY)
+        showPicker(items, picker, view)
     }
 }
 

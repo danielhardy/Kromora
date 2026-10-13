@@ -172,6 +172,8 @@ actor FakeRenderEngine: RenderEngining {
 
     /// Swap in a failure to exercise the caller's error path.
     var shouldFailEncode = false
+    /// Formats whose encode throws while others succeed, to exercise format fallback.
+    var failingEncodeFormats: Set<ExportFormat> = []
     /// Optional gates used by export lifecycle tests. The real engine owns one serial export lane;
     /// these counters make that bound observable without allocating full-resolution images.
     private var encodeGateAfterFirst = false
@@ -236,7 +238,7 @@ actor FakeRenderEngine: RenderEngining {
                 await withCheckedContinuation { parkedEncodes.append($0) }
             }
             try Task.checkCancellation()
-            if shouldFailEncode { throw ImageError.exportFailed }
+            if shouldFailEncode || failingEncodeFormats.contains(format) { throw ImageError.exportFailed }
             emit(.encodeCompleted(record))
             return RenderResult(
                 data: Data("fake-\(format.rawValue)".utf8), extent: .zero,
@@ -534,6 +536,7 @@ actor FakeRenderEngine: RenderEngining {
     private(set) var nativeRequests: [[NativePatchSpec]] = []
 
     func setShouldFailEncode(_ value: Bool) { shouldFailEncode = value }
+    func setFailingEncodeFormats(_ value: Set<ExportFormat>) { failingEncodeFormats = value }
 
     /// Let the first encode finish but hold the second until the test chooses to release it.
     func gateEncodeAfterFirst() { encodeGateAfterFirst = true }
