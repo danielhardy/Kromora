@@ -202,12 +202,12 @@ final class PortablePackageLease: Sendable {
     /// Serializes same-session package mutations that must read a current value and publish a
     /// related transaction without a concurrent edit slipping between those steps.
     ///
-    /// The body performs whole package transactions (journal, `F_FULLFSYNC`, renames; a virtual
-    /// copy also hashes the original), so a hold can last from tens of milliseconds to seconds.
-    /// That rules out `os_unfair_lock`, which is meant for tiny critical sections. A serial queue
-    /// is used instead: waiters block in the kernel without spinning, and `sync` lets the
-    /// queue's owner inherit the waiter's QoS, so a user-initiated waiter lifts a utility-QoS
-    /// holder rather than inverting behind it.
+    /// The body performs whole package transactions (journal, `F_FULLFSYNC`, renames); capture
+    /// metadata repair also reads every embedded original needing repair in a shard before its
+    /// commit. Holds can last from tens of milliseconds to seconds. That rules out `os_unfair_lock`,
+    /// which is meant for tiny critical sections. A serial queue is used instead: waiters block in
+    /// the kernel without spinning, and synchronous dispatch propagates a waiting caller's QoS to
+    /// the work already holding the queue rather than inverting behind a utility-QoS holder.
     ///
     /// Callers, all reached from the package-I/O worker, `EditDocumentStore`, or detached
     /// maintenance tasks when a scheduler exists (always, in production): `commitEditRevision`,
