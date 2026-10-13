@@ -2,7 +2,7 @@
 id: KRMA-914
 title: "Smart Mask Discovery: develop a signature visual experience beyond the initial prototype"
 type: feature
-status: backlog
+status: review
 priority: medium
 human_review_required: false
 creation_provenance:
@@ -16,10 +16,18 @@ labels:
   - design
   - performance
 created: 2026-10-12T21:56:49.211Z
-updated: 2026-10-13T01:11:53.311Z
-blockers: []
-order: zzzv
+updated: 2026-10-13T16:51:38.321Z
+blockers:
+  - id: evt_mv6x4j4h_ul6zvn
+    type: human
+    reason: Remaining acceptance needs a live, in-motion visual review of the 'Darkroom Development' treatment (5a090b2c) across bright/dark/portrait/landscape/busy photos, canvas sizes and zoom. The ticket's prior feedback was 'underwhelming', and I cannot see motion in a non-interactive run.
+    action: Run 'swift run', request a Smart Mask on several photos, and record accept / what to change. Say whether to build the optional extras (cursor-as-safelight, haptic at edge lock-in, sound, longer-wait choreography). A supervised GPU-contention measurement per CLAUDE.md is also needed if near-zero interference is to be claimed.
+    created_at: 2026-10-13T16:51:38.321Z
+order: n
 board: product
+blocked_reason: Remaining acceptance needs a live, in-motion visual review of the 'Darkroom Development' treatment (5a090b2c) across bright/dark/portrait/landscape/busy photos, canvas sizes and zoom. The ticket's prior feedback was 'underwhelming', and I cannot see motion in a non-interactive run.
+blocked_action: Run 'swift run', request a Smart Mask on several photos, and record accept / what to change. Say whether to build the optional extras (cursor-as-safelight, haptic at edge lock-in, sound, longer-wait choreography). A supervised GPU-contention measurement per CLAUDE.md is also needed if near-zero interference is to be claimed.
+blocked_from_status: ready
 context:
   files:
     - Sources/KromoraKit/Models/MaskDiscoveryState.swift

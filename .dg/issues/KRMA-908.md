@@ -2,7 +2,7 @@
 id: KRMA-908
 title: Observe Look-library and settings changes directly in their consuming views
 type: task
-status: backlog
+status: ready
 priority: low
 human_review_required: false
 creation_provenance:
@@ -15,12 +15,36 @@ labels:
   - maintainability
   - observation
 created: 2026-10-12T17:11:43.446Z
-updated: 2026-10-12T17:12:20.202Z
+updated: 2026-10-13T22:11:39.658Z
 depends_on:
   - KRMA-907
 blockers: []
-order: zzz
+order: zy
 board: product
+context:
+  files:
+    - Sources/KromoraKit/Views/LookInspectorView.swift
+    - Sources/KromoraKit/Views/ContentView.swift
+    - Sources/KromoraKit/Views/FilmstripView.swift
+    - Tests/KromoraKitTests/ObservationInvalidationTests.swift
+    - Tests/KromoraKitTests/LookInspectorViewTests.swift
+    - Sources/KromoraKit/Models/LUTLibrary.swift
+    - Sources/KromoraKit/Models/KromoraSettings.swift
+    - Sources/KromoraKit/ViewModels/AppViewModel.swift
+  docs:
+    - CLAUDE.md
+    - AGENTS.md
+    - docs/APP_ARCHITECTURE.md
+    - docs/ENGINEERING_GUIDE.md
+  issues:
+    - KRMA-907
+    - KRMA-909
+    - KRMA-898
+  commands:
+    - swift build
+    - swift test --no-parallel --filter 'ObservationInvalidationTests|LookInspectorViewTests|LUTWorkflowTests|KromoraSettingsTests|MenuCommandTests|PackageSettingsTests'
+    - dg validate
+    - git diff --check
 footprint:
   source: declared
   paths:
@@ -45,30 +69,6 @@ footprint:
     - path: docs/APP_ARCHITECTURE.md
       access: write
       confidence: 1
-context:
-  files:
-    - "Sources/KromoraKit/Views/LookInspectorView.swift"
-    - "Sources/KromoraKit/Views/ContentView.swift"
-    - "Sources/KromoraKit/Views/FilmstripView.swift"
-    - "Tests/KromoraKitTests/ObservationInvalidationTests.swift"
-    - "Tests/KromoraKitTests/LookInspectorViewTests.swift"
-    - "Sources/KromoraKit/Models/LUTLibrary.swift"
-    - "Sources/KromoraKit/Models/KromoraSettings.swift"
-    - "Sources/KromoraKit/ViewModels/AppViewModel.swift"
-  docs:
-    - "CLAUDE.md"
-    - "AGENTS.md"
-    - "docs/APP_ARCHITECTURE.md"
-    - "docs/ENGINEERING_GUIDE.md"
-  issues:
-    - "KRMA-907"
-    - "KRMA-909"
-    - "KRMA-898"
-  commands:
-    - "swift build"
-    - "swift test --no-parallel --filter 'ObservationInvalidationTests|LookInspectorViewTests|LUTWorkflowTests|KromoraSettingsTests|MenuCommandTests|PackageSettingsTests'"
-    - "dg validate"
-    - "git diff --check"
 ---
 
 ## Objective

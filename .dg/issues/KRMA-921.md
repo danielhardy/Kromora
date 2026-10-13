@@ -2,7 +2,7 @@
 id: KRMA-921
 title: "Spike: determine beep-free key handling mechanism (menu key equivalents vs onKeyPress vs key NSView)"
 type: task
-status: review
+status: done
 priority: high
 human_review_required: false
 creation_provenance:
@@ -13,15 +13,10 @@ labels:
   - keyboard
   - spike
 created: 2026-10-13T13:18:51.360Z
-updated: 2026-10-13T13:21:28.723Z
+updated: 2026-10-13T14:41:16.353Z
 blockers: []
-order: z
+order: zzzzzx
 board: product
-claim:
-  actor: claude
-  session: 01MV6PJ77LNSJCMLWQ
-  claimed_at: 2026-10-13T13:19:05.793Z
-  expires_at: 2026-10-13T14:19:05.793Z
 footprint:
   source: observed
   paths: []

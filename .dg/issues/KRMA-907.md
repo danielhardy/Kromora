@@ -2,7 +2,7 @@
 id: KRMA-907
 title: Observe derive, Look-save and removable-media state at their feature surfaces
 type: task
-status: backlog
+status: ready
 priority: low
 human_review_required: false
 creation_provenance:
@@ -15,10 +15,33 @@ labels:
   - maintainability
   - observation
 created: 2026-10-12T17:11:42.743Z
-updated: 2026-10-12T17:12:18.548Z
+updated: 2026-10-13T22:20:41.071Z
 blockers: []
-order: zzy
+order: zzh
 board: product
+context:
+  files:
+    - Sources/KromoraKit/Views/ContentView.swift
+    - Sources/KromoraKit/Views/RemovableMediaSelectorView.swift
+    - Tests/KromoraKitTests/ObservationInvalidationTests.swift
+    - Sources/KromoraKit/Views/RecipeExtractorSheet.swift
+    - Sources/KromoraKit/Views/LookSaveSheet.swift
+    - Sources/KromoraKit/ViewModels/AppViewModel.swift
+  docs:
+    - CLAUDE.md
+    - AGENTS.md
+    - docs/APP_ARCHITECTURE.md
+    - docs/ENGINEERING_GUIDE.md
+  issues:
+    - KRMA-521
+    - KRMA-908
+    - KRMA-909
+    - KRMA-896
+  commands:
+    - swift build
+    - swift test --no-parallel --filter 'ObservationInvalidationTests|PackageSourceImportCoordinatorTests|MediaVolumeTests|RecipeExtractorTests|PackageSettingsTests'
+    - dg validate
+    - git diff --check
 footprint:
   source: declared
   paths:
@@ -37,29 +60,6 @@ footprint:
     - path: docs/APP_ARCHITECTURE.md
       access: write
       confidence: 1
-context:
-  files:
-    - "Sources/KromoraKit/Views/ContentView.swift"
-    - "Sources/KromoraKit/Views/RemovableMediaSelectorView.swift"
-    - "Tests/KromoraKitTests/ObservationInvalidationTests.swift"
-    - "Sources/KromoraKit/Views/RecipeExtractorSheet.swift"
-    - "Sources/KromoraKit/Views/LookSaveSheet.swift"
-    - "Sources/KromoraKit/ViewModels/AppViewModel.swift"
-  docs:
-    - "CLAUDE.md"
-    - "AGENTS.md"
-    - "docs/APP_ARCHITECTURE.md"
-    - "docs/ENGINEERING_GUIDE.md"
-  issues:
-    - "KRMA-521"
-    - "KRMA-908"
-    - "KRMA-909"
-    - "KRMA-896"
-  commands:
-    - "swift build"
-    - "swift test --no-parallel --filter 'ObservationInvalidationTests|PackageSourceImportCoordinatorTests|MediaVolumeTests|RecipeExtractorTests|PackageSettingsTests'"
-    - "dg validate"
-    - "git diff --check"
 ---
 
 ## Objective

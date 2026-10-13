@@ -2,7 +2,7 @@
 id: KRMA-909
 title: Isolate clipboard presentation updates and remove dormant editor notification forwarding
 type: task
-status: backlog
+status: ready
 priority: low
 human_review_required: false
 creation_provenance:
@@ -15,12 +15,37 @@ labels:
   - maintainability
   - observation
 created: 2026-10-12T17:11:44.129Z
-updated: 2026-10-12T17:12:20.767Z
+updated: 2026-10-13T22:11:44.838Z
 depends_on:
   - KRMA-908
 blockers: []
-order: zzzh
+order: zz
 board: product
+context:
+  files:
+    - Sources/KromoraKit/ViewModels/EditorDocumentCoordinator.swift
+    - Sources/KromoraKit/Views/ContentView.swift
+    - Sources/KromoraKit/Views/OnboardingViews.swift
+    - Tests/KromoraKitTests/ObservationInvalidationTests.swift
+    - Tests/KromoraKitTests/EditClipboardCoordinatorTests.swift
+    - Sources/KromoraKit/ViewModels/EditClipboardCoordinator.swift
+    - Sources/KromoraKit/ViewModels/AppViewModel.swift
+  docs:
+    - CLAUDE.md
+    - AGENTS.md
+    - docs/APP_ARCHITECTURE.md
+    - docs/ENGINEERING_GUIDE.md
+  issues:
+    - KRMA-908
+    - KRMA-521
+    - KRMA-529
+    - KRMA-907
+    - KRMA-903
+  commands:
+    - swift build
+    - swift test --no-parallel --filter 'ObservationInvalidationTests|EditClipboardCoordinatorTests|EditClipboardTests|AppViewModelTests|MenuCommandTests|PackageSettingsTests'
+    - dg validate
+    - git diff --check
 footprint:
   source: declared
   paths:
@@ -45,31 +70,6 @@ footprint:
     - path: docs/APP_ARCHITECTURE.md
       access: write
       confidence: 1
-context:
-  files:
-    - "Sources/KromoraKit/ViewModels/EditorDocumentCoordinator.swift"
-    - "Sources/KromoraKit/Views/ContentView.swift"
-    - "Sources/KromoraKit/Views/OnboardingViews.swift"
-    - "Tests/KromoraKitTests/ObservationInvalidationTests.swift"
-    - "Tests/KromoraKitTests/EditClipboardCoordinatorTests.swift"
-    - "Sources/KromoraKit/ViewModels/EditClipboardCoordinator.swift"
-    - "Sources/KromoraKit/ViewModels/AppViewModel.swift"
-  docs:
-    - "CLAUDE.md"
-    - "AGENTS.md"
-    - "docs/APP_ARCHITECTURE.md"
-    - "docs/ENGINEERING_GUIDE.md"
-  issues:
-    - "KRMA-908"
-    - "KRMA-521"
-    - "KRMA-529"
-    - "KRMA-907"
-    - "KRMA-903"
-  commands:
-    - "swift build"
-    - "swift test --no-parallel --filter 'ObservationInvalidationTests|EditClipboardCoordinatorTests|EditClipboardTests|AppViewModelTests|MenuCommandTests|PackageSettingsTests'"
-    - "dg validate"
-    - "git diff --check"
 ---
 
 ## Objective
