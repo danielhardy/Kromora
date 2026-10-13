@@ -12,7 +12,9 @@ fails when this table and the catalog disagree. Add a row here whenever a shortc
 ## Results (2026-10-13 spot check)
 
 This was a hands-on spot check of clicking around and using the keyboard in the signed build, not a
-cell-by-cell run of the grid below. The per-cell result columns were not filled in.
+cell-by-cell run of the grid below. The per-cell result columns were not filled in, and the
+requirement to fill them in was waived by the human on 2026-10-13 (KRMA-926). The grid remains
+available as an optional aid for future keyboard changes.
 
 1. `keyboardRouter` resolves in the real scene: **yes**. Photo and Tools menu items are enabled and
    shortcuts run. This agrees with the KRMA-920 by-ear confirmation.
