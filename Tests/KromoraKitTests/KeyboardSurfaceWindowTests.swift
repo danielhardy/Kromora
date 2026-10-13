@@ -99,6 +99,14 @@ final class KeyboardSurfaceWindowTests: TempDirectoryTestCase {
         )!
     }
 
+    private func shiftZ(in window: NSWindow) -> NSEvent {
+        NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [.command, .shift], timestamp: 0,
+            windowNumber: window.windowNumber, context: nil, characters: "Z",
+            charactersIgnoringModifiers: "Z", isARepeat: false, keyCode: 6
+        )!
+    }
+
     private func send(_ event: NSEvent) { NSApp.sendEvent(event) }
 
     private var rightArrow: String { String(UnicodeScalar(NSRightArrowFunctionKey)!) }
@@ -141,6 +149,60 @@ final class KeyboardSurfaceWindowTests: TempDirectoryTestCase {
         XCTAssertEqual(editor?.string, " g", // Left moved the caret, then Space inserted before the g
                         "the field editor received the typed characters")
         XCTAssertEqual(f.window.unclaimed, 0)
+    }
+
+    /// Installs a main-menu ⌘Z / ⇧⌘Z that calls the production `UndoRedoRouting`, as the Edit menu does.
+    @MainActor private final class UndoTarget: NSObject {
+        /// Stands in for `NSApp.keyWindow`, which is nil while the test process is not active.
+        weak var window: NSWindow?
+        @objc func undo(_ item: NSMenuItem) { UndoRedoRouting.perform(.undo, in: window) }
+        @objc func redo(_ item: NSMenuItem) { UndoRedoRouting.perform(.redo, in: window) }
+    }
+
+    private func installUndoMenu(_ target: UndoTarget) {
+        let main = NSMenu()
+        let top = NSMenuItem(); main.addItem(top)
+        let sub = NSMenu(title: "Edit"); top.submenu = sub
+        let undo = NSMenuItem(title: "Undo", action: #selector(UndoTarget.undo(_:)), keyEquivalent: "z")
+        undo.target = target
+        let redo = NSMenuItem(title: "Redo", action: #selector(UndoTarget.redo(_:)), keyEquivalent: "z")
+        redo.keyEquivalent = "Z"
+        redo.keyEquivalentModifierMask = [.command, .shift]
+        redo.target = target
+        sub.addItem(undo); sub.addItem(redo)
+        NSApp.mainMenu = main
+    }
+
+    func testCommandZUndoesTextInAFieldAndThePhotoElsewhere() async throws {
+        let f = try await makeFixture()
+        defer { f.window.close() }
+        let target = UndoTarget()
+        target.window = f.window
+        installUndoMenu(target)
+        var undone = 0, redone = 0
+        let tokens = [
+            NotificationCenter.default.addObserver(forName: .undoEdit, object: nil, queue: nil) { _ in undone += 1 },
+            NotificationCenter.default.addObserver(forName: .redoEdit, object: nil, queue: nil) { _ in redone += 1 },
+        ]
+        defer { tokens.forEach(NotificationCenter.default.removeObserver) }
+
+        // Canvas focused: the photo edit is undone/redone.
+        send(key("z", code: 6, in: f.window, mods: [.command]))
+        send(shiftZ(in: f.window))
+        XCTAssertEqual(undone, 1)
+        XCTAssertEqual(redone, 1)
+
+        // Text field editing: ⌘Z / ⇧⌘Z belong to the field editor's own undo manager.
+        f.driver.focusField = true
+        try await Task.sleep(for: .milliseconds(300))
+        let field = try XCTUnwrap(Self.firstSubview(of: NSTextField.self, in: f.window.contentView!))
+        let editor = try XCTUnwrap(f.window.fieldEditor(false, for: field) as? NSTextView)
+        XCTAssertTrue(f.window.firstResponder === editor)
+        editor.insertText("abc", replacementRange: editor.selectedRange())
+        send(key("z", code: 6, in: f.window, mods: [.command]))
+        send(shiftZ(in: f.window))
+        XCTAssertEqual(undone, 1, "⌘Z in a text field must not undo the photo")
+        XCTAssertEqual(redone, 1, "⇧⌘Z in a text field must not redo the photo")
     }
 
     private static func firstSubview<T: NSView>(of type: T.Type, in view: NSView) -> T? {

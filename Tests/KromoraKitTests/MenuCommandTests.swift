@@ -28,6 +28,23 @@ final class MenuCommandTests: XCTestCase {
         XCTAssertEqual(scene.components(separatedBy: "\n        Settings {").count - 1, 1)
     }
 
+    func testUndoRedoLiveOnlyInTheEditMenu() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/MenuCommands.swift"),
+            encoding: .utf8
+        )
+        XCTAssertEqual(source.components(separatedBy: "Button(\"Undo\")").count - 1, 1)
+        XCTAssertEqual(source.components(separatedBy: "Button(\"Redo\")").count - 1, 1)
+        let undoRedo = try XCTUnwrap(source.range(of: "CommandGroup(replacing: .undoRedo)"))
+        let newItem = try XCTUnwrap(source.range(of: "CommandGroup(replacing: .newItem)"))
+        let undo = try XCTUnwrap(source.range(of: "Button(\"Undo\")"))
+        let redo = try XCTUnwrap(source.range(of: "Button(\"Redo\")"))
+        XCTAssertTrue(undoRedo.upperBound <= undo.lowerBound && redo.lowerBound < newItem.lowerBound,
+                      "Undo and Redo belong to the .undoRedo group, not File")
+    }
+
     func testEditTransferShortcutsDoNotClaimStandardTextClipboardKeys() {
         let modifiers = KromoraEditTransferShortcuts.modifiers
 

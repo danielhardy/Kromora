@@ -24,6 +24,27 @@ enum KromoraAutoAdjustmentShortcut {
     static let referenceAction = "Apply Auto edits"
 }
 
+/// Command-Z / Shift-Command-Z. A modified menu key equivalent fires even while a text field is
+/// editing, so the menu action decides: a field editor undoes its own text, anything else undoes
+/// the photo edit through the existing notifications.
+@MainActor
+enum UndoRedoRouting {
+    enum Direction { case undo, redo }
+
+    static func perform(_ direction: Direction, in window: NSWindow?) {
+        if let editor = window?.firstResponder as? NSTextView, let manager = editor.undoManager {
+            switch direction {
+            case .undo: if manager.canUndo { manager.undo() }
+            case .redo: if manager.canRedo { manager.redo() }
+            }
+            return
+        }
+        NotificationCenter.default.post(
+            name: direction == .undo ? .undoEdit : .redoEdit, object: nil
+        )
+    }
+}
+
 /// Kromora's File menu, replacing SwiftUI's default "New" group.
 ///
 /// One of two entry points KromoraKit exposes to the executable (the other is
@@ -77,6 +98,16 @@ public struct KromoraCommands: Commands {
 
         CommandMenu("Tools") { keyboardItems(.tools) }
 
+        // Undo/Redo live in the Edit menu. The items stay enabled: a focused text field can have
+        // text to undo while the photo has none, so photo `canUndo` is not the whole answer.
+        // Enablement follows the "Drive File/Edit command enablement from focused values" ticket.
+        CommandGroup(replacing: .undoRedo) {
+            Button("Undo") { UndoRedoRouting.perform(.undo, in: NSApp.keyWindow) }
+                .keyboardShortcut("z", modifiers: [.command])
+            Button("Redo") { UndoRedoRouting.perform(.redo, in: NSApp.keyWindow) }
+                .keyboardShortcut("z", modifiers: [.command, .shift])
+        }
+
         CommandGroup(replacing: .newItem) {
             Button("Open Image...") { post(.openImage) }
                 .keyboardShortcut("o")
@@ -105,10 +136,6 @@ public struct KromoraCommands: Commands {
 
             Divider()
 
-            Button("Undo") { post(.undoEdit) }
-                .keyboardShortcut("z", modifiers: [.command])
-            Button("Redo") { post(.redoEdit) }
-                .keyboardShortcut("z", modifiers: [.command, .shift])
             Button("Reset Photo") { post(.resetPhoto) }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
 
