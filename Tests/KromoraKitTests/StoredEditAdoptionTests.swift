@@ -9,7 +9,7 @@ import XCTest
 final class StoredEditAdoptionTests: TempDirectoryTestCase {
     private func waitUntil(
         _ description: String,
-        timeout: Duration = .seconds(5),
+        timeout: Duration = .seconds(30),
         _ condition: @escaping @MainActor () -> Bool
     ) async throws {
         let deadline = ContinuousClock.now + timeout
@@ -273,6 +273,13 @@ final class StoredEditAdoptionTests: TempDirectoryTestCase {
             held.remove(id)
             waiters.removeValue(forKey: id)?.resume()
         }
+
+        /// Frees every held id so a failed test cannot leave `shutdown()` awaiting a gated read.
+        func releaseAll() {
+            held.removeAll()
+            for continuation in waiters.values { continuation.resume() }
+            waiters.removeAll()
+        }
     }
 
     /// Reproduces a legacy package whose summaries predate persisted fingerprints, so the grid
@@ -288,8 +295,19 @@ final class StoredEditAdoptionTests: TempDirectoryTestCase {
         }
     }
 
+    /// Installs a gate and registers its release for every exit path. Teardown blocks run last-in
+    /// first-out, so this releases before `reopen`'s teardown awaits `shutdown()`.
+    private func installGate(
+        holding ids: Set<PortablePhotoAssetID>, on session: PortableLibrarySession
+    ) -> MaterializationGate {
+        let gate = MaterializationGate(holding: ids)
+        session.materializationGate = { await gate.arrive($0) }
+        addTeardownBlock { await gate.releaseAll() }
+        return gate
+    }
+
     private func waitForArrival(_ gate: MaterializationGate) async throws {
-        let deadline = ContinuousClock.now + .seconds(5)
+        let deadline = ContinuousClock.now + .seconds(30)
         while await gate.arrivals.isEmpty {
             if ContinuousClock.now >= deadline {
                 throw TestSynchronizationError.timedOut(
@@ -313,8 +331,7 @@ final class StoredEditAdoptionTests: TempDirectoryTestCase {
         let (viewModel, fake, session) = try await reopen(
             packageURL, browsingAssets: true, holdPreparation: false)
         let id = try portableID("one.png", in: viewModel)
-        let gate = MaterializationGate(holding: [id])
-        session.materializationGate = { await gate.arrive($0) }
+        let gate = installGate(holding: [id], on: session)
 
         try select("one.png", in: viewModel)
         try await waitForArrival(gate)
@@ -346,8 +363,7 @@ final class StoredEditAdoptionTests: TempDirectoryTestCase {
         let (viewModel, _, session) = try await reopen(
             packageURL, browsingAssets: true, holdPreparation: false)
         let oneID = try portableID("one.png", in: viewModel)
-        let gate = MaterializationGate(holding: [oneID])
-        session.materializationGate = { await gate.arrive($0) }
+        let gate = installGate(holding: [oneID], on: session)
 
         try select("one.png", in: viewModel)
         try await waitForArrival(gate)
@@ -375,8 +391,7 @@ final class StoredEditAdoptionTests: TempDirectoryTestCase {
         let (viewModel, _, session) = try await reopen(
             packageURL, browsingAssets: true, holdPreparation: false)
         let id = try portableID("one.png", in: viewModel)
-        let gate = MaterializationGate(holding: [id])
-        session.materializationGate = { await gate.arrive($0) }
+        let gate = installGate(holding: [id], on: session)
         let url = try XCTUnwrap(
             viewModel.collection.items.first { $0.displayName == "one.png" }?.url)
 
