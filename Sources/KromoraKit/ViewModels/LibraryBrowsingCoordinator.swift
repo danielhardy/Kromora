@@ -21,6 +21,11 @@ protocol LibraryBrowsingProviding: AnyObject {
     func resolveEmbeddedSourceURL(for assetID: PortablePhotoAssetID) throws -> URL
     func materializedAsset(for assetID: PortablePhotoAssetID) async throws -> PhotoAsset
     func updateLibraryState(for assetID: PortablePhotoAssetID, rating: Int, flag: PhotoFlag) throws
+    /// Queue culling changes for a coalesced, serial, off-main write.
+    func enqueueLibraryStateUpdates(
+        _ updates: [PortableLibrarySession.LibraryStateUpdate],
+        onFailure: @escaping @MainActor (Error) -> Void
+    )
     /// Rebuild the disposable index from package membership (the package is canonical).
     func rebuildIndex() throws
 }
@@ -563,21 +568,21 @@ final class LibraryBrowsingCoordinator {
 
     private func persistPortableLibraryStateIfNeeded() {
         guard let library else { return }
-        var failure: Error?
-        for assetID in collection.lastCullingAssetIDs {
-            guard let item = collection.items.first(where: { $0.id == assetID }) else { continue }
-            do {
-                try library.updateLibraryState(
-                    for: item.asset.source.portableIdentity.assetID,
-                    rating: item.asset.rating, flag: item.asset.flag
-                )
-            } catch {
-                failure = error
-            }
+        let ids = collection.lastCullingAssetIDs
+        guard !ids.isEmpty else { return }
+        let wanted = Set(ids)
+        var itemsByID: [PhotoAssetID: ImageCollection.Item] = [:]
+        for item in collection.items where wanted.contains(item.id) { itemsByID[item.id] = item }
+        let updates = ids.compactMap { id -> PortableLibrarySession.LibraryStateUpdate? in
+            guard let item = itemsByID[id] else { return nil }
+            return .init(
+                assetID: item.asset.source.portableIdentity.assetID,
+                rating: item.asset.rating, flag: item.asset.flag
+            )
         }
-        if let failure {
-            destination?.presentLibraryError(
-                "Kromora could not update the library catalog: \(failure.localizedDescription)"
+        library.enqueueLibraryStateUpdates(updates) { [weak self] error in
+            self?.destination?.presentLibraryError(
+                "Kromora could not update the library catalog: \(error.localizedDescription)"
             )
         }
     }

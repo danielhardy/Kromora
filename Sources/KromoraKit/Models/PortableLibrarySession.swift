@@ -68,6 +68,7 @@ final class PortableLibrarySession {
     private let scheduler: ImageWorkScheduler?
     private let heartbeatJobID: ImageWorkScheduler.JobID
     private let indexWriteJobID: ImageWorkScheduler.JobID
+    private let libraryStateJobID: ImageWorkScheduler.JobID
     private let indexLoadJobID: ImageWorkScheduler.JobID
     private let presentedAspectRatioRepairJobID: ImageWorkScheduler.JobID
     private let sourceFingerprintBackfillJobID: ImageWorkScheduler.JobID
@@ -102,6 +103,11 @@ final class PortableLibrarySession {
     private var nextCaptureMetadataBackfillShard = 0
     private var sourceFingerprintBackfillRetryGate = SourceFingerprintBackfillRetryGate()
     private var isShuttingDown = false
+    private var pendingLibraryStateUpdates: [PortablePhotoAssetID: LibraryStateUpdate] = [:]
+    private var isDrainingLibraryState = false
+    private var libraryStateIndexWriteMayBeLost = false
+    private var libraryStateIdleWaiters: [CheckedContinuation<Void, Never>] = []
+    private var libraryStateFailureHandler: (@MainActor (Error) -> Void)?
     private var lostDuringSession = false
 
     init(
@@ -175,6 +181,9 @@ final class PortableLibrarySession {
             )
             self.indexWriteJobID = ImageWorkScheduler.JobID(
                 "portable-package-index-write-\(lease.ownerID.uuidString)"
+            )
+            self.libraryStateJobID = ImageWorkScheduler.JobID(
+                "portable-package-library-state-\(lease.ownerID.uuidString)"
             )
             self.indexLoadJobID = ImageWorkScheduler.JobID(
                 "portable-package-index-load-\(lease.ownerID.uuidString)"
@@ -655,6 +664,12 @@ final class PortableLibrarySession {
     /// releases the lock. The order is important: no heartbeat may run against a future owner.
     func shutdown() async {
         guard !isShuttingDown else { return }
+        // Queued culling changes are user data: write them before the lease goes away.
+        await flushPendingLibraryState()
+        guard !isShuttingDown else { return }
+        // The flush may have queued a projection write that a scheduler-wide cancellation or the
+        // cancellation below would drop; persist the current projection after cancelling so the
+        // next open does not serve pre-flush values.
         isShuttingDown = true
         heartbeatTask?.cancel()
         heartbeatTask = nil
@@ -663,7 +678,9 @@ final class PortableLibrarySession {
             await scheduler?.cancelAndWait(id: jobID)
         }
         activeImportJobIDs.removeAll()
+        await scheduler?.cancelAndWait(id: libraryStateJobID)
         await scheduler?.cancelAndWait(id: indexWriteJobID)
+        if libraryStateIndexWriteMayBeLost { try? queryController.index.write(to: indexURL) }
         await scheduler?.cancelAndWait(id: indexLoadJobID)
         await scheduler?.cancelAndWait(id: presentedAspectRatioRepairJobID)
         await scheduler?.cancelAndWait(id: sourceFingerprintBackfillJobID)
@@ -1543,6 +1560,13 @@ final class PortableLibrarySession {
         _ = try? applyIndexDelta(.init(upserts: [.init(from: entry)]))
     }
 
+    /// One culling change for `updateLibraryState(_:)`.
+    struct LibraryStateUpdate: Sendable, Equatable {
+        let assetID: PortablePhotoAssetID
+        let rating: Int
+        let flag: PhotoFlag
+    }
+
     /// Persist the package-owned catalog summary used by filtering and sorting. The presentation
     /// bridge may mirror this state for the current window, but it must not become the durable
     /// authority for a portable library.
@@ -1551,26 +1575,183 @@ final class PortableLibrarySession {
         rating: Int,
         flag: PhotoFlag
     ) throws {
+        try updateLibraryState([.init(assetID: assetID, rating: rating, flag: flag)])
+    }
+
+    /// Synchronously persist a batch with one package transaction per affected membership shard.
+    func updateLibraryState(_ updates: [LibraryStateUpdate]) throws {
         try ensureWritableLease()
-        let shardName = PortableLibraryPackage.shard(for: assetID)
         let package = self.package
         let lease = self.lease
         let now = clock.now()
-        let updatedEntry: LibraryIndexEntry?
+        let entries: [LibraryIndexEntry]
         do {
-            updatedEntry = try lease.withWriterMutationLock {
-                var shard = try package.readMembershipShard(shardName)
-                guard let index = shard.entries.firstIndex(where: {
-                    $0.assetID == assetID && !$0.isTombstone
-                }) else {
-                    throw PortablePackageTrashError.assetNotFound(assetID)
+            entries = try Self.writeLibraryState(
+                updates, package: package, lease: lease, now: now
+            )
+        } catch {
+            throw ensureLeaseError(error)
+        }
+        if !entries.isEmpty { _ = try applyIndexDelta(.init(upserts: entries)) }
+    }
+
+    /// Queue culling changes for a serial, off-main write. Changes for the same asset coalesce
+    /// last-write-wins while an earlier batch is still writing, so a later rating can never be
+    /// overwritten by an earlier one. A session without a scheduler writes inline.
+    func enqueueLibraryStateUpdates(
+        _ updates: [LibraryStateUpdate],
+        onFailure: @escaping @MainActor (Error) -> Void
+    ) {
+        guard !updates.isEmpty else { return }
+        for update in updates { pendingLibraryStateUpdates[update.assetID] = update }
+        libraryStateFailureHandler = onFailure
+        if !isDrainingLibraryState { startLibraryStateDrain() }
+    }
+
+    /// Suspends until every queued culling change has been written (or has failed and been
+    /// reported). Used before quit so a rating made just before ⌘Q is durable.
+    func flushPendingLibraryState() async {
+        guard isDrainingLibraryState || !pendingLibraryStateUpdates.isEmpty else { return }
+        await withCheckedContinuation { libraryStateIdleWaiters.append($0) }
+    }
+
+    private func startLibraryStateDrain() {
+        let batch = Array(pendingLibraryStateUpdates.values)
+        pendingLibraryStateUpdates.removeAll()
+        guard !batch.isEmpty else { finishLibraryStateDrain(); return }
+        isDrainingLibraryState = true
+
+        guard let scheduler else {
+            completeLibraryStateBatch(batch, outcome: writeLibraryStateInline(batch))
+            return
+        }
+        let package = self.package
+        let lease = self.lease
+        let now = clock.now
+        let box = LibraryStateWriteResult()
+        scheduler.enqueuePackageIO(
+            id: libraryStateJobID,
+            lane: .maintenance,
+            priority: .packageIO,
+            onTerminal: { [weak self] outcome in
+                guard let self else { return }
+                switch outcome {
+                case .completed:
+                    self.completeLibraryStateBatch(batch, outcome: box.take())
+                case .cancelled, .evicted, .rejected:
+                    // The change is user data: never drop it because the lane was full or the
+                    // scheduler was cancelled. Keep a result the operation already produced.
+                    let outcome = box.take() ?? self.writeLibraryStateInline(batch)
+                    self.completeLibraryStateBatch(batch, outcome: outcome)
                 }
-                guard shard.entries[index].summary.rating != rating
-                        || shard.entries[index].summary.flag != flag.rawValue
-                else { return nil }
-                shard.entries[index].summary.rating = min(max(rating, 0), 5)
-                shard.entries[index].summary.flag = flag.rawValue
-                shard.entries[index].summary.assetRevision &+= 1
+            },
+            operation: {
+                box.store(Result {
+                    try Self.writeLibraryState(batch, package: package, lease: lease, now: now())
+                })
+            }
+        )
+    }
+
+    private func writeLibraryStateInline(_ batch: [LibraryStateUpdate])
+        -> Result<[LibraryIndexEntry], Error>
+    {
+        Result {
+            try Self.writeLibraryState(
+                batch, package: package, lease: lease, now: clock.now()
+            )
+        }
+    }
+
+    private func completeLibraryStateBatch(
+        _ batch: [LibraryStateUpdate], outcome: Result<[LibraryIndexEntry], Error>?
+    ) {
+        switch outcome {
+        case .success(let entries):
+            if !entries.isEmpty {
+                libraryStateIndexWriteMayBeLost = true
+                do { _ = try applyIndexDelta(.init(upserts: entries)) } catch {
+                    libraryStateFailureHandler?(error)
+                }
+            }
+        case .failure(let error):
+            let mapped = ensureLeaseError(error)
+            if mapped is PortablePackageLeaseError { lostDuringSession = true }
+            libraryStateFailureHandler?(mapped)
+        case nil:
+            break
+        }
+        if pendingLibraryStateUpdates.isEmpty {
+            finishLibraryStateDrain()
+        } else {
+            startLibraryStateDrain()
+        }
+    }
+
+    private func finishLibraryStateDrain() {
+        isDrainingLibraryState = false
+        if !pendingLibraryStateUpdates.isEmpty, !isShuttingDown {
+            startLibraryStateDrain()
+            return
+        }
+        let waiters = libraryStateIdleWaiters
+        libraryStateIdleWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
+    }
+
+    /// Thread-safe result handoff from the package-I/O operation to the main-actor session.
+    private final class LibraryStateWriteResult: Sendable {
+        private let value = OSAllocatedUnfairLock<Result<[LibraryIndexEntry], Error>?>(
+            initialState: nil
+        )
+        func store(_ result: Result<[LibraryIndexEntry], Error>) {
+            value.withLock { $0 = result }
+        }
+        func take() -> Result<[LibraryIndexEntry], Error>? {
+            value.withLock { $0 }
+        }
+    }
+
+    /// Groups updates by membership shard and commits exactly one transaction per shard under the
+    /// writer mutation lock. Unchanged entries are skipped, and a shard with no change commits
+    /// nothing. Returns the refreshed index entries for the entries that changed.
+    nonisolated static func writeLibraryState(
+        _ updates: [LibraryStateUpdate],
+        package: PortableLibraryPackage,
+        lease: PortablePackageLease,
+        now: Date,
+        didCommitShard: (@Sendable (String) -> Void)? = nil
+    ) throws -> [LibraryIndexEntry] {
+        do { try lease.renew(now: now) } catch { throw PortablePackageLeaseError.lostDuringSession }
+        // Last update for an asset wins within a batch.
+        var latest: [PortablePhotoAssetID: LibraryStateUpdate] = [:]
+        for update in updates { latest[update.assetID] = update }
+        let byShard = Dictionary(grouping: latest.values) {
+            PortableLibraryPackage.shard(for: $0.assetID)
+        }
+        var changed: [LibraryIndexEntry] = []
+        for shardName in byShard.keys.sorted() {
+            let shardUpdates = byShard[shardName] ?? []
+            let entries: [LibraryIndexEntry] = try lease.withWriterMutationLock {
+                var shard = try package.readMembershipShard(shardName)
+                var positions: [PortablePhotoAssetID: Int] = [:]
+                for (index, entry) in shard.entries.enumerated() where !entry.isTombstone {
+                    positions[entry.assetID] = index
+                }
+                var touched: [Int] = []
+                for update in shardUpdates {
+                    guard let index = positions[update.assetID] else {
+                        throw PortablePackageTrashError.assetNotFound(update.assetID)
+                    }
+                    guard shard.entries[index].summary.rating != update.rating
+                            || shard.entries[index].summary.flag != update.flag.rawValue
+                    else { continue }
+                    shard.entries[index].summary.rating = min(max(update.rating, 0), 5)
+                    shard.entries[index].summary.flag = update.flag.rawValue
+                    shard.entries[index].summary.assetRevision &+= 1
+                    touched.append(index)
+                }
+                guard !touched.isEmpty else { return [] }
 
                 var transaction = try package.beginTransaction(lease: lease, now: now)
                 do {
@@ -1583,12 +1764,12 @@ final class PortableLibrarySession {
                     try? transaction.abort()
                     throw error
                 }
-                return LibraryIndexEntry(from: shard.entries[index])
+                didCommitShard?(shardName)
+                return touched.map { LibraryIndexEntry(from: shard.entries[$0]) }
             }
-        } catch {
-            throw ensureLeaseError(error)
+            changed.append(contentsOf: entries)
         }
-        if let updatedEntry { _ = try applyIndexDelta(.init(upserts: [updatedEntry])) }
+        return changed
     }
 
 }

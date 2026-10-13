@@ -133,6 +133,13 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
             persistedStates.append((assetID, rating, flag))
         }
 
+        func enqueueLibraryStateUpdates(
+            _ updates: [PortableLibrarySession.LibraryStateUpdate],
+            onFailure: @escaping @MainActor (Error) -> Void
+        ) {
+            for update in updates { persistedStates.append((update.assetID, update.rating, update.flag)) }
+        }
+
         func rebuildIndex() throws { rebuildCount += 1 }
     }
 

@@ -4350,6 +4350,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         async let frameStores: Void = flushPendingFrameStores()
         let result = await edits
         await frameStores
+        await portableLibrary?.flushPendingLibraryState()
         return result
     }
 
