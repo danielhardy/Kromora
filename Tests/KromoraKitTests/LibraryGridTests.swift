@@ -619,6 +619,10 @@ final class LibraryGridTests: TempDirectoryTestCase {
         Self.pumpRunLoop()
         let evaluations = RenderDiagnostics.snapshot.gridBodyEvaluations
         XCTAssertGreaterThan(clip.bounds.origin.y, maxOffset / 2, "the scripted scroll must move the content")
+        XCTAssertGreaterThan(
+            evaluations, 0,
+            "crossing row boundaries must publish coarse scroll updates to the grid"
+        )
 
         let layout = LibraryGridLayout()
         let metrics = layout.metrics(for: 720 - 32)
