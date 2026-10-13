@@ -5,16 +5,22 @@ The rows are generated from `KeyboardShortcutCatalog.all`
 (`Sources/KromoraKit/Views/KeyboardShortcutCatalog.swift`); `KeyboardShortcutCatalogTests`
 fails when this table and the catalog disagree. Add a row here whenever a shortcut is added.
 
-- **Build under test:** _(fill in: version/build, `open Xcode/Kromora.xcodeproj`, `Kromora` scheme)_
-- **Date / tester:** _(fill in)_
-- **Heard any system alert beep during the run?** _(yes/no, and on which cell)_
+- **Build under test:** `Kromora` scheme run from `Xcode/Kromora.xcodeproj` (signed, App Sandbox), on `efe50615` plus uncommitted working-tree changes
+- **Date:** 2026-10-13
+- **Heard any system alert beep during the run?** No
 
-## Questions to answer first
+## Results (2026-10-13 spot check)
 
-1. `keyboardRouter` resolves in the real scene (`@FocusedValue(\.keyboardRouter)`; Photo and Tools
-   menu items enabled, not greyed): **yes / no**
-2. Plain ⌘V no longer pastes edits; only ⌥⌘V does (⌘C opens Selective Copy). Decision: **keep / restore ⌘V**
-   _(KRMA-920 deviation 1: a disabled or empty standard Paste swallows ⌘V before the app sees it.)_
+This was a hands-on spot check of clicking around and using the keyboard in the signed build, not a
+cell-by-cell run of the grid below. The per-cell result columns were not filled in.
+
+1. `keyboardRouter` resolves in the real scene: **yes**. Photo and Tools menu items are enabled and
+   shortcuts run. This agrees with the KRMA-920 by-ear confirmation.
+2. Plain ⌘V: **keep**. KRMA-966 (`bfa146d4`) restored ⌘V as a standard Paste command, so it pastes
+   copied edits in the editor while a focused text field keeps its own paste. The KRMA-920 deviation
+   no longer applies.
+3. Failure found: **Esc does not cancel the crop tool**. Tracked in KRMA-969.
+4. Unrelated polish found: the top-right toolbar buttons are all bronze. Tracked in KRMA-970.
 
 ## How to run
 
