@@ -1637,12 +1637,20 @@ final class PortableLibrarySession {
                 guard let self else { return }
                 switch outcome {
                 case .completed:
-                    self.completeLibraryStateBatch(batch, outcome: box.take())
+                    if let result = box.take() {
+                        self.completeLibraryStateBatch(batch, outcome: result)
+                    } else {
+                        self.writeLibraryStateOffMain(batch)
+                    }
                 case .cancelled, .evicted, .rejected:
                     // The change is user data: never drop it because the lane was full or the
-                    // scheduler was cancelled. Keep a result the operation already produced.
-                    let outcome = box.take() ?? self.writeLibraryStateInline(batch)
-                    self.completeLibraryStateBatch(batch, outcome: outcome)
+                    // scheduler was cancelled. Keep a result the operation already produced;
+                    // otherwise retry off-main because terminal callbacks run on the main actor.
+                    if let result = box.take() {
+                        self.completeLibraryStateBatch(batch, outcome: result)
+                    } else {
+                        self.writeLibraryStateOffMain(batch)
+                    }
                 }
             },
             operation: {
@@ -1660,6 +1668,20 @@ final class PortableLibrarySession {
             try Self.writeLibraryState(
                 batch, package: package, lease: lease, now: clock.now()
             )
+        }
+    }
+
+    /// Retry a scheduler job that never entered its package-I/O operation without moving durable
+    /// package work onto the main actor. The session stays draining until this task reports back.
+    private func writeLibraryStateOffMain(_ batch: [LibraryStateUpdate]) {
+        let package = self.package
+        let lease = self.lease
+        let now = clock.now
+        Task.detached(priority: .utility) { [weak self] in
+            let result = Result {
+                try Self.writeLibraryState(batch, package: package, lease: lease, now: now())
+            }
+            await self?.completeLibraryStateBatch(batch, outcome: result)
         }
     }
 
@@ -1743,10 +1765,11 @@ final class PortableLibrarySession {
                     guard let index = positions[update.assetID] else {
                         throw PortablePackageTrashError.assetNotFound(update.assetID)
                     }
-                    guard shard.entries[index].summary.rating != update.rating
+                    let rating = min(max(update.rating, 0), 5)
+                    guard shard.entries[index].summary.rating != rating
                             || shard.entries[index].summary.flag != update.flag.rawValue
                     else { continue }
-                    shard.entries[index].summary.rating = min(max(update.rating, 0), 5)
+                    shard.entries[index].summary.rating = rating
                     shard.entries[index].summary.flag = update.flag.rawValue
                     shard.entries[index].summary.assetRevision &+= 1
                     touched.append(index)

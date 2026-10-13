@@ -81,6 +81,18 @@ final class CullingStateBatchWriteTests: TempDirectoryTestCase {
         XCTAssertTrue(committed.values.isEmpty)
     }
 
+    func testClampedUnchangedBatchCommitsNothing() throws {
+        let (session, _, ids) = try makeSession(assetCount: 1)
+        try session.updateLibraryState(for: ids[0], rating: 5, flag: .pick)
+        let committed = ShardLog()
+        _ = try PortableLibrarySession.writeLibraryState(
+            updates(ids, rating: 9, flag: .pick),
+            package: session.package, lease: session.lease, now: Date(),
+            didCommitShard: { committed.append($0) }
+        )
+        XCTAssertTrue(committed.values.isEmpty)
+    }
+
     func testMissingAssetThrowsAssetNotFound() throws {
         let (session, _, _) = try makeSession(assetCount: 1)
         XCTAssertThrowsError(
@@ -124,6 +136,64 @@ final class CullingStateBatchWriteTests: TempDirectoryTestCase {
         for id in ids { XCTAssertEqual(states[id]?.0, 3) }
     }
 
+    func testAppFlushWaitsForPendingCullingWriteBeforeQuit() async throws {
+        let (seed, packageURL, ids) = try makeSession(assetCount: 1)
+        try seed.lease.release()
+
+        let scheduler = ImageWorkScheduler()
+        let gate = CullingPackageIOGate()
+        let blockerID = ImageWorkScheduler.JobID("culling-flush-test-blocker")
+        scheduler.enqueuePackageIO(
+            id: blockerID, lane: .leaseHeartbeat, priority: .packageIO,
+            operation: { await gate.wait() }
+        )
+        let startDeadline = Date().addingTimeInterval(5)
+        while !(await gate.started()), Date() < startDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        guard await gate.started() else {
+            await gate.release()
+            XCTFail("package-I/O blocker did not start")
+            return
+        }
+
+        let indexURL = tempDirectory.appendingPathComponent("CullingIndex/LibraryIndex.store")
+        let session = try PortableLibrarySession(
+            at: packageURL, indexURL: indexURL, scheduler: scheduler
+        )
+        let viewModel = makeAppViewModel(portableLibrarySession: session)
+        session.enqueueLibraryStateUpdates(updates(ids, rating: 5, flag: .pick)) { error in
+            XCTFail("unexpected culling write failure: \(error)")
+        }
+
+        let probe = CullingFlushProbe()
+        let flush = Task { @MainActor in
+            await probe.record(viewModel.flushPendingWrites())
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        let resultBeforeWriteCanRun = await probe.result
+        XCTAssertNil(resultBeforeWriteCanRun)
+
+        await gate.release()
+        await flush.value
+        await scheduler.cancelAndWait(id: blockerID)
+
+        let resultAfterWrite = await probe.result
+        XCTAssertEqual(resultAfterWrite, .success)
+        let shard = try session.package.readMembershipShard(
+            PortableLibraryPackage.shard(for: ids[0])
+        )
+        XCTAssertEqual(
+            shard.entries.first(where: { $0.assetID == ids[0] })?.summary.rating,
+            5
+        )
+        XCTAssertEqual(
+            shard.entries.first(where: { $0.assetID == ids[0] })?.summary.flag,
+            PhotoFlag.pick.rawValue
+        )
+        await viewModel.shutdown()
+    }
+
     func testInlineFallbackWithoutScheduler() async throws {
         let (session, packageURL, ids) = try makeSession(assetCount: 4)
         session.enqueueLibraryStateUpdates(updates(ids, rating: 2, flag: .pick)) { _ in
@@ -131,6 +201,21 @@ final class CullingStateBatchWriteTests: TempDirectoryTestCase {
         }
         await session.flushPendingLibraryState()
         try session.lease.release()
+        let states = try reopenedStates(packageURL)
+        for id in ids { XCTAssertEqual(states[id]?.0, 2) }
+    }
+
+    func testRejectedPackageIOStillPersistsPendingWrites() async throws {
+        let scheduler = ImageWorkScheduler(
+            configuration: .init(maxConcurrentPackageIO: 0)
+        )
+        let (session, packageURL, ids) = try makeSession(assetCount: 4, scheduler: scheduler)
+        session.enqueueLibraryStateUpdates(updates(ids, rating: 2, flag: .pick)) { _ in
+            XCTFail("unexpected failure")
+        }
+        await session.flushPendingLibraryState()
+        await session.shutdown()
+
         let states = try reopenedStates(packageURL)
         for id in ids { XCTAssertEqual(states[id]?.0, 2) }
     }
@@ -153,4 +238,27 @@ private final class ShardLog: Sendable {
     private let storage = OSAllocatedUnfairLock<[String]>(initialState: [])
     var values: [String] { storage.withLock { $0 } }
     func append(_ v: String) { storage.withLock { $0.append(v) } }
+}
+
+private actor CullingPackageIOGate {
+    private var hasStarted = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func wait() async {
+        hasStarted = true
+        await withCheckedContinuation { continuation = $0 }
+    }
+
+    func started() -> Bool { hasStarted }
+
+    func release() {
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
+private actor CullingFlushProbe {
+    private(set) var result: PersistenceFlushResult?
+
+    func record(_ result: PersistenceFlushResult) { self.result = result }
 }
