@@ -472,7 +472,7 @@ final class PackageEditProjectionTests: TempDirectoryTestCase {
         let original = try XCTUnwrap(imported.imported.first)
 
         let session = try PortableLibrarySession(at: packageURL)
-        let copy = try session.createVirtualCopy(of: original.assetID)
+        let copy = try await session.createVirtualCopy(of: original.assetID)
         XCTAssertNotEqual(copy.assetID, original.assetID)
         XCTAssertEqual(copy.displayName, "portrait — Copy.jpg")
         XCTAssertEqual(
@@ -523,7 +523,7 @@ final class PackageEditProjectionTests: TempDirectoryTestCase {
         let original = try XCTUnwrap(imported.imported.first)
 
         let session = try PortableLibrarySession(at: packageURL)
-        let copy = try session.createVirtualCopy(of: original.assetID)
+        let copy = try await session.createVirtualCopy(of: original.assetID)
         let legacyName = "IMG_1370.DNG — Copy"
         try package.markVirtualCopy(
             copy.assetID, of: original.assetID, displayName: legacyName, lease: session.lease

@@ -281,9 +281,13 @@ struct InfoInspectorView: View {
                     Button {
                         viewModel.createVirtualCopy()
                     } label: {
-                        Label("Create Virtual Copy", systemImage: "plus.square.on.square")
+                        Label(
+                            viewModel.isCreatingVirtualCopy ? "Creating Virtual Copy…" : "Create Virtual Copy",
+                            systemImage: "plus.square.on.square"
+                        )
                     }
                     .buttonStyle(.plain)
+                    .disabled(viewModel.isCreatingVirtualCopy)
                     .help("Create an independent library copy with its own edits and history")
                 }
                 HStack(spacing: 6) {

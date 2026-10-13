@@ -68,6 +68,7 @@ final class PortableLibrarySession {
     private let scheduler: ImageWorkScheduler?
     private let heartbeatJobID: ImageWorkScheduler.JobID
     private let indexWriteJobID: ImageWorkScheduler.JobID
+    private let virtualCopyJobID: ImageWorkScheduler.JobID
     private let libraryStateJobID: ImageWorkScheduler.JobID
     private let indexLoadJobID: ImageWorkScheduler.JobID
     private let presentedAspectRatioRepairJobID: ImageWorkScheduler.JobID
@@ -181,6 +182,9 @@ final class PortableLibrarySession {
             )
             self.indexWriteJobID = ImageWorkScheduler.JobID(
                 "portable-package-index-write-\(lease.ownerID.uuidString)"
+            )
+            self.virtualCopyJobID = ImageWorkScheduler.JobID(
+                "portable-package-virtual-copy-\(lease.ownerID.uuidString)"
             )
             self.libraryStateJobID = ImageWorkScheduler.JobID(
                 "portable-package-library-state-\(lease.ownerID.uuidString)"
@@ -679,6 +683,7 @@ final class PortableLibrarySession {
         }
         activeImportJobIDs.removeAll()
         await scheduler?.cancelAndWait(id: libraryStateJobID)
+        await scheduler?.cancelAndWait(id: virtualCopyJobID)
         await scheduler?.cancelAndWait(id: indexWriteJobID)
         if libraryStateIndexWriteMayBeLost { try? queryController.index.write(to: indexURL) }
         await scheduler?.cancelAndWait(id: indexLoadJobID)
@@ -1128,7 +1133,7 @@ final class PortableLibrarySession {
     }
 
     /// "IMG_1370.DNG" becomes "IMG_1370 — Copy.DNG", so the copy keeps a real extension.
-    static func virtualCopyDisplayName(for sourceFilename: String) -> String {
+    nonisolated static func virtualCopyDisplayName(for sourceFilename: String) -> String {
         let url = URL(fileURLWithPath: sourceFilename)
         let base = url.deletingPathExtension().lastPathComponent
         let stem = base.isEmpty ? "Copy" : base
@@ -1179,29 +1184,101 @@ final class PortableLibrarySession {
         return result
     }
 
+    /// The independent identity of a freshly created virtual copy.
+    struct VirtualCopyResult: Sendable {
+        let assetID: PortablePhotoAssetID
+        let identity: PortablePhotoIdentity
+        let displayName: String
+        let indexDelta: LibraryIndexDelta
+    }
+
+    private final class VirtualCopyOutcome: Sendable {
+        private let value = OSAllocatedUnfairLock<Result<VirtualCopyResult, Error>?>(initialState: nil)
+        func store(_ result: Result<VirtualCopyResult, Error>) { value.withLock { $0 = result } }
+        func take() -> Result<VirtualCopyResult, Error>? { value.withLock { $0 } }
+    }
+
     /// Copies one managed original into a new package asset, then records its source relationship.
-    /// The caller persists the copied edit document under the returned independent identity.
-    func createVirtualCopy(of sourceID: PortablePhotoAssetID) throws
-        -> (assetID: PortablePhotoAssetID, identity: PortablePhotoIdentity, displayName: String)
-    {
-        let sourceRecord = try package.readAssetRecord(for: sourceID)
-        let sourceURL = try package.embeddedSourceURL(for: sourceRecord)
-        // Keep the extension at the end. "IMG_1370.DNG — Copy" has no path extension, so the
-        // browsing locator and RAW classifier both miss the embedded file.
-        let displayName = Self.virtualCopyDisplayName(for: sourceURL.lastPathComponent)
-        let imported = try importPackageSources(
-            [.init(url: sourceURL, name: displayName)], duplicatePolicy: .importAnyway
-        )
-        guard let copy = imported.imported.first else {
-            throw PortablePackageError.invalidVirtualCopy("the source original could not be copied")
+    /// The copy, content hash and relationship transaction run on the package-I/O lane (inline
+    /// for a session without a scheduler); only the incremental index update runs here. The
+    /// caller persists the copied edit document under the returned independent identity.
+    func createVirtualCopy(of sourceID: PortablePhotoAssetID) async throws -> VirtualCopyResult {
+        try ensureWritableLease()
+        let package = self.package
+        let lease = self.lease
+        let now = clock.now
+        let result: VirtualCopyResult
+        if let scheduler {
+            let outcome = VirtualCopyOutcome()
+            result = try await withCheckedThrowingContinuation { continuation in
+                scheduler.enqueuePackageIO(
+                    id: virtualCopyJobID,
+                    lane: .importCopyHash,
+                    onTerminal: { terminal in
+                        // A copy that already finished is kept even if shutdown cancelled the
+                        // job: the package holds it and the caller must see the result.
+                        if let finished = outcome.take() {
+                            continuation.resume(with: finished)
+                        } else if terminal == .rejected {
+                            continuation.resume(throwing: PortablePackageImportWorkerError.notAdmitted)
+                        } else {
+                            continuation.resume(throwing: CancellationError())
+                        }
+                    },
+                    operation: {
+                        outcome.store(Result {
+                            try Self.writeVirtualCopy(of: sourceID, package: package, lease: lease, now: now)
+                        })
+                    }
+                )
+            }
+        } else {
+            result = try Self.writeVirtualCopy(of: sourceID, package: package, lease: lease, now: now)
         }
-        try package.markVirtualCopy(
-            copy.assetID, of: sourceID, displayName: displayName, lease: lease,
-            now: clock.now()
-        )
-        _ = try refreshIndex()
-        let copyRecord = try package.readAssetRecord(for: copy.assetID)
-        return (copy.assetID, copyRecord.identity, displayName)
+        if !isShuttingDown { _ = try applyIndexDelta(result.indexDelta) }
+        return result
+    }
+
+    nonisolated private static func writeVirtualCopy(
+        of sourceID: PortablePhotoAssetID,
+        package: PortableLibraryPackage,
+        lease: PortablePackageLease,
+        now: @escaping @Sendable () -> Date
+    ) throws -> VirtualCopyResult {
+        do {
+            let sourceRecord = try package.readAssetRecord(for: sourceID)
+            let sourceURL = try package.embeddedSourceURL(for: sourceRecord)
+            // Keep the extension at the end. "IMG_1370.DNG — Copy" has no path extension, so the
+            // browsing locator and RAW classifier both miss the embedded file.
+            let displayName = virtualCopyDisplayName(for: sourceURL.lastPathComponent)
+            let imported = try package.importSources(
+                [.init(url: sourceURL, name: displayName)],
+                lease: lease,
+                options: .init(duplicatePolicy: .importAnyway),
+                now: now
+            )
+            guard let copy = imported.imported.first else {
+                throw PortablePackageError.invalidVirtualCopy("the source original could not be copied")
+            }
+            try lease.withWriterMutationLock {
+                try package.markVirtualCopy(
+                    copy.assetID, of: sourceID, displayName: displayName, lease: lease, now: now()
+                )
+            }
+            let copyRecord = try package.readAssetRecord(for: copy.assetID)
+            let shard = try package.readMembershipShard(PortableLibraryPackage.shard(for: copy.assetID))
+            var delta = imported.indexDelta
+            if let entry = shard.entries.first(where: { $0.assetID == copy.assetID }) {
+                delta = delta.merging(.init(upserts: [.init(from: entry)]))
+            }
+            return VirtualCopyResult(
+                assetID: copy.assetID, identity: copyRecord.identity,
+                displayName: displayName, indexDelta: delta
+            )
+        } catch {
+            if error is PortablePackageLeaseError { throw PortablePackageLeaseError.lostDuringSession }
+            throw error
+        }
     }
 
     /// Photos delivers bytes rather than a stable file URL. The temporary file is only an import

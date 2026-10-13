@@ -331,6 +331,95 @@ final class EditHistoryCoordinatorTests: XCTestCase {
         XCTAssertTrue(host.statuses.last?.hasPrefix("Could not create virtual copy") == true)
     }
 
+    @MainActor
+    private final class CopyGate {
+        private var entered: CheckedContinuation<Void, Never>?
+        private var release: CheckedContinuation<Void, Never>?
+        private var didEnter = false
+
+        func pass() async {
+            didEnter = true
+            entered?.resume()
+            entered = nil
+            await withCheckedContinuation { release = $0 }
+        }
+
+        func waitUntilEntered() async {
+            if didEnter { return }
+            await withCheckedContinuation { entered = $0 }
+        }
+
+        func open() {
+            release?.resume()
+            release = nil
+        }
+    }
+
+    func testVirtualCopyKeepsMainActorResponsiveRejectsSecondRequestAndClearsFlag() async throws {
+        let store = FakeStore()
+        let host = Host()
+        host.reference = referenceA
+        let coordinator = makeCoordinator(store: store, host: host)
+        let gate = CopyGate()
+        let copy = EditHistoryCoordinator.VirtualCopy(
+            sourceReference: referenceB, displayName: "Copy", assetID: PortablePhotoAssetID()
+        )
+        var created = 0
+        let task = coordinator.createVirtualCopy(
+            of: referenceA, makeCopy: { await gate.pass(); return copy }, didCreate: { _ in created += 1 }
+        )
+        XCTAssertNotNil(task)
+        XCTAssertTrue(coordinator.isCreatingVirtualCopy)
+        await gate.waitUntilEntered()
+
+        let hop = Task { @MainActor in true }
+        let responsive = await withTaskGroup(of: Bool.self) { group in
+            group.addTask { await hop.value }
+            group.addTask { try? await Task.sleep(for: .seconds(2)); return false }
+            let first = await group.next() ?? false
+            group.cancelAll()
+            return first
+        }
+        XCTAssertTrue(responsive, "main actor stays responsive while the copy is in flight")
+        XCTAssertNil(coordinator.createVirtualCopy(
+            of: referenceA, makeCopy: { copy }, didCreate: { _ in XCTFail("second copy must not start") }
+        ))
+
+        gate.open()
+        await task?.value
+        XCTAssertEqual(created, 1)
+        XCTAssertFalse(coordinator.isCreatingVirtualCopy)
+
+        await coordinator.createVirtualCopy(
+            of: referenceA, makeCopy: { throw CocoaError(.fileWriteUnknown) }, didCreate: { _ in }
+        )?.value
+        XCTAssertFalse(coordinator.isCreatingVirtualCopy, "failure clears the in-progress flag")
+    }
+
+    func testShutdownDuringVirtualCopySuppressesDidCreate() async throws {
+        let store = FakeStore()
+        let host = Host()
+        host.reference = referenceA
+        let coordinator = makeCoordinator(store: store, host: host)
+        let gate = CopyGate()
+        let copy = EditHistoryCoordinator.VirtualCopy(
+            sourceReference: referenceB, displayName: "Copy", assetID: PortablePhotoAssetID()
+        )
+        var created = 0
+        XCTAssertNotNil(coordinator.createVirtualCopy(
+            of: referenceA, makeCopy: { await gate.pass(); return copy }, didCreate: { _ in created += 1 }
+        ))
+        await gate.waitUntilEntered()
+
+        let shutdown = Task { await coordinator.shutdown() }
+        await Task.yield()
+        gate.open()
+        await shutdown.value
+
+        XCTAssertEqual(created, 0, "shutdown lets the copy finish but suppresses didCreate")
+        XCTAssertFalse(coordinator.isCreatingVirtualCopy)
+    }
+
     func testShutdownSuppressesGatedRefreshPublication() async throws {
         let store = FakeStore()
         await store.set(revisions: [revision(1, exposure: 0.1)], current: 1)

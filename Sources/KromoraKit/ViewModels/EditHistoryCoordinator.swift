@@ -51,6 +51,11 @@ final class EditHistoryCoordinator {
         willSet { willChange() }
     }
 
+    /// True while a virtual copy is being written; a second request is rejected until it clears.
+    private(set) var isCreatingVirtualCopy = false {
+        willSet { willChange() }
+    }
+
     private let store: any EditHistoryStore
     private let environment: Environment
     private let willChange: @MainActor () -> Void
@@ -188,20 +193,24 @@ final class EditHistoryCoordinator {
     /// Flush, create the copy through `makeCopy`, give it the current edits, then hand it to
     /// `didCreate` (which reloads the collection, reports and opens it). A throw from any step is
     /// reported once. Shutdown lets an accepted copy finish writing but suppresses `didCreate`.
+    /// `makeCopy` is awaited, so the copy's file I/O can run off the main actor; a request made
+    /// while one is in flight returns nil.
     @discardableResult
     func createVirtualCopy(
         of reference: EditSourceReference,
-        makeCopy: @escaping @MainActor () throws -> VirtualCopy,
+        makeCopy: @escaping @MainActor () async throws -> VirtualCopy,
         didCreate: @escaping @MainActor (VirtualCopy) throws -> Void
     ) -> Task<Void, Never>? {
-        guard !isShutDown else { return nil }
+        guard !isShutDown, !isCreatingVirtualCopy else { return nil }
+        isCreatingVirtualCopy = true
         environment.endUndoGrouping()
         let document = environment.currentDocument()
         return spawn { [self, store, environment] in
+            defer { isCreatingVirtualCopy = false }
             guard await environment.flushPersistence() else { return }
             guard environment.activeSourceReference() == reference else { return }
             do {
-                let copy = try makeCopy()
+                let copy = try await makeCopy()
                 try await store.save(document, for: copy.sourceReference)
                 guard isCurrent(reference) else { return }
                 try didCreate(copy)

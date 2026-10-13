@@ -114,7 +114,7 @@ final class VirtualCopyMetadataCoordinatorTests: XCTestCase {
         try lease.release()
         let original = try XCTUnwrap(imported.imported.first).assetID
         let session = try PortableLibrarySession(at: packageURL)
-        let copy = try session.createVirtualCopy(of: original).assetID
+        let copy = try await session.createVirtualCopy(of: original).assetID
 
         let coordinator = VirtualCopyMetadataCoordinator(
             reader: VirtualCopyMetadataCoordinator.packageReader(package), willChange: {}
@@ -131,6 +131,32 @@ final class VirtualCopyMetadataCoordinatorTests: XCTestCase {
         await coordinator.settleForTest()
         XCTAssertFalse(coordinator.canCreate)
         await coordinator.shutdown()
+    }
+
+    func testScheduledSessionCreatesIndependentCopyIncrementally() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("VCS-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let packageURL = dir.appendingPathComponent("L.kromoralibrary")
+        let package = try PortableLibraryPackage.create(at: packageURL)
+        let sourceURL = dir.appendingPathComponent("p.jpg")
+        try Data("portrait".utf8).write(to: sourceURL)
+        let lease = try PortablePackageLease.acquire(at: packageURL)
+        let imported = try package.importSources([.init(url: sourceURL)], lease: lease)
+        try lease.release()
+        let original = try XCTUnwrap(imported.imported.first).assetID
+        let session = try PortableLibrarySession(at: packageURL, scheduler: ImageWorkScheduler())
+
+        let copy = try await session.createVirtualCopy(of: original)
+
+        XCTAssertNotEqual(copy.assetID, original)
+        XCTAssertTrue(copy.displayName.contains("Copy"))
+        let record = try package.readAssetRecord(for: copy.assetID)
+        XCTAssertEqual(record.copyOfAssetID, original)
+        let indexed = session.queryController.index.entries.map(\.assetID)
+        XCTAssertTrue(indexed.contains(copy.assetID) && indexed.contains(original))
+        await session.shutdown()
     }
 }
 

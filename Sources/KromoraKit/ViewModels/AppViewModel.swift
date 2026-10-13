@@ -3868,6 +3868,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     var canCreateVirtualCopy: Bool { virtualCopyMetadata?.canCreate ?? false }
 
+    var isCreatingVirtualCopy: Bool { editHistory.isCreatingVirtualCopy }
+
     func createVirtualCopy() {
         guard let portableLibrary, let reference = activeSourceReference,
               (try? portableLibrary.package.readAssetRecord(for: reference.portableAssetID)) != nil else {
@@ -3877,7 +3879,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         editHistory.createVirtualCopy(
             of: reference,
             makeCopy: {
-                let copy = try portableLibrary.createVirtualCopy(of: reference.portableAssetID)
+                let copy = try await portableLibrary.createVirtualCopy(of: reference.portableAssetID)
                 return .init(
                     sourceReference: EditSourceReference(
                         portableIdentity: copy.identity,
