@@ -46,8 +46,11 @@ real renderer. When the suite had ten tests it took 6.3 seconds to execute on an
 Keyboard routing is tested at three levels (KRMA-920): `KeyboardCommandRouterTests` covers the
 dispatch table and focus ownership without AppKit, `KeyboardShortcutCatalogTests` keeps the menu
 bar, reference sheet and key surface in agreement (and fails if an `NSEvent` monitor returns), and
-`KeyboardSurfaceWindowTests` / `KeyRoutingProbeTests` synthesize key events into a real `NSWindow`
-and assert none reach `NSWindow.noResponder(for:)`, the call that plays the system alert. All three
+`KeyboardInventoryMatrixTests` (every inventory key × canvas, workspace picker, popup, button, list,
+text field, slider, stepper × with/without a photo), `KeyboardSurfaceWindowTests`,
+`FocusedSceneValueTests` and `KeyRoutingProbeTests` synthesize key events into a real `NSWindow` and
+assert none reach `NSWindow.noResponder(for:)`, the call that plays the system alert (text fields
+and slider/stepper arrows are deliberately left to the control). All three
 need no unlocked display and run in the serial lane. Silence of the sound itself is a by-ear check.
 
 The photo-intelligence corpus has two intentionally separate checks. The fast

@@ -34,6 +34,7 @@ public struct KromoraCommands: Commands {
     @Environment(\.openWindow) private var openWindow
     @ObservedObject private var settings: KromoraSettings
     @FocusedValue(\.keyboardRouter) private var keyboardRouter
+    @FocusedValue(\.keyboardContext) private var keyboardContext
 
     public init(settings: KromoraSettings = KromoraSettings()) {
         _settings = ObservedObject(wrappedValue: settings)
@@ -113,6 +114,7 @@ public struct KromoraCommands: Commands {
 
             Button(KromoraAutoAdjustmentShortcut.menuTitle) { post(.applyAutoAdjustment) }
                 .keyboardShortcut("a", modifiers: .shift)
+                .disabled(keyboardContext?.canAutoAdjust != true)
 
             Divider()
 
@@ -151,23 +153,21 @@ public struct KromoraCommands: Commands {
         }
     }
 
-    /// Plain-key shortcuts as menu items. The action goes through `KeyboardCommandRouter`, which is
-    /// where precedence and context live; the items stay enabled so a stale menu can never turn a
-    /// valid key into a dead one (an unavailable command is an intentional no-op, not an alert).
+    /// Plain-key shortcuts as menu items, built from the catalog. The action goes through
+    /// `KeyboardCommandRouter`, which is where precedence and context live. A disabled item still
+    /// swallows its key (no alert), so greying a command out is silent as well as truthful.
     @ViewBuilder
     private func keyboardItems(_ menu: KeyboardShortcutSpec.Menu) -> some View {
-        ForEach(KeyboardShortcutCatalog.menuItems(in: menu)) { spec in
-            if case .menuKey(_, let key, let modifiers) = spec.delivery,
-               let input = Self.keyInput(for: key, modifiers: modifiers) {
-                Button(spec.action) { keyboardRouter?.perform(input) }
-                    .keyboardShortcut(key, modifiers: modifiers)
-                    .disabled(keyboardRouter == nil)
-            }
+        ForEach(KeyboardShortcutCatalog.menuItems(in: menu)) { binding in
+            Button(binding.title) { keyboardRouter?.perform(binding.input) }
+                .keyboardShortcut(binding.key, modifiers: binding.modifiers)
+                .disabled(!isEnabled(binding.command))
         }
     }
 
-    static func keyInput(for key: KeyEquivalent, modifiers: EventModifiers) -> KeyInput? {
-        KeyInput(.character(String(key.character)), modifiers: modifiers)
+    private func isEnabled(_ command: KeyboardCommand) -> Bool {
+        guard keyboardRouter != nil, let keyboardContext else { return false }
+        return command.isAvailable(in: keyboardContext)
     }
 
     private func post(_ name: Notification.Name) {

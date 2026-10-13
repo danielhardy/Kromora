@@ -17,7 +17,7 @@ the editor.
 | Top-bar comparison control | Is visible for every loaded photo with a meaningful comparison, and remains visible while a retained side-by-side preference is showing an identity photo. Its label names the destination: `Side by Side` or `Single View`. |
 | `V` | Performs the same action as the top-bar control. It is consumed only when that action is available. |
 | `Space` (hold) | In single-image view, temporarily replaces the edited surface with the comparison baseline. It is not consumed in side-by-side view because both versions are already visible. |
-| `\\` (hold) | A plain-key shortcut with the same temporary Original behavior as Space. It is available in the editor canvas and inspector, but not while a text field or native control owns focus. It is not consumed in side-by-side view. |
+| `⌘\\` (hold) | The same temporary Original behavior as Space, with Command held. A bare `\\` is not a shortcut. Auto-repeat does not retrigger the transition; losing focus, the key window, or app activation restores the edited presentation. It is a claimed no-op in side-by-side view. |
 
 The comparison baseline is the non-destructive `EditDocument.comparisonBaseline`: it keeps the
 develop frame and removes the visible Light, Color, Effects, Look, and local-mask stages according
@@ -35,7 +35,7 @@ or exported result.
   panes render the source image, and the control remains available so the user can return to single
   view; Space remains unavailable because there is no meaningful before/after.
 - If the source is unloaded, comparison presentation controls disappear until a source is loaded.
-- The `\\` hold state is owned by `KeyboardCommandRouter` and is cleared on its matching key-up; model lifecycle
+- The `⌘\\` and Space hold state is owned by `KeyboardCommandRouter` and is cleared on its matching key-up (even if Command is released first) or `releaseHolds()`; model lifecycle
   cleanup also clears the transient Original state when photos, edits, or presentation mode change.
 
 Both preview surfaces are explicitly labeled for VoiceOver as Original and Edited (or the selected

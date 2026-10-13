@@ -4,9 +4,9 @@ import SwiftUI
 /// of these — the focus-scoped `.onKeyPress` surface (`KeyboardSurface`) and the menu bar's
 /// plain-key `Commands` items — so there is exactly one dispatch table and no `NSEvent` anywhere.
 struct KeyInput: Equatable, Sendable {
-    enum Arrow: Equatable, Sendable { case left, right, up, down }
+    enum Arrow: Hashable, Sendable { case left, right, up, down }
 
-    enum Key: Equatable, Sendable {
+    enum Key: Hashable, Sendable {
         case arrow(Arrow)
         case space
         case `return`
@@ -22,11 +22,14 @@ struct KeyInput: Equatable, Sendable {
     var key: Key
     var modifiers: EventModifiers
     var phase: Phase
+    /// An auto-repeat key-down. Hold gestures start once; repeats of a held key are claimed.
+    var isRepeat: Bool
 
-    init(_ key: Key, modifiers: EventModifiers = [], phase: Phase = .down) {
+    init(_ key: Key, modifiers: EventModifiers = [], phase: Phase = .down, isRepeat: Bool = false) {
         self.key = key
         self.modifiers = modifiers.intersection(Self.significantModifiers)
         self.phase = phase
+        self.isRepeat = isRepeat
     }
 
     /// Caps Lock, numeric-pad and function flags never change what a shortcut means.
@@ -38,6 +41,38 @@ struct KeyInput: Equatable, Sendable {
     }
     /// Plain-key gestures: no Shift/Command/Option/Control.
     var isPlain: Bool { modifiers.isEmpty }
+}
+
+/// The slice of editor state that decides whether a shortcut can act. Published per scene
+/// (`FocusedValues.keyboardContext`) so menu items show the right enabled state, and rebuilt from
+/// the live view model when the router dispatches, so both read the same answer.
+struct KeyboardContext: Equatable, Sendable {
+    var hasImage = false
+    var collectionActive = false
+    var isGrid = false
+    var isEdit = false
+    var cropActive = false
+    var retouchActive = false
+    var maskingActive = false
+    var brushMaskToolActive = false
+    var canAutoAdjust = false
+
+    @MainActor
+    init(_ vm: AppViewModel) {
+        hasImage = vm.sourceImage != nil
+        collectionActive = vm.collection.isActive
+        isGrid = vm.navigation.isGrid
+        isEdit = vm.navigation.isEdit
+        cropActive = vm.isCropToolActive
+        retouchActive = vm.isRetouchCanvasActive
+        maskingActive = vm.inspectorState.isMaskingWorkspacePresented
+        brushMaskToolActive = maskingActive
+            && (vm.maskInteractionState.activeTool == .brush
+                || vm.maskInteractionState.activeTool == .erase)
+        canAutoAdjust = vm.canRunAutoAdjustment
+    }
+
+    init() {}
 }
 
 /// Routes `KeyInput` to the view model. It replaces the `NSEvent` local monitor (`KeyMonitor`).
@@ -57,6 +92,8 @@ final class KeyboardCommandRouter {
     /// during the hold can change the key-up's flags, but the temporary Original presentation must
     /// still end.
     private(set) var backslashIsHeld = false
+    /// Space is held (comparison or canvas pan). Tracked so focus or window loss can end it.
+    private(set) var spaceIsHeld = false
 
     init(viewModel: AppViewModel) {
         self.viewModel = viewModel
@@ -71,8 +108,7 @@ final class KeyboardCommandRouter {
         // A key-up can arrive after Command has been released. Once the matching key-down was
         // accepted, consume the key-up and always restore the edited presentation.
         if !input.isDown, backslashIsHeld, input.key == .character("\\") {
-            backslashIsHeld = false
-            _ = vm.showOriginal(false)
+            releaseHolds()
             return true
         }
 
@@ -107,20 +143,38 @@ final class KeyboardCommandRouter {
 
     // MARK: - Command-modified gestures
 
-    /// Command-C opens Selective Copy and Command-A selects the grid; both are delivered by the
-    /// standard Edit-menu commands (`onCopyCommand`, `onCommand(selectAll:)`) so a focused text
-    /// field keeps its normal copy and select-all. Backslash is a hold gesture and arrives
-    /// through the key surface.
+    /// Command-C opens Selective Copy, Command-V pastes edits and Command-A selects the grid; the
+    /// surface installs them as standard Edit-menu commands (`onCopyCommand`, `onCommand`) so a
+    /// focused text field keeps its normal copy, paste and select-all. Command-Backslash is a hold
+    /// gesture and arrives through the key surface.
     private func handleBackslash(_ input: KeyInput, vm: AppViewModel) -> Bool {
         // A key-up without an accepted key-down is not ours (for example, if focus changed while
-        // the key was pressed), so do not disturb another transient gesture.
-        guard input.isDown else { return false }
+        // the key was pressed); claim it without disturbing another transient gesture.
+        guard input.isDown else { return true }
+        // Auto-repeat of a held key must not restart the transition.
+        if input.isRepeat { return true }
         guard vm.sourceImage != nil, vm.isComparisonAvailable, !vm.isSideBySide else {
-            return false
+            return true
         }
         backslashIsHeld = true
         _ = vm.showOriginal(true)
         return true
+    }
+
+    var isHolding: Bool { backslashIsHeld || spaceIsHeld }
+
+    /// Ends every transient hold gesture and restores the edited presentation. Called on key-up
+    /// and whenever the surface loses focus or its window stops being key, because the matching
+    /// key-up is then delivered elsewhere (or never).
+    func releaseHolds() {
+        guard backslashIsHeld || spaceIsHeld, let vm = viewModel else { return }
+        if spaceIsHeld {
+            vm.retouchInteractionState.setSpacePanning(false)
+            vm.maskInteractionState.setSpacePanning(false)
+        }
+        backslashIsHeld = false
+        spaceIsHeld = false
+        _ = vm.showOriginal(false)
     }
 
     // MARK: - Arrows
@@ -186,21 +240,20 @@ final class KeyboardCommandRouter {
 
     private func handleDelete(_ input: KeyInput, vm: AppViewModel) -> Bool {
         guard !input.hasSystemModifier else { return false }
-        if input.isDown, vm.isRetouchCanvasActive,
-           vm.retouchInteractionState.selectedSpotID != nil {
+        guard input.isDown else { return true }
+        if vm.isRetouchCanvasActive, vm.retouchInteractionState.selectedSpotID != nil {
             vm.retouchWorkflow.deleteSelected()
-            return true
+        } else {
+            // Removes the Library selection after confirmation; a no-op outside the grid.
+            vm.requestDeleteSelectedLibraryItems()
         }
-        // Remove the Library selection after confirmation. Outside the grid the Delete menu
-        // command (File ▸ Delete Selected Photos) is the only owner.
-        guard input.isDown, vm.navigation.isGrid else { return false }
-        vm.requestDeleteSelectedLibraryItems()
         return true
     }
 
     /// Cancel crop first, then deselect/exit the active canvas tool.
     private func handleEscape(_ input: KeyInput, vm: AppViewModel) -> Bool {
-        guard !input.hasSystemModifier, input.isDown else { return false }
+        guard !input.hasSystemModifier else { return false }
+        guard input.isDown else { return true }
         if vm.isCropToolActive {
             vm.cancelCrop()
         } else if vm.isRetouchCanvasActive && vm.retouchInteractionState.hasDraft {
@@ -218,134 +271,105 @@ final class KeyboardCommandRouter {
         } else if vm.isRetouchCanvasActive {
             vm.retouchWorkflow.setArmed(false)
             vm.inspectorState.select(.info)
-        } else {
-            return false
         }
+        // Nothing to cancel is an intentional no-op, still claimed.
         return true
     }
 
     /// Hold Space to compare the original (or pan while a canvas tool is active).
     private func handleSpace(_ input: KeyInput, vm: AppViewModel) -> Bool {
         guard input.isPlain else { return false }
-        let isDown = input.isDown
+        guard input.isDown else {
+            releaseHolds()
+            return true
+        }
+        if input.isRepeat { return true }
         if vm.isRetouchCanvasActive {
-            vm.retouchInteractionState.setSpacePanning(isDown)
-            return true
+            spaceIsHeld = true
+            vm.retouchInteractionState.setSpacePanning(true)
+        } else if vm.inspectorState.isMaskingWorkspacePresented,
+                  vm.maskInteractionState.activeTool != .selection {
+            spaceIsHeld = true
+            vm.maskInteractionState.setSpacePanning(true)
+        } else if vm.isComparisonAvailable && !vm.isSideBySide {
+            // A one-off or untouched photo has no before/after surface and side-by-side already
+            // shows both, so Space is a claimed no-op there.
+            spaceIsHeld = true
+            _ = vm.showOriginal(true)
         }
-        if vm.inspectorState.isMaskingWorkspacePresented,
-           vm.maskInteractionState.activeTool != .selection {
-            vm.maskInteractionState.setSpacePanning(isDown)
-            return true
-        }
-        // A one-off or untouched photo has no meaningful before/after surface. Let Space continue
-        // through in that state instead of consuming a key that did nothing. Side-by-side already
-        // exposes both surfaces; Space is reserved for the temporary Original view in single mode.
-        guard vm.isComparisonAvailable && !vm.isSideBySide else { return false }
-        _ = vm.showOriginal(isDown)
         return true
     }
 
     /// Apply crop, or open the active grid item in Edit.
     private func handleReturn(_ input: KeyInput, vm: AppViewModel) -> Bool {
-        guard !input.hasSystemModifier, input.isDown else { return false }
+        guard !input.hasSystemModifier else { return false }
+        guard input.isDown else { return true }
         if vm.isCropToolActive {
             vm.commitCrop()
-            return true
-        }
-        if vm.navigation.isGrid {
+        } else if vm.navigation.isGrid {
             vm.openLibraryImageForEditing()
-            return true
         }
-        return false
+        return true
     }
 
     // MARK: - Character keys
 
     private func handleCharacter(_ characters: String, input: KeyInput, vm: AppViewModel) -> Bool {
-        if characters == "\\", input.isPlain {
+        if characters == "\\", input.modifiers == .command {
             return handleBackslash(input, vm: vm)
         }
         // Option/Control/Command-modified characters belong to AppKit, input sources and the
-        // menu bar. They are never Kromora's character shortcuts.
-        guard input.isDown, !input.hasSystemModifier else { return false }
-        let mods = input.modifiers
-
-        if let command = LibraryCullingCommand.parse(
-            characters: characters, hasModifiers: !mods.isEmpty
-        ) {
-            // Culling belongs to a browsable collection. A one-off image opened outside the
-            // library should not swallow P/X/rating keys when there is no focused asset to edit.
-            guard vm.collection.isActive else { return false }
-            vm.perform(command)
-            return true
+        // menu bar; the catalog never binds them. An unavailable command is a claimed no-op.
+        guard input.isDown, let command = KeyboardShortcutCatalog.command(for: input) else {
+            return false
         }
-        switch characters {
-        case "a":
-            guard vm.isRetouchCanvasActive, input.isPlain else { return false }
-            vm.toggleRetouchVisualization()
-        case "i":
-            // Plain I is a preview-only presentation toggle; Command-I stays the Info Inspector.
-            guard input.isPlain, vm.sourceImage != nil else { return false }
+        if command.isAvailable(in: KeyboardContext(vm)) { execute(command, vm: vm) }
+        return true
+    }
+
+    private func execute(_ command: KeyboardCommand, vm: AppViewModel) {
+        switch command {
+        case .cull(let culling): vm.perform(culling)
+        case .toggleRetouchVisualization: vm.toggleRetouchVisualization()
+        case .toggleCaptureOverlay:
+            // A preview-only presentation toggle; Command-I stays the Info Inspector.
             NotificationCenter.default.post(name: .toggleCaptureMetadataOverlay, object: nil)
-        case "c":
-            // Crop is an editor command: unavailable without a current image.
-            guard input.isPlain, vm.sourceImage != nil else { return false }
-            vm.toggleCropTool()
-        case "q":
-            guard input.isPlain, vm.sourceImage != nil, vm.navigation.isEdit else { return false }
+        case .toggleCrop: vm.toggleCropTool()
+        case .toggleRetouch:
             if vm.isRetouchCanvasActive {
                 vm.retouchWorkflow.setArmed(false)
                 vm.inspectorState.select(.info)
             } else {
                 vm.retouchWorkflow.setArmed(true)
             }
-        case "g":
-            return vm.navigate(to: .grid)
-        case "e":
+        case .showLibrary: _ = vm.navigate(to: .grid)
+        case .showEdit:
             if vm.inspectorState.isMaskingWorkspacePresented {
                 vm.setMaskTool(.erase)
-                return true
+            } else {
+                _ = vm.navigate(to: .edit)
             }
-            return vm.navigate(to: .edit)
-        case "o":
+        case .toggleMaskOverlay:
             // Lightroom's key for the mask overlay: show or hide it while masking.
-            guard vm.inspectorState.isMaskingWorkspacePresented, input.isPlain else { return false }
             vm.maskInteractionState.toggleOverlay()
-        case "/":
-            guard vm.isRetouchCanvasActive else { return false }
-            vm.retouchWorkflow.nextSource()
-        case "h":
-            guard vm.isRetouchCanvasActive, input.isPlain else { return false }
-            vm.retouchInteractionState.cycleOverlayPolicy()
-        case "b":
-            guard vm.inspectorState.isMaskingWorkspacePresented else { return false }
-            vm.setMaskTool(.brush)
-        case "l":
-            guard vm.inspectorState.isMaskingWorkspacePresented else { return false }
-            vm.setMaskTool(.linear)
-        case "r":
-            guard vm.inspectorState.isMaskingWorkspacePresented else { return false }
-            vm.setMaskTool(.radial)
-        case "v":
-            guard input.isPlain else { return false }
-            return vm.toggleSideBySide()
-        case "[":
-            return handleBracket(increase: false, shift: mods.contains(.shift), vm: vm)
-        case "]":
-            return handleBracket(increase: true, shift: mods.contains(.shift), vm: vm)
-        default:
-            return false
+        case .nextRetouchSource: vm.retouchWorkflow.nextSource()
+        case .cycleRetouchOverlay: vm.retouchInteractionState.cycleOverlayPolicy()
+        case .maskBrush: vm.setMaskTool(.brush)
+        case .maskLinear: vm.setMaskTool(.linear)
+        case .maskRadial: vm.setMaskTool(.radial)
+        case .toggleComparison: _ = vm.toggleSideBySide()
+        case .step(let increase, let feather):
+            handleBracket(increase: increase, shift: feather, vm: vm)
         }
-        return true
     }
 
     /// `[` / `]`: rotate in crop, brush size/feather in masking, spot size/feather in retouch,
     /// otherwise previous/next photo.
-    private func handleBracket(increase: Bool, shift: Bool, vm: AppViewModel) -> Bool {
+    private func handleBracket(increase: Bool, shift: Bool, vm: AppViewModel) {
         let sign: Double = increase ? 1 : -1
         if vm.isCropToolActive {
             if increase { vm.rotateClockwise() } else { vm.rotateCounterClockwise() }
-            return true
+            return
         }
         if vm.inspectorState.isMaskingWorkspacePresented,
            vm.maskInteractionState.activeTool == .brush
@@ -355,7 +379,7 @@ final class KeyboardCommandRouter {
             } else {
                 vm.maskInteractionState.adjustBrushRadius(by: 0.005 * sign)
             }
-            return true
+            return
         }
         if vm.isRetouchCanvasActive {
             if shift {
@@ -365,15 +389,14 @@ final class KeyboardCommandRouter {
                 let radius = vm.retouchInteractionState.radius + 0.002 * sign
                 vm.retouchInteractionState.radius = increase ? min(0.25, radius) : max(0.0005, radius)
             }
-            return true
+            return
         }
-        guard vm.collection.isActive else { return false }
+        guard vm.collection.isActive else { return }
         switch (vm.navigation.isGrid, increase) {
         case (true, false): vm.selectPreviousPortableInGrid()
         case (true, true): vm.selectNextPortableInGrid()
         case (false, false): vm.selectPreviousImage()
         case (false, true): vm.selectNextImage()
         }
-        return true
     }
 }

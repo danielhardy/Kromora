@@ -404,7 +404,7 @@ public struct ContentView: View {
             .accessibilityLabel("Comparison view")
             .accessibilityValue(viewModel.isSideBySide ? "Side by side" : "Single photo")
             .accessibilityHint("Switch comparison view (V)")
-            .help("Switch between single-photo and side-by-side comparison (V). Hold \\ or Space to show original in single view.")
+            .help("Switch between single-photo and side-by-side comparison (V). Hold ⌘\\ or Space to show original in single view.")
             .disabled(!viewModel.toolbarPhotoActionsAvailable)
 
             resetToolbarButton

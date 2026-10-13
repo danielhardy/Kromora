@@ -74,23 +74,41 @@ final class KeyboardCommandRouterTests: TempDirectoryTestCase {
         XCTAssertFalse(KeyInput(.arrow(.left), modifiers: .shift).isPlain)
     }
 
-    func testSurfaceMapsOnlyTheKeysItOwns() {
-        // Letters are menu key equivalents, never claimed by the surface.
-        XCTAssertNil(KeyboardSurface.input(key: "c", modifiers: [], phase: .down))
+    private func keyEvent(
+        _ chars: String, type: NSEvent.EventType = .keyDown,
+        mods: NSEvent.ModifierFlags = [], isRepeat: Bool = false
+    ) -> NSEvent {
+        NSEvent.keyEvent(
+            with: type, location: .zero, modifierFlags: mods, timestamp: 0, windowNumber: 0,
+            context: nil, characters: chars, charactersIgnoringModifiers: chars,
+            isARepeat: isRepeat, keyCode: 0
+        )!
+    }
+
+    func testChainTailMapsKeyEventsOntoRouterInput() {
+        let left = String(UnicodeScalar(NSLeftArrowFunctionKey)!)
         XCTAssertEqual(
-            KeyboardSurface.input(key: .leftArrow, modifiers: .shift, phase: .up),
+            KeyboardChainTail.input(for: keyEvent(left, type: .keyUp, mods: [.shift, .numericPad, .function])),
             KeyInput(.arrow(.left), modifiers: .shift, phase: .up)
         )
+        let right = String(UnicodeScalar(NSRightArrowFunctionKey)!)
         XCTAssertEqual(
-            KeyboardSurface.input(key: .rightArrow, modifiers: [], phase: .repeat)?.phase, .down,
-            "auto-repeat navigates like a key-down"
+            KeyboardChainTail.input(for: keyEvent(right, isRepeat: true))?.isRepeat, true,
+            "auto-repeat is flagged so holds do not retrigger"
         )
         XCTAssertEqual(
-            KeyboardSurface.input(key: "\\", modifiers: [], phase: .down),
-            KeyInput(.character("\\"))
+            KeyboardChainTail.input(for: keyEvent("\\", mods: .command)),
+            KeyInput(.character("\\"), modifiers: .command)
         )
-        XCTAssertEqual(KeyboardSurface.input(key: .space, modifiers: [], phase: .down)?.key, .space)
-        XCTAssertEqual(KeyboardSurface.input(key: .deleteForward, modifiers: [], phase: .down)?.key, .forwardDelete)
+        XCTAssertEqual(KeyboardChainTail.input(for: keyEvent(" "))?.key, .space)
+        XCTAssertEqual(KeyboardChainTail.input(for: keyEvent("\r"))?.key, .return)
+        XCTAssertEqual(KeyboardChainTail.input(for: keyEvent("\u{1b}"))?.key, .escape)
+        XCTAssertEqual(KeyboardChainTail.input(for: keyEvent("\u{7f}"))?.key, .delete)
+        XCTAssertEqual(
+            KeyboardChainTail.input(for: keyEvent(String(UnicodeScalar(NSDeleteFunctionKey)!)))?.key,
+            .forwardDelete
+        )
+        XCTAssertEqual(KeyboardChainTail.input(for: keyEvent("C", mods: .shift))?.key, .character("c"))
     }
 
     func testOwnershipLeavesTextAndValueEditorsTheirKeys() {
@@ -109,10 +127,10 @@ final class KeyboardCommandRouterTests: TempDirectoryTestCase {
             XCTAssertTrue(KeyboardOwnership.surfaceOwns(.arrow(.right), firstResponder: control))
             XCTAssertTrue(KeyboardOwnership.surfaceOwns(.arrow(.down), firstResponder: control))
         }
-        // …but Space/Return activate a focused button.
-        XCTAssertFalse(KeyboardOwnership.surfaceOwns(.space, firstResponder: NSButton()))
-        XCTAssertFalse(KeyboardOwnership.surfaceOwns(.return, firstResponder: NSPopUpButton()))
-        XCTAssertFalse(KeyboardOwnership.surfaceOwns(.space, firstResponder: NSTableView()), "a focused list handles Space itself")
+        // A control that consumed Space or Return never reaches the chain tail, so what does
+        // reach it is the app's.
+        XCTAssertTrue(KeyboardOwnership.surfaceOwns(.space, firstResponder: NSButton()))
+        XCTAssertTrue(KeyboardOwnership.surfaceOwns(.return, firstResponder: NSPopUpButton()))
     }
 
     func testArrowNavigationClaimsKeyDownAndKeyUpAtMiddleAndCollectionBoundaries() async throws {
@@ -188,42 +206,72 @@ final class KeyboardCommandRouterTests: TempDirectoryTestCase {
         XCTAssertTrue(viewModel.isLookNoneSelected)
     }
 
-    func testBackslashKeyDownAndKeyUpFlashOriginal() {
+    func testCommandBackslashHoldFlashesOriginalAndIgnoresRepeats() {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.sourceImage = grayImage()
         viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.5)] }
         let router = router(viewModel)
 
-        XCTAssertTrue(press(router, .character("\\")))
+        XCTAssertTrue(press(router, .character("\\"), modifiers: .command))
         XCTAssertTrue(viewModel.isShowingOriginal)
         XCTAssertTrue(router.backslashIsHeld)
 
-        // A modifier changing mid-hold must not leave the transient preview armed.
-        XCTAssertTrue(press(router, .character("\\"), modifiers: .shift, phase: .up))
+        // An auto-repeat is claimed but must not retrigger the transition.
+        viewModel.isShowingOriginal = false
+        XCTAssertTrue(router.perform(KeyInput(.character("\\"), modifiers: .command, isRepeat: true)))
+        XCTAssertFalse(viewModel.isShowingOriginal, "a repeat must not restart the hold")
+
+        // Command released before Backslash: the key-up carries no modifiers.
+        viewModel.isShowingOriginal = true
+        XCTAssertTrue(press(router, .character("\\"), phase: .up))
         XCTAssertFalse(viewModel.isShowingOriginal)
         XCTAssertFalse(router.backslashIsHeld)
     }
 
-    func testUnavailableOrModifiedBackslashDoesNotChangeOriginalState() {
+    func testReleaseHoldsRestoresEditedPresentationForBothHoldKeys() {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
-        let router = router(viewModel)
-
-        XCTAssertFalse(press(router, .character("\\")), "no photo: nothing to compare")
-        XCTAssertFalse(viewModel.isShowingOriginal)
-        XCTAssertFalse(press(router, .character("\\"), phase: .up), "a stray key-up is not ours")
-
         viewModel.sourceImage = grayImage()
         viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.5)] }
-        for modifier in [EventModifiers.command, .shift, .option, .control] {
+        let router = router(viewModel)
+
+        XCTAssertTrue(press(router, .character("\\"), modifiers: .command))
+        XCTAssertTrue(viewModel.isShowingOriginal)
+        router.releaseHolds()
+        XCTAssertFalse(viewModel.isShowingOriginal)
+        XCTAssertFalse(router.backslashIsHeld)
+
+        XCTAssertTrue(press(router, .space))
+        XCTAssertTrue(router.spaceIsHeld)
+        XCTAssertTrue(viewModel.isShowingOriginal)
+        router.releaseHolds()
+        XCTAssertFalse(viewModel.isShowingOriginal)
+        XCTAssertFalse(router.spaceIsHeld)
+    }
+
+    func testBareAndOtherModifiedBackslashAreNotTheHoldKey() {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        viewModel.sourceImage = grayImage()
+        viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.5)] }
+        let router = router(viewModel)
+        for modifier in [EventModifiers.shift, .option, .control, []] {
             XCTAssertFalse(press(router, .character("\\"), modifiers: modifier))
             XCTAssertFalse(viewModel.isShowingOriginal)
         }
     }
 
+    func testUnavailableBackslashHoldIsAClaimedNoOp() {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let router = router(viewModel)
+        XCTAssertTrue(press(router, .character("\\"), modifiers: .command), "no photo: claimed")
+        XCTAssertFalse(viewModel.isShowingOriginal)
+        XCTAssertFalse(router.backslashIsHeld)
+        XCTAssertTrue(press(router, .character("\\"), modifiers: .command, phase: .up))
+    }
+
     func testCropShortcutIsPlainCOnly() {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         let router = router(viewModel)
-        XCTAssertFalse(press(router, .character("c")), "no photo, nothing to crop")
+        XCTAssertTrue(press(router, .character("c")), "no photo: a claimed no-op")
 
         viewModel.sourceImage = grayImage()
         for modifier in [EventModifiers.shift, .command, .option, .control] {
@@ -232,7 +280,7 @@ final class KeyboardCommandRouterTests: TempDirectoryTestCase {
         XCTAssertFalse(viewModel.isCropToolActive)
         XCTAssertTrue(press(router, .character("c")))
         XCTAssertTrue(viewModel.isCropToolActive)
-        XCTAssertFalse(press(router, .character("x")), "culling needs an active collection")
+        XCTAssertTrue(press(router, .character("x")), "culling needs an active collection; claimed no-op")
     }
 
     func testPlainIAndOnlyPlainIWithAnOpenPhotoTogglesCaptureOverlay() async throws {
@@ -245,7 +293,7 @@ final class KeyboardCommandRouterTests: TempDirectoryTestCase {
         ) { _ in togglePosted.fulfill() }
         defer { NotificationCenter.default.removeObserver(token) }
 
-        XCTAssertFalse(press(router, .character("i")), "without a photo, I is not claimed")
+        XCTAssertTrue(press(router, .character("i")), "without a photo, I is a claimed no-op")
         viewModel.sourceImage = grayImage()
         XCTAssertTrue(press(router, .character("i")))
         await fulfillment(of: [togglePosted], timeout: 0.1)
@@ -274,7 +322,7 @@ final class KeyboardCommandRouterTests: TempDirectoryTestCase {
             viewModel.document.crop,
             CropAdjustments(normalizedRect: CGRect(x: 0.1, y: 0.2, width: 0.7, height: 0.6))
         )
-        XCTAssertFalse(press(router, .escape), "with nothing to cancel Esc is left to AppKit")
+        XCTAssertTrue(press(router, .escape), "with nothing to cancel Esc is a claimed no-op")
     }
 
     func testRetouchShortcutsArmCycleOverlayAndExitInTwoSteps() {
@@ -332,7 +380,9 @@ final class KeyboardCommandRouterTests: TempDirectoryTestCase {
     func testSpaceComparesOriginalOnlyWhenComparisonIsAvailable() {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         let router = router(viewModel)
-        XCTAssertFalse(press(router, .space), "no photo: Space continues through")
+        XCTAssertTrue(press(router, .space), "no photo: a claimed no-op, never the alert")
+        XCTAssertFalse(viewModel.isShowingOriginal)
+        XCTAssertTrue(press(router, .space, phase: .up))
         XCTAssertFalse(press(router, .space, modifiers: .shift))
 
         viewModel.sourceImage = grayImage()

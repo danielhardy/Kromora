@@ -312,20 +312,30 @@ now decides, and the app claims the keys it owns:
   alert. Items stay enabled and call `KeyboardCommandRouter`; an unavailable command is a claimed
   no-op, never a dead key. Do not give these Command/Option/Control modifiers: those belong to the
   system and to text editing.
-- **Arrows, Space, Return, Esc, Delete and the hold gestures (Space, \)** arrive through
-  `.onKeyPress(phases: .all)` on the focusable root (`KeyboardSurface`). Return `.handled` for any
-  key the app owns, including an intentional no-op; `.ignored` hands the key on. Arrows cannot be
-  menu key equivalents because AppKit would deliver them even while a text field edits.
-  `KeyboardOwnership` lets text input, sliders and steppers keep their keys.
-- **Command-C / Command-A** use the standard Edit-menu commands (`onCopyCommand`,
-  `onCommand(selectAll:)`). Paste Edits is ⌥⌘V (menu).
-- One dispatch table: `KeyboardCommandRouter.perform(_:)`. Add a shortcut to
-  `KeyboardShortcutCatalog` (menu bar + reference sheet) and the router together.
+- **Arrows, Space, Return, Esc, Delete and the hold gestures (Space, ⌘\\)** arrive at
+  `KeyboardChainTail`, a responder `KeyboardSurface` installs at the end of the window's chain. Any
+  first responder (canvas, picker, popup, button, list) that does not consume a key passes it up to
+  the tail, which hands it to the router and always claims a key the app owns, including an
+  intentional no-op, so nothing reaches `noResponder(for:)`. `KeyboardOwnership` is asked first:
+  text input keeps every key, sliders and steppers keep arrows. Arrows cannot be menu key
+  equivalents because AppKit would deliver them even while a text field edits.
+- **Command-C / Command-V / Command-A** use the standard Edit-menu commands (`onCopyCommand`,
+  `onCommand`), so a text field keeps ordinary copy, paste and select-all; ⌥⌘V also pastes edits.
+  Do not rely on a key handler for Command-V: a Paste item with no responder swallows it.
+- **One table.** `KeyboardShortcutCatalog` binds every key: `.menuKey` entries carry the
+  `KeyboardCommand` that the router executes and that `KromoraCommands` renders; `.surface` entries
+  list the `KeyInput`s the tail must claim. `KeyboardCommand.isAvailable(in: KeyboardContext)` is the
+  one predicate behind both menu enablement and the router's claimed-no-op decision. The surface
+  publishes the router and context with `focusedSceneValue`; a disabled menu item still swallows its
+  key, so enablement is truthful and silent.
+- **Hold gestures** ignore auto-repeat and end on key-up, on focus moving to a text field, and when
+  the window or app resigns (`KeyboardCommandRouter.releaseHolds()`).
 - Pure-click controls (workspace picker, filmstrip thumbnails) use `.focusable(false)` so arrows are
   never stranded on an `NSControl`.
 
-The `KeyRoutingProbeTests` / `KeyboardSurfaceWindowTests` pair drive synthesized key events through
-a real window and treat `NSWindow.noResponder(for:)` — the call that plays the alert — as the
+`KeyboardInventoryMatrixTests` drives the whole inventory against each kind of first responder in
+a real window, with `KeyRoutingProbeTests` / `KeyboardSurfaceWindowTests` as the underlying probes;
+they drive synthesized key events through the window and treat `NSWindow.noResponder(for:)` — the call that plays the alert — as the
 machine-checkable "no boop". Silence itself is confirmed by ear.
 
 ## Inspector controls

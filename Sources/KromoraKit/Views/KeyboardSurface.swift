@@ -1,27 +1,31 @@
 import SwiftUI
 
-// Keyboard routing (KRMA-920). Kromora has no `NSEvent` monitor: the responder chain decides who
-// owns a key, and the app claims the keys it owns explicitly.
+// Keyboard routing (KRMA-920, KRMA-966). Kromora has no `NSEvent` monitor: the responder chain
+// decides who owns a key, and the app claims the keys it owns explicitly.
 //
 //  * Plain letters, digits, brackets and Shift-letters are menu key equivalents
 //    (`KromoraCommands`). AppKit offers them to the focused control first — so text fields and
 //    value editors keep typing — and falls back to them *before* the system alert.
-//  * Arrows, Space, Return, Escape, Delete and the hold-to-compare gestures arrive here, through
-//    `.onKeyPress(phases: .all)` on a focusable root. Returning `.handled` is what keeps AppKit
-//    from playing the alert; `.ignored` hands the key on (to the menu bar, or to the alert if
-//    nothing owns it).
-//  * Command-C and Command-A use the standard Edit-menu commands (`onCopyCommand`,
-//    `onCommand(selectAll:)`), so a focused text field keeps ordinary copy and select-all.
+//  * Arrows, Space, Return, Escape, Delete and the hold-to-compare gestures reach
+//    `KeyboardChainTail`, a responder installed at the end of the window's chain. Whatever the first
+//    responder is — the canvas, a toolbar picker, a popup, a button, a list — a key it does not
+//    consume arrives there, and the tail claims it (an intentional no-op included) instead of
+//    letting AppKit play the alert. Text input and value editors are asked first, so they keep
+//    their keys.
+//  * Command-C, Command-V and Command-A use the standard Edit-menu commands (`onCopyCommand`,
+//    `onCommand`), so a focused text field keeps ordinary copy, paste and select-all.
 
 /// The router that menu-bar commands call, published per scene so `KromoraCommands` can reach the
 /// window's view model from outside the view hierarchy.
 extension FocusedValues {
     @Entry var keyboardRouter: KeyboardCommandRouter?
+    /// Editor state that decides menu enablement; published alongside the router.
+    @Entry var keyboardContext: KeyboardContext?
 }
 
 struct KeyboardSurface: ViewModifier {
     let router: KeyboardCommandRouter
-    let viewModel: AppViewModel
+    @ObservedObject var viewModel: AppViewModel
     @FocusState private var isSurfaceFocused: Bool
     @State private var window = WindowBox()
 
@@ -30,18 +34,6 @@ struct KeyboardSurface: ViewModifier {
             .focusable()
             .focusEffectDisabled()
             .focused($isSurfaceFocused)
-            .onKeyPress(phases: .all) { press in
-                guard let input = Self.input(
-                    key: press.key, modifiers: press.modifiers, phase: press.phase
-                ) else { return .ignored }
-                // SwiftUI offers keys to this ancestor even while a text field or slider below it
-                // has focus, so ask the responder chain who owns the key before claiming it.
-                let responder = window.window?.firstResponder
-                guard KeyboardOwnership.surfaceOwns(input.key, firstResponder: responder) else {
-                    return .ignored
-                }
-                return router.perform(input) ? .handled : .ignored
-            }
             .onCopyCommand {
                 // Command-C opens Selective Copy for the open photo; nothing goes on the pasteboard.
                 guard viewModel.sourceImage != nil else { return [] }
@@ -51,31 +43,36 @@ struct KeyboardSurface: ViewModifier {
             .onCommand(#selector(NSResponder.selectAll(_:))) {
                 if viewModel.navigation.isGrid { viewModel.collection.selectAll() }
             }
-            .background(WindowReader(box: window))
+            // Command-V pastes edits. It must be a standard Paste command rather than a key
+            // handler: a menu item with no responder to enable it swallows Command-V before the
+            // surface sees it, while a focused text field's own `paste:` still comes first.
+            .onCommand(#selector(NSText.paste(_:))) {
+                guard !KeyboardCommandRouter.isModalPresented(viewModel) else { return }
+                viewModel.pasteEdits()
+            }
+            .background(WindowReader(box: window, router: router))
             .focusedSceneValue(\.keyboardRouter, router)
+            .focusedSceneValue(\.keyboardContext, KeyboardContext(viewModel))
             .onAppear { isSurfaceFocused = true }
-    }
-
-    /// Maps a SwiftUI key press onto the keys this surface owns. Letters are intentionally absent:
-    /// they are menu key equivalents.
-    static func input(
-        key pressedKey: KeyEquivalent, modifiers: EventModifiers, phase: KeyPress.Phases
-    ) -> KeyInput? {
-        let key: KeyInput.Key
-        switch pressedKey {
-        case .leftArrow: key = .arrow(.left)
-        case .rightArrow: key = .arrow(.right)
-        case .upArrow: key = .arrow(.up)
-        case .downArrow: key = .arrow(.down)
-        case .space: key = .space
-        case .return: key = .return
-        case .escape: key = .escape
-        case .delete: key = .delete
-        case .deleteForward: key = .forwardDelete
-        case KeyEquivalent("\\"): key = .character("\\")
-        default: return nil
-        }
-        return KeyInput(key, modifiers: modifiers, phase: phase == .up ? .up : .down)
+            // A hold ends with its key-up, but that key-up goes elsewhere once focus leaves the
+            // surface or the window stops being key. Restore the edited presentation then.
+            .onChange(of: isSurfaceFocused) { _, focused in
+                if !focused { router.releaseHolds() }
+            }
+            // A text field taking first responder also strands the key-up. SwiftUI focus state does
+            // not always reflect that, so check the AppKit responder whenever the window updates.
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didUpdateNotification)) { note in
+                guard router.isHolding, note.object as AnyObject? === window.window,
+                      KeyboardOwnership.textInputOwnsKeyboard(window.window?.firstResponder)
+                else { return }
+                router.releaseHolds()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { note in
+                if note.object as AnyObject? === window.window { router.releaseHolds() }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+                router.releaseHolds()
+            }
     }
 }
 
@@ -100,17 +97,13 @@ enum KeyboardOwnership {
         responder is NSSlider || responder is NSStepper || responder is NSComboBox
     }
 
+    /// Whether the app may claim `key` while `firstResponder` is focused. By the time a key reaches
+    /// the responder-chain tail the control had its chance and passed, so only text input (every
+    /// key) and value editors (arrows) are reserved.
     static func surfaceOwns(_ key: KeyInput.Key, firstResponder: NSResponder?) -> Bool {
         if textInputOwnsKeyboard(firstResponder) { return false }
-        switch key {
-        case .arrow:
-            return !valueEditingControlOwnsArrows(firstResponder)
-        case .space, .return:
-            // A focused button, picker or menu activates with Space/Return.
-            return !(firstResponder is NSControl)
-        default:
-            return true
-        }
+        if case .arrow = key { return !valueEditingControlOwnsArrows(firstResponder) }
+        return true
     }
 }
 
@@ -123,10 +116,12 @@ final class WindowBox {
 
 private struct WindowReader: NSViewRepresentable {
     let box: WindowBox
+    let router: KeyboardCommandRouter
 
     func makeNSView(context: Context) -> NSView {
         let view = ReaderView()
         view.box = box
+        view.tail = KeyboardChainTail(router: router)
         return view
     }
 
@@ -134,9 +129,97 @@ private struct WindowReader: NSViewRepresentable {
 
     final class ReaderView: NSView {
         var box: WindowBox?
+        var tail: KeyboardChainTail?
+        override func viewWillMove(toWindow newWindow: NSWindow?) {
+            super.viewWillMove(toWindow: newWindow)
+            if newWindow == nil { tail?.uninstall() }
+        }
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             box?.window = window
+            if let window { tail?.install(in: window) }
         }
+    }
+}
+
+/// The last responder in the window's chain. A key press that the first responder and everything
+/// above it declined arrives here; the tail hands it to `KeyboardCommandRouter` and, when the app
+/// does not own it either, passes it on exactly as AppKit would have (alert included).
+@MainActor
+final class KeyboardChainTail: NSResponder {
+    private let router: KeyboardCommandRouter
+    private weak var window: NSWindow?
+
+    init(router: KeyboardCommandRouter) {
+        self.router = router
+        super.init()
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    func install(in window: NSWindow) {
+        guard self.window !== window else { return }
+        uninstall()
+        self.window = window
+        nextResponder = window.nextResponder
+        window.nextResponder = self
+    }
+
+    func uninstall() {
+        if let window, window.nextResponder === self { window.nextResponder = nextResponder }
+        nextResponder = nil
+        window = nil
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if claims(event) { return }
+        if let nextResponder {
+            nextResponder.keyDown(with: event)
+        } else {
+            window?.noResponder(for: #selector(NSResponder.keyDown(with:)))
+        }
+    }
+
+    override func keyUp(with event: NSEvent) {
+        if claims(event) { return }
+        nextResponder?.keyUp(with: event)
+    }
+
+    private func claims(_ event: NSEvent) -> Bool {
+        guard let input = Self.input(for: event),
+              KeyboardOwnership.surfaceOwns(input.key, firstResponder: window?.firstResponder)
+        else { return false }
+        return router.perform(input)
+    }
+
+    /// Maps a key event onto the router's vocabulary; nil for keys the app has no use for.
+    static func input(for event: NSEvent) -> KeyInput? {
+        guard event.type == .keyDown || event.type == .keyUp,
+              let characters = event.charactersIgnoringModifiers,
+              let scalar = characters.unicodeScalars.first else { return nil }
+        let key: KeyInput.Key
+        switch Int(scalar.value) {
+        case NSLeftArrowFunctionKey: key = .arrow(.left)
+        case NSRightArrowFunctionKey: key = .arrow(.right)
+        case NSUpArrowFunctionKey: key = .arrow(.up)
+        case NSDownArrowFunctionKey: key = .arrow(.down)
+        case NSDeleteFunctionKey: key = .forwardDelete
+        case 0x7F: key = .delete
+        case 0x0D, 0x03: key = .return
+        case 0x1B: key = .escape
+        case 0x20: key = .space
+        default:
+            key = .character(characters.lowercased())
+        }
+        var modifiers: EventModifiers = []
+        let flags = event.modifierFlags
+        if flags.contains(.shift) { modifiers.insert(.shift) }
+        if flags.contains(.control) { modifiers.insert(.control) }
+        if flags.contains(.option) { modifiers.insert(.option) }
+        if flags.contains(.command) { modifiers.insert(.command) }
+        return KeyInput(
+            key, modifiers: modifiers, phase: event.type == .keyUp ? .up : .down,
+            isRepeat: event.type == .keyDown && event.isARepeat
+        )
     }
 }
