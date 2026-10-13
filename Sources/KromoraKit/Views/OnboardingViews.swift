@@ -209,36 +209,9 @@ struct KeyboardShortcutReferenceView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
 
-    private struct Entry: Identifiable {
-        let action: String
-        let keys: String
-        let area: String
-        var id: String { action }
-    }
+    private let entries = KeyboardShortcutCatalog.all
 
-    private let entries = [
-        Entry(action: "Open photos", keys: "⌘O", area: "Library"),
-        Entry(action: "Import from Photos", keys: "⌘⇧I", area: "Library"),
-        Entry(action: "Open source folder", keys: "⌘⌥I", area: "Library"),
-        Entry(action: "Refresh library", keys: "⌘R", area: "Library"),
-        Entry(action: "Delete selected photos", keys: "Delete", area: "Library"),
-        Entry(action: "Move between Library and Edit", keys: "G / E", area: "Navigation"),
-        Entry(action: "Select previous / next photo", keys: "← / →", area: "Library and Edit"),
-        Entry(action: "Pick / reject photo", keys: "P / X", area: "Library"),
-        Entry(action: "Rate photo", keys: "0–5", area: "Library"),
-        Entry(action: "Undo / redo edit", keys: "⌘Z / ⇧⌘Z", area: "Edit"),
-        Entry(action: "Reset photo", keys: "⇧⌘R", area: "Edit"),
-        Entry(
-            action: KromoraAutoAdjustmentShortcut.referenceAction,
-            keys: KromoraAutoAdjustmentShortcut.displayString,
-            area: "Edit"
-        ),
-        Entry(action: "Show original", keys: "Space or ⌘\\", area: "Edit"),
-        Entry(action: "Toggle comparison", keys: "V", area: "Edit"),
-        Entry(action: "Export edited photo", keys: "⌘S", area: "Edit")
-    ]
-
-    private var filtered: [Entry] {
+    private var filtered: [KeyboardShortcutSpec] {
         guard !query.isEmpty else { return entries }
         return entries.filter {
             $0.action.localizedCaseInsensitiveContains(query)

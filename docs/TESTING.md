@@ -43,6 +43,13 @@ the tests and are not committed; the photo-intelligence resource exception is do
 real renderer. When the suite had ten tests it took 6.3 seconds to execute on an Apple M4 Pro running macOS 27.2
 (targeted serialized run, excluding build time); it has since grown to 17 and has not been re-timed.
 
+Keyboard routing is tested at three levels (KRMA-920): `KeyboardCommandRouterTests` covers the
+dispatch table and focus ownership without AppKit, `KeyboardShortcutCatalogTests` keeps the menu
+bar, reference sheet and key surface in agreement (and fails if an `NSEvent` monitor returns), and
+`KeyboardSurfaceWindowTests` / `KeyRoutingProbeTests` synthesize key events into a real `NSWindow`
+and assert none reach `NSWindow.noResponder(for:)`, the call that plays the system alert. All three
+need no unlocked display and run in the serial lane. Silence of the sound itself is a by-ear check.
+
 The photo-intelligence corpus has two intentionally separate checks. The fast
 `PhotoIntelligenceDecisionLogicTests` suite uses deterministic fakes to test scene/Auto decision
 logic. The serial `PhotoIntelligenceRealCorpusTests` suite writes deterministic procedural PNGs to

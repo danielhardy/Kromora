@@ -9,7 +9,6 @@ struct FilmstripView: View {
 
     var body: some View {
         let entries = collection.thumbnailEntries
-        let filteredIndices = collection.filteredIndices
 
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
@@ -31,40 +30,10 @@ struct FilmstripView: View {
                                 )
                             }
                             .buttonStyle(.plain)
-                            // Thumbnails must remain VoiceOver buttons, but they must not take
-                            // keyboard focus. A focused NSButton interprets leftover arrows as
-                            // `noop:` and plays the system error beep even after `.onKeyPress`
-                            // returns `.handled`.
+                            // Thumbnails stay VoiceOver buttons but never take keyboard focus: arrows
+                            // belong to the app-level key surface (`KeyboardSurface`), and a focused
+                            // NSButton would strand them on a control that cannot use them.
                             .focusable(false)
-                            // A focused thumbnail owns the arrow gesture. Consume every phase so
-                            // AppKit's native button responder never sees a successful navigation,
-                            // a boundary no-op, or the key-up after SwiftUI replaces the selected
-                            // cell. The button's normal activation and accessibility behavior are
-                            // otherwise left intact.
-                            .onKeyPress(
-                                keys: [.leftArrow, .rightArrow, .upArrow, .downArrow],
-                                phases: .all
-                            ) { press in
-                                let result = FilmstripNavigation.keyPressResult(for: press.phase)
-                                guard result == .handled else { return result }
-                                guard press.phase != .up else { return result }
-                                guard press.key == .leftArrow || press.key == .rightArrow else {
-                                    return result
-                                }
-                                let direction: FilmstripNavigation.Direction =
-                                    press.key == .leftArrow ? .previous : .next
-                                guard let adjacentIndex = FilmstripNavigation.adjacentIndex(
-                                    in: filteredIndices,
-                                    selectedIndex: collection.selectedIndex,
-                                    direction: direction
-                                ) else {
-                                    // Reaching either end is an intentional no-op, but the arrow
-                                    // still belongs to the focused filmstrip control.
-                                    return result
-                                }
-                                onSelect(adjacentIndex, [])
-                                return result
-                            }
                             // Use the source ID for navigation scrolling; the collection keeps the
                             // reservation ID internally so this cell can be replaced in place.
                             .id(item.id)
@@ -113,39 +82,6 @@ enum FilmstripLayout {
             + (showPhotoNames ? captionSpacing + captionHeight : 0)
             + (stripVerticalPadding * 2)
             + 1
-    }
-}
-
-/// Computes filmstrip navigation in display order rather than underlying collection order. This
-/// keeps keyboard stepping aligned with filtered thumbnails and gives the view a small, pure seam
-/// for testing without synthesizing AppKit focus.
-enum FilmstripNavigation {
-    enum Direction {
-        case previous
-        case next
-    }
-
-    /// Arrow key events are handled at the focused SwiftUI button boundary. In particular, the
-    /// key-up must be consumed even though it does not select another item: after a selection
-    /// changes the old button can be replaced before AppKit dispatches that event.
-    static func keyPressResult(for phase: KeyPress.Phases) -> KeyPress.Result {
-        guard phase == .down || phase == .repeat || phase == .up else {
-            return .ignored
-        }
-        return .handled
-    }
-
-    static func adjacentIndex(
-        in filteredIndices: [Int],
-        selectedIndex: Int,
-        direction: Direction
-    ) -> Int? {
-        switch direction {
-        case .previous:
-            return filteredIndices.last { $0 < selectedIndex }
-        case .next:
-            return filteredIndices.first { $0 > selectedIndex }
-        }
     }
 }
 

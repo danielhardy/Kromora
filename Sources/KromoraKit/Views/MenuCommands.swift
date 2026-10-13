@@ -16,11 +16,11 @@ enum KromoraEditTransferShortcuts {
 
 /// Shift+A applies Auto. Plain A already toggles the retouch visualization, so the shifted
 /// variant keeps both editor commands available without changing the existing gesture. The menu
-/// title and shortcut reference share these labels; the menu deliberately has no key equivalent
-/// because AppKit resolves menu key equivalents before the text-input focus policy can defer them.
+/// item carries the key equivalent: AppKit offers it to a focused text field first, so typing a
+/// capital A is never stolen, and it is the last chance before the system alert for other focus.
 enum KromoraAutoAdjustmentShortcut {
     static let displayString = "⇧A"
-    static let menuTitle = "Apply Auto Edits (⇧A)"
+    static let menuTitle = "Apply Auto Edits"
     static let referenceAction = "Apply Auto edits"
 }
 
@@ -33,6 +33,7 @@ enum KromoraAutoAdjustmentShortcut {
 public struct KromoraCommands: Commands {
     @Environment(\.openWindow) private var openWindow
     @ObservedObject private var settings: KromoraSettings
+    @FocusedValue(\.keyboardRouter) private var keyboardRouter
 
     public init(settings: KromoraSettings = KromoraSettings()) {
         _settings = ObservedObject(wrappedValue: settings)
@@ -50,11 +51,10 @@ public struct KromoraCommands: Commands {
 
             Divider()
 
+            keyboardItems(.view)
+
             Button("Reset Rotation") { post(.resetRotation) }
                 .accessibilityLabel("Reset Rotation")
-
-            Button("Capture Info Overlay (I)") { post(.toggleCaptureMetadataOverlay) }
-                .accessibilityLabel("Toggle capture information overlay")
 
             Button(settings.showClippingAlerts ? "Hide Clipping Alerts" : "Show Clipping Alerts") {
                 settings.showClippingAlerts.toggle()
@@ -71,6 +71,10 @@ public struct KromoraCommands: Commands {
 
             Button("Keyboard Shortcuts…") { post(.showKeyboardShortcuts) }
         }
+
+        CommandMenu("Photo") { keyboardItems(.photo) }
+
+        CommandMenu("Tools") { keyboardItems(.tools) }
 
         CommandGroup(replacing: .newItem) {
             Button("Open Image...") { post(.openImage) }
@@ -108,6 +112,7 @@ public struct KromoraCommands: Commands {
                 .keyboardShortcut("r", modifiers: [.command, .shift])
 
             Button(KromoraAutoAdjustmentShortcut.menuTitle) { post(.applyAutoAdjustment) }
+                .keyboardShortcut("a", modifiers: .shift)
 
             Divider()
 
@@ -144,6 +149,25 @@ public struct KromoraCommands: Commands {
             Button("Export Original + Settings Bundle…") { post(.exportOriginalWithSettings) }
                 .keyboardShortcut("b", modifiers: [.command, .option])
         }
+    }
+
+    /// Plain-key shortcuts as menu items. The action goes through `KeyboardCommandRouter`, which is
+    /// where precedence and context live; the items stay enabled so a stale menu can never turn a
+    /// valid key into a dead one (an unavailable command is an intentional no-op, not an alert).
+    @ViewBuilder
+    private func keyboardItems(_ menu: KeyboardShortcutSpec.Menu) -> some View {
+        ForEach(KeyboardShortcutCatalog.menuItems(in: menu)) { spec in
+            if case .menuKey(_, let key, let modifiers) = spec.delivery,
+               let input = Self.keyInput(for: key, modifiers: modifiers) {
+                Button(spec.action) { keyboardRouter?.perform(input) }
+                    .keyboardShortcut(key, modifiers: modifiers)
+                    .disabled(keyboardRouter == nil)
+            }
+        }
+    }
+
+    static func keyInput(for key: KeyEquivalent, modifiers: EventModifiers) -> KeyInput? {
+        KeyInput(.character(String(key.character)), modifiers: modifiers)
     }
 
     private func post(_ name: Notification.Name) {
@@ -201,7 +225,12 @@ private struct FileMenuCommandReceiver: ViewModifier {
                 viewModel.refreshSource()
             }
             .onReceive(NotificationCenter.default.publisher(for: .undoEdit)) { _ in
-                viewModel.undo()
+                // A pending culling change (pick/reject/rating) is undoable once edit history is empty.
+                if viewModel.canUndo {
+                    viewModel.undo()
+                } else {
+                    _ = viewModel.undoCullingChange()
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: .redoEdit)) { _ in
                 viewModel.redo()

@@ -41,7 +41,7 @@ final class MenuCommandTests: XCTestCase {
 
     func testAutoEditShortcutIsDiscoverableInMenuAndReference() {
         XCTAssertEqual(KromoraAutoAdjustmentShortcut.displayString, "⇧A")
-        XCTAssertEqual(KromoraAutoAdjustmentShortcut.menuTitle, "Apply Auto Edits (⇧A)")
+        XCTAssertEqual(KromoraAutoAdjustmentShortcut.menuTitle, "Apply Auto Edits")
         XCTAssertEqual(KromoraAutoAdjustmentShortcut.referenceAction, "Apply Auto edits")
     }
 

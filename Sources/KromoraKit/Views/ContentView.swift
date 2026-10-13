@@ -18,6 +18,7 @@ public struct ContentView: View {
     @State private var isWelcomePresented = false
     @State private var isTourPresented = false
     @State private var isShortcutReferencePresented = false
+    @State private var keyboardRouter: KeyboardCommandRouter
     @Namespace private var toolbarGlassNamespace
 
     /// The window toolbar has a deliberately small crop-mode surface. Keep this as a named seam
@@ -34,6 +35,7 @@ public struct ContentView: View {
         _canvasState = Bindable(wrappedValue: viewModel.canvasState)
         _collection = Bindable(wrappedValue: viewModel.collection)
         _exportCoordinator = Bindable(wrappedValue: viewModel.export)
+        _keyboardRouter = State(wrappedValue: KeyboardCommandRouter(viewModel: viewModel))
     }
 
     /// Allows the application delegate to share the model that owns the persistence queue, so clean
@@ -45,6 +47,7 @@ public struct ContentView: View {
         _canvasState = Bindable(wrappedValue: viewModel.canvasState)
         _collection = Bindable(wrappedValue: viewModel.collection)
         _exportCoordinator = Bindable(wrappedValue: viewModel.export)
+        _keyboardRouter = State(wrappedValue: KeyboardCommandRouter(viewModel: viewModel))
     }
 
     public var body: some View {
@@ -139,7 +142,7 @@ public struct ContentView: View {
                 viewModel.refreshRemovableMedia()
                 if !hasSeenWelcome { isWelcomePresented = true }
             }
-            .modifier(KeyboardShortcuts(viewModel: viewModel))
+            .keyboardSurface(router: keyboardRouter, viewModel: viewModel)
             .modifier(MenuCommandReceivers(viewModel: viewModel))
             .alert(
                 "Something went wrong",

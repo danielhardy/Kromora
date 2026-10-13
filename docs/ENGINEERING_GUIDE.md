@@ -294,6 +294,35 @@ Keep a structural test proving raster assignment cannot bypass the hook, and add
 with a named limit and a one-line reason. Every PR that changes a presentation budget must say why
 in its change summary.
 
+## Keyboard routing
+
+Kromora has **no `NSEvent` key monitor** (removed in KRMA-920; `KeyboardShortcutCatalogTests` fails
+if one returns). A monitor sits ahead of the responder chain and must guess whether a control owns
+a key; every key it declined fell through to AppKit and played the system alert. The responder chain
+now decides, and the app claims the keys it owns:
+
+- **Plain letters, digits, brackets and Shift-letters** are `Commands` menu items with key
+  equivalents (`KromoraCommands`, built from `KeyboardShortcutCatalog`). AppKit offers an unmodified
+  key to the focused control first (a text field keeps typing) and falls back to the menu before the
+  alert. Items stay enabled and call `KeyboardCommandRouter`; an unavailable command is a claimed
+  no-op, never a dead key. Do not give these Command/Option/Control modifiers: those belong to the
+  system and to text editing.
+- **Arrows, Space, Return, Esc, Delete and the hold gestures (Space, ⌘\)** arrive through
+  `.onKeyPress(phases: .all)` on the focusable root (`KeyboardSurface`). Return `.handled` for any
+  key the app owns, including an intentional no-op; `.ignored` hands the key on. Arrows cannot be
+  menu key equivalents because AppKit would deliver them even while a text field edits.
+  `KeyboardOwnership` lets text input, sliders and steppers keep their keys.
+- **Command-C / Command-A** use the standard Edit-menu commands (`onCopyCommand`,
+  `onCommand(selectAll:)`). Paste Edits is ⌥⌘V (menu).
+- One dispatch table: `KeyboardCommandRouter.perform(_:)`. Add a shortcut to
+  `KeyboardShortcutCatalog` (menu bar + reference sheet) and the router together.
+- Pure-click controls (workspace picker, filmstrip thumbnails) use `.focusable(false)` so arrows are
+  never stranded on an `NSControl`.
+
+The `KeyRoutingProbeTests` / `KeyboardSurfaceWindowTests` pair drive synthesized key events through
+a real window and treat `NSWindow.noResponder(for:)` — the call that plays the alert — as the
+machine-checkable "no boop". Silence itself is confirmed by ear.
+
 ## Inspector controls
 
 Every inspector slider is `NeutralOriginSlider`, not `SwiftUI.Slider`. It wraps `NSSlider` and

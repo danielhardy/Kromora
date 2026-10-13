@@ -215,4 +215,65 @@ final class KeyRoutingProbeTests: XCTestCase {
         }
         w.close()
     }
+
+    /// Command-modified keys: does a SwiftUI surface see ⌘C through `.onKeyPress` when the standard
+    /// Copy menu item exists but is disabled (no responder implements `copy:`)?
+    func testCommandKeyReachesOnKeyPressWithDisabledCopyMenuItem() async throws {
+        _ = NSApplication.shared
+        let probe = MenuProbe(); probe.enabled = false
+        installMenu(key: "c", probe: probe, mods: .command)
+        let box = Box()
+        let host = NSHostingView(rootView: Surface(box: box))
+        host.frame = NSRect(x: 0, y: 0, width: 400, height: 200)
+        let w = makeWindow(host)
+        _ = w.makeFirstResponder(host)
+        try await Task.sleep(for: .milliseconds(300))
+        send(key("c", code: 8, in: w, mods: .command))
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(box.presses, [], "a disabled ⌘C menu item swallows the key before SwiftUI sees it")
+        XCTAssertEqual(probe.fired, 0)
+        w.close()
+    }
+
+    struct Bare: View { var body: some View { Color.clear.frame(width: 100, height: 40) } }
+    struct Focusable: View {
+        @FocusState private var f: Bool
+        var body: some View { Color.clear.frame(width: 100, height: 40).focusable().focused($f).focusEffectDisabled().onAppear { f = true } }
+    }
+    struct Ignoring: View {
+        @FocusState private var f: Bool
+        var body: some View { Color.clear.frame(width: 100, height: 40).focusable().focused($f).focusEffectDisabled().onKeyPress(phases: .all) { _ in .ignored }.onAppear { f = true } }
+    }
+
+    struct IgnoringMod: ViewModifier {
+        @FocusState private var f: Bool
+        func body(content: Content) -> some View {
+            content.focusable().focused($f).focusEffectDisabled().onKeyPress(phases: .all) { _ in .ignored }.onAppear { f = true }
+        }
+    }
+
+    func testMenuKeyEquivalentIsTheFallbackForAHostingViewFirstResponder() async throws {
+        _ = NSApplication.shared
+        func run(_ name: String, _ view: some View) async throws {
+            let probe = MenuProbe()
+            installMenu(key: "c", probe: probe)
+            let host = NSHostingView(rootView: view)
+            host.frame = NSRect(x: 0, y: 0, width: 200, height: 100)
+            let w = makeWindow(host)
+            _ = w.makeFirstResponder(host)
+            try await Task.sleep(for: .milliseconds(300))
+            send(key("c", code: 8, in: w))
+            // A SwiftUI hosting view as first responder falls back to the menu key equivalent —
+            // before the alert — whether or not the surface handles keys of its own.
+            XCTAssertEqual(probe.fired, 1, name)
+            XCTAssertEqual(w.unclaimed.count, 0, name)
+            w.close()
+        }
+        try await run("bare", Bare())
+        try await run("focusable", Focusable())
+        try await run("onKeyPress ignored", Ignoring())
+        try await run("ignored + TextField/Button", VStack { TextField("t", text: .constant("")); Button("b") {} }.modifier(IgnoringMod()))
+        try await run("ignored + onCopyCommand", Color.clear.frame(width: 100, height: 40).modifier(IgnoringMod()).onCopyCommand { [] })
+        try await run("ignored + onCommand selectAll", Color.clear.frame(width: 100, height: 40).modifier(IgnoringMod()).onCommand(#selector(NSResponder.selectAll(_:))) {})
+    }
 }
