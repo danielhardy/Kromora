@@ -148,9 +148,9 @@ final class ColorMixerTests: XCTestCase {
             let intendedDelta = chroma(pixel(edited, channelIndex)) - chroma(pixel(base, channelIndex))
             let remoteIndex = (channelIndex + 4) % 8
             let remoteDelta = abs(chroma(pixel(edited, remoteIndex)) - chroma(pixel(base, remoteIndex)))
-            XCTAssertGreaterThan(intendedDelta, 4, "channel (channelIndex) should affect its hue")
+            XCTAssertGreaterThan(intendedDelta, 4, "channel \(channelIndex) should affect its hue")
             XCTAssertGreaterThanOrEqual(intendedDelta, remoteDelta,
-                                        "channel (channelIndex) should be local")
+                                        "channel \(channelIndex) should be local")
         }
     }
 

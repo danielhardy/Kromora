@@ -2,6 +2,7 @@ import XCTest
 import SwiftUI
 import AppKit
 import CoreImage
+import Synchronization
 @testable import KromoraKit
 
 /// The real `KeyboardSurface` inside a real window, driven by synthesized key events through
@@ -179,18 +180,18 @@ final class KeyboardSurfaceWindowTests: TempDirectoryTestCase {
         let target = UndoTarget()
         target.window = f.window
         installUndoMenu(target)
-        var undone = 0, redone = 0
+        let undone = Mutex(0), redone = Mutex(0)
         let tokens = [
-            NotificationCenter.default.addObserver(forName: .undoEdit, object: nil, queue: nil) { _ in undone += 1 },
-            NotificationCenter.default.addObserver(forName: .redoEdit, object: nil, queue: nil) { _ in redone += 1 },
+            NotificationCenter.default.addObserver(forName: .undoEdit, object: nil, queue: nil) { _ in undone.withLock { $0 += 1 } },
+            NotificationCenter.default.addObserver(forName: .redoEdit, object: nil, queue: nil) { _ in redone.withLock { $0 += 1 } },
         ]
         defer { tokens.forEach(NotificationCenter.default.removeObserver) }
 
         // Canvas focused: the photo edit is undone/redone.
         send(key("z", code: 6, in: f.window, mods: [.command]))
         send(shiftZ(in: f.window))
-        XCTAssertEqual(undone, 1)
-        XCTAssertEqual(redone, 1)
+        XCTAssertEqual(undone.withLock { $0 }, 1)
+        XCTAssertEqual(redone.withLock { $0 }, 1)
 
         // Text field editing: ⌘Z / ⇧⌘Z belong to the field editor's own undo manager.
         f.driver.focusField = true
@@ -201,8 +202,8 @@ final class KeyboardSurfaceWindowTests: TempDirectoryTestCase {
         editor.insertText("abc", replacementRange: editor.selectedRange())
         send(key("z", code: 6, in: f.window, mods: [.command]))
         send(shiftZ(in: f.window))
-        XCTAssertEqual(undone, 1, "⌘Z in a text field must not undo the photo")
-        XCTAssertEqual(redone, 1, "⇧⌘Z in a text field must not redo the photo")
+        XCTAssertEqual(undone.withLock { $0 }, 1, "⌘Z in a text field must not undo the photo")
+        XCTAssertEqual(redone.withLock { $0 }, 1, "⇧⌘Z in a text field must not redo the photo")
     }
 
     private static func firstSubview<T: NSView>(of type: T.Type, in view: NSView) -> T? {

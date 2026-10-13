@@ -320,7 +320,7 @@ final class EffectsPipelineTests: XCTestCase {
                 / Float(width * height / 8)
             XCTAssertGreaterThan(
                 (outputHigh - outputLow) * sourceDirection, 0,
-                "Clarity (value) inverted the source orientation"
+                "Clarity \(value) inverted the source orientation"
             )
         }
     }
