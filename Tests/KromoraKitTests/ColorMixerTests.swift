@@ -196,7 +196,7 @@ final class ColorMixerTests: XCTestCase {
         ] {
             let edited = renderInSRGBWorkingSpace(RenderPipeline.applyColorMixer(mixer, to: source))
             XCTAssertLessThan(chroma(pixel(edited, 0)), base - 15,
-                              "(name) should visibly desaturate a 210° sky")
+                              "\(name) should visibly desaturate a 210° sky")
         }
     }
 
