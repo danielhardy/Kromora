@@ -82,6 +82,7 @@ final class SourcePresentationStateTests: XCTestCase {
         state.endSelection(previewState: .ready)
         state.clear()
         state.setInspectorDocumentPending(true)
+        state.inspectorDocumentSettled()
         state.beginSourcePreparation()
         XCTAssertEqual(state, frozen)
     }

@@ -42,6 +42,7 @@ struct SourcePresentationState: Equatable, Sendable {
 
     /// The stored document was adopted or rejected; the inspector stops holding its values.
     mutating func inspectorDocumentSettled() {
+        guard !isShutDown else { return }
         isInspectorDocumentPending = false
     }
 
