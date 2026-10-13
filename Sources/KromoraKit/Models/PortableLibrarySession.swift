@@ -69,6 +69,7 @@ final class PortableLibrarySession {
     private let heartbeatJobID: ImageWorkScheduler.JobID
     private let indexWriteJobID: ImageWorkScheduler.JobID
     private let virtualCopyJobID: ImageWorkScheduler.JobID
+    private let removalJobID: ImageWorkScheduler.JobID
     private let libraryStateJobID: ImageWorkScheduler.JobID
     private let indexLoadJobID: ImageWorkScheduler.JobID
     private let presentedAspectRatioRepairJobID: ImageWorkScheduler.JobID
@@ -185,6 +186,9 @@ final class PortableLibrarySession {
             )
             self.virtualCopyJobID = ImageWorkScheduler.JobID(
                 "portable-package-virtual-copy-\(lease.ownerID.uuidString)"
+            )
+            self.removalJobID = ImageWorkScheduler.JobID(
+                "portable-package-removal-\(lease.ownerID.uuidString)"
             )
             self.libraryStateJobID = ImageWorkScheduler.JobID(
                 "portable-package-library-state-\(lease.ownerID.uuidString)"
@@ -684,6 +688,7 @@ final class PortableLibrarySession {
         activeImportJobIDs.removeAll()
         await scheduler?.cancelAndWait(id: libraryStateJobID)
         await scheduler?.cancelAndWait(id: virtualCopyJobID)
+        await scheduler?.cancelAndWait(id: removalJobID)
         await scheduler?.cancelAndWait(id: indexWriteJobID)
         if libraryStateIndexWriteMayBeLost { try? queryController.index.write(to: indexURL) }
         await scheduler?.cancelAndWait(id: indexLoadJobID)
@@ -1627,6 +1632,79 @@ final class PortableLibrarySession {
         }
         _ = try applyIndexDelta(.init(removals: [assetID]))
         return result
+    }
+
+    private final class RemovalOutcome: Sendable {
+        private let value = OSAllocatedUnfairLock<Result<PortablePackageRemovalResult, Error>?>(
+            initialState: nil
+        )
+        func store(_ result: Result<PortablePackageRemovalResult, Error>) { value.withLock { $0 = result } }
+        func take() -> Result<PortablePackageRemovalResult, Error>? { value.withLock { $0 } }
+    }
+
+    /// Remove one asset with the quarantine/tombstone transaction on the package-I/O lane (inline
+    /// for a session without a scheduler); only the index update runs here. Callers must not
+    /// overlap calls. A removal that already committed is reported even if shutdown cancelled the
+    /// job; one that never started throws `CancellationError`, so no item is left half-removed.
+    @discardableResult
+    func removeFromLibraryOffMain(_ assetID: PortablePhotoAssetID) async throws
+        -> PortablePackageRemovalResult
+    {
+        try ensureWritableLease()
+        let package = self.package
+        let lease = self.lease
+        let now = clock.now
+        let result: Result<PortablePackageRemovalResult, Error>
+        if let scheduler {
+            let outcome = RemovalOutcome()
+            result = await withCheckedContinuation { continuation in
+                scheduler.enqueuePackageIO(
+                    id: removalJobID,
+                    lane: .maintenance,
+                    priority: .packageIO,
+                    onTerminal: { terminal in
+                        if let finished = outcome.take() {
+                            continuation.resume(returning: finished)
+                        } else if terminal == .rejected {
+                            continuation.resume(
+                                returning: .failure(PortablePackageImportWorkerError.notAdmitted)
+                            )
+                        } else {
+                            continuation.resume(returning: .failure(CancellationError()))
+                        }
+                    },
+                    operation: {
+                        outcome.store(Result {
+                            try Self.writeRemoval(assetID, package: package, lease: lease, now: now())
+                        })
+                    }
+                )
+            }
+        } else {
+            result = Result { try Self.writeRemoval(assetID, package: package, lease: lease, now: now()) }
+        }
+        switch result {
+        case .success(let removal):
+            if !isShuttingDown { _ = try applyIndexDelta(.init(removals: [assetID])) }
+            return removal
+        case .failure(PortablePackageTrashError.alreadyRemoved(let removedID)):
+            // A prior removal committed its tombstone but did not finish updating the projection.
+            if !isShuttingDown { _ = try applyIndexDelta(.init(removals: [assetID])) }
+            throw PortablePackageTrashError.alreadyRemoved(removedID)
+        case .failure(let error):
+            throw ensureLeaseError(error)
+        }
+    }
+
+    nonisolated private static func writeRemoval(
+        _ assetID: PortablePhotoAssetID,
+        package: PortableLibraryPackage,
+        lease: PortablePackageLease,
+        now: Date
+    ) throws -> PortablePackageRemovalResult {
+        try lease.withWriterMutationLock {
+            try package.removeFromLibrary(assetID, lease: lease, now: now)
+        }
     }
 
     /// Mirror a membership entry a package transaction already committed (an edit's presented

@@ -1,4 +1,5 @@
 import Foundation
+import os
 import XCTest
 
 @testable import KromoraKit
@@ -366,6 +367,117 @@ final class LibraryDeletionCoordinatorTests: TempDirectoryTestCase {
         }
         XCTAssertTrue(message.hasPrefix("Removed 1 photo(s), but some photos could not be removed:"))
         XCTAssertTrue(fixture.destination.events.contains("render"))
+        await fixture.analysis.shutdown()
+        await fixture.collection.shutdown()
+    }
+
+    // MARK: Off-main removal
+
+    /// A scheduler-backed portable fixture whose single package-I/O worker can be held by a blocker.
+    private func makeScheduledFixture(count: Int) async throws -> (
+        collection: ImageCollection, coordinator: LibraryDeletionCoordinator,
+        analysis: PhotoAnalysisCoordinator, session: PortableLibrarySession,
+        scheduler: ImageWorkScheduler
+    ) {
+        let sources = try (0..<count).map {
+            try Fixtures.writeGradientPNG(
+                width: 16 + $0, height: 12, named: "scheduled-\($0).png", in: tempDirectory
+            )
+        }
+        let scheduler = ImageWorkScheduler()
+        let session = try PortableLibrarySession(
+            at: tempDirectory.appendingPathComponent("scheduled-\(UUID().uuidString).kromora"),
+            scheduler: scheduler
+        )
+        try session.importURLs(sources)
+        let collection = makeTestCollection(libraryFolderURL: session.package.rootURL)
+        collection.loadPortableAssets(try session.materializedAssets())
+        let store = makeInMemoryEditStore()
+        let analysis = makeAnalysisCoordinator()
+        let coordinator = makeCoordinator(
+            collection: collection, persistence: EditPersistenceCoordinator(store: store),
+            store: store, analysis: analysis, portableLibrary: session
+        )
+        return (collection, coordinator, analysis, session, scheduler)
+    }
+
+    private func holdPackageIOWorker(
+        _ scheduler: ImageWorkScheduler
+    ) async -> OSAllocatedUnfairLock<Bool> {
+        let started = OSAllocatedUnfairLock(initialState: false)
+        let release = OSAllocatedUnfairLock(initialState: false)
+        scheduler.enqueuePackageIO(id: .init("deletion-test-blocker"), lane: .leaseHeartbeat) {
+            started.withLock { $0 = true }
+            while !release.withLock({ $0 }) { await Task.yield() }
+        }
+        for _ in 0..<10_000 where !started.withLock({ $0 }) { await Task.yield() }
+        return release
+    }
+
+    func testMainActorStaysResponsiveWhileSessionRemovalIsGated() async throws {
+        let fixture = try await makeScheduledFixture(count: 1)
+        let item = try XCTUnwrap(fixture.collection.items.first)
+        let release = await holdPackageIOWorker(fixture.scheduler)
+
+        let deletion = Task { @MainActor in
+            await fixture.coordinator.delete([candidate(for: item, in: fixture.collection)])
+        }
+        for _ in 0..<50 { await Task.yield() }
+        var hopped = false
+        await MainActor.run { hopped = true }
+        XCTAssertTrue(hopped)
+        XCTAssertTrue(fixture.coordinator.isDeleting)
+        XCTAssertEqual(fixture.session.assetCount, 1, "the gated removal has not run")
+
+        release.withLock { $0 = true }
+        let result = await deletion.value
+        XCTAssertEqual(result.deletedIDs, [item.id])
+        XCTAssertFalse(fixture.coordinator.isDeleting)
+        XCTAssertEqual(fixture.session.assetCount, 0)
+        await fixture.session.shutdown()
+        await fixture.analysis.shutdown()
+        await fixture.collection.shutdown()
+    }
+
+    func testOverlappingDeletionOfTheSameItemIsRejected() async throws {
+        let fixture = try await makeScheduledFixture(count: 1)
+        let item = try XCTUnwrap(fixture.collection.items.first)
+        let candidate = candidate(for: item, in: fixture.collection)
+        let release = await holdPackageIOWorker(fixture.scheduler)
+
+        let first = Task { @MainActor in await fixture.coordinator.delete([candidate]) }
+        for _ in 0..<50 { await Task.yield() }
+        let second = await fixture.coordinator.delete([candidate])
+        XCTAssertTrue(second.deletedIDs.isEmpty)
+        XCTAssertEqual(second.failures.count, 1)
+
+        release.withLock { $0 = true }
+        let result = await first.value
+        XCTAssertEqual(result.deletedIDs, [item.id])
+        await fixture.session.shutdown()
+        await fixture.analysis.shutdown()
+        await fixture.collection.shutdown()
+    }
+
+    func testShutdownMidBatchLeavesNoHalfRemovedItem() async throws {
+        let fixture = try await makeScheduledFixture(count: 3)
+        let candidates = fixture.collection.items.map { candidate(for: $0, in: fixture.collection) }
+        let release = await holdPackageIOWorker(fixture.scheduler)
+
+        let deletion = Task { @MainActor in await fixture.coordinator.delete(candidates) }
+        for _ in 0..<50 { await Task.yield() }
+        let shutdown = Task { @MainActor in await fixture.session.shutdown() }
+        for _ in 0..<50 { await Task.yield() }
+        release.withLock { $0 = true }
+        await shutdown.value
+        let result = await deletion.value
+
+        XCTAssertLessThan(result.deletedIDs.count, candidates.count)
+        XCTAssertEqual(result.deletedIDs.count + result.failures.count, candidates.count)
+        // Every reported removal left the grid; every failure is still presented.
+        let remaining = Set(fixture.collection.items.map(\.id))
+        XCTAssertTrue(Set(result.deletedIDs).isDisjoint(with: remaining))
+        XCTAssertEqual(remaining.count, candidates.count - result.deletedIDs.count)
         await fixture.analysis.shutdown()
         await fixture.collection.shutdown()
     }

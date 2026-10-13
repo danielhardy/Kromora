@@ -46,6 +46,10 @@ final class LibraryDeletionCoordinator {
     private let portableLibrary: PortableLibrarySession?
     private let persistenceIdentity: (ImageCollection.Item) -> PortablePhotoIdentity?
     private let allowsUnregisteredSourceDeletion: Bool
+    private var inFlightIDs: Set<PhotoAssetID> = []
+
+    /// True while a deletion batch is running; the root rejects overlapping requests.
+    var isDeleting: Bool { !inFlightIDs.isEmpty }
 
     init(
         collection: ImageCollection,
@@ -132,6 +136,15 @@ final class LibraryDeletionCoordinator {
         guard !candidates.isEmpty else {
             return LibraryDeletionResult(deletedIDs: [], failures: [])
         }
+        let ids = Set(candidates.map(\.id))
+        guard inFlightIDs.isDisjoint(with: ids) else {
+            return LibraryDeletionResult(
+                deletedIDs: [],
+                failures: ["Some of these photos are already being removed."]
+            )
+        }
+        inFlightIDs.formUnion(ids)
+        defer { inFlightIDs.subtract(ids) }
 
         let flushResult = await persistence.flush()
         guard flushResult.succeeded else {
@@ -171,7 +184,7 @@ final class LibraryDeletionCoordinator {
 
             do {
                 do {
-                    try portableLibrary.removeFromLibrary(item.asset.source.portableIdentity.assetID)
+                    try await portableLibrary.removeFromLibraryOffMain(item.asset.source.portableIdentity.assetID)
                 } catch PortablePackageTrashError.alreadyRemoved {
                     // Membership is already tombstoned by an earlier, partially completed removal.
                     // Removal is idempotent: fall through to finish the edit-record cleanup so the
@@ -192,6 +205,8 @@ final class LibraryDeletionCoordinator {
                     )
                 )
                 deletedIDs.append(candidate.id)
+                // Publish each removal as it lands so the grid shrinks during a large batch.
+                _ = collection.removeItems(with: [candidate.id])
             } catch {
                 failures.append(
                     "Could not remove \(candidate.displayName): " + error.localizedDescription
