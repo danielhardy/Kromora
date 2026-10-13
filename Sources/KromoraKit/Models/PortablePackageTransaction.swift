@@ -237,7 +237,7 @@ final class PortablePackageLease: Sendable {
     static func acquire(
         at packageRoot: URL,
         ownerID: UUID = UUID(),
-        deviceName: String = Host.current().localizedName ?? ProcessInfo.processInfo.hostName,
+        deviceName: String = DeviceName.current(),
         processID: Int32 = ProcessInfo.processInfo.processIdentifier,
         writerHostID: String? = nil,
         processStartedAt: String? = nil,
