@@ -506,7 +506,10 @@ final class ExportCoordinator {
             onStatus?("Exporting \(batchCompleted) of \(total)… \(item.name)")
             if let sourceAccess = await Self.sourceAccess(for: item) {
                 let source = sourceAccess.source
-                let documentResolution = await resolvedDocument(for: item, fallback: document)
+                let itemAssetID = await item.resolvedAssetID()
+                let documentResolution = await resolvedDocument(
+                    for: item, assetID: itemAssetID, fallback: document
+                )
                 guard !Task.isCancelled, !batchCancellationRequested else {
                     cancelled = true
                     break
@@ -545,7 +548,7 @@ final class ExportCoordinator {
                     var interval = KromoraObservability.begin(.export, source: source, quality: .export)
                     defer { interval.end() }
                     let data = try await exportEngine.render(RenderRequest(
-                        source: source, assetID: await item.resolvedAssetID(), document: itemDocument, lut: itemLUT,
+                        source: source, assetID: itemAssetID, document: itemDocument, lut: itemLUT,
                         quality: .export,
                         output: .encoded(
                             format: options.format, quality: CGFloat(options.quality)
@@ -719,10 +722,10 @@ final class ExportCoordinator {
     }
 
     private func resolvedDocument(
-        for item: BatchItem, fallback: EditDocument
+        for item: BatchItem, assetID: PhotoAssetID?, fallback: EditDocument
     ) async -> (document: EditDocument, isPerAsset: Bool) {
         if let document = item.document { return (document, true) }
-        guard let editStore, let assetID = await item.resolvedAssetID() else {
+        guard let editStore, let assetID else {
             return (fallback, false)
         }
         let result = await editStore.load(
