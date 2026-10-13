@@ -322,7 +322,7 @@ struct InfoInspectorView: View {
                             .contentShape(Rectangle())
                             .padding(.horizontal, 6)
                             .padding(.vertical, 4)
-                            .background(isCurrent ? Color.accentColor.opacity(0.12) : .clear)
+                            .background(isCurrent ? KromoraTheme.primaryAccent.opacity(0.12) : .clear)
                             .clipShape(RoundedRectangle(cornerRadius: 5))
                         }
                         .buttonStyle(.plain)
@@ -428,7 +428,7 @@ struct InfoInspectorView: View {
                         .contentShape(Rectangle())
                         .background {
                             if isSelected {
-                                Color.accentColor.opacity(0.2)
+                                KromoraTheme.primaryAccent.opacity(0.2)
                             }
                         }
                 }

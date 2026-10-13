@@ -354,7 +354,7 @@ struct InspectorAdvancedBand<Content: View>: View {
         .padding(.horizontal, InspectorStyle.contentInset)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.black.opacity(0.22))
+        .background(KromoraTheme.advancedBand)
         .overlay(alignment: .top) { Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1) }
         .overlay(alignment: .bottom) { Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1) }
         .padding(.horizontal, -InspectorStyle.contentInset)

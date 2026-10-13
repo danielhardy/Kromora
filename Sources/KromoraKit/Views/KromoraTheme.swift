@@ -9,7 +9,13 @@ import SwiftUI
 /// surfaces; image-analysis canvases have their own explicitly scoped colors.
 enum KromoraTheme {
     // Surface roles for the editor shell. Each one is a dynamic AppKit color, so it follows the
-    // window appearance: system light, system dark, or the Settings "Always dark mode" override.
+    // window appearance: system light, system dark, or the Settings Light or Dark override.
+    //
+    // Dark appearance is a graphite ladder, darkest to lightest: canvas #141414, secondary
+    // chrome #222222, inspector #2A2A2A, toolbar #323232. Large adjacent planes differ by at
+    // least one step, and none is flat black. Native materials are reserved for floating
+    // overlays (badges, capsules) that sit over photo content; large panes stay opaque so
+    // labels and analysis plots keep a stable contrast backdrop.
     //
     // - Toolbar: the lightest chrome band.
     // - Secondary chrome: source browser and library. A step lighter than the canvas in
@@ -46,7 +52,7 @@ enum KromoraTheme {
         effectiveAppearance.performAsCurrentDrawingAppearance {
             color = primaryAccentColor.usingColorSpace(.deviceRGB)
         }
-        return color ?? NSColor(srgbRed: 0.616, green: 0.341, blue: 0.220, alpha: 1)
+        return color ?? NSColor(srgbRed: 0.722, green: 0.388, blue: 0.227, alpha: 1)
     }
 
     /// Quiet semantic surface for chrome that supports the canvas without competing with it.
@@ -86,7 +92,7 @@ enum KromoraTheme {
         effectiveAppearance.performAsCurrentDrawingAppearance {
             color = secondaryChromeNSColor.usingColorSpace(.deviceRGB)
         }
-        return color ?? NSColor(srgbRed: 0.925, green: 0.910, blue: 0.882, alpha: 1)
+        return color ?? NSColor(srgbRed: 0.949, green: 0.937, blue: 0.918, alpha: 1)
     }
 
     /// Dedicated editor surface color. On this macOS release the system window, control, and
@@ -112,10 +118,10 @@ enum KromoraTheme {
         name: NSColor.Name("KromoraToolbarChrome")
     ) { appearance in
         let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        // Dark matches the lighter Xcode toolbar band. Light stays near the system window.
+        // Dark is the lightest graphite step. Light stays near the system window.
         return isDark
-            ? NSColor(srgbRed: 74.0 / 255.0, green: 74.0 / 255.0, blue: 74.0 / 255.0, alpha: 1)
-            : NSColor(calibratedWhite: 0.96, alpha: 1)
+            ? NSColor(srgbRed: 50.0 / 255.0, green: 50.0 / 255.0, blue: 50.0 / 255.0, alpha: 1)
+            : NSColor(srgbRed: 249 / 255, green: 249 / 255, blue: 249 / 255, alpha: 1)
     }
 
     private static let canvasBackgroundNSColor = NSColor(
@@ -124,39 +130,64 @@ enum KromoraTheme {
         let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         // Dark is the recessed editor, darker than the sidebar. Light stays the existing stage.
         return isDark
-            ? NSColor(srgbRed: 38.0 / 255.0, green: 38.0 / 255.0, blue: 38.0 / 255.0, alpha: 1)
-            : NSColor(calibratedWhite: 0.90, alpha: 1)
+            ? NSColor(srgbRed: 20.0 / 255.0, green: 20.0 / 255.0, blue: 20.0 / 255.0, alpha: 1)
+            : NSColor(srgbRed: 238 / 255, green: 238 / 255, blue: 238 / 255, alpha: 1)
     }
 
     private static let inspectorChromeNSColor = NSColor(
         name: NSColor.Name("KromoraInspectorChrome")
     ) { appearance in
         let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        // Light matches the toolbar. Dark stays the sidebar step, not the toolbar band.
+        // Light matches the toolbar. Dark sits between the sidebar and the toolbar band.
         return isDark
-            ? NSColor(srgbRed: 52.0 / 255.0, green: 52.0 / 255.0, blue: 52.0 / 255.0, alpha: 1)
-            : NSColor(calibratedWhite: 0.96, alpha: 1)
+            ? NSColor(srgbRed: 42.0 / 255.0, green: 42.0 / 255.0, blue: 42.0 / 255.0, alpha: 1)
+            : NSColor(srgbRed: 249 / 255, green: 249 / 255, blue: 249 / 255, alpha: 1)
     }
 
     private static let secondaryChromeNSColor = NSColor(
         name: NSColor.Name("KromoraSecondaryChrome")
     ) { appearance in
         let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        // Light: #ECE8E1, a quiet warm neutral above the canvas.
-        // Dark: a sidebar step between the canvas and the toolbar.
+        // Light: #F2EFEA, a quiet warm neutral above the canvas.
+        // Dark: a sidebar step between the canvas and the inspector.
         return isDark
-            ? NSColor(srgbRed: 52.0 / 255.0, green: 52.0 / 255.0, blue: 52.0 / 255.0, alpha: 1)
-            : NSColor(srgbRed: 236 / 255, green: 232 / 255, blue: 225 / 255, alpha: 1)
+            ? NSColor(srgbRed: 34.0 / 255.0, green: 34.0 / 255.0, blue: 34.0 / 255.0, alpha: 1)
+            : NSColor(srgbRed: 242 / 255, green: 239 / 255, blue: 234 / 255, alpha: 1)
     }
 
     private static let primaryAccentColor = NSColor(
         name: NSColor.Name("KromoraPrimaryAccent")
     ) { appearance in
         let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        // Dark: #CE865C (RGB 206, 134, 92), light: #9D5738 (RGB 157, 87, 56).
+        // Dark: #CE865C (RGB 206, 134, 92), light: #B8633A (RGB 184, 99, 58).
         return isDark
             ? NSColor(srgbRed: 206 / 255, green: 134 / 255, blue: 92 / 255, alpha: 1)
-            : NSColor(srgbRed: 157 / 255, green: 87 / 255, blue: 56 / 255, alpha: 1)
+            : NSColor(srgbRed: 184 / 255, green: 99 / 255, blue: 58 / 255, alpha: 1)
+    }
+
+    /// Active adjustment-row labels. Light appearance reads as enabled text; dark keeps the
+    /// system secondary label. Genuinely disabled values keep system tertiary styling.
+    static var adjustmentLabel: Color {
+        Color(nsColor: adjustmentLabelNSColor)
+    }
+
+    static func resolvedAdjustmentLabelColor(for appearance: NSAppearance? = nil) -> NSColor {
+        let effectiveAppearance = appearance ?? NSAppearance(named: .aqua)!
+        var color: NSColor?
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            color = adjustmentLabelNSColor.usingColorSpace(.deviceRGB)
+        }
+        return color ?? NSColor(white: 0.15, alpha: 1)
+    }
+
+    private static let adjustmentLabelNSColor = NSColor(
+        name: NSColor.Name("KromoraAdjustmentLabel")
+    ) { appearance in
+        let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        // Light: #3C3C3C on the pale inspector (about 10:1), still a step below primary text.
+        return isDark
+            ? NSColor.secondaryLabelColor
+            : NSColor(srgbRed: 60 / 255, green: 60 / 255, blue: 60 / 255, alpha: 1)
     }
 
     static var controlBackground: Color {
@@ -166,10 +197,62 @@ enum KromoraTheme {
     /// Deliberately dark backdrop for histogram and tone-curve plots. The plot
     /// content uses bright/primary colors so the analysis remains readable in
     /// either system appearance without darkening its containing inspector.
-    static let analysisBackground = Color.black.opacity(0.25)
-    static let analysisBorder = Color.white.opacity(0.08)
-    static let analysisGrid = Color.white.opacity(0.10)
-    static let analysisReference = Color.white.opacity(0.25)
+    /// Light appearance uses a lighter tint so the plot does not read as a heavy gray block.
+    static var analysisBackground: Color {
+        Color(nsColor: analysisBackgroundNSColor)
+    }
+
+    static func resolvedAnalysisBackgroundColor(for appearance: NSAppearance? = nil) -> NSColor {
+        let effectiveAppearance = appearance ?? NSAppearance(named: .aqua)!
+        var color: NSColor?
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            color = analysisBackgroundNSColor.usingColorSpace(.deviceRGB)
+        }
+        return color ?? NSColor.black.withAlphaComponent(0.25)
+    }
+
+    private static let analysisBackgroundNSColor = NSColor(
+        name: NSColor.Name("KromoraAnalysisBackground")
+    ) { appearance in
+        let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return NSColor.black.withAlphaComponent(isDark ? 0.25 : 0.16)
+    }
+    /// Light appearance draws these in dark ink, because the light plot backdrop is pale and
+    /// white lines would vanish; dark appearance keeps the original white lines.
+    static let analysisBorder = analysisLine(darkAlpha: 0.08, lightAlpha: 0.14)
+    static let analysisGrid = analysisLine(darkAlpha: 0.10, lightAlpha: 0.16)
+    static let analysisReference = analysisLine(darkAlpha: 0.25, lightAlpha: 0.38)
+
+    /// Tint behind the "Advanced" bands (Sharpening, Vignette, Grain, Noise reduction, ...).
+    /// Light appearance is a faint wash so the band stays lighter than the inspector's heavy plots.
+    static var advancedBand: Color {
+        Color(nsColor: advancedBandNSColor)
+    }
+
+    static func resolvedAdvancedBandColor(for appearance: NSAppearance? = nil) -> NSColor {
+        let effectiveAppearance = appearance ?? NSAppearance(named: .aqua)!
+        var color: NSColor?
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            color = advancedBandNSColor.usingColorSpace(.deviceRGB)
+        }
+        return color ?? NSColor.black.withAlphaComponent(0.035)
+    }
+
+    private static let advancedBandNSColor = NSColor(
+        name: NSColor.Name("KromoraAdvancedBand")
+    ) { appearance in
+        let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return NSColor.black.withAlphaComponent(isDark ? 0.22 : 0.035)
+    }
+
+    private static func analysisLine(darkAlpha: CGFloat, lightAlpha: CGFloat) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            return isDark
+                ? NSColor.white.withAlphaComponent(darkAlpha)
+                : NSColor.black.withAlphaComponent(lightAlpha)
+        })
+    }
 }
 
 extension View {

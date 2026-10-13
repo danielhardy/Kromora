@@ -9,11 +9,12 @@ struct ResettableAdjustmentLabel: View {
     let title: String
     let reset: () -> Void
     var resetActionTitle: String = "Reset to neutral"
+    @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
         Text(title)
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(isEnabled ? KromoraTheme.adjustmentLabel : Color.secondary)
             .contentShape(Rectangle())
             .onTapGesture(count: 2, perform: reset)
             .accessibilityElement()
