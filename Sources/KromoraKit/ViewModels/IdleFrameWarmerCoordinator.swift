@@ -118,7 +118,7 @@ protocol IdleFrameWarmerDestination: AnyObject {
     /// Whether a plan captured at `generation` still matches the published library.
     func idleFrameWarmerPlanIsCurrent(generation: UInt64) -> Bool
     /// Materializes one bounded page of ranked entries; ineligible or removed assets are omitted.
-    func idleFrameWarmerCandidates(for entries: [IdleFrameWarmPlanEntry]) -> [IdleFrameWarmCandidate]
+    func idleFrameWarmerCandidates(for entries: [IdleFrameWarmPlanEntry]) async -> [IdleFrameWarmCandidate]
     var idleFrameWarmerActivePortableAssetID: PortablePhotoAssetID? { get }
     var idleFrameWarmerVisiblePortableAssetIDs: Set<PortablePhotoAssetID> { get }
     func idleFrameWarmerSavedLookSignature(for assetID: PhotoAssetID) -> LookSignature?
@@ -281,7 +281,11 @@ final class IdleFrameWarmerCoordinator {
             }
             let slice = Array(plan[pageStart..<min(plan.count, pageStart + pageSize)])
             pageStart += slice.count
-            let candidates = destination.idleFrameWarmerCandidates(for: slice)
+            let candidates = await destination.idleFrameWarmerCandidates(for: slice)
+            guard canContinue(generation: scheduledGeneration) else { return .finished }
+            guard destination.idleFrameWarmerPlanIsCurrent(generation: input.generation) else {
+                return .stale
+            }
             let skipped = slice.count - candidates.count
             progress = IdleFrameWarmerProgress(
                 done: progress.done, remaining: max(0, progress.remaining - skipped)

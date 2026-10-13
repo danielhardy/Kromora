@@ -66,49 +66,38 @@ struct ImageSource: Sendable, Equatable {
     /// cache identity must continue to use the dynamic `cacheFingerprint` below.
     let traceToken: String
 
+    /// Pure memberwise initializer: no stat, no read, no hash. The identity and the file-change
+    /// signature are already resolved by the caller — `resolve` for a file, the `data:` initializer
+    /// for bytes — so constructing a source is safe on any thread, including the main actor.
     init(
         backing: Backing,
         kind: Kind,
         nativeExtent: CGSize,
-        dataFingerprint: String? = nil,
-        portableIdentity: PortablePhotoIdentity? = nil,
-        existingFileChangeSignature: PhotoSourceFingerprint? = nil
+        portableIdentity: PortablePhotoIdentity,
+        fileChangeSignature: PhotoSourceFingerprint? = nil,
+        dataFingerprint: String? = nil
     ) {
         self.backing = backing
         self.kind = kind
         self.nativeExtent = nativeExtent
-        if case .data(let data) = backing {
-            self.dataFingerprint = dataFingerprint ?? PhotoAssetID.contentDigest(data)
-        } else {
-            self.dataFingerprint = nil
-        }
-        if case .url(let url) = backing {
-            self.fileChangeSignature = PhotoSourceFingerprint.file(at: url)
-        } else {
-            self.fileChangeSignature = nil
-        }
-        self.portableIdentity = Self.makePortableIdentity(
+        self.portableIdentity = portableIdentity
+        self.fileChangeSignature = fileChangeSignature
+        self.dataFingerprint = dataFingerprint
+        self.traceToken = Self.makeTraceToken(from: Self.fingerprintForTrace(
             backing: backing, kind: kind, nativeExtent: nativeExtent,
-            dataFingerprint: self.dataFingerprint, existing: portableIdentity,
-            existingFileChangeSignature: existingFileChangeSignature,
-            currentFileChangeSignature: self.fileChangeSignature
-        )
-        self.traceToken = Self.makeTraceToken(from: Self.fingerprintForTrace(backing: backing,
-                                                                              kind: kind,
-                                                                              nativeExtent: nativeExtent,
-                                                                              dataFingerprint: self.dataFingerprint))
+            dataFingerprint: dataFingerprint, fileChangeSignature: fileChangeSignature
+        ))
     }
 
-    /// A file-backed source, classified by extension — the same rule `ImageDecoder.load` uses,
-    /// so a file cannot be RAW for one and standard for the other.
+    /// A file-backed source whose identity the caller already resolved off the main actor.
     init(
-        url: URL, nativeExtent: CGSize, portableIdentity: PortablePhotoIdentity? = nil,
-        existingFileChangeSignature: PhotoSourceFingerprint? = nil
+        url: URL, nativeExtent: CGSize, portableIdentity: PortablePhotoIdentity,
+        fileChangeSignature: PhotoSourceFingerprint?
     ) {
         self.init(
             backing: .url(url), kind: Self.kind(forExtension: url.pathExtension),
             nativeExtent: nativeExtent, portableIdentity: portableIdentity,
-            existingFileChangeSignature: existingFileChangeSignature
+            fileChangeSignature: fileChangeSignature
         )
     }
 
@@ -117,18 +106,129 @@ struct ImageSource: Sendable, Equatable {
     /// There is no filename to inspect here, so the UTI ImageIO reports for the buffer decides. This
     /// is what makes a RAW dropped in as a payload — or a Photos item delivered as one — take the
     /// RAW path rather than being misread as a standard image.
+    ///
+    /// The bytes are already in memory, so this does no file I/O. It does digest them unless the
+    /// import boundary supplies `dataFingerprint`; Photos imports always do.
     init(
         data: Data, nativeExtent: CGSize, dataFingerprint: String? = nil,
         portableIdentity: PortablePhotoIdentity? = nil
     ) {
+        let kind = Self.kind(forData: data)
+        let fingerprint = dataFingerprint ?? PhotoAssetID.contentDigest(data)
         self.init(
-            backing: .data(data), kind: Self.kind(forData: data), nativeExtent: nativeExtent,
-            dataFingerprint: dataFingerprint, portableIdentity: portableIdentity
+            backing: .data(data), kind: kind, nativeExtent: nativeExtent,
+            portableIdentity: Self.dataIdentity(
+                data: data, kind: kind, nativeExtent: nativeExtent, existing: portableIdentity
+            ),
+            dataFingerprint: fingerprint
         )
     }
 
     init(preparation: ImageSourcePreparation) {
         self = preparation.source
+    }
+
+    // MARK: - Identity resolution
+
+    /// Everything needed to resolve a source, as a value that can cross to a background context.
+    struct Request: Sendable, Equatable {
+        let backing: Backing
+        let nativeExtent: CGSize
+        let portableIdentity: PortablePhotoIdentity?
+        let existingFileChangeSignature: PhotoSourceFingerprint?
+        let dataFingerprint: String?
+
+        init(
+            url: URL, nativeExtent: CGSize, portableIdentity: PortablePhotoIdentity? = nil,
+            existingFileChangeSignature: PhotoSourceFingerprint? = nil
+        ) {
+            self.backing = .url(url)
+            self.nativeExtent = nativeExtent
+            self.portableIdentity = portableIdentity
+            self.existingFileChangeSignature = existingFileChangeSignature
+            self.dataFingerprint = nil
+        }
+
+        init(
+            data: Data, nativeExtent: CGSize, dataFingerprint: String? = nil,
+            portableIdentity: PortablePhotoIdentity? = nil
+        ) {
+            self.backing = .data(data)
+            self.nativeExtent = nativeExtent
+            self.portableIdentity = portableIdentity
+            self.existingFileChangeSignature = nil
+            self.dataFingerprint = dataFingerprint
+        }
+    }
+
+    /// Resolve a source's identity off the main actor: stat the file, take its bounded signature,
+    /// and — only when neither a browsing placeholder nor an unchanged snapshot lets the existing
+    /// identity be reused — stream the whole file through SHA-256.
+    ///
+    /// Never fails: an unreadable file resolves to an "unavailable" identity so the caller's
+    /// decode reports the real error.
+    @concurrent
+    static func resolve(
+        url: URL, nativeExtent: CGSize, portableIdentity: PortablePhotoIdentity? = nil,
+        existingFileChangeSignature: PhotoSourceFingerprint? = nil
+    ) async -> ImageSource {
+        resolveBlocking(
+            url: url, nativeExtent: nativeExtent, portableIdentity: portableIdentity,
+            existingFileChangeSignature: existingFileChangeSignature
+        )
+    }
+
+    @concurrent
+    static func resolve(_ request: Request) async -> ImageSource {
+        resolveBlocking(request)
+    }
+
+    static func resolveBlocking(_ request: Request) -> ImageSource {
+        switch request.backing {
+        case .url(let url):
+            return resolveBlocking(
+                url: url, nativeExtent: request.nativeExtent,
+                portableIdentity: request.portableIdentity,
+                existingFileChangeSignature: request.existingFileChangeSignature
+            )
+        case .data(let data):
+            return ImageSource(
+                data: data, nativeExtent: request.nativeExtent,
+                dataFingerprint: request.dataFingerprint,
+                portableIdentity: request.portableIdentity
+            )
+        }
+    }
+
+    /// The synchronous body of `resolve`. It performs blocking file I/O, so it is for background
+    /// contexts and for tests that need a source without an `await`; UI code uses `resolve`.
+    static func resolveBlocking(
+        url: URL, nativeExtent: CGSize, portableIdentity existing: PortablePhotoIdentity? = nil,
+        existingFileChangeSignature: PhotoSourceFingerprint? = nil
+    ) -> ImageSource {
+        let kind = kind(forExtension: url.pathExtension)
+        let current = PhotoSourceFingerprint.file(at: url)
+        let identity = fileIdentity(
+            url: url, kind: kind, nativeExtent: nativeExtent, existing: existing,
+            existingFileChangeSignature: existingFileChangeSignature,
+            currentFileChangeSignature: current
+        )
+        return ImageSource(
+            backing: .url(url), kind: kind, nativeExtent: nativeExtent,
+            portableIdentity: identity, fileChangeSignature: current
+        )
+    }
+
+    /// The same bytes with decoder-authoritative dimensions. Pure: the identity and change
+    /// signature carry over, so preparing a source never rereads or rehashes the file.
+    func withNativeExtent(_ extent: CGSize) -> ImageSource {
+        ImageSource(
+            backing: backing, kind: kind, nativeExtent: extent,
+            portableIdentity: cacheIdentity.with(
+                geometry: PhotoPixelDimensions(width: Int(extent.width), height: Int(extent.height))
+            ),
+            fileChangeSignature: fileChangeSignature, dataFingerprint: dataFingerprint
+        )
     }
 
     // MARK: - Classification
@@ -189,107 +289,106 @@ struct ImageSource: Sendable, Equatable {
         return PortablePhotoIdentity(assetID: portableIdentity.assetID, sourceFingerprint: fingerprint)
     }
 
-    private static func makePortableIdentity(
-        backing: Backing, kind: Kind, nativeExtent: CGSize, dataFingerprint: String?,
-        existing: PortablePhotoIdentity?,
-        existingFileChangeSignature: PhotoSourceFingerprint?,
-        currentFileChangeSignature: PhotoSourceFingerprint?
-    ) -> PortablePhotoIdentity {
-        let geometry = nativeExtent.width > 0 && nativeExtent.height > 0
+    private static func geometry(of nativeExtent: CGSize) -> PhotoPixelDimensions? {
+        nativeExtent.width > 0 && nativeExtent.height > 0
             ? PhotoPixelDimensions(width: Int(nativeExtent.width), height: Int(nativeExtent.height))
             : nil
+    }
+
+    private static func dataIdentity(
+        data: Data, kind: Kind, nativeExtent: CGSize, existing: PortablePhotoIdentity?
+    ) -> PortablePhotoIdentity {
+        let geometry = geometry(of: nativeExtent)
+        let fingerprint = PortablePhotoSourceFingerprint(
+            contentHash: PortablePhotoSourceFingerprint.contentHash(of: data),
+            sourceRevision: existing?.sourceFingerprint.sourceRevision ?? 0,
+            decoderVersion: existing?.sourceFingerprint.decoderVersion ?? "imageio-\(kind)-v1",
+            geometry: geometry
+        )
+        let assetID = existing?.assetID
+            ?? PortablePhotoAssetID.compatibility(from: PhotoAssetID.data(data))
+        return PortablePhotoIdentity(assetID: assetID, sourceFingerprint: fingerprint)
+    }
+
+    /// Resolve a file's identity. Three branches, cheapest first; only the last reads the file.
+    private static func fileIdentity(
+        url: URL, kind: Kind, nativeExtent: CGSize, existing: PortablePhotoIdentity?,
+        existingFileChangeSignature: PhotoSourceFingerprint?,
+        currentFileChangeSignature: PhotoSourceFingerprint
+    ) -> PortablePhotoIdentity {
+        let geometry = geometry(of: nativeExtent)
+        let decoderVersion = existing?.sourceFingerprint.decoderVersion ?? "imageio-\(kind)-v1"
         let fingerprint: PortablePhotoSourceFingerprint
-        switch backing {
-        case .data(let data):
-            fingerprint = PortablePhotoSourceFingerprint(
-                contentHash: PortablePhotoSourceFingerprint.contentHash(of: data),
-                sourceRevision: existing?.sourceFingerprint.sourceRevision ?? 0,
-                decoderVersion: existing?.sourceFingerprint.decoderVersion ?? "imageio-\(kind)-v1",
-                geometry: geometry
-            )
-        case .url(let url):
-            let decoderVersion = existing?.sourceFingerprint.decoderVersion
-                ?? "imageio-\(kind)-v1"
-            if let existing, existingFileChangeSignature?.isBrowsingObservation == true,
-               !existing.sourceFingerprint.isBrowsingPlaceholder {
-                // A browsing asset keeps the content hash computed when it entered the library
-                // but a placeholder change signature, so there is nothing to compare and the
-                // match test below can never succeed. Rehashing the whole file here ran on the
-                // main actor (about 50 ms for a 126 MB RAW) for every thumbnail request,
-                // prefetch and idle-warm candidate. The authoritative check against the record's
-                // signature happens when the photo is opened and prepared off the main actor.
-                fingerprint = existing.sourceFingerprint.with(geometry: geometry)
-            } else if let existing, let existingFileChangeSignature,
-               let currentFileChangeSignature,
-               // A signature that came from the package has whole-second dates, so exact equality
-               // never matched a real file and every open hashed the whole file on the main actor.
-               existingFileChangeSignature.isSameFileSnapshot(as: currentFileChangeSignature) {
-                fingerprint = existing.sourceFingerprint.with(geometry: geometry)
-            } else {
-                // The expensive path: it reads and hashes the whole file. It runs on whatever
-                // thread builds the source, which during a photo switch is the main actor, so say
-                // so in the log instead of leaving it to be inferred from a stall.
-                let hashStart = DispatchTime.now().uptimeNanoseconds
-                defer {
-                    let ms = Double(DispatchTime.now().uptimeNanoseconds &- hashStart) / 1_000_000
-                    KromoraObservability.photoSwitchPhase(
-                        "wholeFileRehash", since: nil,
-                        detail: String(
-                            format: "hashMs=%.1f hadStoredSignature=%@ mainThread=%@", ms,
-                            existingFileChangeSignature == nil ? "false" : "true",
-                            Thread.isMainThread ? "true" : "false"
-                        )
-                    )
-                }
-                fingerprint = (try? PortablePhotoSourceFingerprint.file(
-                    at: url,
-                    sourceRevision: existing?.sourceFingerprint.sourceRevision ?? 0,
-                    decoderVersion: decoderVersion, geometry: geometry
-                )) ?? existing?.sourceFingerprint.with(geometry: geometry)
-                    ?? PortablePhotoSourceFingerprint(
-                        contentHash: PortablePhotoSourceFingerprint.contentHash(
-                            of: Data(("unavailable:" + PhotoAssetID.file(url).raw).utf8)
-                        ),
-                        decoderVersion: "unavailable-\(kind)-v1", geometry: geometry
-                    )
-            }
-        }
-        let fallbackAssetID: PortablePhotoAssetID
-        if let existing {
-            fallbackAssetID = existing.assetID
+        // The content hash computed by the expensive path, kept so a source with no existing
+        // identity derives its compatibility asset ID from it instead of hashing a second time.
+        var hashed: PortablePhotoSourceFingerprint?
+        if let existing, existingFileChangeSignature?.isBrowsingObservation == true,
+           !existing.sourceFingerprint.isBrowsingPlaceholder {
+            // A browsing asset keeps the content hash computed when it entered the library
+            // but a placeholder change signature, so there is nothing to compare and the
+            // match test below can never succeed. The authoritative check against the record's
+            // signature happens when the photo is opened and prepared.
+            fingerprint = existing.sourceFingerprint.with(geometry: geometry)
+        } else if let existing, let existingFileChangeSignature,
+                  // A signature that came from the package has whole-second dates, so exact
+                  // equality never matched a real file and every open hashed the whole file.
+                  existingFileChangeSignature.isSameFileSnapshot(as: currentFileChangeSignature) {
+            fingerprint = existing.sourceFingerprint.with(geometry: geometry)
         } else {
-            switch backing {
-            case .url(let url):
-                let fallbackFingerprint = (try? PortablePhotoSourceFingerprint.file(
-                    at: url, decoderVersion: "imageio-\(kind)-v1", geometry: geometry
-                )) ?? PortablePhotoSourceFingerprint(
-                    contentHash: PortablePhotoSourceFingerprint.contentHash(
-                        of: Data("unavailable".utf8)
-                    ), decoderVersion: "unavailable-\(kind)-v1", geometry: geometry
+            // The expensive path: it streams and hashes the whole file. `resolve` runs it off the
+            // main actor; the log says which thread it actually ran on.
+            let hashStart = DispatchTime.now().uptimeNanoseconds
+            defer {
+                let ms = Double(DispatchTime.now().uptimeNanoseconds &- hashStart) / 1_000_000
+                KromoraObservability.photoSwitchPhase(
+                    "wholeFileRehash", since: nil,
+                    detail: String(
+                        format: "hashMs=%.1f hadStoredSignature=%@ mainThread=%@", ms,
+                        existingFileChangeSignature == nil ? "false" : "true",
+                        Thread.isMainThread ? "true" : "false"
+                    )
                 )
-                fallbackAssetID = PortablePhotoAssetID.compatibility(from: fallbackFingerprint)
-            case .data(let data):
-                fallbackAssetID = PortablePhotoAssetID.compatibility(from: PhotoAssetID.data(data))
             }
+            hashed = try? PortablePhotoSourceFingerprint.file(
+                at: url, sourceRevision: existing?.sourceFingerprint.sourceRevision ?? 0,
+                decoderVersion: decoderVersion, geometry: geometry
+            )
+            fingerprint = hashed ?? existing?.sourceFingerprint.with(geometry: geometry)
+                ?? PortablePhotoSourceFingerprint(
+                    contentHash: PortablePhotoSourceFingerprint.contentHash(
+                        of: Data(("unavailable:" + PhotoAssetID.file(url).raw).utf8)
+                    ),
+                    decoderVersion: "unavailable-\(kind)-v1", geometry: geometry
+                )
         }
-        return PortablePhotoIdentity(assetID: fallbackAssetID, sourceFingerprint: fingerprint)
+        let assetID: PortablePhotoAssetID
+        if let existing {
+            assetID = existing.assetID
+        } else {
+            let compatibilityFingerprint = hashed ?? PortablePhotoSourceFingerprint(
+                contentHash: PortablePhotoSourceFingerprint.contentHash(of: Data("unavailable".utf8)),
+                decoderVersion: "unavailable-\(kind)-v1", geometry: geometry
+            )
+            assetID = PortablePhotoAssetID.compatibility(from: compatibilityFingerprint)
+        }
+        return PortablePhotoIdentity(assetID: assetID, sourceFingerprint: fingerprint)
     }
 
     private static func fingerprintForTrace(backing: Backing, kind: Kind, nativeExtent: CGSize,
-                                            dataFingerprint: String?) -> String {
+                                            dataFingerprint: String?,
+                                            fileChangeSignature: PhotoSourceFingerprint?) -> String {
         let extent = "\(Double(nativeExtent.width).bitPattern):\(Double(nativeExtent.height).bitPattern)"
         switch backing {
         case .data:
             return "data:\(dataFingerprint ?? "missing"):\(kind):\(extent)"
         case .url(let url):
-            // This is intentionally performed once, at source-session creation. Subsequent event
-            // logging uses the stored token, while cache/source replacement checks remain dynamic.
-            let values = try? url.resourceValues(forKeys: [
-                .fileSizeKey, .contentModificationDateKey, .fileResourceIdentifierKey
-            ])
-            let size = values?.fileSize.map(String.init) ?? "missing"
-            let modified = values?.contentModificationDate?.timeIntervalSince1970.description ?? "missing"
-            let resourceID = values?.fileResourceIdentifier.map { String(describing: $0) } ?? "missing"
+            // Derived from the signature captured at resolution, so building the token never
+            // touches the file. Subsequent event logging uses the stored token, while
+            // cache/source replacement checks remain dynamic.
+            let size = fileChangeSignature?.byteCount.map(String.init) ?? "missing"
+            let modified = fileChangeSignature?.modificationDate?.timeIntervalSince1970.description
+                ?? "missing"
+            let resourceID = fileChangeSignature?.resourceIdentifier ?? "missing"
             return "url:\(url.standardizedFileURL.path):\(size):\(modified):\(resourceID):\(kind):\(extent)"
         }
     }

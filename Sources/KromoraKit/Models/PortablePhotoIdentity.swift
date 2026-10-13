@@ -69,7 +69,7 @@ struct PortablePhotoSourceFingerprint: Codable, Hashable, Sendable, Equatable {
         geometry: PhotoPixelDimensions? = nil
     ) throws -> Self {
         Self(
-            contentHash: Self.contentHash(of: try Data(contentsOf: url)),
+            contentHash: try Self.contentHash(ofFileAt: url),
             sourceRevision: sourceRevision,
             decoderVersion: decoderVersion,
             geometry: geometry
@@ -134,6 +134,23 @@ struct PortablePhotoSourceFingerprint: Codable, Hashable, Sendable, Equatable {
 
     static func contentHash(of data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Chunk size for streaming a file through SHA-256: large enough to keep the read syscalls
+    /// cheap, small enough that hashing a 100+ MB RAW never holds more than one chunk in memory.
+    static let streamingChunkSize = 4 * 1024 * 1024
+
+    /// The SHA-256 of a file's bytes, read incrementally. Equal to `contentHash(of:)` for the same
+    /// bytes without ever materialising the whole file. This blocks on disk I/O, so call it from a
+    /// background context (`ImageSource.resolve` does).
+    static func contentHash(ofFileAt url: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while let chunk = try handle.read(upToCount: streamingChunkSize), !chunk.isEmpty {
+            hasher.update(data: chunk)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     private static func escape(_ value: String) -> String {

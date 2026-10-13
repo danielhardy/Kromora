@@ -143,7 +143,7 @@ final class PreviewAdmissionCoordinator {
     private var pendingPresentationHistogram: PendingPresentationHistogram?
     private let histogramJobID = ImageWorkScheduler.JobID("histogram")
     private struct AdjacentPreviewCandidate: Sendable {
-        let source: ImageSource
+        let sourceRequest: ImageSource.Request
         let inMemoryDocument: EditDocument?
         let reference: EditSourceReference
     }
@@ -1066,14 +1066,14 @@ final class PreviewAdmissionCoordinator {
                     dimensions.width > 0, dimensions.height > 0
                 else { return nil }
                 let extent = CGSize(width: dimensions.width, height: dimensions.height)
-                let source: ImageSource
+                let sourceRequest: ImageSource.Request
                 if let url = item.url {
-                    source = ImageSource(
+                    sourceRequest = ImageSource.Request(
                         url: url, nativeExtent: extent,
                         portableIdentity: item.asset.source.portableIdentity,
                         existingFileChangeSignature: item.asset.source.fingerprint)
                 } else if let data = item.imageData {
-                    source = ImageSource(
+                    sourceRequest = ImageSource.Request(
                         data: data, nativeExtent: extent,
                         dataFingerprint: item.dataFingerprint,
                         portableIdentity: item.asset.source.portableIdentity)
@@ -1081,7 +1081,8 @@ final class PreviewAdmissionCoordinator {
                     return nil
                 }
                 return AdjacentPreviewCandidate(
-                    source: source, inMemoryDocument: destination.admissionDocument(for: item.id),
+                    sourceRequest: sourceRequest,
+                    inMemoryDocument: destination.admissionDocument(for: item.id),
                     reference: destination.admissionSourceReference(for: item)
                 )
             }
@@ -1134,6 +1135,11 @@ final class PreviewAdmissionCoordinator {
             else { return }
             let coldCandidates = candidates.filter { $0.inMemoryDocument == nil }
             let storedResults = await editStore.load(for: coldCandidates.map(\.reference))
+            var sources: [ImageSource] = []
+            sources.reserveCapacity(candidates.count)
+            for candidate in candidates {
+                sources.append(await ImageSource.resolve(candidate.sourceRequest))
+            }
             guard !Task.isCancelled,
                 destination.admissionActiveAssetID == assetID,
                 destination.admissionSourceRevision == revision
@@ -1141,7 +1147,7 @@ final class PreviewAdmissionCoordinator {
             var storedResultIndex = 0
             var requests: [RenderRequest] = []
             requests.reserveCapacity(candidates.count)
-            for candidate in candidates {
+            for (candidate, source) in zip(candidates, sources) {
                 let document: EditDocument
                 if let inMemory = candidate.inMemoryDocument {
                     document = inMemory
@@ -1153,11 +1159,11 @@ final class PreviewAdmissionCoordinator {
                 }
                 requests.append(
                     destination.admissionSettledRequest(
-                        source: candidate.source, assetID: candidate.reference.assetID,
+                        source: source, assetID: candidate.reference.assetID,
                         document: document,
                         lut: destination.admissionResolvedLUT(document.lut.lutID),
                         plan: destination.admissionAdjacentPlan(
-                            for: document, nativeExtent: candidate.source.nativeExtent
+                            for: document, nativeExtent: source.nativeExtent
                         ), canonical: false
                     ))
             }

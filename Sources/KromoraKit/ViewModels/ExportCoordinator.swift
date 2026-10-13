@@ -495,7 +495,7 @@ final class ExportCoordinator {
             }
             batchCurrentItem = item.name
             onStatus?("Exporting \(batchCompleted) of \(total)… \(item.name)")
-            if let sourceAccess = Self.sourceAccess(for: item) {
+            if let sourceAccess = await Self.sourceAccess(for: item) {
                 let source = sourceAccess.source
                 let documentResolution = await resolvedDocument(for: item, fallback: document)
                 guard !Task.isCancelled, !batchCancellationRequested else {
@@ -681,11 +681,11 @@ final class ExportCoordinator {
     /// returns 1.0 regardless. The pipeline reads the decoder's own size anyway, never this field
     /// (`RenderPipeline.developedSource`), so decoding every file up front just to fill it in would
     /// be pure cost.
-    private static func sourceAccess(for item: BatchItem) -> SourceAccess? {
+    private static func sourceAccess(for item: BatchItem) async -> SourceAccess? {
         if let url = item.url {
             let resolved = resolveScopedURL(url: url, bookmarkData: item.bookmarkData)
             return SourceAccess(
-                source: ImageSource(url: resolved, nativeExtent: .zero),
+                source: await ImageSource.resolve(url: resolved, nativeExtent: .zero),
                 url: resolved
             )
         }

@@ -326,12 +326,7 @@ extension RenderEngining {
             extent = try? ImageDecoder.prepareStandard(from: data, name: "import")
         }
         guard let extent else { return nil }
-        return ImageSourcePreparation(source: ImageSource(
-            backing: source.backing, kind: source.kind, nativeExtent: extent,
-            portableIdentity: source.cacheIdentity.with(
-                geometry: PhotoPixelDimensions(width: Int(extent.width), height: Int(extent.height))
-            )
-        ))
+        return ImageSourcePreparation(source: source.withNativeExtent(extent))
     }
 
     func makeCIImage(_ request: RenderRequest) async -> sending CIImage? { nil }

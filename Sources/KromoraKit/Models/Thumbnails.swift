@@ -76,7 +76,7 @@ enum PlatformThumbnailProvider {
     ) -> CGImage? {
         guard maxPixelSize > 0 else { return nil }
         let identity = portableIdentity
-            ?? ImageSource(url: url, nativeExtent: .zero).cacheIdentity
+            ?? ImageSource.resolveBlocking(url: url, nativeExtent: .zero).cacheIdentity
         let key = cacheKey(identity: identity, maxPixelSize: maxPixelSize)
         if let image = cache.value(for: key) {
             KromoraObservability.event(.cacheHit, quality: .thumbnail, detail: "layer=thumbnail")

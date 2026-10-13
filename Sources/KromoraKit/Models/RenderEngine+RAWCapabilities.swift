@@ -21,15 +21,7 @@ extension RenderEngine {
             // The session's filter size is sensor-native; the orientation tag decides the
             // display axes (quarter-turns swap them). The canvas, crop math, and scale
             // factors all work in display space, matching the standard-image path.
-            let preparedSource = ImageSource(
-                backing: source.backing, kind: .raw, nativeExtent: session.orientedNativeSize,
-                portableIdentity: source.cacheIdentity.with(
-                    geometry: PhotoPixelDimensions(
-                        width: Int(session.orientedNativeSize.width),
-                        height: Int(session.orientedNativeSize.height)
-                    )
-                )
-            )
+            let preparedSource = source.withNativeExtent(session.orientedNativeSize)
             return ImageSourcePreparation(source: preparedSource)
         }
     }
@@ -42,12 +34,7 @@ extension RenderEngine {
         case .data(let data):
             extent = try ImageDecoder.prepareStandard(from: data, name: "import")
         }
-        return ImageSourcePreparation(source: ImageSource(
-            backing: source.backing, kind: .standard, nativeExtent: extent,
-            portableIdentity: source.cacheIdentity.with(
-                geometry: PhotoPixelDimensions(width: Int(extent.width), height: Int(extent.height))
-            )
-        ))
+        return ImageSourcePreparation(source: source.withNativeExtent(extent))
     }
 
     /// Read capabilities from the same renderer-owned session used for preparation and preview.

@@ -2218,7 +2218,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         var laps: [String] = []
         cancelIdlePreviewBuild(resetCursor: true)
         laps.append(lap("cancelIdlePreviewBuildMs"))
-        let importPlan = SourceImportPlan(
+        let importPlan = SourceImportDraft(
             name: name, url: url, data: data, assetID: assetID,
             portableIdentity: portableIdentity, fileChangeSignature: fileChangeSignature,
             dataFingerprint: dataFingerprint,
@@ -2258,8 +2258,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             guard let self, !self.isShuttingDown,
                 self.loadRequestGeneration == requestGeneration else { return }
             KromoraObservability.photoSwitchPhase("beginLoadScheduled", since: presentationSelectionUptime)
+            // The file's identity resolves off the main actor; a newer selection supersedes it.
+            let resolvedPlan = await importPlan.resolved()
+            guard !self.isShuttingDown, self.loadRequestGeneration == requestGeneration else { return }
             self.beginLoad(
-                importPlan, previousActiveAssetID: previousActiveAssetID,
+                resolvedPlan, previousActiveAssetID: previousActiveAssetID,
                 presentationSelectionUptime: presentationSelectionUptime
             )
         }
@@ -4956,7 +4959,7 @@ extension AppViewModel: IdleFrameWarmerDestination {
         portableLibrary?.indexGeneration == generation
     }
 
-    func idleFrameWarmerCandidates(for entries: [IdleFrameWarmPlanEntry]) -> [IdleFrameWarmCandidate] {
+    func idleFrameWarmerCandidates(for entries: [IdleFrameWarmPlanEntry]) async -> [IdleFrameWarmCandidate] {
         guard let portableLibrary,
               let assets = try? portableLibrary.browsingAssets(forIDs: entries.map(\.assetID))
         else { return [] }
@@ -4964,30 +4967,40 @@ extension AppViewModel: IdleFrameWarmerDestination {
             assets.map { ($0.source.portableIdentity.assetID, $0) },
             uniquingKeysWith: { first, _ in first }
         )
-        return entries.compactMap { entry in
+        // Gather value inputs on the main actor, then resolve each file's identity off it.
+        var pending: [(entry: IdleFrameWarmPlanEntry, asset: PhotoAsset, url: URL,
+                       identity: PortablePhotoIdentity, extent: CGSize)] = []
+        for entry in entries {
             guard let asset = byID[entry.assetID],
                   let dimensions = asset.dimensions,
                   dimensions.width > 0, dimensions.height > 0,
-                  let url = asset.url else { return nil }
+                  let url = asset.url else { continue }
             let identity = asset.source.portableIdentity
-            guard !identity.sourceFingerprint.isBrowsingPlaceholder else { return nil }
-            let source = ImageSource(
-                url: url, nativeExtent: CGSize(
-                    width: dimensions.width, height: dimensions.height
-                ), portableIdentity: identity,
-                existingFileChangeSignature: asset.source.fingerprint
-            )
-            return IdleFrameWarmCandidate(
-                index: entry.index, assetID: asset.id, source: source,
-                reference: EditSourceReference(
-                    assetID: asset.id, portableIdentity: identity, url: url
-                ),
-                inMemoryDocument: editorDocument.session(for: asset.id)?.document,
-                inMemoryLookSignature: idleFrameWarmerSavedLookSignature(for: asset.id),
-                distanceFromViewport: entry.distanceFromViewport,
-                launchHintRecencyRank: entry.launchHintRecencyRank
-            )
+            guard !identity.sourceFingerprint.isBrowsingPlaceholder else { continue }
+            pending.append((
+                entry, asset, url, identity,
+                CGSize(width: dimensions.width, height: dimensions.height)
+            ))
         }
+        var candidates: [IdleFrameWarmCandidate] = []
+        candidates.reserveCapacity(pending.count)
+        for item in pending {
+            let source = await ImageSource.resolve(
+                url: item.url, nativeExtent: item.extent, portableIdentity: item.identity,
+                existingFileChangeSignature: item.asset.source.fingerprint
+            )
+            candidates.append(IdleFrameWarmCandidate(
+                index: item.entry.index, assetID: item.asset.id, source: source,
+                reference: EditSourceReference(
+                    assetID: item.asset.id, portableIdentity: item.identity, url: item.url
+                ),
+                inMemoryDocument: editorDocument.session(for: item.asset.id)?.document,
+                inMemoryLookSignature: idleFrameWarmerSavedLookSignature(for: item.asset.id),
+                distanceFromViewport: item.entry.distanceFromViewport,
+                launchHintRecencyRank: item.entry.launchHintRecencyRank
+            ))
+        }
+        return candidates
     }
 
     var idleFrameWarmerActivePortableAssetID: PortablePhotoAssetID? {

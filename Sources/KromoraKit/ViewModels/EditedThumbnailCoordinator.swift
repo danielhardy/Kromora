@@ -184,29 +184,13 @@ final class EditedThumbnailCoordinator {
         let generation = (editedThumbnailGenerations[assetID] ?? 0) &+ 1
         editedThumbnailGenerations[assetID] = generation
 
-        let source: ImageSource?
-        if let url = item.url {
-            source = ImageSource(
-                url: url, nativeExtent: item.thumbnailNativeExtent,
-                portableIdentity: item.asset.source.portableIdentity,
-                existingFileChangeSignature: item.asset.source.fingerprint
-            )
-        } else if let data = item.imageData {
-            source = ImageSource(
-                data: data, nativeExtent: item.thumbnailNativeExtent,
-                dataFingerprint: item.dataFingerprint,
-                portableIdentity: item.asset.source.portableIdentity
-            )
-        } else {
-            source = nil
-        }
-        guard let source else { return }
+        guard let sourceRequest = Self.sourceRequest(for: item) else { return }
 
         let inMemoryDocument = destination.editedThumbnailDocument(for: assetID)
         if let inMemoryDocument, inMemoryDocument.isIdentity {
             let revision = editedThumbnailRevision(document: inMemoryDocument, look: .none)
             presentIdentity(
-                revision: revision, assetID: assetID, portableAssetID: source.cacheIdentity.assetID
+                revision: revision, assetID: assetID, portableAssetID: item.asset.source.portableIdentity.assetID
             )
             return
         }
@@ -225,14 +209,16 @@ final class EditedThumbnailCoordinator {
             assetID == destination.activeEditedThumbnailAssetID
             ? destination.editedThumbnailDocumentRevision
             : destination.editedThumbnailDocumentRevision(for: assetID)
-        let thumbnailSourceIdentity = source.cacheIdentity
         let engine = self.engine
         let editStore = self.editStore
         workScheduler.enqueue(id: jobID, lane: .thumbnail, priority: priority) {
-            [weak self, engine, editStore, source, sourceReference, assetID, generation,
-             thumbnailSourceRevision, thumbnailDocumentRevision, thumbnailSourceIdentity,
-             inMemoryDocument] in
-            guard let self, self.isCurrentEditedThumbnailRequest(
+            [weak self, engine, editStore, sourceRequest, sourceReference, assetID, generation,
+             thumbnailSourceRevision, thumbnailDocumentRevision, inMemoryDocument] in
+            // The file's identity resolves off the main actor, right before the fences below
+            // compare it with what the library item says now.
+            let source = await ImageSource.resolve(sourceRequest)
+            let thumbnailSourceIdentity = source.portableIdentity
+            guard let self, await self.isCurrentEditedThumbnailRequest(
                 assetID: assetID, generation: generation,
                 sourceRevision: thumbnailSourceRevision,
                 documentRevision: thumbnailDocumentRevision,
@@ -251,7 +237,7 @@ final class EditedThumbnailCoordinator {
                 document = loaded.document
                 savedLook = loaded.found ? loaded.lookSignature : nil
             }
-            guard !Task.isCancelled, self.isCurrentEditedThumbnailRequest(
+            guard !Task.isCancelled, await self.isCurrentEditedThumbnailRequest(
                 assetID: assetID, generation: generation,
                 sourceRevision: thumbnailSourceRevision,
                 documentRevision: thumbnailDocumentRevision,
@@ -301,7 +287,7 @@ final class EditedThumbnailCoordinator {
                     .edited, for: thumbnailSourceIdentity
                 )
                 if let hit = result.hit {
-                    guard !Task.isCancelled, self.isCurrentEditedThumbnailRequest(
+                    guard !Task.isCancelled, await self.isCurrentEditedThumbnailRequest(
                         assetID: assetID, generation: generation,
                         sourceRevision: thumbnailSourceRevision,
                         documentRevision: thumbnailDocumentRevision,
@@ -378,7 +364,7 @@ final class EditedThumbnailCoordinator {
                 output: .raster, space: .current
             )
             let rendered: CGImage? = await engine.makeThumbnailCGImage(request)
-            guard !Task.isCancelled, self.isCurrentEditedThumbnailRequest(
+            guard !Task.isCancelled, await self.isCurrentEditedThumbnailRequest(
                 assetID: assetID, generation: generation,
                 sourceRevision: thumbnailSourceRevision,
                 documentRevision: thumbnailDocumentRevision,
@@ -416,7 +402,7 @@ final class EditedThumbnailCoordinator {
                 }.value
                 // Encoding can outlive a rapid edit or source switch. Recheck the same fences used
                 // for pixel publication before allowing obsolete work to replace the stable key.
-                guard !Task.isCancelled, self.isCurrentEditedThumbnailRequest(
+                guard !Task.isCancelled, await self.isCurrentEditedThumbnailRequest(
                     assetID: assetID, generation: generation,
                     sourceRevision: thumbnailSourceRevision,
                     documentRevision: thumbnailDocumentRevision,
@@ -441,6 +427,24 @@ final class EditedThumbnailCoordinator {
         }
     }
 
+    private static func sourceRequest(for item: ImageCollection.Item) -> ImageSource.Request? {
+        if let url = item.url {
+            return ImageSource.Request(
+                url: url, nativeExtent: item.thumbnailNativeExtent,
+                portableIdentity: item.asset.source.portableIdentity,
+                existingFileChangeSignature: item.asset.source.fingerprint
+            )
+        }
+        if let data = item.imageData {
+            return ImageSource.Request(
+                data: data, nativeExtent: item.thumbnailNativeExtent,
+                dataFingerprint: item.dataFingerprint,
+                portableIdentity: item.asset.source.portableIdentity
+            )
+        }
+        return nil
+    }
+
     /// Validate every value that can make an edited thumbnail stale. The collection item is checked
     /// again because a file-backed source can be replaced in place while a thumbnail is rendering.
     private func isCurrentEditedThumbnailRequest(
@@ -449,29 +453,18 @@ final class EditedThumbnailCoordinator {
         sourceRevision: UInt64?,
         documentRevision: UInt64,
         sourceIdentity: PortablePhotoIdentity
-    ) -> Bool {
+    ) async -> Bool {
         guard let destination, !destination.isEditedThumbnailShuttingDown,
-            editedThumbnailGenerations[assetID] == generation,
-            let item = destination.editedThumbnailItem(for: assetID)
+            let item = destination.editedThumbnailItem(for: assetID),
+            let currentRequest = Self.sourceRequest(for: item)
         else { return false }
-
-        let currentSource: ImageSource?
-        if let url = item.url {
-            currentSource = ImageSource(
-                url: url, nativeExtent: item.thumbnailNativeExtent,
-                portableIdentity: item.asset.source.portableIdentity,
-                existingFileChangeSignature: item.asset.source.fingerprint
-            )
-        } else if let data = item.imageData {
-            currentSource = ImageSource(
-                data: data, nativeExtent: item.thumbnailNativeExtent,
-                dataFingerprint: item.dataFingerprint,
-                portableIdentity: item.asset.source.portableIdentity
-            )
-        } else {
-            currentSource = nil
-        }
-        guard currentSource?.cacheIdentity == sourceIdentity else { return false }
+        let currentSource = await ImageSource.resolve(currentRequest)
+        // Everything below reads main-actor state again: it may have moved while the file was
+        // being resolved.
+        guard !destination.isEditedThumbnailShuttingDown,
+            editedThumbnailGenerations[assetID] == generation,
+            currentSource.portableIdentity == sourceIdentity
+        else { return false }
 
         if let sourceRevision {
             guard destination.activeEditedThumbnailAssetID == assetID,
