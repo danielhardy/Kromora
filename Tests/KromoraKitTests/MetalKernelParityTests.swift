@@ -154,9 +154,23 @@ final class MetalKernelParityTests: XCTestCase {
         }
         let reveal = try render()
         func alpha(_ bytes: [UInt8], _ x: Int, _ y: Int) -> UInt8 { bytes[(y * 64 + x) * 4 + 3] }
-        XCTAssertGreaterThan(alpha(reveal, 18, 18), 20)
-        XCTAssertEqual(alpha(reveal, 45, 45), 0)
-        XCTAssertEqual(alpha(reveal, 18, 45), 0)
+        // The subject is lifted with additive silver light (little alpha), so compare mean light
+        // over the covered quadrant against the uncovered quadrants rather than single pixels.
+        func light(_ bytes: [UInt8], x: ClosedRange<Int>, y: ClosedRange<Int>) -> Double {
+            var total = 0.0
+            for py in y { for px in x {
+                let i = (py * 64 + px) * 4
+                total += Double(bytes[i]) + Double(bytes[i + 1]) + Double(bytes[i + 2])
+            } }
+            return total / Double(x.count * y.count)
+        }
+        let covered = light(reveal, x: 10...22, y: 10...22)
+        XCTAssertGreaterThan(covered, light(reveal, x: 36...54, y: 36...54) + 3,
+                             "the lift must follow the actual returned coverage")
+        XCTAssertGreaterThan(covered, light(reveal, x: 10...22, y: 36...54) + 3)
+        // Surroundings may recede slightly (dodge and burn) but are never filled.
+        XCTAssertLessThan(alpha(reveal, 45, 45), 40)
+        XCTAssertLessThan(alpha(reveal, 18, 45), 40)
         XCTAssertEqual(alpha(reveal, 2, 2), 0)
         uniforms.timing.z = 1
         XCTAssertTrue(try render().allSatisfy { $0 == 0 }, "the reveal must recede completely")
@@ -165,7 +179,7 @@ final class MetalKernelParityTests: XCTestCase {
         let waiting = try render()
         let waitingAlpha = stride(from: 3, to: waiting.count, by: 4).map { waiting[$0] }
         XCTAssertGreaterThan(waitingAlpha.max() ?? 0, 0)
-        XCTAssertLessThan(waitingAlpha.max() ?? 255, 40, "waiting light must preserve the photo")
+        XCTAssertLessThan(waitingAlpha.max() ?? 255, 90, "the safelight vignette must preserve the photo")
         XCTAssertEqual(alpha(waiting, 2, 2), 0)
     }
 

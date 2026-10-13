@@ -48,7 +48,7 @@ final class MaskDiscoveryState: ObservableObject {
 /// Monotonic, duration-independent choreography. Long waits settle into a quieter breathing
 /// exposure; cached results can reveal immediately. These are artistic envelopes, not progress.
 enum MaskDiscoveryTiming {
-    static let revealDuration: TimeInterval = 1.65
+    static let revealDuration: TimeInterval = 2.4
     static let dismissalDuration: TimeInterval = 0.25
 
     static func waitingOpacity(elapsed: TimeInterval) -> Float {
