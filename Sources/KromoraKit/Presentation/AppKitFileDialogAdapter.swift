@@ -11,18 +11,18 @@ public protocol FileDialogProviding {
         allowedContentTypes: [UTType],
         allowsMultipleSelection: Bool,
         startingAt directoryURL: URL?
-    ) -> [URL]?
+    ) async -> [URL]?
     func chooseFolder(
         title: String,
         prompt: String,
         startingAt directoryURL: URL?,
         canCreateDirectories: Bool
-    ) -> URL?
+    ) async -> URL?
 }
 
 public extension FileDialogProviding {
-    func chooseImages(startingAt directoryURL: URL?) -> [URL]? {
-        chooseFiles(
+    func chooseImages(startingAt directoryURL: URL?) async -> [URL]? {
+        await chooseFiles(
             title: "Open Image",
             allowedContentTypes: ImageDecoder.supportedTypes,
             allowsMultipleSelection: true,
@@ -34,22 +34,24 @@ public extension FileDialogProviding {
 /// Production AppKit implementation of ``FileDialogProviding``.
 @MainActor
 public final class AppKitFileDialog: FileDialogProviding {
-    public init() {}
+    private let sheets: any SheetPresenting
+
+    public init() { sheets = AppKitSheetPresenter() }
+
+    init(sheets: any SheetPresenting) { self.sheets = sheets }
 
     public func chooseFiles(
         title: String,
         allowedContentTypes: [UTType],
         allowsMultipleSelection: Bool,
         startingAt directoryURL: URL?
-    ) -> [URL]? {
-        let panel = NSOpenPanel()
-        panel.title = title
-        panel.allowedContentTypes = allowedContentTypes
-        panel.allowsMultipleSelection = allowsMultipleSelection
-        panel.directoryURL = directoryURL
-
-        guard panel.runModal() == .OK else { return nil }
-        return panel.urls
+    ) async -> [URL]? {
+        await sheets.chooseOpenURLs { panel in
+            panel.title = title
+            panel.allowedContentTypes = allowedContentTypes
+            panel.allowsMultipleSelection = allowsMultipleSelection
+            panel.directoryURL = directoryURL
+        }
     }
 
     public func chooseFolder(
@@ -57,47 +59,62 @@ public final class AppKitFileDialog: FileDialogProviding {
         prompt: String,
         startingAt directoryURL: URL?,
         canCreateDirectories: Bool
-    ) -> URL? {
-        let panel = NSOpenPanel()
-        panel.title = title
-        panel.prompt = prompt
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.canCreateDirectories = canCreateDirectories
-        panel.allowsMultipleSelection = false
-        panel.directoryURL = directoryURL
-
-        guard panel.runModal() == .OK else { return nil }
-        return panel.url
+    ) async -> URL? {
+        await sheets.chooseOpenURLs { panel in
+            panel.title = title
+            panel.prompt = prompt
+            panel.canChooseFiles = false
+            panel.canChooseDirectories = true
+            panel.canCreateDirectories = canCreateDirectories
+            panel.allowsMultipleSelection = false
+            panel.directoryURL = directoryURL
+        }?.first
     }
 }
 
 /// Launch-time confirmation before breaking an expired portable-library writer lease.
+///
+/// The library opens synchronously inside ``AppViewModel/init``, so the question is asked first,
+/// through the sheet seam, and the answer is handed to the open as a ``ResolvedLeaseRecoveryConfirmer``.
+@MainActor
+struct PortablePackageLeaseRecoveryPrompt {
+    let sheets: any SheetPresenting
+
+    /// `nil` when opening needs no decision (no lock, a live lease, or a conclusively dead local
+    /// writer). Otherwise whether the user chose to take over the expired lease.
+    func decision(for packageURL: URL, now: Date = Date()) async -> ResolvedLeaseRecoveryConfirmer? {
+        guard let info = PortablePackageLease.existingInfo(at: packageURL.standardizedFileURL),
+              info.expiresAt <= now, info.localWriterState != .dead
+        else { return nil }
+        let accepted = await sheets.confirm(
+            message: "Take over this library?",
+            informativeText:
+                "The previous Kromora session on \(info.deviceName) did not close cleanly, so the writer lock expired.\n\n"
+                + "Kromora will recover any interrupted writes, then open \(packageURL.lastPathComponent).",
+            style: .warning,
+            buttons: ["Take Over Library", "Not Now"]
+        )
+        return ResolvedLeaseRecoveryConfirmer(allowBreak: accepted)
+    }
+}
+
+/// A lease-recovery answer that was already collected asynchronously.
+struct ResolvedLeaseRecoveryConfirmer: PortablePackageLeaseRecoveryConfirming {
+    let allowBreak: Bool
+
+    func confirmBreakExpiredWriterLease(
+        packageURL: URL,
+        info: PortablePackageLeaseInfo
+    ) -> Bool {
+        allowBreak
+    }
+}
+
+/// Answers the open's synchronous lease question; see ``PortablePackageLeaseRecoveryPrompt``.
 @MainActor
 protocol PortablePackageLeaseRecoveryConfirming {
     func confirmBreakExpiredWriterLease(
         packageURL: URL,
         info: PortablePackageLeaseInfo
     ) -> Bool
-}
-
-/// Production AppKit prompt used when a previous session left an expired `manifest.lock`.
-@MainActor
-struct AppKitPortablePackageLeaseRecoveryConfirmer: PortablePackageLeaseRecoveryConfirming {
-    func confirmBreakExpiredWriterLease(
-        packageURL: URL,
-        info: PortablePackageLeaseInfo
-    ) -> Bool {
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
-        let alert = NSAlert()
-        alert.messageText = "Take over this library?"
-        alert.informativeText =
-            "The previous Kromora session on \(info.deviceName) did not close cleanly, so the writer lock expired.\n\n"
-            + "Kromora will recover any interrupted writes, then open \(packageURL.lastPathComponent)."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Take Over Library")
-        alert.addButton(withTitle: "Not Now")
-        return alert.runModal() == .alertFirstButtonReturn
-    }
 }

@@ -101,6 +101,40 @@ final class LookLUTExportTests: TempDirectoryTestCase {
     }
 
     @MainActor
+    func testAcceptedSaveSheetWritesTheLook() async throws {
+        let sheets = FakeSheets()
+        let coordinator = LookSaveCoordinator(sheets: sheets)
+        coordinator.setConversion(
+            try LookLUTConverter.convert(document: EditDocument(), lut: nil, size: 2), name: "Sheet Look"
+        )
+        let destination = tempDirectory.appendingPathComponent("Sheet Look.cube")
+        sheets.saveURL = destination
+        var saved: URL?
+        coordinator.onSaved = { saved = $0 }
+
+        await coordinator.saveDialog().value
+
+        XCTAssertEqual(sheets.lastSavePanel?.title, "Save Look")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
+        XCTAssertEqual(saved, destination)
+    }
+
+    @MainActor
+    func testCancelledSaveSheetWritesNothing() async throws {
+        let sheets = FakeSheets()
+        let coordinator = LookSaveCoordinator(sheets: sheets)
+        coordinator.setConversion(
+            try LookLUTConverter.convert(document: EditDocument(), lut: nil, size: 2), name: "Sheet Look"
+        )
+        coordinator.onSaved = { _ in XCTFail("cancel must not report a save") }
+
+        await coordinator.saveDialog().value
+
+        XCTAssertEqual(sheets.saveCalls, 1)
+        XCTAssertNil(coordinator.saveError)
+    }
+
+    @MainActor
     func testSavingRegistersWithoutChangingTheActiveDocument() async throws {
         let source = try Fixtures.writeGradientPNG(width: 8, height: 8, named: "save-look.png", in: tempDirectory)
         let store = makeInMemoryEditStore()

@@ -191,7 +191,7 @@ public struct KromoraSettingsView: View {
                     .foregroundStyle(.secondary)
             }
             HStack {
-                Button("Choose…") { chooseFolder(kind) }
+                Button("Choose…") { Task { await chooseFolder(kind) } }
                     .accessibilityLabel("Choose " + kind.title)
                 Button("Test") {
                     testMessage.wrappedValue = settings.testDefaultFolder(kind).message
@@ -226,8 +226,8 @@ public struct KromoraSettingsView: View {
         }
     }
 
-    private func chooseFolder(_ kind: KromoraFolderKind) {
-        let url = fileDialog.chooseFolder(
+    private func chooseFolder(_ kind: KromoraFolderKind) async {
+        let url = await fileDialog.chooseFolder(
             title: "Choose " + kind.title,
             prompt: "Use Folder",
             startingAt: settings.status(for: kind).url

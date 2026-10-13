@@ -5,6 +5,20 @@ import XCTest
 
 @MainActor
 final class RetouchWorkflowCoordinatorTests: XCTestCase {
+    private func waitUntil(
+        _ description: String,
+        timeout: Duration = .seconds(30),
+        _ condition: @MainActor () -> Bool
+    ) async throws {
+        let deadline = ContinuousClock.now + timeout
+        while !condition() {
+            if ContinuousClock.now >= deadline {
+                throw TestSynchronizationError.timedOut(description, "condition did not settle")
+            }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
     func testClickAndDragCommitOneSpotEach() {
         let destination = FakeRetouchDestination()
         let workflow = RetouchWorkflowCoordinator(destination: destination)
@@ -199,7 +213,7 @@ extension RetouchWorkflowCoordinatorTests {
         return (destination, RetouchWorkflowCoordinator(destination: destination), gate)
     }
 
-    func testLateDetectionForPreviousPhotoDoesNotPublishOnNextPhoto() async {
+    func testLateDetectionForPreviousPhotoDoesNotPublishOnNextPhoto() async throws {
         let (destination, workflow, gate) = makeGated()
         destination.retouchAnalysisSource = Self.source("A")
         workflow.detectDust()
@@ -212,7 +226,7 @@ extension RetouchWorkflowCoordinatorTests {
         XCTAssertTrue(destination.statuses.isEmpty)
     }
 
-    func testLateDetectionFailureForPreviousPhotoDoesNotPublishOnNextPhoto() async {
+    func testLateDetectionFailureForPreviousPhotoDoesNotPublishOnNextPhoto() async throws {
         let (destination, workflow, gate) = makeGated()
         destination.proxyProvider = { _ in await gate.arrive(); return nil }
         destination.retouchAnalysisSource = Self.source("A")
@@ -226,13 +240,13 @@ extension RetouchWorkflowCoordinatorTests {
         XCTAssertTrue(destination.statuses.isEmpty)
     }
 
-    func testCompletedSuggestionsAreClearedAndStaleAcceptIsHarmless() async {
+    func testCompletedSuggestionsAreClearedAndStaleAcceptIsHarmless() async throws {
         let (destination, workflow, gate) = makeGated()
         destination.retouchAnalysisSource = Self.source("A")
         workflow.detectDust()
         await gate.waitForArrivals(1)
         gate.releaseAll()
-        while workflow.interactionState.dustSuggestions.isEmpty { await Task.yield() }
+        try await waitUntil("dust suggestions to appear") { !workflow.interactionState.dustSuggestions.isEmpty }
         let stale = workflow.interactionState.dustSuggestions
         // The source changes without the lifecycle hook: acceptance itself must still refuse.
         destination.retouchAnalysisSource = Self.source("B")
@@ -242,7 +256,7 @@ extension RetouchWorkflowCoordinatorTests {
         XCTAssertTrue(workflow.interactionState.dustSuggestions.isEmpty)
     }
 
-    func testSourceChangeClearsSuggestionsAndCandidates() async {
+    func testSourceChangeClearsSuggestionsAndCandidates() async throws {
         let (destination, workflow, gate) = makeGated()
         destination.retouchAnalysisSource = Self.source("A")
         workflow.interactionState.setDustSuggestions([
@@ -255,7 +269,7 @@ extension RetouchWorkflowCoordinatorTests {
         gate.releaseAll()
     }
 
-    func testDisablingVisualizationWhileSuspendedLeavesCandidatesEmpty() async {
+    func testDisablingVisualizationWhileSuspendedLeavesCandidatesEmpty() async throws {
         let (destination, workflow, gate) = makeGated()
         destination.retouchAnalysisSource = Self.source("A")
         workflow.toggleVisualization()
@@ -266,7 +280,7 @@ extension RetouchWorkflowCoordinatorTests {
         XCTAssertTrue(workflow.interactionState.visualizationCandidates.isEmpty)
     }
 
-    func testSupersededRequestCannotPublishAndOnlyLatestDoes() async {
+    func testSupersededRequestCannotPublishAndOnlyLatestDoes() async throws {
         let (destination, workflow, gate) = makeGated()
         destination.retouchAnalysisSource = Self.source("A")
         workflow.detectDust()
@@ -274,13 +288,13 @@ extension RetouchWorkflowCoordinatorTests {
         workflow.detectDust() // replaces nothing active; becomes the single pending request
         workflow.detectDust() // replaces the pending request
         gate.releaseAll()
-        while workflow.interactionState.dustSuggestions.isEmpty { await Task.yield() }
+        try await waitUntil("dust suggestions to appear") { !workflow.interactionState.dustSuggestions.isEmpty }
         await workflow.shutdown()
         XCTAssertEqual(gate.arrivals, 1) // the analysis built for the first request served the rest
         XCTAssertEqual(destination.statuses.count, 1)
     }
 
-    func testShutdownRejectsNewRequestsAndAwaitsOwnedWork() async {
+    func testShutdownRejectsNewRequestsAndAwaitsOwnedWork() async throws {
         let (destination, workflow, gate) = makeGated()
         destination.retouchAnalysisSource = Self.source("A")
         workflow.detectDust()
@@ -296,13 +310,13 @@ extension RetouchWorkflowCoordinatorTests {
         XCTAssertTrue(destination.statuses.isEmpty)
     }
 
-    func testAcceptingCurrentPhotoSuggestionsStillGroupsUndo() async {
+    func testAcceptingCurrentPhotoSuggestionsStillGroupsUndo() async throws {
         let (destination, workflow, gate) = makeGated()
         destination.retouchAnalysisSource = Self.source("A")
         workflow.detectDust()
         await gate.waitForArrivals(1)
         gate.releaseAll()
-        while workflow.interactionState.dustSuggestions.isEmpty { await Task.yield() }
+        try await waitUntil("dust suggestions to appear") { !workflow.interactionState.dustSuggestions.isEmpty }
         let count = workflow.interactionState.dustSuggestions.count
         workflow.acceptAllDustSuggestions()
         XCTAssertEqual(destination.document.retouch.spots.count, count)
@@ -336,7 +350,7 @@ extension RetouchWorkflowCoordinatorTests {
         return (destination, RetouchWorkflowCoordinator(destination: destination, worker: worker), gate)
     }
 
-    func testDetectionRunsOffMainActorWhileMainActorProgresses() async {
+    func testDetectionRunsOffMainActorWhileMainActorProgresses() async throws {
         let log = StageLog()
         let hold = DispatchSemaphore(value: 0)
         let (destination, workflow, gate) = makeObserved(log: log, hold: hold)
@@ -344,19 +358,19 @@ extension RetouchWorkflowCoordinatorTests {
         workflow.detectDust()
         await gate.waitForArrivals(1)
         gate.releaseAll()
-        while log.analyzeCount == 0 { await Task.yield() }
+        try await waitUntil("first analysis stage") { log.analyzeCount > 0 }
         // The worker is parked inside the expensive stage; the main actor must still make progress.
         var sentinel = 0
         for _ in 0..<50 { sentinel += 1; await Task.yield() }
         XCTAssertEqual(sentinel, 50)
         XCTAssertTrue(workflow.interactionState.dustSuggestions.isEmpty)
         hold.signal()
-        while workflow.interactionState.dustSuggestions.isEmpty { await Task.yield() }
+        try await waitUntil("dust suggestions to appear") { !workflow.interactionState.dustSuggestions.isEmpty }
         XCTAssertFalse(log.anyOnMain)
         await workflow.shutdown()
     }
 
-    func testThresholdBurstCoalescesAndFinalThresholdWins() async {
+    func testThresholdBurstCoalescesAndFinalThresholdWins() async throws {
         let log = StageLog()
         let (destination, workflow, gate) = makeObserved(log: log)
         destination.retouchAnalysisSource = Self.source("A")
@@ -367,24 +381,24 @@ extension RetouchWorkflowCoordinatorTests {
         gate.releaseAll()
         let expected = RetouchDustDetector.detect(in: Self.speckProxy(), threshold: 0.05, maximum: 1_000)
         XCTAssertFalse(expected.isEmpty)
-        while workflow.interactionState.visualizationCandidates != expected { await Task.yield() }
+        try await waitUntil("visualization candidates to match expected") { workflow.interactionState.visualizationCandidates == expected }
         XCTAssertEqual(gate.arrivals, 1)
         XCTAssertEqual(log.analyzeCount, 1)
         XCTAssertEqual(log.selectCount, 1) // 41 requests collapsed into one active plus one pending
         await workflow.shutdown()
     }
 
-    func testRepeatedThresholdsReuseAnalysisAndSourceChangeInvalidatesIt() async {
+    func testRepeatedThresholdsReuseAnalysisAndSourceChangeInvalidatesIt() async throws {
         let log = StageLog()
         let (destination, workflow, gate) = makeObserved(log: log)
         destination.retouchAnalysisSource = Self.source("A")
         workflow.toggleVisualization()
         await gate.waitForArrivals(1)
         gate.releaseAll()
-        while log.selectCount < 1 { await Task.yield() }
+        try await waitUntil("first select stage") { log.selectCount >= 1 }
         for (index, threshold) in [0.03, 0.04, 0.06].enumerated() {
             workflow.setVisualizationThreshold(threshold)
-            while log.selectCount < index + 2 { await Task.yield() }
+            try await waitUntil("select stage for threshold step") { log.selectCount >= index + 2 }
         }
         XCTAssertEqual(log.analyzeCount, 1)
         XCTAssertEqual(gate.arrivals, 1)
@@ -392,7 +406,7 @@ extension RetouchWorkflowCoordinatorTests {
         workflow.activeSourceDidChange()
         await gate.waitForArrivals(2)
         gate.releaseAll()
-        while log.analyzeCount < 2 { await Task.yield() }
+        try await waitUntil("second analysis stage") { log.analyzeCount >= 2 }
         XCTAssertEqual(log.analyzeCount, 2)
         await workflow.shutdown()
     }

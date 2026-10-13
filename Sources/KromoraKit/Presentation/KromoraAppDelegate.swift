@@ -3,23 +3,23 @@ import AppKit
 /// Shared application lifecycle behavior for each Kromora launcher.
 @MainActor
 public final class KromoraAppDelegate: NSObject, NSApplicationDelegate {
-    public let viewModel: AppViewModel
+    let launch: AppLaunch
     private let appearanceController: KromoraWindowAppearanceController
     private var terminationFlushInProgress = false
     var quitConfirmation: any QuitConfirmationPresenting = AppKitQuitConfirmation()
+    private var viewModel: AppViewModel? { launch.viewModel }
 
     public override init() {
         // Kromora is a single-window editor. Automatic window tabbing inserts
         // Hide Tab Bar / Show All Tabs into the View menu before scenes build.
         NSWindow.allowsAutomaticWindowTabbing = false
-        // Unbundled `swift run` starts as a background process. AppViewModel init can present a
-        // lease-recovery NSAlert before applicationDidFinishLaunching, and that alert is otherwise
-        // invisible — the terminal prints "Build complete!" and appears hung.
+        // Unbundled `swift run` starts as a background process. The launch lease-recovery sheet
+        // would otherwise stay invisible — the terminal prints "Build complete!" and appears hung.
         NSApplication.shared.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
-        let viewModel = AppViewModel(includeBundledLooks: true)
-        self.viewModel = viewModel
-        self.appearanceController = KromoraWindowAppearanceController(settings: viewModel.settings)
+        NSApp.activate()
+        let launch = AppLaunch()
+        self.launch = launch
+        self.appearanceController = KromoraWindowAppearanceController(settings: launch.settings)
         super.init()
     }
 
@@ -32,32 +32,37 @@ public final class KromoraAppDelegate: NSObject, NSApplicationDelegate {
     public func applicationDidFinishLaunching(_ notification: Notification) {
         appearanceController.start()
         NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
     }
 
     public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        // AppKit routes the last-window close through applicationShouldTerminate below, where
-        // `.terminateLater` remains pending until the edit and frame-store flushes finish.
+        // Keep the single-window editor's close behavior. AppKit then routes the close through
+        // applicationShouldTerminate below, where the asynchronous confirmation and flush finish.
         true
     }
 
     public func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !terminationFlushInProgress else { return .terminateLater }
-        guard viewModel.terminationGuard.shouldQuit(presenter: quitConfirmation) else {
-            return .terminateCancel
-        }
+        guard let viewModel else { return .terminateNow }
         terminationFlushInProgress = true
+        // Confirmation is a sheet, so the reply is deferred until it is answered.
         Task { @MainActor [weak self] in
             guard let self else { return }
+            guard await viewModel.terminationGuard.shouldQuit(presenter: quitConfirmation) else {
+                terminationFlushInProgress = false
+                sender.reply(toApplicationShouldTerminate: false)
+                return
+            }
             let result = await viewModel.flushPendingWrites()
-            await handleTerminationFlushResult(result, sender: sender)
+            await handleTerminationFlushResult(result, sender: sender, viewModel: viewModel)
         }
         return .terminateLater
     }
 
     private func handleTerminationFlushResult(
         _ result: PersistenceFlushResult,
-        sender: NSApplication
+        sender: NSApplication,
+        viewModel: AppViewModel
     ) async {
         guard case .success = result else {
             let alert = NSAlert()
@@ -68,10 +73,12 @@ public final class KromoraAppDelegate: NSObject, NSApplicationDelegate {
             alert.addButton(withTitle: "Quit Without Saving")
             alert.addButton(withTitle: "Cancel")
 
+            // App-modal on purpose: this runs while the app is quitting, when the window may already
+            // be gone, and the answer decides whether termination proceeds.
             switch alert.runModal() {
             case .alertFirstButtonReturn:
                 terminationFlushInProgress = false
-                startTerminationFlush(sender)
+                startTerminationFlush(sender, viewModel: viewModel)
             case .alertSecondButtonReturn:
                 await viewModel.discardPendingWrites()
                 await viewModel.shutdown()
@@ -88,12 +95,12 @@ public final class KromoraAppDelegate: NSObject, NSApplicationDelegate {
         sender.reply(toApplicationShouldTerminate: true)
     }
 
-    private func startTerminationFlush(_ sender: NSApplication) {
+    private func startTerminationFlush(_ sender: NSApplication, viewModel: AppViewModel) {
         terminationFlushInProgress = true
         Task { @MainActor [weak self] in
             guard let self else { return }
             let result = await viewModel.flushPendingWrites()
-            await handleTerminationFlushResult(result, sender: sender)
+            await handleTerminationFlushResult(result, sender: sender, viewModel: viewModel)
         }
     }
 

@@ -794,6 +794,7 @@ class TempDirectoryTestCase: XCTestCase {
             Thumbnails.generate(from: url, maxPixelSize: Thumbnails.firstFrameMaxPixelSize)
         },
         fileDialog: any FileDialogProviding = AppKitFileDialog(),
+        sheets: any SheetPresenting = FakeSheets(),
         fileDropActionPolicy: FileDropActionPolicy = FileDropActionPolicy(),
         leaseRecoveryConfirmer: (any PortablePackageLeaseRecoveryConfirming)? = nil
     ) -> AppViewModel {
@@ -826,6 +827,7 @@ class TempDirectoryTestCase: XCTestCase {
             originalThumbnailProvider: originalThumbnailProvider,
             embeddedFirstFrameProvider: embeddedFirstFrameProvider,
             fileDialog: fileDialog,
+            sheets: sheets,
             fileDropActionPolicy: fileDropActionPolicy,
             leaseRecoveryConfirmer: leaseRecoveryConfirmer,
             portableLibrarySession: portableLibrarySession,

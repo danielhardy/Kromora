@@ -67,7 +67,7 @@ final class FileIntegrationBoundaryTests: TempDirectoryTestCase {
 
         let existingIDs = viewModel.collection.items.map(\.id)
         let existingSource = viewModel.sourceName
-        viewModel.openImageDialog()
+        await viewModel.openImageDialog().value
 
         XCTAssertEqual(viewModel.collection.items.map(\.id), existingIDs)
         XCTAssertEqual(viewModel.sourceName, existingSource)

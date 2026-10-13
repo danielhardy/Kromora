@@ -43,6 +43,37 @@ final class DeriveCoordinatorTests: TempDirectoryTestCase {
                           "a temp path must never be a LUT's identity — it can be reused after a sweep")
     }
 
+    // MARK: - Save sheet
+
+    func testAcceptedSaveSheetWritesTheChosenCube() async throws {
+        let sheets = FakeSheets()
+        let coordinator = DeriveCoordinator(sheets: sheets)
+        _ = try installScratchResult(on: coordinator)
+        let destination = tempDirectory.appendingPathComponent("saved.cube")
+        sheets.saveURL = destination
+        var saved: URL?
+        coordinator.onSaved = { saved = $0 }
+
+        await coordinator.saveDialog().value
+
+        XCTAssertEqual(sheets.saveCalls, 1)
+        XCTAssertEqual(sheets.lastSavePanel?.title, "Save Derived Look")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
+        XCTAssertEqual(saved, destination)
+    }
+
+    func testCancelledSaveSheetWritesNothing() async throws {
+        let sheets = FakeSheets()
+        let coordinator = DeriveCoordinator(sheets: sheets)
+        _ = try installScratchResult(on: coordinator)
+        coordinator.onSaved = { _ in XCTFail("cancel must not report a save") }
+        coordinator.onError = { XCTFail("cancel is not an error: \($0)") }
+
+        await coordinator.saveDialog().value
+
+        XCTAssertEqual(sheets.saveCalls, 1)
+    }
+
     // MARK: - Naming
 
     func testDerivedNameEncodesSourceAndSize() {

@@ -11,7 +11,7 @@ public struct KromoraScene: Scene {
 
     public var body: some Scene {
         WindowGroup {
-            KromoraRootView(viewModel: delegate.viewModel)
+            KromoraRootView(launch: delegate.launch)
                 .frame(minWidth: 800, minHeight: 500)
         }
         .windowStyle(.titleBar)
@@ -23,11 +23,11 @@ public struct KromoraScene: Scene {
         }
         .windowResizability(.contentSize)
         .commands {
-            KromoraCommands(settings: delegate.viewModel.settings)
+            KromoraCommands(settings: delegate.launch.settings)
         }
 
         Settings {
-            KromoraSettingsScene(viewModel: delegate.viewModel)
+            KromoraSettingsScene(launch: delegate.launch)
         }
     }
 }
@@ -37,25 +37,32 @@ public struct KromoraScene: Scene {
 /// never be found again on the next launch.
 @MainActor
 struct KromoraRootView: View {
-    let viewModel: AppViewModel
+    let launch: AppLaunch
 
     var body: some View {
-        ContentView(viewModel: viewModel)
+        if let viewModel = launch.viewModel {
+            ContentView(viewModel: viewModel)
+        } else {
+            ProgressView()
+                .controlSize(.large)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .task { await launch.open() }
+        }
     }
 }
 
 @MainActor
 private struct KromoraSettingsScene: View {
-    let viewModel: AppViewModel
+    let launch: AppLaunch
     @State private var editDatabaseURL: URL?
 
     var body: some View {
         KromoraSettingsView(
-            settings: viewModel.settings,
+            settings: launch.settings,
             editDatabaseURL: editDatabaseURL
         )
         .task {
-            editDatabaseURL = await viewModel.editDatabaseURL
+            editDatabaseURL = await launch.open().editDatabaseURL
         }
     }
 }

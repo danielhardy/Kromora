@@ -45,20 +45,23 @@ final class ExportWorkflowCoordinator {
 
     weak var destination: (any ExportWorkflowDestination)?
     private let export: ExportCoordinator
-    private(set) var pendingShareURL: URL?
+    private let sheets: any SheetPresenting
     private(set) var externalEditorHandoffURL: URL?
-    private var pendingShareExports: [URL: URL] = [:]
+    /// The Share control the picker anchors to, registered by `ShareAnchorView`.
+    weak var shareAnchorView: NSView?
     private var activeShareDirectories: Set<URL> = []
     private var sharePickerSessions: [URL: SharePickerSession] = [:]
     private let shareRoot: URL
 
     init(
         export: ExportCoordinator,
+        sheets: any SheetPresenting = AppKitSheetPresenter(),
         destination: (any ExportWorkflowDestination)? = nil,
         shareRoot: URL = FileManager.default.temporaryDirectory
             .appendingPathComponent("Kromora Share Exports", isDirectory: true)
     ) {
         self.export = export
+        self.sheets = sheets
         self.destination = destination
         self.shareRoot = shareRoot
     }
@@ -71,21 +74,12 @@ final class ExportWorkflowCoordinator {
 
     func exportFailed() {
         externalEditorHandoffURL = nil
-        let directories = Set(pendingShareExports.values)
-        pendingShareExports.removeAll()
-        pendingShareURL = nil
-        for directory in directories {
-            removeShareExport(at: directory)
-        }
     }
 
     func exportCompleted(at url: URL) {
         if externalEditorHandoffURL == url {
             externalEditorHandoffURL = nil
             NSWorkspace.shared.open(url)
-        } else if let directory = pendingShareExports.removeValue(forKey: url) {
-            if pendingShareURL == url { pendingShareURL = nil }
-            presentSharePicker(for: [url], in: directory)
         }
     }
 
@@ -119,57 +113,73 @@ final class ExportWorkflowCoordinator {
 
     /// Render a full-resolution TIFF for the system's default TIFF editor. The active source remains
     /// read-only; the returned TIFF is imported through Open Image as a new library item.
-    func editInExternalEditor() {
-        guard let destination, let request = destination.exportSingleRequest else {
-            self.destination?.setExportStatus("Open an image first")
-            return
+    @discardableResult
+    func editInExternalEditor() -> Task<Void, Never> {
+        Task { [weak self] in
+            guard let self else { return }
+            guard let destination = self.destination,
+                  let request = destination.exportSingleRequest else {
+                self.destination?.setExportStatus("Open an image first")
+                return
+            }
+            let directoryURL = self.export.defaultFolderURL?()
+            guard let url = await self.sheets.chooseSaveURL(configure: { panel in
+                panel.title = "Edit in External Editor"
+                panel.nameFieldStringValue = request.baseName + "_external.tiff"
+                panel.allowedContentTypes = [.tiff]
+                panel.directoryURL = directoryURL
+            }) else { return }
+            self.externalEditorHandoffURL = url
+            self.export.performExport(
+                source: request.source,
+                assetID: destination.exportActiveAssetID,
+                document: request.document,
+                lut: request.lut,
+                options: ExportOptions(
+                    format: .tiff,
+                    destination: .file(url),
+                    metadata: .preserve,
+                    location: .exclude
+                ),
+                to: url,
+                access: .systemGranted(for: url)
+            )
         }
-        let panel = NSSavePanel()
-        panel.title = "Edit in External Editor"
-        panel.nameFieldStringValue = request.baseName + "_external.tiff"
-        panel.allowedContentTypes = [.tiff]
-        panel.directoryURL = export.defaultFolderURL?()
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        externalEditorHandoffURL = url
-        export.performExport(
-            source: request.source,
-            assetID: destination.exportActiveAssetID,
-            document: request.document,
-            lut: request.lut,
-            options: ExportOptions(
-                format: .tiff,
-                destination: .file(url),
-                metadata: .preserve,
-                location: .exclude
-            ),
-            to: url,
-            access: .systemGranted(for: url)
-        )
     }
 
     /// Copy the untouched source and its edit recipe into a checksum-verified portable bundle.
-    func exportOriginalWithSettings() {
+    @discardableResult
+    func exportOriginalWithSettings() -> Task<Void, Never> {
+        Task { [weak self] in
+            await self?.runExportOriginalWithSettings()
+        }
+    }
+
+    private func runExportOriginalWithSettings() async {
         guard let destination, let request = destination.exportSingleRequest else {
             self.destination?.setExportStatus("Open an image first")
             return
         }
-        let privacyAlert = NSAlert()
-        privacyAlert.messageText = "Keep the original's embedded metadata?"
-        privacyAlert.informativeText = "The bundle preserves the original file byte-for-byte. It may contain location metadata such as GPS coordinates. The active library original will remain unchanged."
-        privacyAlert.addButton(withTitle: "Keep Original Metadata")
-        privacyAlert.addButton(withTitle: "Cancel")
-        guard privacyAlert.runModal() == .alertFirstButtonReturn else { return }
-        let panel = NSOpenPanel()
-        panel.title = "Choose Bundle Location"
-        panel.prompt = "Export Bundle"
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.canCreateDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.directoryURL = export.defaultFolderURL?()
-        guard panel.runModal() == .OK, let parent = panel.url else { return }
-        let access = SecurityScopedResourceAccess.systemGranted(for: parent)
         let sourceName = destination.exportSourceName
+        guard await sheets.confirm(
+            message: "Keep the original's embedded metadata?",
+            informativeText: "The bundle preserves the original file byte-for-byte. It may contain location metadata such as GPS coordinates. The active library original will remain unchanged.",
+            style: .warning,
+            buttons: ["Keep Original Metadata", "Cancel"]
+        ) else { return }
+        let directoryURL = export.defaultFolderURL?()
+        guard let parent = await sheets.chooseOpenURLs(configure: { panel in
+            panel.title = "Choose Bundle Location"
+            panel.prompt = "Export Bundle"
+            panel.canChooseFiles = false
+            panel.canChooseDirectories = true
+            panel.canCreateDirectories = true
+            panel.allowsMultipleSelection = false
+            panel.directoryURL = directoryURL
+        })?.first else { return }
+        // The sheet suspended this method, so the open photo may have changed. The snapshot taken
+        // before the prompts is what the user confirmed and is what gets bundled.
+        let access = SecurityScopedResourceAccess.systemGranted(for: parent)
         let stem = URL(fileURLWithPath: sourceName).deletingPathExtension().lastPathComponent
         let name = stem.isEmpty ? "Photo" : stem
         let bundleURL = parent.appendingPathComponent(
@@ -271,13 +281,13 @@ final class ExportWorkflowCoordinator {
                 request.items,
                 document: request.document,
                 lut: request.lut,
-                options: ExportOptions(format: .tiff, destination: .folder(directory)),
+                options: ShareExportPolicy.options(destination: .folder(directory)),
                 to: directory
             )
             guard outcome.exported > 0,
                   let urls = try? FileManager.default.contentsOfDirectory(
                     at: directory, includingPropertiesForKeys: nil
-                  ).filter({ $0.pathExtension.lowercased() == "tif" || $0.pathExtension.lowercased() == "tiff" }),
+                  ).filter({ $0.pathExtension.lowercased() == ShareExportPolicy.preferredFormat.fileExtension }),
                   !urls.isEmpty else {
                 self.removeShareExport(at: directory)
                 return
@@ -286,13 +296,14 @@ final class ExportWorkflowCoordinator {
         }
     }
 
+    /// Shows the picker at once. The photo renders when the user picks a service, so there is no
+    /// silent delay and nothing is written for a cancelled picker.
     private func shareCurrentExport() {
         guard let destination, let request = destination.exportSingleRequest else {
             self.destination?.setExportStatus("Open an image first")
             return
         }
         let directory = makeShareDirectory()
-        let url = directory.appendingPathComponent(request.baseName + "_share.tiff")
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         } catch {
@@ -300,30 +311,71 @@ final class ExportWorkflowCoordinator {
             destination.presentExportError("Could not prepare a share export: \(error.localizedDescription)")
             return
         }
-        pendingShareURL = url
-        pendingShareExports[url] = directory
-        export.performExport(
-            source: request.source,
-            assetID: destination.exportActiveAssetID,
-            document: request.document,
-            lut: request.lut,
-            options: ExportOptions(
-                format: .tiff,
-                destination: .file(url),
-                metadata: .preserve,
-                location: .exclude
-            ),
-            to: url
-        )
+        let assetID = destination.exportActiveAssetID
+        let provider = NSItemProvider()
+        provider.suggestedName = request.baseName
+        provider.registerFileRepresentation(
+            forTypeIdentifier: ShareExportPolicy.preferredFormat.utType.identifier,
+            fileOptions: [],
+            visibility: .all
+        ) { [weak self] completion in
+            Task { @MainActor in
+                guard let self else {
+                    completion(nil, false, CocoaError(.userCancelled))
+                    return
+                }
+                do {
+                    let url = try await self.renderShareFile(
+                        request, assetID: assetID, into: directory
+                    )
+                    completion(url, false, nil)
+                } catch {
+                    completion(nil, false, error)
+                }
+            }
+            return nil
+        }
+        presentSharePicker(for: [provider], in: directory)
     }
 
-    private func presentSharePicker(for urls: [URL], in directory: URL) {
-        guard let view = NSApplication.shared.keyWindow?.contentView else {
+    /// Renders the share file into `directory`: HEIC, or JPEG when HEIC encoding fails.
+    func renderShareFile(
+        _ request: SingleRequest, assetID: PhotoAssetID?, into directory: URL
+    ) async throws -> URL {
+        var format = ShareExportPolicy.preferredFormat
+        let data: Data
+        do {
+            data = try await export.renderEncodedData(
+                source: request.source, assetID: assetID, document: request.document,
+                lut: request.lut, options: ShareExportPolicy.options(format: format)
+            )
+        } catch {
+            format = ShareExportPolicy.fallbackFormat
+            data = try await export.renderEncodedData(
+                source: request.source, assetID: assetID, document: request.document,
+                lut: request.lut, options: ShareExportPolicy.options(format: format)
+            )
+        }
+        let url = directory.appendingPathComponent(
+            request.baseName + "_share." + format.fileExtension
+        )
+        try await Self.write(data, to: url)
+        return url
+    }
+
+    nonisolated private static func write(_ data: Data, to url: URL) async throws {
+        try data.write(to: url, options: .atomic)
+    }
+
+    private func presentSharePicker(for items: [Any], in directory: URL) {
+        let anchor = shareAnchorView.flatMap { $0.window == nil ? nil : $0 }
+            ?? NSApplication.shared.keyWindow?.contentView
+        guard let view = anchor else {
             removeShareExport(at: directory)
             destination?.setExportStatus("Share unavailable: no window to present the sharing menu")
             return
         }
-        let picker = NSSharingServicePicker(items: urls)
+        let picker = NSSharingServicePicker(items: items)
         let delegate = SharePickerDelegate { [weak self] in
             self?.removeShareExport(at: directory)
         }
@@ -333,6 +385,32 @@ final class ExportWorkflowCoordinator {
             delegate: delegate
         )
         picker.show(relativeTo: view.bounds, of: view, preferredEdge: .minY)
+    }
+}
+
+/// What Share exports: a message-sized file, never the full-resolution 16-bit TIFF used for
+/// editing handoff. All values live here so the policy has one place to change.
+enum ShareExportPolicy {
+    /// HEIC keeps files small with good quality; JPEG is the fallback when HEIC encoding fails.
+    static let preferredFormat: ExportFormat = .heif
+    static let fallbackFormat: ExportFormat = .jpeg
+    /// Longest side in pixels; larger photos are scaled down, smaller ones are never upscaled.
+    static let longEdge = 4096
+    static let quality = 0.85
+
+    /// Encodes in `WorkingSpace.current` (sRGB or Display P3), with location metadata excluded.
+    static func options(
+        format: ExportFormat = preferredFormat, destination: ExportDestination? = nil
+    ) -> ExportOptions {
+        ExportOptions(
+            format: format,
+            quality: quality,
+            sizing: .longEdge(longEdge),
+            colorSpace: .current,
+            destination: destination,
+            metadata: .preserve,
+            location: .exclude
+        )
     }
 }
 

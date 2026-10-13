@@ -1,5 +1,4 @@
 import Foundation
-import AppKit
 import UniformTypeIdentifiers
 
 /// Owns the active-photo “Save as Look/LUT” confirmation and save flow.
@@ -26,6 +25,11 @@ final class LookSaveCoordinator: ObservableObject {
     private var document = EditDocument()
     private var lut: CubeLUT?
     private var conversionTask: Task<Void, Never>?
+    private let sheets: any SheetPresenting
+
+    init(sheets: any SheetPresenting = AppKitSheetPresenter()) {
+        self.sheets = sheets
+    }
 
     func present(document: EditDocument, lut: CubeLUT?, suggestedName: String = "Look") {
         conversionTask?.cancel()
@@ -76,7 +80,12 @@ final class LookSaveCoordinator: ObservableObject {
     }
 
     /// Present the destination panel after the user has reviewed the support matrix.
-    func saveDialog() {
+    @discardableResult
+    func saveDialog() -> Task<Void, Never> {
+        Task { [weak self] in await self?.runSaveDialog() }
+    }
+
+    private func runSaveDialog() async {
         guard let conversion else { return }
         guard conversion.verification.passed || allowsApproximateSave else {
             saveError = "This Look is approximate even at \(conversion.size)³ (maximum channel error "
@@ -89,14 +98,15 @@ final class LookSaveCoordinator: ObservableObject {
             return
         }
 
-        let panel = NSSavePanel()
-        panel.title = "Save Look"
-        panel.nameFieldStringValue = validName + ".cube"
-        if let folder = libraryFolder?() ?? canonicalLibraryFolder?() { panel.directoryURL = folder }
-        if let cubeType = UTType(filenameExtension: "cube") {
-            panel.allowedContentTypes = [cubeType]
-        }
-        guard panel.runModal() == .OK, let destination = panel.url else { return }
+        let folder = libraryFolder?() ?? canonicalLibraryFolder?()
+        guard let destination = await sheets.chooseSaveURL(configure: { panel in
+            panel.title = "Save Look"
+            panel.nameFieldStringValue = validName + ".cube"
+            if let folder { panel.directoryURL = folder }
+            if let cubeType = UTType(filenameExtension: "cube") {
+                panel.allowedContentTypes = [cubeType]
+            }
+        }) else { return }
         let access = SecurityScopedResourceAccess.systemGranted(for: destination)
         defer { access.release() }
 

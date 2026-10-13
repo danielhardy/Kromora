@@ -123,8 +123,8 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
         return removableMediaFiles.filter { !removableMediaInLibrary.contains($0.id) }
     }
 
-    func chooseSourceFolder(startingAt directoryURL: URL?) {
-        guard let url = fileDialog.chooseFolder(
+    func chooseSourceFolder(startingAt directoryURL: URL?) async {
+        guard let url = await fileDialog.chooseFolder(
             title: "Choose Source Folder", prompt: "Use Folder", startingAt: directoryURL,
             canCreateDirectories: false
         ) else { return }
@@ -260,7 +260,7 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
                     self.finishFailedScan(error)
                     return
                 }
-                guard let grant = self.requestAccess(for: volume) else {
+                guard let grant = await self.requestAccess(for: volume) else {
                     self.isRemovableMediaScanning = false
                     self.removableMediaWarnings = ["Access to \(volume.name) was not granted."]
                     return
@@ -477,8 +477,8 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
         removableMediaWarnings.append(error.localizedDescription)
     }
 
-    private func requestAccess(for volume: MediaVolume) -> MediaAccessGrant? {
-        guard let url = fileDialog.chooseFolder(
+    private func requestAccess(for volume: MediaVolume) async -> MediaAccessGrant? {
+        guard let url = await fileDialog.chooseFolder(
             title: "Grant Access to \(volume.name)",
             prompt: "Grant Access",
             startingAt: volume.url,

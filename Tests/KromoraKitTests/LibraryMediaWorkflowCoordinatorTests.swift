@@ -202,7 +202,7 @@ final class LibraryMediaWorkflowCoordinatorTests: XCTestCase {
         var selectedImage: URL?
         coordinator.onImageURL = { url, _ in selectedImage = url }
 
-        coordinator.chooseSourceFolder(startingAt: nil)
+        await coordinator.chooseSourceFolder(startingAt: nil)
         XCTAssertEqual(coordinator.removableMediaVolume?.url, folder.standardizedFileURL.resolvingSymlinksInPath())
         XCTAssertEqual(coordinator.importSource, .folder)
         XCTAssertTrue(coordinator.isRemovableMediaSelectorPresented)
@@ -238,7 +238,7 @@ final class LibraryMediaWorkflowCoordinatorTests: XCTestCase {
         var request: RemovableMediaImportRequest?
         coordinator.onImportRequest = { request = $0 }
 
-        coordinator.chooseSourceFolder(startingAt: nil)
+        await coordinator.chooseSourceFolder(startingAt: nil)
         try await waitUntil { coordinator.removableMediaLibraryChecked == 2 && !coordinator.isRemovableMediaScanning }
         XCTAssertEqual(coordinator.removableMediaInLibrary, [known.id])
         XCTAssertEqual(coordinator.selectedRemovableMediaFiles, [new])

@@ -68,6 +68,9 @@ final class ExportCoordinator {
     /// Optional post-commit Photos delivery. Keeping this injectable leaves core export tests
     /// independent of PhotoKit authorization and the user's library.
     private let photosDelivery: (any PhotosDelivering)?
+    private let sheets: any SheetPresenting
+    /// True while a save/open sheet is up, so a repeated command cannot stack a second sheet.
+    private var isPresentingSheet = false
     private var singleTask: Task<Void, Never>?
     private var batchTask: Task<BatchOutcome, Never>?
     /// This flag also makes the panel-free API cancellable: its caller may not own a task that the
@@ -86,8 +89,10 @@ final class ExportCoordinator {
         maskResolver: (any LocalMaskResolving)? = nil,
         editStore: EditDocumentStore? = nil,
         lutResolver: ((LUTID?) -> CubeLUT?)? = nil,
-        photosDelivery: (any PhotosDelivering)? = PhotoKitDelivery()
+        photosDelivery: (any PhotosDelivering)? = PhotoKitDelivery(),
+        sheets: any SheetPresenting = AppKitSheetPresenter()
     ) {
+        self.sheets = sheets
         // Test renderers are deliberately shared so request assertions remain simple. The real
         // renderer gets isolated mutable Core Image state for export work.
         self.exportEngine = exportEngine ?? (engine is RenderEngine
@@ -205,19 +210,37 @@ final class ExportCoordinator {
         lut: CubeLUT?,
         suggestedBaseName: String
     ) {
-        let panel = NSSavePanel()
+        guard !isPresentingSheet else { return }
+        isPresentingSheet = true
         let formatPicker = ExportFormatAccessoryView(selectedFormat: lastUsedFormat)
-        panel.title = "Export"
-        panel.nameFieldStringValue = suggestedBaseName + "." + formatPicker.selectedFormat.fileExtension
-        panel.directoryURL = defaultFolderURL?()
-        panel.allowedContentTypes = [formatPicker.selectedFormat.utType]
-        formatPicker.onSelectionChanged = { [weak panel] format in
-            panel?.nameFieldStringValue = suggestedBaseName + "." + format.fileExtension
-            panel?.allowedContentTypes = [format.utType]
+        let directoryURL = defaultFolderURL?()
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.isPresentingSheet = false }
+            let chosen = await self.sheets.chooseSaveURL { panel in
+                panel.title = "Export"
+                panel.nameFieldStringValue =
+                    suggestedBaseName + "." + formatPicker.selectedFormat.fileExtension
+                panel.directoryURL = directoryURL
+                panel.allowedContentTypes = [formatPicker.selectedFormat.utType]
+                formatPicker.onSelectionChanged = { [weak panel] format in
+                    panel?.nameFieldStringValue = suggestedBaseName + "." + format.fileExtension
+                    panel?.allowedContentTypes = [format.utType]
+                }
+                panel.accessoryView = formatPicker
+            }
+            guard let url = chosen else { return }
+            self.performExportFromDialog(
+                source: source, assetID: assetID, document: document, lut: lut,
+                formatPicker: formatPicker, url: url
+            )
         }
-        panel.accessoryView = formatPicker
+    }
 
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+    private func performExportFromDialog(
+        source: ImageSource, assetID: PhotoAssetID?, document: EditDocument, lut: CubeLUT?,
+        formatPicker: ExportFormatAccessoryView, url: URL
+    ) {
         performExport(
             source: source,
             assetID: assetID,
@@ -321,6 +344,25 @@ final class ExportCoordinator {
         }
     }
 
+    /// Render and encode one image without writing it or touching export status. Share uses this to
+    /// render lazily, when the user picks a service.
+    func renderEncodedData(
+        source: ImageSource,
+        assetID: PhotoAssetID?,
+        document: EditDocument,
+        lut: CubeLUT?,
+        options: ExportOptions
+    ) async throws -> Data {
+        try options.validate()
+        return try await exportEngine.render(RenderRequest(
+            source: source, assetID: assetID, document: document, lut: lut,
+            quality: .export,
+            output: .encoded(format: options.format, quality: CGFloat(options.quality)),
+            space: options.colorSpace,
+            exportOptions: options
+        )).data
+    }
+
     /// Start a single export using the file destination embedded in options.
     func performExport(
         source: ImageSource,
@@ -345,18 +387,35 @@ final class ExportCoordinator {
             return
         }
 
-        let panel = NSOpenPanel()
-        panel.title = "Choose Export Folder"
-        panel.prompt = "Export Here"
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.canCreateDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.directoryURL = defaultFolderURL?()
+        guard !isPresentingSheet else { return }
+        isPresentingSheet = true
         let formatPicker = ExportFormatAccessoryView(selectedFormat: lastUsedFormat)
-        panel.accessoryView = formatPicker
-        guard panel.runModal() == .OK, let folder = panel.url else { return }
+        let directoryURL = defaultFolderURL?()
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.isPresentingSheet = false }
+            let chosen = await self.sheets.chooseOpenURLs { panel in
+                panel.title = "Choose Export Folder"
+                panel.prompt = "Export Here"
+                panel.canChooseFiles = false
+                panel.canChooseDirectories = true
+                panel.canCreateDirectories = true
+                panel.allowsMultipleSelection = false
+                panel.directoryURL = directoryURL
+                panel.accessoryView = formatPicker
+            }
+            guard let folder = chosen?.first else { return }
+            self.startBatchExport(
+                items: items, document: document, lut: lut, folder: folder,
+                formatPicker: formatPicker
+            )
+        }
+    }
 
+    private func startBatchExport(
+        items: [BatchItem], document: EditDocument, lut: CubeLUT?, folder: URL,
+        formatPicker: ExportFormatAccessoryView
+    ) {
         let format = formatPicker.selectedFormat
         // Record the choice as soon as the dialog completes, before the async batch starts.
         lastUsedFormat = format

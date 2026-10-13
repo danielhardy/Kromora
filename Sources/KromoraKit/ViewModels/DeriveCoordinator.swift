@@ -1,5 +1,4 @@
 import Foundation
-import AppKit
 import UniformTypeIdentifiers
 import Darwin
 
@@ -57,13 +56,18 @@ final class DeriveCoordinator: ObservableObject {
     ) throws -> RecipeExtractor.Result
 
     private let extractor: Extractor
+    private let sheets: any SheetPresenting
 
-    init(extractor: @escaping Extractor = { raw, jpg, progress, isCancelled in
-        try RecipeExtractor.derive(
-            rawURL: raw, jpgURL: jpg, progress: progress, isCancelled: isCancelled
-        )
-    }) {
+    init(
+        extractor: @escaping Extractor = { raw, jpg, progress, isCancelled in
+            try RecipeExtractor.derive(
+                rawURL: raw, jpgURL: jpg, progress: progress, isCancelled: isCancelled
+            )
+        },
+        sheets: any SheetPresenting = AppKitSheetPresenter()
+    ) {
         self.extractor = extractor
+        self.sheets = sheets
     }
 
     private enum Outcome: Sendable {
@@ -251,23 +255,26 @@ final class DeriveCoordinator: ObservableObject {
 
     /// Ask where to put the derived LUT, defaulting to the configured LUT
     /// folder so the library picks it up on the next scan.
-    func saveDialog() {
+    @discardableResult
+    func saveDialog() -> Task<Void, Never> {
+        Task { [weak self] in await self?.runSaveDialog() }
+    }
+
+    private func runSaveDialog() async {
         guard let lut = derivedLUT, scratchURL != nil else {
             onStatus?("No derived Look to save")
             return
         }
 
-        let panel = NSSavePanel()
-        panel.title = "Save Derived Look"
-        if let cubeType = UTType(filenameExtension: "cube") {
-            panel.allowedContentTypes = [cubeType]
-        }
-        panel.nameFieldStringValue = lut.name + ".cube"
-        if let folder = libraryFolder?() ?? canonicalLibraryFolder?() {
-            panel.directoryURL = folder
-        }
-
-        guard panel.runModal() == .OK, let destination = panel.url else { return }
+        let folder = libraryFolder?() ?? canonicalLibraryFolder?()
+        guard let destination = await sheets.chooseSaveURL(configure: { panel in
+            panel.title = "Save Derived Look"
+            if let cubeType = UTType(filenameExtension: "cube") {
+                panel.allowedContentTypes = [cubeType]
+            }
+            panel.nameFieldStringValue = lut.name + ".cube"
+            if let folder { panel.directoryURL = folder }
+        }) else { return }
         let access = SecurityScopedResourceAccess.systemGranted(for: destination)
         defer { access.release() }
 

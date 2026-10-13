@@ -147,13 +147,21 @@ struct RecipeExtractorSheet: View {
     // MARK: - File pickers
 
     private func pickRAW() {
+        Task { await chooseRAW() }
+    }
+
+    private func pickJPG() {
+        Task { await chooseJPG() }
+    }
+
+    private func chooseRAW() async {
         // RAW + DNG types — match what ImageDecoder knows how to load
         var types: [UTType] = [.rawImage]
         if let dng = UTType(filenameExtension: "dng") { types.append(dng) }
         for ext in ["cr2", "cr3", "nef", "arw", "orf", "raf", "rw2", "pef", "srw"] {
             if let t = UTType(filenameExtension: ext) { types.append(t) }
         }
-        if let url = fileDialog.chooseFiles(
+        if let url = await fileDialog.chooseFiles(
             title: "Select RAW or DNG",
             allowedContentTypes: types,
             allowsMultipleSelection: false,
@@ -163,8 +171,8 @@ struct RecipeExtractorSheet: View {
         }
     }
 
-    private func pickJPG() {
-        if let url = fileDialog.chooseFiles(
+    private func chooseJPG() async {
+        if let url = await fileDialog.chooseFiles(
             title: "Select JPG",
             allowedContentTypes: [.jpeg],
             allowsMultipleSelection: false,

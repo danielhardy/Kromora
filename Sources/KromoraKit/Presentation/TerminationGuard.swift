@@ -47,28 +47,31 @@ struct TerminationGuard: Equatable, Sendable {
 @MainActor
 protocol QuitConfirmationPresenting {
     /// Returns true when the user chose to quit and cancel the running work.
-    func confirmQuit(message: String) -> Bool
+    func confirmQuit(message: String) async -> Bool
 }
 
+@MainActor
 struct AppKitQuitConfirmation: QuitConfirmationPresenting {
-    func confirmQuit(message: String) -> Bool {
-        let alert = NSAlert()
-        alert.messageText = message
-        alert.informativeText = "Work already finished is kept. Anything still running stops."
-        alert.alertStyle = .warning
-        // Cancel is first so it is the default button.
-        alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Quit")
-        return alert.runModal() == .alertSecondButtonReturn
+    var sheets: any SheetPresenting = AppKitSheetPresenter()
+
+    func confirmQuit(message: String) async -> Bool {
+        // Cancel is first so it is the default button; the seam reports the first button as true.
+        let cancelled = await sheets.confirm(
+            message: message,
+            informativeText: "Work already finished is kept. Anything still running stops.",
+            style: .warning,
+            buttons: ["Cancel", "Quit"]
+        )
+        return !cancelled
     }
 }
 
 extension TerminationGuard {
     /// True when quitting may proceed: nothing is running, or the user confirmed.
     @MainActor
-    func shouldQuit(presenter: some QuitConfirmationPresenting) -> Bool {
+    func shouldQuit(presenter: some QuitConfirmationPresenting) async -> Bool {
         let active = activities
         guard !active.isEmpty else { return true }
-        return presenter.confirmQuit(message: Self.message(for: active))
+        return await presenter.confirmQuit(message: Self.message(for: active))
     }
 }

@@ -973,6 +973,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// coordinator or any supporting-work path, and is cancelled when navigation selects another
     /// source.
     private let fileDialog: any FileDialogProviding
+    private let lookSheets: LookLibrarySheets
     private let sourceSession: SourceSessionCoordinator
     private var lutCacheInvalidationTask: Task<Void, Never>?
     private var semanticCoordinatorInstallTask: Task<Void, Never>?
@@ -1009,7 +1010,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             engine: RenderEngine.shared,
             includeBundledLooks: false,
             portablePackageURL: packageURL,
-            leaseRecoveryConfirmer: AppKitPortablePackageLeaseRecoveryConfirmer(),
             asynchronousPortableLibraryIndexLoading: true
         )
     }
@@ -1022,7 +1022,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             engine: RenderEngine.shared,
             includeBundledLooks: includeBundledLooks,
             portablePackageURL: packageURL,
-            leaseRecoveryConfirmer: AppKitPortablePackageLeaseRecoveryConfirmer(),
             asynchronousPortableLibraryIndexLoading: true
         )
     }
@@ -1054,8 +1053,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             Thumbnails.generate(from: url, maxPixelSize: Thumbnails.firstFrameMaxPixelSize)
         },
         fileDialog: any FileDialogProviding = AppKitFileDialog(),
+        sheets: any SheetPresenting = AppKitSheetPresenter(),
         fileDropActionPolicy: FileDropActionPolicy = FileDropActionPolicy(),
         leaseRecoveryConfirmer: (any PortablePackageLeaseRecoveryConfirming)? = nil,
+        settings injectedSettings: KromoraSettings? = nil,
         portableLibrarySession injectedPortableLibrarySession: PortableLibrarySession? = nil,
         asynchronousPortableLibraryIndexLoading: Bool = false
     ) {
@@ -1120,7 +1121,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         self.photosImportCoordinator = PhotosImportCoordinator()
         self.maskingWorkflow = MaskingWorkflowCoordinator(analysis: analysisCoordinator)
         self.retouchWorkflow = RetouchWorkflowCoordinator()
-        self.settings = KromoraSettings(
+        self.settings = injectedSettings ?? KromoraSettings(
             preferences: preferences,
             userLookFolderURL: userLookFolderURL
         )
@@ -1144,6 +1145,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             userLookFolderURL: settings.ensureUserLookFolder(),
             includeBundled: includeBundledLooks
         )
+        self.lookSheets = LookLibrarySheets(sheets: sheets, library: self.library)
         self.export = ExportCoordinator(
             engine: engine,
             maskResolver: CoordinatorLocalMaskResolver(coordinator: analysisCoordinator),
@@ -2715,18 +2717,22 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// window. The request is cancellable at the orchestration layer and the snapshot is value-only;
     /// an obsolete prefetch may finish in the renderer, but it cannot publish or start source-load
     /// work for a photo the user has already left.
-    func openImageDialog() {
-        guard portableLibrary != nil else {
-            reportPortableLibraryUnavailable()
-            return
+    @discardableResult
+    func openImageDialog() -> Task<Void, Never> {
+        Task { [weak self] in
+            guard let self else { return }
+            guard self.portableLibrary != nil else {
+                self.reportPortableLibraryUnavailable()
+                return
+            }
+            guard let urls = await self.fileDialog.chooseImages(
+                startingAt: self.settings.defaultSourceFolderURL
+            ) else { return }
+            self.openImages(
+                urls: urls,
+                access: urls.map { .systemGranted(for: $0) }
+            )
         }
-        guard let urls = fileDialog.chooseImages(startingAt: settings.defaultSourceFolderURL) else {
-            return
-        }
-        openImages(
-            urls: urls,
-            access: urls.map { .systemGranted(for: $0) }
-        )
     }
 
     /// Import the selected files through the worker-backed package path and open the first item.
@@ -3006,12 +3012,18 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     /// Choose a folder to import into the portable library, reveal the library browser, and open
     /// the first imported image.
-    func chooseSourceFolder() {
-        guard portableLibrary != nil else {
-            reportPortableLibraryUnavailable()
-            return
+    @discardableResult
+    func chooseSourceFolder() -> Task<Void, Never> {
+        Task { [weak self] in
+            guard let self else { return }
+            guard self.portableLibrary != nil else {
+                self.reportPortableLibraryUnavailable()
+                return
+            }
+            await self.libraryMediaWorkflow.chooseSourceFolder(
+                startingAt: self.settings.defaultSourceFolderURL
+            )
         }
-        libraryMediaWorkflow.chooseSourceFolder(startingAt: settings.defaultSourceFolderURL)
     }
 
     /// Classify a dropped URL at the application boundary, then dispatch through the existing
@@ -4234,7 +4246,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         derive.derive(rawURL: rawURL, jpgURL: jpgURL)
     }
 
-    func saveDerivedLUT() {
+    @discardableResult
+    func saveDerivedLUT() -> Task<Void, Never> {
         derive.saveDialog()
     }
 
@@ -4257,44 +4270,19 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         lookSave.dismiss()
     }
 
-    func saveLook() {
+    @discardableResult
+    func saveLook() -> Task<Void, Never> {
         lookSave.saveDialog()
     }
 
     // MARK: - Look folder
 
-    func chooseLookFolder() {
-        let panel = NSOpenPanel()
-        panel.title = "Select Look Folder"
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
+    @discardableResult
+    func chooseLookFolder() -> Task<Void, Never> { lookSheets.chooseFolder() }
 
-        if panel.runModal() == .OK, let url = panel.url {
-            library.setFolder(url, access: .systemGranted(for: url))
-        }
-    }
-
-    /// Import one or more external `.cube`/text-based `.look` files from ordinary Finder locations.
-    /// The library owns parsing, security-scoped access, and persistence; this method only owns the
-    /// AppKit panel and the user-facing entry point.
-    func chooseLookFile() {
-        let panel = NSOpenPanel()
-        panel.title = "Import Look"
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = true
-        panel.allowedContentTypes = [
-            UTType(filenameExtension: "cube"),
-            UTType(filenameExtension: "look"),
-        ].compactMap { $0 }
-
-        if panel.runModal() == .OK {
-            for url in panel.urls {
-                library.importLUT(from: url, access: .systemGranted(for: url))
-            }
-        }
-    }
+    /// Import external `.cube`/`.look` files; the library owns parsing, access, and persistence.
+    @discardableResult
+    func chooseLookFile() -> Task<Void, Never> { lookSheets.chooseFiles() }
 
     /// Testable/non-panel seam for importing a file selected by another UI surface.
     func importLook(from url: URL) {

@@ -700,4 +700,68 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
         return (CGFloat(bytes[0]), CGFloat(bytes[1]), CGFloat(bytes[2]))
     }
 
+    // MARK: - Sheet seam
+
+    func testAcceptedSaveSheetExportsToTheChosenURL() async throws {
+        let sheets = FakeSheets()
+        let destination = tempDirectory.appendingPathComponent("sheet.jpg")
+        sheets.saveURL = destination
+        let coordinator = ExportCoordinator(sheets: sheets)
+        coordinator.onError = { XCTFail("unexpected error: \($0)") }
+
+        coordinator.exportDialog(
+            source: try makeSource(), document: EditDocument(), lut: nil, suggestedBaseName: "sheet"
+        )
+
+        try await waitUntil { FileManager.default.fileExists(atPath: destination.path) && !coordinator.isExporting }
+        XCTAssertEqual(sheets.saveCalls, 1)
+    }
+
+    func testCancelledSaveSheetLeavesTheCoordinatorIdleAndReusable() async throws {
+        let sheets = FakeSheets()
+        let coordinator = ExportCoordinator(sheets: sheets)
+        let source = try makeSource()
+
+        coordinator.exportDialog(
+            source: source, document: EditDocument(), lut: nil, suggestedBaseName: "x"
+        )
+        try await waitUntil { sheets.saveCalls == 1 }
+        await Task.yield()
+        XCTAssertFalse(coordinator.isExporting)
+
+        // A cancelled sheet must not wedge the re-entrancy guard.
+        coordinator.exportDialog(
+            source: source, document: EditDocument(), lut: nil, suggestedBaseName: "x"
+        )
+        try await waitUntil { sheets.saveCalls == 2 }
+        XCTAssertFalse(coordinator.isExporting)
+    }
+
+    func testAcceptedFolderSheetRunsTheBatch() async throws {
+        let sheets = FakeSheets()
+        let folder = try destinationFolder()
+        sheets.openURLs = [folder]
+        let coordinator = ExportCoordinator(sheets: sheets)
+        let items = try makeSources(["one"])
+
+        coordinator.batchExportDialog(items: items, document: EditDocument(), lut: nil)
+
+        try await waitUntil { sheets.openCalls == 1 }
+        try await waitUntil {
+            (try? FileManager.default.contentsOfDirectory(atPath: folder.path))?.isEmpty == false
+                && !coordinator.isExporting
+        }
+    }
+
+    func testCancelledFolderSheetStartsNothing() async throws {
+        let sheets = FakeSheets()
+        let coordinator = ExportCoordinator(sheets: sheets)
+        coordinator.batchExportDialog(
+            items: try makeSources(["one"]), document: EditDocument(), lut: nil)
+        try await waitUntil { sheets.openCalls == 1 }
+        await Task.yield()
+        XCTAssertFalse(coordinator.isExporting)
+        XCTAssertEqual(coordinator.batchTotal, 0)
+    }
+
 }

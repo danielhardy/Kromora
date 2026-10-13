@@ -385,6 +385,12 @@ final class PortablePackageLease: Sendable {
 
     private var lockURL: URL { packageRoot.appendingPathComponent("manifest.lock") }
 
+    /// The writer recorded in the package's lock file, or `nil` when there is no readable lock.
+    /// Reading never acquires, renews, or breaks the lease.
+    static func existingInfo(at packageRoot: URL) -> PortablePackageLeaseInfo? {
+        try? readInfo(at: packageRoot.appendingPathComponent("manifest.lock"))
+    }
+
     private static func readInfo(at url: URL) throws -> PortablePackageLeaseInfo {
         return try PackageJSONCoder.decode(
             PortablePackageLeaseInfo.self, from: Data(contentsOf: url)
