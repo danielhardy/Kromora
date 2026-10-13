@@ -15,6 +15,23 @@ final class KeyboardShortcutCatalogTests: TempDirectoryTestCase {
         }
     }
 
+    /// `docs/KEYBOARD_QA_CHECKLIST.md` has one row per catalog entry (KRMA-926).
+    func testQAChecklistListsEveryCatalogShortcut() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let checklist = try String(
+            contentsOf: root.appendingPathComponent("docs/KEYBOARD_QA_CHECKLIST.md"), encoding: .utf8)
+        let rows = Set(checklist.split(separator: "\n").compactMap { line -> String? in
+            guard line.hasPrefix("| ") else { return nil }
+            return line.dropFirst(2).components(separatedBy: " | ").first
+        })
+        for spec in KeyboardShortcutCatalog.all {
+            XCTAssertTrue(
+                rows.contains(spec.action.replacingOccurrences(of: "|", with: "\\|")),
+                "docs/KEYBOARD_QA_CHECKLIST.md is missing a row for \(spec.action)")
+        }
+    }
+
     func testMenuKeysAreUniqueAndEveryOneIsDisplayedInTheReference() {
         var seen = Set<String>()
         for (spec, key, modifiers, _) in menuSpecs {
