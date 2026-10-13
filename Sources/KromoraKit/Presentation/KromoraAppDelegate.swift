@@ -6,6 +6,7 @@ public final class KromoraAppDelegate: NSObject, NSApplicationDelegate {
     public let viewModel: AppViewModel
     private let appearanceController: KromoraWindowAppearanceController
     private var terminationFlushInProgress = false
+    var quitConfirmation: any QuitConfirmationPresenting = AppKitQuitConfirmation()
 
     public override init() {
         // Kromora is a single-window editor. Automatic window tabbing inserts
@@ -42,6 +43,9 @@ public final class KromoraAppDelegate: NSObject, NSApplicationDelegate {
 
     public func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !terminationFlushInProgress else { return .terminateLater }
+        guard viewModel.terminationGuard.shouldQuit(presenter: quitConfirmation) else {
+            return .terminateCancel
+        }
         terminationFlushInProgress = true
         Task { @MainActor [weak self] in
             guard let self else { return }

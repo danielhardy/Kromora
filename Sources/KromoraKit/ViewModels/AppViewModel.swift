@@ -822,6 +822,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     var isExporting: Bool { export.isExporting }
     var isBatchExporting: Bool { export.isExporting && export.batchTotal > 0 }
     var batchProgress: Double { export.batchProgress }
+
+    /// Long-running work that quitting would cancel.
+    var terminationGuard: TerminationGuard {
+        TerminationGuard(
+            batchExportTotal: isBatchExporting ? export.batchTotal : nil,
+            photosImportTotal: photosImportProgress?.total,
+            packageImportTotal: portableImportProgress.flatMap { $0.phase == .finished ? nil : $0.total }
+        )
+    }
     var batchCompleted: Int { export.batchCompleted }
     var batchTotal: Int { export.batchTotal }
     var batchCurrentItem: String? { export.batchCurrentItem }
