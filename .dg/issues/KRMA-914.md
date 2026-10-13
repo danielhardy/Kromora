@@ -16,7 +16,7 @@ labels:
   - design
   - performance
 created: 2026-10-12T21:56:49.211Z
-updated: 2026-10-12T22:09:00.690Z
+updated: 2026-10-13T01:11:53.311Z
 blockers: []
 order: zzzv
 board: product
@@ -84,14 +84,18 @@ Build an independently owned, swappable Metal-based visual experience that opera
 
 The experience should be:
 
-- Visually extraordinary but restrained.
+- Visually extraordinary but not over the top.
 - Instantaneously responsive.
 - Extremely lightweight while Apple's processing is running.
 - Independent of the mask-generation engine.
 - Encapsulated as a replaceable animation subsystem.
-- Compatible with the existing Metal canvas without deeply modifying its renderer.
+- Compatible with the existing Metal canvas without deeply modifying its renderer's behavior (outside of this moment).
 - Capable of adapting to operations lasting anywhere from milliseconds to more than a minute.
 - Polished enough that the actual mask appears as the natural conclusion of the preceding animation.
+- Could have a "finally" when the mask is ready
+- Could playfully interact with the mouse to make it more interesting (not a must but an idea)
+- Bonus points for things that feel magical, technical, photographically familar/adjacent, fun
+- could even have sound if we thought it made sense
 
 Prioritize the beauty of the interaction, the integrity of the photograph, and near-zero interference with Apple's processing. **The intelligence is already there. Give it a sense of wonder.**
 
@@ -214,3 +218,18 @@ Committed the initial Smart Mask Discovery prototype at the user's request.
 Validation recorded for the committed implementation: strict application build passed; the selected 70 tests passed with zero failures; production package verification passed; shader freshness and whitespace checks passed. This was a commit/bookkeeping action, so the already-completed build and test runs were not repeated. The pre-existing `ColorMixerTests.swift:193` warning still prevents the strict all-test warning gate from passing; live GPU contention and the final motion/visual-quality review remain unverified.
 
 KRMA-914 stays in **backlog**. The prototype remains a starting point that the user found underwhelming; no completion or visual acceptance is implied. No push, PR, merge, or distribution was performed. This comment and the current-baseline section supersede the earlier historical note that the prototype was uncommitted.
+
+
+### Comment — claude @ 2026-10-13T01:11:53.310Z
+
+Second iteration committed on main as 5a090b2c8763e1c2ca0de8347e994a7ef81ab2c1 (KRMA-914: replace discovery visuals with darkroom development treatment). Answers the 'pretty underwhelming' assessment of the ribbon prototype (239e6b80); the ticket stays in backlog and is NOT visually accepted.
+
+Design: 'Darkroom Development'. Waiting = amber safelight, radial vignette, faint drifting developer-tray light, breathing silver grain; no progress, deadline, or invented regions. Reveal (actual admitted mask pixels) = silver grain nucleates where returned coverage is strongest and sparkles, then coalesces; warm halation blooms just outside the true boundary; a crisp pearl 'fixer' edge locks in; lights come up. Reduce Motion keeps the still coverage tint. Reveal duration 1.65s -> 2.4s. Uniform ABI and overlay Swift unchanged; MaskDiscovery.metal rewritten and KromoraPresentation.metallib rebuilt (--check passes).
+
+Visual review so far: offscreen contact sheets (waiting + 8 reveal frames) over ai-clear-backlit-portrait with a real Vision foreground-instance mask. Iterated: first pass caustics invisible and reveal read as grey fog; second pass caustics overpowered the face; third pass restrained (current). STILL OPEN: live review in motion, other fixtures (low-key portrait, busy street, high-key), canvas sizes/zoom, and the user's acceptance.
+
+Test change to note: testDiscoveryShaderUsesActualCoverageAndLeavesPhotoPerimeterTransparent asserted single-pixel alpha from the old design. It now asserts mean light over the covered quadrant exceeds uncovered quadrants (coverage-following), surroundings alpha < 40 (bounded burn, never filled), perimeter alpha 0, full recede at reveal=1. Waiting alpha cap raised 40 -> 90 to allow the vignette; revisit if the dimming proves too heavy in motion.
+
+Verification: strict swift build passes; 70 focused tests pass (MaskDiscovery, MetalKernelParity, MaskingWorkflowCoordinator, PackageSettings, GeometryPointMapping, CanvasNavigation, XcodeProjectInvariant); git diff --check clean. scripts/app-store-build.sh not re-run for this iteration. No contention measurement.
+
+Not built yet (ideas from the brief): cursor-as-safelight interaction, trackpad haptic at fixer-edge lock-in, optional sound, long-wait choreography beyond the existing 8-20s settle.

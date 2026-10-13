@@ -2,11 +2,39 @@
 id: KRMA-912
 title: Show camera and lens in Library facets from backfilled capture metadata
 type: task
-status: backlog
+status: done
 priority: medium
 agent: claude
 verification_agent: codex
 human_review_required: false
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: The camera facet shows Make Model without a repeated make; the lens facet shows lens names.
+      result: pass
+      notes: Camera naming behavior is covered by LibraryFacetTests.
+    - criterion: A newly imported photo has camera and lens in its summary.
+      result: pass
+      notes: Added an importer test with embedded TIFF make/model and EXIF lens metadata.
+    - criterion: A package indexed before the backfill ran picks up camera, lens, location, settings and date on the next reconcile, without a rebuild.
+      result: pass
+      notes: Added a stale projection reconciliation test that checks all five metadata fields.
+    - criterion: An original with no embedded camera data is not re-read on every open.
+      result: pass
+      notes: Extended the backfill idempotency test to start with nil camera/lens fields and verify empty-string sentinels are persisted.
+  checks_run:
+    - swift build (passed)
+    - swift test related metadata and Library suites (47 tests, passed)
+    - swift test focused on backfill, reconciliation, and import persistence (4 tests, passed)
+  findings: []
+  fixes:
+    - Added focused tests for importer metadata persistence, backfill idempotency, and stale-index adoption.
+  verification_commits:
+    - 02139c3c
+  actor: codex
+  resolved_model: gpt-6-luna
+  completed_at: 2026-10-12T19:22:17.394Z
+  session: 01MV5MXZ1Q78LBFYU0
 creation_provenance:
   runner: claude
   model: sonnet
@@ -15,9 +43,9 @@ labels:
   - library
   - facets
 created: 2026-10-12T17:27:12.750Z
-updated: 2026-10-12T17:28:13.378Z
+updated: 2026-10-12T19:22:17.397Z
 blockers: []
-order: zzzy
+order: n
 board: product
 footprint:
   source: declared
@@ -25,6 +53,12 @@ footprint:
     - path: Sources/KromoraKit/Models/LibraryFacets.swift
       access: write
       confidence: 1
+  observed:
+    paths: []
+    captured_at: 2026-10-12T17:28:29.931Z
+    unavailable_reason: "missing_commits: no implementation commits are recorded"
+commits:
+  - 02139c3c
 ---
 
 ## Objective
@@ -56,3 +90,32 @@ Note for the verifier: this working-tree change was written by the project owner
 
 - Checks run: `swift build`; `swift test --filter 'CaptureMetadataBackfillTests|LibraryFacetTests|LibraryQueryControllerTests|CaptureMetadataOverlayTests'` (36 tests, 0 failures).
 - Gap: there is no direct test for the index reconcile adopting backfilled values, or for the importer writing camera/lens. A verifier should add or request those.
+
+
+### Comment — claude @ 2026-10-12T17:28:29.223Z
+
+Committed in 76b92c21. Facet camera/lens names, importer + backfill recording, and index reconcile adoption were written by the project owner; implementer reviewed the diff, ran build and 36 related tests (0 failures) and added cameraName test. Gaps noted in the ticket: no direct test for index reconcile adoption or importer camera/lens.
+
+## Agent log
+
+- 2026-10-12T19:22:17.394Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] The camera facet shows Make Model without a repeated make; the lens facet shows lens names. (pass) — Camera naming behavior is covered by LibraryFacetTests.
+- [x] A newly imported photo has camera and lens in its summary. (pass) — Added an importer test with embedded TIFF make/model and EXIF lens metadata.
+- [x] A package indexed before the backfill ran picks up camera, lens, location, settings and date on the next reconcile, without a rebuild. (pass) — Added a stale projection reconciliation test that checks all five metadata fields.
+- [x] An original with no embedded camera data is not re-read on every open. (pass) — Extended the backfill idempotency test to start with nil camera/lens fields and verify empty-string sentinels are persisted.
+Checks run:
+- swift build (passed)
+- swift test related metadata and Library suites (47 tests, passed)
+- swift test focused on backfill, reconciliation, and import persistence (4 tests, passed)
+Findings:
+- None
+Fixes:
+- Added focused tests for importer metadata persistence, backfill idempotency, and stale-index adoption.
+Verification commits:
+- 02139c3c
+Actor: codex
+Resolved model: gpt-6-luna
+Pickup session: 01MV5MXZ1Q78LBFYU0
+Summary: Verification passed; importer, backfill, and stale-index metadata coverage added.
