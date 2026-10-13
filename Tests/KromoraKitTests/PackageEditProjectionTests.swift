@@ -403,6 +403,48 @@ final class PackageEditProjectionTests: TempDirectoryTestCase {
         XCTAssertNoThrow(try PortableLibraryPackage.open(at: package.rootURL))
     }
 
+    func testConcurrentWriterMutationsOnOneLeaseSerializeWithoutCorruptingShard() async throws {
+        let (package, lease, assets) = try makeLegacyGeometryPackage(
+            name: "WriterMutationSerializes", assetCount: 1
+        )
+        defer { try? lease.release() }
+        let asset = try XCTUnwrap(assets.first)
+        let active = OSAllocatedUnfairLock(initialState: (current: 0, peak: 0))
+        let rounds = 8
+
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for writer in 0..<2 {
+                group.addTask {
+                    for round in 0..<rounds {
+                        try lease.withWriterMutationLock {
+                            active.withLock { state in
+                                state.current += 1
+                                state.peak = max(state.peak, state.current)
+                            }
+                            defer { active.withLock { $0.current -= 1 } }
+                            var shard = try package.readMembershipShard(asset.shardName)
+                            let index = try XCTUnwrap(shard.entries.firstIndex {
+                                $0.assetID == asset.assetID
+                            })
+                            // Read-modify-write: a lost update would drop one writer's count.
+                            shard.entries[index].summary.rating =
+                                (shard.entries[index].summary.rating ?? 0) + 1
+                            try package.writeMembershipShard(shard)
+                            _ = (writer, round)
+                        }
+                    }
+                }
+            }
+            try await group.waitForAll()
+        }
+
+        XCTAssertEqual(active.withLock { $0.peak }, 1)
+        let summary = try XCTUnwrap(package.readMembershipShard(asset.shardName).entries
+            .first { $0.assetID == asset.assetID }?.summary)
+        XCTAssertEqual(summary.rating, 2 * rounds)
+        XCTAssertNoThrow(try PortableLibraryPackage.open(at: package.rootURL))
+    }
+
     func testHistoryNavigationBranchesWithoutWritingAndPreservesNamedSnapshots() async throws {
         let packageURL = tempDirectory.appendingPathComponent("HistoryTimeline.kromoralibrary")
         let package = try PortableLibraryPackage.create(at: packageURL)

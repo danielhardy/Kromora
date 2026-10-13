@@ -193,16 +193,34 @@ final class PortablePackageLease: Sendable {
     let ownerID: UUID
     private let duration: TimeInterval
     private let state: OSAllocatedUnfairLock<State>
-    private let writerMutationLock = OSAllocatedUnfairLock(initialState: ())
+    private let writerMutationQueue = DispatchQueue(
+        label: "com.kromora.package-writer-mutation", qos: .utility
+    )
 
     var info: PortablePackageLeaseInfo { state.withLock { $0.info } }
 
     /// Serializes same-session package mutations that must read a current value and publish a
     /// related transaction without a concurrent edit slipping between those steps.
+    ///
+    /// The body performs whole package transactions (journal, `F_FULLFSYNC`, renames; a virtual
+    /// copy also hashes the original), so a hold can last from tens of milliseconds to seconds.
+    /// That rules out `os_unfair_lock`, which is meant for tiny critical sections. A serial queue
+    /// is used instead: waiters block in the kernel without spinning, and `sync` lets the
+    /// queue's owner inherit the waiter's QoS, so a user-initiated waiter lifts a utility-QoS
+    /// holder rather than inverting behind it.
+    ///
+    /// Callers, all reached from the package-I/O worker, `EditDocumentStore`, or detached
+    /// maintenance tasks when a scheduler exists (always, in production): `commitEditRevision`,
+    /// `selectEditRevision`, `replaceSourceFingerprint`, the presented-aspect-ratio and
+    /// capture-metadata shard repairs, virtual copy, removal, and library-state writes. The main
+    /// actor reaches this lock only through the scheduler-less inline fallbacks of
+    /// `PortableLibrarySession` (tests) and its synchronous `updateLibraryState`,
+    /// `removeFromLibrary` and `replaceSourceFingerprint`, which production does not call.
+    /// `body` must not re-enter this method on the same lease; that would deadlock.
     func withWriterMutationLock<T: Sendable>(
         _ body: @Sendable () throws -> T
     ) rethrows -> T {
-        try writerMutationLock.withLock { _ in try body() }
+        try writerMutationQueue.sync(execute: body)
     }
 
     private init(packageRoot: URL, info: PortablePackageLeaseInfo, duration: TimeInterval) {
