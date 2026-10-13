@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import UniformTypeIdentifiers
 
 /// The values a single-photo export snapshots from the active document.
 struct ExportSingleRequest {
@@ -294,7 +295,7 @@ final class ExportWorkflowCoordinator {
             let provider = NSItemProvider()
             provider.suggestedName = name
             provider.registerFileRepresentation(
-                forTypeIdentifier: ShareExportPolicy.preferredFormat.utType.identifier,
+                forTypeIdentifier: ShareExportPolicy.providerContentType.identifier,
                 fileOptions: [],
                 visibility: .all
             ) { [weak self] completion in
@@ -343,7 +344,7 @@ final class ExportWorkflowCoordinator {
         let provider = NSItemProvider()
         provider.suggestedName = request.baseName
         provider.registerFileRepresentation(
-            forTypeIdentifier: ShareExportPolicy.preferredFormat.utType.identifier,
+            forTypeIdentifier: ShareExportPolicy.providerContentType.identifier,
             fileOptions: [],
             visibility: .all
         ) { [weak self] completion in
@@ -428,6 +429,10 @@ enum ShareExportPolicy {
     /// HEIC keeps files small with good quality; JPEG is the fallback when HEIC encoding fails.
     static let preferredFormat: ExportFormat = .heif
     static let fallbackFormat: ExportFormat = .jpeg
+    /// Rendering starts after the picker is shown, so the final concrete format is not known
+    /// when the provider registers. Advertise their shared image type; each returned file keeps
+    /// the extension that matches the encoder that succeeded.
+    static let providerContentType = UTType.image
     /// Longest side in pixels; larger photos are scaled down, smaller ones are never upscaled.
     static let longEdge = 4096
     static let quality = 0.85

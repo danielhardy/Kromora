@@ -148,6 +148,12 @@ final class ExportWorkflowCoordinatorTests: XCTestCase {
         }
         XCTAssertEqual(ShareExportPolicy.preferredFormat, .heif)
         XCTAssertEqual(ShareExportPolicy.fallbackFormat, .jpeg)
+        XCTAssertTrue(
+            ShareExportPolicy.preferredFormat.utType.conforms(to: ShareExportPolicy.providerContentType)
+        )
+        XCTAssertTrue(
+            ShareExportPolicy.fallbackFormat.utType.conforms(to: ShareExportPolicy.providerContentType)
+        )
     }
 
     func testShareRendersLazilyIntoItsDirectoryAndRemovalLeavesNothing() async throws {
@@ -224,7 +230,7 @@ final class ExportWorkflowCoordinatorTests: XCTestCase {
     }
 
     private func loadFile(_ provider: NSItemProvider) async throws -> Data {
-        let type = ShareExportPolicy.preferredFormat.utType.identifier
+        let type = ShareExportPolicy.providerContentType.identifier
         return try await withCheckedThrowingContinuation { continuation in
             provider.loadFileRepresentation(forTypeIdentifier: type) { url, error in
                 guard let url else {
@@ -235,6 +241,15 @@ final class ExportWorkflowCoordinatorTests: XCTestCase {
                 continuation.resume(with: Result { try Data(contentsOf: url) })
             }
         }
+    }
+
+    private func shareFileExtensions(in root: URL) throws -> [String] {
+        let fileManager = FileManager.default
+        let directories = try fileManager.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+        return try directories.flatMap { directory in
+            try fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+                .map(\.pathExtension)
+        }.sorted()
     }
 
     func testMultiPhotoSharePresentsPickerBeforeAnyRenderAndCleansUpAfterSuccess() async throws {
@@ -258,8 +273,16 @@ final class ExportWorkflowCoordinatorTests: XCTestCase {
         XCTAssertEqual(items.count, 2)
         let providers = try XCTUnwrap(items as? [NSItemProvider])
         XCTAssertEqual(providers.map(\.suggestedName), ["A", "A 2"])
+        XCTAssertTrue(providers.allSatisfy { provider in
+            provider.registeredTypeIdentifiers.contains(
+                ShareExportPolicy.providerContentType.identifier
+            )
+        })
 
-        for provider in providers { _ = try await loadFile(provider) }
+        for provider in providers {
+            _ = try await loadFile(provider)
+        }
+        XCTAssertEqual(try shareFileExtensions(in: root), ["heic", "heic"])
         let requests = await engine.encodeRequests
         XCTAssertEqual(requests.count, 2)
         XCTAssertTrue(requests.allSatisfy { $0.format == .heif })
@@ -288,10 +311,11 @@ final class ExportWorkflowCoordinatorTests: XCTestCase {
         let providers = try XCTUnwrap(items as? [NSItemProvider])
         XCTAssertEqual(providers.count, 2)
         for provider in providers {
-            // The loaded copy carries the declared HEIC name; its bytes are the JPEG fallback.
-            let bytes = try await loadFile(provider)
-            XCTAssertEqual(bytes, Data("fake-\(ExportFormat.jpeg.rawValue)".utf8))
+            // The provider has a generic image type because the concrete format is chosen lazily.
+            let data = try await loadFile(provider)
+            XCTAssertEqual(data, Data("fake-\(ExportFormat.jpeg.rawValue)".utf8))
         }
+        XCTAssertEqual(try shareFileExtensions(in: root), ["jpg", "jpg"])
         let formats = await engine.encodeRequests.map(\.format)
         XCTAssertEqual(formats, [.heif, .jpeg, .heif, .jpeg])
         withExtendedLifetime((window, destination)) {}
