@@ -42,6 +42,8 @@ struct KeyboardSurface: ViewModifier {
                 viewModel.presentSelectiveCopyDialog()
                 return []
             }
+            // Escape as the text-input system's cancel command (see `KeyboardChainTail`).
+            .onExitCommand { router.perform(KeyInput(.escape)) }
             .onCommand(#selector(NSResponder.selectAll(_:))) {
                 if viewModel.navigation.isGrid { viewModel.collection.selectAll() }
             }
@@ -186,6 +188,20 @@ final class KeyboardChainTail: NSResponder {
     override func keyUp(with event: NSEvent) {
         if claims(event) { return }
         nextResponder?.keyUp(with: event)
+    }
+
+    // A first responder that routes keys through the text-input system (`interpretKeyEvents`)
+    // turns Return into this editing command instead of passing the key down the chain. It walks
+    // the responder chain to this tail, which hands it to the router so the crop tool still
+    // applies; an unclaimed one continues to AppKit unchanged. Escape's `cancelOperation:` stops
+    // at `NSWindow`, ahead of the tail, so `KeyboardSurface` takes it with `onExitCommand`.
+    override func insertNewline(_ sender: Any?) {
+        if !performCommand(.return) { nextResponder?.insertNewline(sender) }
+    }
+
+    private func performCommand(_ key: KeyInput.Key) -> Bool {
+        guard KeyboardOwnership.surfaceOwns(key, firstResponder: window?.firstResponder) else { return false }
+        return router.perform(KeyInput(key))
     }
 
     private func claims(_ event: NSEvent) -> Bool {
