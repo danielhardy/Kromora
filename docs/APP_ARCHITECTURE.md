@@ -121,6 +121,32 @@ unnecessary, and presents an exact hit instead of rendering. `PreviewCoordinator
 value-only document/source/navigation inputs and retains the `PreviewSurface` instances, so there
 is no second document store or surface reference in these collaborators.
 
+## Source-presentation state ownership (KRMA-910)
+
+`SourcePresentationState` (`ViewModels/SourcePresentationState.swift`) is the single owner of the
+source-loading presentation flags: `isLoading`, `isNavigationLoading`, `previewState`,
+inspector-document-pending, and toolbar availability/transition. `AppViewModel` stores it once as
+`presentation` and exposes the historical names (`isLoading`, `previewState`, …) as read-only
+projections. The dimensions stay independent on purpose; the value records presentation readiness
+only and never holds the `ImageSource`, render surfaces, active `EditDocument`, or generations.
+Call sites keep their existing source/request-generation and `isShuttingDown` guards and then
+invoke one named transition. After `shutDown()` every transition is a no-op.
+
+| Event | Transition | loading | nav loading | preview | toolbar |
+| --- | --- | --- | --- | --- | --- |
+| Placeholder record resolving; new selection | `beginSelection` | on | on | loading | transitioning |
+| Cached/ stored first frame or provisional frame confirmed | `firstFramePresented` | – | off | – | – |
+| Source preparation handed to session | `beginSourcePreparation` | on | on | – | – |
+| Source prepared (marker installed) | `sourcePrepared` | off | – | loading | – |
+| Stored document adopted/rejected | `inspectorDocumentSettled` | – | – | – | – (pending off) |
+| Renderer frame settled | `previewReady` | – | off | ready | available, settled |
+| Render failure | `previewFailed` | – | off | failed | available iff a source exists |
+| Source preparation failure | `sourceFailed` | off | off | failed | as `previewFailed`; pending off |
+| Direct open failure | `openFailed` | off | – | failed | – |
+| Placeholder resolution ended (Library, error) | `endSelection` | off | off | optional | settled |
+| Source clear / active deletion | `clear` | off | off | empty | unavailable |
+| Shutdown | `shutDown` | – | off | – | frozen |
+
 ## Canvas workflow ownership
 
 `CanvasWorkflowCoordinator` owns crop entry, commit, cancel, reset, transient straighten/flip/

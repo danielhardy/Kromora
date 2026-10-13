@@ -180,11 +180,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// True while a cold photo-to-photo selection is waiting for its stored edit document. The
     /// inspector holds its current slider presentation during this short interval; the published
     /// document itself continues to belong to the newly selected photo.
-    @Published private(set) var isInspectorSourceDocumentPending = false
+    var isInspectorSourceDocumentPending: Bool { presentation.isInspectorDocumentPending }
     /// Toolbar photo actions retain their last settled availability while another selected photo
     /// loads. Their action methods still validate the active source before doing any work.
-    @Published private(set) var toolbarPhotoActionsAvailable = false
-    @Published private(set) var isToolbarPhotoTransitioning = false
+    var toolbarPhotoActionsAvailable: Bool { presentation.toolbarActionsAvailable }
+    var isToolbarPhotoTransitioning: Bool { presentation.isToolbarTransitioning }
     var durableEditHistory: [PortablePackageEditRevision] { editHistory.history }
     var durableCurrentEditRevision: UInt64 { editHistory.currentRevision }
 
@@ -669,11 +669,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     @Published private(set) var autoAdjustmentProgress: Double?
     private let autoWorkflowCoordinator = AutoWorkflowCoordinator()
 
-    @Published var isLoading: Bool = false
+    /// Single owner of the source-loading presentation flags (KRMA-910). The façade properties
+    /// below are read-only projections; every write goes through a named transition.
+    @Published private(set) var presentation = SourcePresentationState()
+    var isLoading: Bool { presentation.isLoading }
     /// Navigation waits only until the selected source has a usable frame on the surface. Full
     /// preview readiness remains separate because RAW development and other render work can
     /// continue after its embedded camera preview has already been presented.
-    @Published private(set) var isNavigationLoading = false
+    var isNavigationLoading: Bool { presentation.isNavigationLoading }
     enum PreviewState: Equatable, Sendable {
         case empty
         case loading
@@ -682,7 +685,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
     /// Source preparation and preview presentation are separate async stages. This state keeps
     /// the transparent source marker from making a not-yet-presented canvas look like a black one.
-    @Published private(set) var previewState: PreviewState = .empty
+    var previewState: PreviewState { presentation.previewState }
     @Published var statusMessage: String = "Open an image to get started"
     private var pendingImportOutcome: (summary: ImportOutcomeSummary, prefix: String)?
 
@@ -1363,13 +1366,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 request.sourceRevision == self.sourceRevision,
                 request.assetID == self.activeAssetID
             else { return }
-            self.isLoading = false
-            self.isInspectorSourceDocumentPending = false
-            self.isNavigationLoading = false
-            self.previewState = .failed
+            self.presentation.sourceFailed(hasSource: self.sourceImage != nil)
             self.previewSurface.discardDepartingFrame()
-            self.toolbarPhotoActionsAvailable = self.sourceImage != nil
-            self.isToolbarPhotoTransitioning = false
             self.presentError(message)
             self.presentPendingImportOutcome()
         }
@@ -1858,8 +1856,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             )
             return
         }
-        isLoading = false
-        previewState = .failed
+        presentation.openFailed()
         previewSurface.discardDepartingFrame()
         presentError("Could not open \(url.lastPathComponent): \(reason)")
     }
@@ -2075,10 +2072,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             let resolutionGeneration = loadRequestGeneration
             let portableAssetID = item.asset.source.portableIdentity.assetID
             let previousStatusMessage = statusMessage
-            isToolbarPhotoTransitioning = true
-            isLoading = true
-            isNavigationLoading = true
-            previewState = .loading
+            presentation.beginSelection()
             // Fence the canvas before suspending, exactly as `load` does: the previous photo's
             // pixels must never remain on screen while the selected photo's record resolves.
             imageSource = nil
@@ -2104,10 +2098,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                     // (thumbnails, previews, and persistence) reuse its hash for an unchanged file.
                     current.asset = resolved
                     guard self.navigation.isEdit else {
-                        self.isToolbarPhotoTransitioning = false
-                        self.isLoading = false
-                        self.isNavigationLoading = false
-                        self.previewState = self.sourceImage == nil ? .empty : .ready
+                        self.presentation.endSelection(
+                            previewState: self.sourceImage == nil ? .empty : .ready)
                         self.statusMessage = self.sourceImage == nil
                             ? "Open an image to get started" : previousStatusMessage
                         self.presentPendingImportOutcome()
@@ -2120,9 +2112,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 } catch {
                     guard !self.isShuttingDown, self.loadRequestGeneration == resolutionGeneration
                     else { return }
-                    self.isToolbarPhotoTransitioning = false
-                    self.isLoading = false
-                    self.isNavigationLoading = false
+                    self.presentation.endSelection()
                     self.failOpenImage(url, reason: error.localizedDescription)
                 }
             }
@@ -2228,9 +2218,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         loadRequestGeneration &+= 1
         let requestGeneration = loadRequestGeneration
         let previousActiveAssetID = activeAssetID
-        isInspectorSourceDocumentPending = previousActiveAssetID != nil
-            && previousActiveAssetID != importPlan.assetID
-            && editorDocument.session(for: importPlan.assetID) == nil
+        presentation.setInspectorDocumentPending(
+            previousActiveAssetID != nil
+                && previousActiveAssetID != importPlan.assetID
+                && editorDocument.session(for: importPlan.assetID) == nil)
 
         // Make the source switch observable and invalidate old pixels immediately. Package state,
         // editor cleanup, and candidate materialization continue after the selection event yields.
@@ -2238,10 +2229,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         laps.append(lap("planMs"))
         updatePinnedFrameAssets(visible: Array(collection.visibleEditedThumbnailAssetIDs))
         laps.append(lap("pinnedFramesMs"))
-        isToolbarPhotoTransitioning = true
-        isLoading = true
-        isNavigationLoading = true
-        previewState = .loading
+        presentation.beginSelection()
         imageSource = nil
         sourceImage = nil
         statusMessage = "Loading \(importPlan.name)..."
@@ -2288,7 +2276,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         KromoraObservability.photoSwitchPhase("persistenceFlushRequested", since: presentationSelectionUptime)
         // `sourceImage` is cleared below to fence edit operations while decoding. Keep the
         // toolbar's settled enabled appearance until this selected photo publishes or fails.
-        isToolbarPhotoTransitioning = true
+        presentation.beginToolbarTransition()
         activeAssetID = assetID
         let sourceReference = importPlan.sourceReference
         activeSourceReference = sourceReference
@@ -2400,7 +2388,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // No source pixels are available to editing tools during the transition. PreviewView may
         // still display the last confirmed frame with a loading indicator over it.
         sourceImage = nil
-        previewState = .loading
+        presentation.markPreviewLoading()
         // The old source must not describe the empty/loading state or gate the new image's
         // inspector while its pixels are being decoded.
         imageSource = nil
@@ -2422,8 +2410,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // validates it once its actual capabilities are known; resetting here would make an import
         // change an unrelated inspector preference merely because source preparation is async.
 
-        isLoading = true
-        isNavigationLoading = true
+        presentation.beginSourcePreparation()
         statusMessage = "Loading \(importPlan.name)..."
 
         KromoraObservability.photoSwitchPhase("beginLoadSyncEnd", since: presentationSelectionUptime)
@@ -2475,7 +2462,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                     self.completePendingStoredFrameConfirmation(generation: generation)
                     self.previewAdmissionCoordinator.admitExactStoredFrameHistogramIfAvailable()
                 }
-                self.isNavigationLoading = false
+                self.presentation.firstFramePresented()
             }
         )
     }
@@ -2535,12 +2522,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         sourceImage = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 0)).cropped(
             to: CGRect(origin: .zero, size: preparation.nativeExtent)
         )
-        previewState = .loading
         if request.plan.source.kind != .raw {
             statusMessage =
                 "\(request.plan.name)  \(Int(preparation.nativeExtent.width))\u{00D7}\(Int(preparation.nativeExtent.height))"
         }
-        isLoading = false
+        presentation.sourcePrepared()
         keepInspectorTabValid()
         scheduleAdjacentPreviewPrefetch()
     }
@@ -2604,7 +2590,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                     identity: publication.preparation.source.portableIdentity,
                     generation: publication.request.sourceRevision
                 )
-                self.isNavigationLoading = false
+                self.presentation.firstFramePresented()
             }
         )
     }
@@ -2616,7 +2602,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private func adoptStoredDocumentValues(
         _ stored: EditDocumentLoadResult, for request: SourceSessionCoordinator.Request
     ) {
-        defer { isInspectorSourceDocumentPending = false }
+        defer { presentation.inspectorDocumentSettled() }
         let context = storedAdoptionContext(stored, for: request)
         guard storedEditAdoption.decideEarlyAdoption(context) == .adopt else { return }
         document = stored.document
@@ -2645,7 +2631,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private func adoptStoredEdits(
         _ stored: EditDocumentLoadResult, for request: SourceSessionCoordinator.Request
     ) {
-        defer { isInspectorSourceDocumentPending = false }
+        defer { presentation.inspectorDocumentSettled() }
         let outcome = storedEditAdoption.decideLateAdoption(
             storedAdoptionContext(stored, for: request),
             hasDeferredSettledPreview: previewAdmissionCoordinator.hasDeferredSettledPreview)
@@ -3156,8 +3142,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         previewCoordinator.cancel()
         cancelWhiteBalanceSampling()
         sourceImage = nil
-        toolbarPhotoActionsAvailable = false
-        isToolbarPhotoTransitioning = false
         imageSource = nil
         sourceURL = nil
         sourceName = ""
@@ -3169,9 +3153,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         document = EditDocument()
         metadata = ImageMetadata()
         histogram = nil
-        isLoading = false
-        isNavigationLoading = false
-        previewState = .empty
+        presentation.clear()
         previewSurface.clear()
         originalPreviewSurface.clear()
         inspectorState.isPresented = false
@@ -3350,7 +3332,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         if activeAssetID == item.id {
             if imageSource != nil, sourceImage != nil {
                 if previewSurface.image == nil {
-                    previewState = .loading
+                    presentation.markPreviewLoading()
                     schedulePreview()
                 } else if inspectorState.isPresented, !isCropToolActive {
                     // Library selection can settle and present this frame while the inspector
@@ -3367,7 +3349,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             // A source preparation can be non-cancellable. Let the in-flight, revision-checked
             // request finish instead of enqueueing a duplicate while the user is navigating.
             if sourceSession.isBusy {
-                previewState = .loading
+                presentation.markPreviewLoading()
                 statusMessage = "Loading \(item.displayName)..."
                 return
             }
@@ -3681,7 +3663,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// recovery action exposed by the masking workspace when a source or mask render fails.
     func retryPreview() {
         guard imageSource != nil, sourceImage != nil else { return }
-        previewState = .loading
+        presentation.markPreviewLoading()
         statusMessage = "Retrying preview…"
         schedulePreview()
     }
@@ -4396,7 +4378,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     public func shutdown() async {
         guard !isShuttingDown else { return }
         isShuttingDown = true
-        isNavigationLoading = false
+        presentation.shutDown()
 
         // Invalidate every generation before awaiting anything. A renderer or framework call may
         // only observe cancellation when it returns, but it can no longer publish into this model.
@@ -4609,18 +4591,12 @@ extension AppViewModel: PreviewPublicationDestination {
     }
 
     func publishPreviewReady() {
-        isNavigationLoading = false
-        previewState = .ready
-        toolbarPhotoActionsAvailable = true
-        isToolbarPhotoTransitioning = false
+        presentation.previewReady()
         presentPendingImportOutcome()
     }
     func publishPreviewFailure() {
-        isNavigationLoading = false
-        previewState = .failed
+        presentation.previewFailed(hasSource: sourceImage != nil)
         previewSurface.discardDepartingFrame()
-        toolbarPhotoActionsAvailable = sourceImage != nil
-        isToolbarPhotoTransitioning = false
         presentPendingImportOutcome()
     }
     func publishAutoAdjustmentReady() {
