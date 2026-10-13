@@ -459,6 +459,29 @@ final class LibraryDeletionCoordinatorTests: TempDirectoryTestCase {
         await fixture.collection.shutdown()
     }
 
+    func testSecondDeletionBatchIsRejectedWhileAnotherItemIsInFlight() async throws {
+        let fixture = try await makeScheduledFixture(count: 2)
+        let items = fixture.collection.items
+        let firstCandidate = candidate(for: items[0], in: fixture.collection)
+        let secondCandidate = candidate(for: items[1], in: fixture.collection)
+        let release = await holdPackageIOWorker(fixture.scheduler)
+
+        let first = Task { @MainActor in await fixture.coordinator.delete([firstCandidate]) }
+        for _ in 0..<50 { await Task.yield() }
+        let second = await fixture.coordinator.delete([secondCandidate])
+        XCTAssertTrue(second.deletedIDs.isEmpty)
+        XCTAssertEqual(second.failures.count, 1)
+
+        release.withLock { $0 = true }
+        let result = await first.value
+        XCTAssertEqual(result.deletedIDs, [items[0].id])
+        XCTAssertEqual(fixture.session.assetCount, 1)
+        XCTAssertEqual(fixture.collection.items.map(\.id), [items[1].id])
+        await fixture.session.shutdown()
+        await fixture.analysis.shutdown()
+        await fixture.collection.shutdown()
+    }
+
     func testShutdownMidBatchLeavesNoHalfRemovedItem() async throws {
         let fixture = try await makeScheduledFixture(count: 3)
         let candidates = fixture.collection.items.map { candidate(for: $0, in: fixture.collection) }

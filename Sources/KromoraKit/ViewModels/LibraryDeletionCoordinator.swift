@@ -137,10 +137,13 @@ final class LibraryDeletionCoordinator {
             return LibraryDeletionResult(deletedIDs: [], failures: [])
         }
         let ids = Set(candidates.map(\.id))
-        guard inFlightIDs.isDisjoint(with: ids) else {
+        // PortableLibrarySession serializes removals through one replaceable scheduler job ID.
+        // Letting a disjoint batch enter would cancel the active job and could report a committed
+        // tombstone as a failure, so keep the entire deletion workflow single-flight.
+        guard !isDeleting else {
             return LibraryDeletionResult(
                 deletedIDs: [],
-                failures: ["Some of these photos are already being removed."]
+                failures: ["A photo removal is already in progress."]
             )
         }
         inFlightIDs.formUnion(ids)
