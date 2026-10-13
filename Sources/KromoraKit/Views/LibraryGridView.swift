@@ -18,7 +18,9 @@ struct LibraryGridView: View {
     private let layout = LibraryGridLayout()
     private let contentPadding: Double = 16
     @SceneStorage("libraryFacetSidebarPresented") private var isFacetSidebarPresented = false
-    @State private var scrollOffset: Double = 0
+    /// Coarse scroll position: the first row intersecting the viewport. Only changes when the
+    /// viewport crosses a row boundary, so scrolling inside a row never re-runs this body.
+    @State private var firstVisibleRow = 0
     @State private var admittedThumbnailIDs: [PhotoAssetID] = []
 
     var body: some View {
@@ -54,37 +56,27 @@ struct LibraryGridView: View {
             .background(KromoraTheme.secondaryChrome)
             Divider()
             LibraryImportProgressBar(viewModel: viewModel)
-            if collection.isPortableWindowed, let total = collection.portableTotalCount {
-                Text("Showing \(collection.items.count) of \(total) — scroll for more")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, 4)
-                    .accessibilityLabel("Showing \(collection.items.count) of \(total) photos")
-            }
-
             HStack(spacing: 0) {
             GeometryReader { geometry in
                 if entries.isEmpty {
                     LibraryEmptyState(collection: collection, viewModel: viewModel)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
+                    let contentWidth = max(1, geometry.size.width - contentPadding * 2)
+                    let metrics = layout.metrics(for: contentWidth)
+                    let pitch = layout.rowHeight(for: metrics) + layout.spacing
+                    let rows = GridRow.rows(itemCount: entries.count, columns: metrics.columns, entries: entries)
+                    let visibleIDs = visibleThumbnailIDs(
+                        entries: entries,
+                        width: contentWidth,
+                        viewportHeight: geometry.size.height,
+                        pitch: pitch
+                    )
                     ScrollView {
-                        let contentWidth = max(1, geometry.size.width - contentPadding * 2)
-                        let metrics = layout.metrics(for: contentWidth)
-                        let rowCount = layout.rowCount(
-                            itemCount: entries.count, columns: metrics.columns
-                        )
-                        let visibleIDs = visibleThumbnailIDs(
-                            entries: entries,
-                            width: contentWidth,
-                            viewportHeight: geometry.size.height
-                        )
                         LazyVStack(alignment: .leading, spacing: CGFloat(layout.spacing)) {
-                            ForEach(0..<rowCount, id: \.self) { row in
+                            ForEach(rows) { row in
                                 LibraryGridRow(
-                                    indices: row * metrics.columns
-                                        ..< min(entries.count, (row + 1) * metrics.columns),
+                                    indices: row.indices,
                                     entries: entries,
                                     collection: collection,
                                     settings: viewModel.settings,
@@ -98,14 +90,6 @@ struct LibraryGridView: View {
                             }
                         }
                         .padding(CGFloat(contentPadding))
-                        .background {
-                            GeometryReader { proxy in
-                                Color.clear.preference(
-                                    key: LibraryGridScrollOffsetKey.self,
-                                    value: proxy.frame(in: .named("libraryGrid")).minY
-                                )
-                            }
-                        }
                         .frame(
                             maxWidth: .infinity,
                             minHeight: geometry.size.height,
@@ -122,12 +106,15 @@ struct LibraryGridView: View {
                             admitVisibleThumbnails(ids)
                         }
                     }
-                    .coordinateSpace(name: "libraryGrid")
-                    .onPreferenceChange(LibraryGridScrollOffsetKey.self) { minY in
-                        let offset = max(0, -Double(minY))
-                        guard abs(offset - scrollOffset) >= 24 else { return }
-                        scrollOffset = offset
+                    .onScrollGeometryChange(for: Int.self) { scroll in
+                        // Reduce the continuous offset to a row index so the action fires only
+                        // when the viewport crosses a row boundary.
+                        let top = max(0, scroll.contentOffset.y + scroll.contentInsets.top - contentPadding)
+                        return Int(top / pitch)
+                    } action: { _, row in
+                        firstVisibleRow = row
                     }
+                    .accessibilityLabel("\(collection.portableTotalCount ?? collection.items.count) photos")
                     .background(KromoraTheme.windowBackground)
                 }
             }
@@ -167,13 +154,15 @@ struct LibraryGridView: View {
     private func visibleThumbnailIDs(
         entries: [ImageCollection.ThumbnailEntry],
         width: Double,
-        viewportHeight: Double
+        viewportHeight: Double,
+        pitch: Double
     ) -> [PhotoAssetID] {
         layout.visibleIndices(
             itemCount: entries.count,
             width: width,
             viewportHeight: viewportHeight,
-            scrollOffset: scrollOffset,
+            // Half a row past the boundary keeps the floor() in the layout stable.
+            scrollOffset: contentPadding + (Double(firstVisibleRow) + 0.5) * pitch,
             contentOrigin: contentPadding
         ).map { entries[$0].id }
     }
@@ -241,6 +230,30 @@ private struct LibraryImportProgressBar: View {
                 "Importing \(progress.processed) of \(progress.total) photos"
             )
             Divider()
+        }
+    }
+}
+
+/// One laid-out row, identified by its first asset and the column count so inserted or removed
+/// items elsewhere in the library do not rebuild unrelated rows.
+private struct GridRow: Identifiable {
+    struct ID: Hashable {
+        let firstAsset: PhotoAssetID
+        let columns: Int
+    }
+
+    let id: ID
+    let indices: Range<Int>
+
+    static func rows(
+        itemCount: Int, columns: Int, entries: [ImageCollection.ThumbnailEntry]
+    ) -> [GridRow] {
+        guard itemCount > 0 else { return [] }
+        return stride(from: 0, to: itemCount, by: columns).map { start in
+            GridRow(
+                id: ID(firstAsset: entries[start].id, columns: columns),
+                indices: start..<min(itemCount, start + columns)
+            )
         }
     }
 }
@@ -446,12 +459,5 @@ private struct LibraryGridCell: View {
         }
         .font(.caption2.weight(.semibold))
         .frame(minWidth: 14)
-    }
-}
-
-private struct LibraryGridScrollOffsetKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
     }
 }

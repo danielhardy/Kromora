@@ -85,8 +85,8 @@ final class LibraryGridTests: TempDirectoryTestCase {
             hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
             // ImageRenderer only paints this ScrollView's chrome without hosting its lazy rows.
             // Check real pixels inside the tile and outside it for both appearances.
-            let tile = try XCTUnwrap(bitmap.colorAt(x: 100, y: 280)?.usingColorSpace(.deviceRGB))
-            let background = try XCTUnwrap(bitmap.colorAt(x: 300, y: 280)?.usingColorSpace(.deviceRGB))
+            let tile = try XCTUnwrap(bitmap.colorAt(x: 100, y: 200)?.usingColorSpace(.deviceRGB))
+            let background = try XCTUnwrap(bitmap.colorAt(x: 300, y: 200)?.usingColorSpace(.deviceRGB))
             XCTAssertGreaterThan(tile.redComponent - tile.greenComponent, 0.2)
             if appearance == .light {
                 XCTAssertGreaterThan(background.redComponent, 0.7)
@@ -582,8 +582,71 @@ final class LibraryGridTests: TempDirectoryTestCase {
         })
     }
 
-    private static func pumpRunLoop() {
-        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+    func testScriptedScrollEvaluatesGridBodyOncePerRowCrossing() throws {
+        let collection = ImageCollection()
+        let assets = (0..<500).map {
+            PhotoAsset(url: tempDirectory.appendingPathComponent("scroll-\($0).jpg"))
+        }
+        collection.loadPortableWindow(
+            assets: assets, totalCount: 500, pageIndex: 0, pageSize: 500, query: .all)
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let hosting = NSHostingView(rootView: LibraryGridView(
+            collection: collection, viewModel: viewModel, onOpen: { _ in }
+        ))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 560),
+            styleMask: [.titled], backing: .buffered, defer: false
+        )
+        window.contentView = hosting
+        hosting.frame = window.contentView?.bounds ?? .zero
+        window.layoutIfNeeded()
+        Self.pumpRunLoop()
+        let scrollView = try XCTUnwrap(Self.firstScrollView(in: hosting))
+        let clip = scrollView.contentView
+
+        RenderDiagnostics.reset()
+        // The old GeometryReader preference re-ran the body every 24 pt (about 125 times for this
+        // scroll); the coarse row tracking should stay near one pass per row crossing.
+        let step = 4.0
+        let maxOffset = 3_000.0
+        var offset = 0.0
+        while offset < maxOffset {
+            offset += step
+            clip.scroll(to: NSPoint(x: 0, y: offset))
+            scrollView.reflectScrolledClipView(clip)
+            Self.pumpRunLoop(seconds: 0.01)
+        }
+        Self.pumpRunLoop()
+        let evaluations = RenderDiagnostics.snapshot.gridBodyEvaluations
+        XCTAssertGreaterThan(clip.bounds.origin.y, maxOffset / 2, "the scripted scroll must move the content")
+
+        let layout = LibraryGridLayout()
+        let metrics = layout.metrics(for: 720 - 32)
+        let pitch = layout.rowHeight(for: metrics) + layout.spacing
+        let rowCrossings = Int(maxOffset / pitch) + 1
+        XCTAssertLessThanOrEqual(
+            evaluations, rowCrossings * 4 + 10,
+            "scrolling must re-run the grid body per row crossing, not per scroll tick"
+        )
+        window.contentView = nil
+    }
+
+    /// The grid's vertical scroller: the tallest scroll view (the culling bar hosts a small one).
+    private static func firstScrollView(in view: NSView) -> NSScrollView? {
+        var best: NSScrollView?
+        func visit(_ node: NSView) {
+            if let scroll = node as? NSScrollView,
+               (scroll.documentView?.frame.height ?? 0) > (best?.documentView?.frame.height ?? 0) {
+                best = scroll
+            }
+            node.subviews.forEach(visit)
+        }
+        visit(view)
+        return best
+    }
+
+    private static func pumpRunLoop(seconds: TimeInterval = 0.4) {
+        RunLoop.current.run(until: Date().addingTimeInterval(seconds))
     }
 }
 
