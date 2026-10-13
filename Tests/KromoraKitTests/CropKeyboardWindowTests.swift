@@ -28,9 +28,29 @@ final class CropKeyboardWindowTests: TempDirectoryTestCase {
         }
     }
 
+    private struct TextInputProbe: NSViewRepresentable {
+        let view: TextInputStyleView
+
+        func makeNSView(context: Context) -> TextInputStyleView { view }
+        func updateNSView(_ nsView: TextInputStyleView, context: Context) {}
+    }
+
+    private struct WindowContent: View {
+        let viewModel: AppViewModel
+        let textInputView: TextInputStyleView
+
+        var body: some View {
+            ZStack {
+                ContentView(viewModel: viewModel)
+                TextInputProbe(view: textInputView).frame(width: 20, height: 20)
+            }
+        }
+    }
+
     private struct Fixture {
         let window: ProbeWindow
         let viewModel: AppViewModel
+        let textInputView: TextInputStyleView
     }
 
     private func makeFixture() async throws -> Fixture {
@@ -45,7 +65,8 @@ final class CropKeyboardWindowTests: TempDirectoryTestCase {
         XCTAssertTrue(viewModel.navigate(to: .edit))
         viewModel.sourceImage = CIImage(color: .gray).cropped(to: CGRect(x: 0, y: 0, width: 8, height: 8))
 
-        let hosting = NSHostingView(rootView: ContentView(viewModel: viewModel))
+        let textInputView = TextInputStyleView(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
+        let hosting = NSHostingView(rootView: WindowContent(viewModel: viewModel, textInputView: textInputView))
         let window = ProbeWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1100, height: 720),
             styleMask: [.titled, .resizable], backing: .buffered, defer: false
@@ -55,7 +76,7 @@ final class CropKeyboardWindowTests: TempDirectoryTestCase {
         hosting.frame = window.contentView?.bounds ?? .zero
         window.makeKeyAndOrderFront(nil)
         try await Task.sleep(for: .milliseconds(500))
-        return Fixture(window: window, viewModel: viewModel)
+        return Fixture(window: window, viewModel: viewModel, textInputView: textInputView)
     }
 
     private func send(_ chars: String, code: UInt16, in window: NSWindow) {
@@ -114,9 +135,7 @@ final class CropKeyboardWindowTests: TempDirectoryTestCase {
     func testTextInputStyleResponderDeliversEscapeAndReturnToTheTail() async throws {
         let f = try await makeFixture()
         defer { f.window.close() }
-        let root = try XCTUnwrap(f.window.contentView)
-        let view = TextInputStyleView(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
-        root.addSubview(view)
+        let view = f.textInputView
 
         for key in Self.keys {
             f.viewModel.beginCrop()
