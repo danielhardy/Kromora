@@ -844,10 +844,6 @@ final class PreviewAdmissionCoordinator {
         // different pixels and always render.
         let mayUseStoredFrame = request.sourceROI == nil
             && !destination.admissionIsShowingOriginal && !destination.admissionCropToolActive
-        // Temporary photo-switch diagnostic: why a settled submission renders instead of reusing
-        // the stored frame, and which Look each side believes it has.
-        var storedFrameOutcome = mayUseStoredFrame ? "noCandidate" : "storedFrameNotAllowed"
-        var storedFrameLook = "-"
         if mayUseStoredFrame {
             let presentation = destination.admissionPresentation
             let editsResolved = destination.admissionStoredEditsResolved
@@ -859,12 +855,10 @@ final class PreviewAdmissionCoordinator {
                 return
             }
             let storedLook = destination.admissionStoredLookSignature(for: request.document.lut.lutID)
-            storedFrameLook = storedLook.map { String(describing: $0) } ?? "nil"
             if let stored = presentation.classifyStoredFrame(
                 for: request, sourceRevision: sourceRevision, editsResolved: editsResolved,
                 storedLook: storedLook
             ) {
-                storedFrameOutcome = String(describing: stored.classification)
                 switch stored.classification {
                 case .exact:
                     destination.admissionPreviewCoordinator.cancel()
@@ -898,13 +892,16 @@ final class PreviewAdmissionCoordinator {
                 return
             }
         }
-        let renderLook = request.lut.map { String(describing: $0.lookSignature) } ?? "nil"
-        KromoraObservability.photoSwitchPhase(
-            "settledRenderSubmitted",
-            since: destination.admissionPresentation.presentationSession?.selectionUptime,
-            detail: "storedFrame=\(storedFrameOutcome) docLut=\(request.document.lut.lutID.map { String(describing: $0) } ?? "nil") "
-                + "docLutIdentity=\(request.document.lut.isIdentity) storedLook=\(storedFrameLook) renderLook=\(renderLook)"
-        )
+        // An unresolved Look renders ungraded, and an ungraded frame must never replace the
+        // stored frame that was drawn with it. Keep the stored frame on screen; the Look
+        // catalog resolving reschedules the preview, which then renders graded.
+        if request.lut == nil, request.document.lut.lutID != nil, !request.document.lut.isIdentity,
+            !destination.admissionIsShowingOriginal,
+            destination.admissionPresentation.hasPresentedStoredFrame(generation: sourceRevision)
+        {
+            deferredSettledPreview = preemptsPredecessor
+            return
+        }
         submit(request, preemptsPredecessor: preemptsPredecessor,
             assetID: assetID, sourceRevision: sourceRevision, displayRevision: displayRevision)
     }

@@ -518,6 +518,39 @@ final class PreviewAdmissionCoordinatorTests: TempDirectoryTestCase {
         await destination.scheduler.cancelAllAndWait()
     }
 
+    func testUnresolvedLookKeepsThePresentedGradedStoredFrameInsteadOfRenderingUngraded() async throws {
+        let engine = FakeRenderEngine()
+        let destination = makeDestination(engine: engine)
+        let coordinator = makeCoordinator(destination: destination, engine: engine)
+        let lutID = LUTID(raw: "missing-look")
+        destination.admissionDocument = EditDocument(lut: LUTSettings(lutID: lutID, intensity: 1))
+        let look = LookSignature.resolved(id: lutID, contentHash: "bytes-1")
+        try await seedStoredFrame(
+            destination, edit: destination.admissionDocument.editHash, look: look
+        )
+        destination.admissionStoredEditsResolved = true
+        destination.storedLookSignature = nil
+        XCTAssertNil(destination.admissionSelectedLook)
+        let session = destination.beginSession()
+        XCTAssertTrue(destination.admissionPresentation.presentProvisional(
+            .storedFrame, assetID: session.assetID, identity: session.identity,
+            generation: session.generation
+        ))
+        destination.admissionPresentation.confirmProvisionalPresentation(
+            .storedFrame, assetID: session.assetID, identity: session.identity,
+            generation: session.generation
+        )
+
+        coordinator.schedulePreview()
+        try await Task.sleep(for: .milliseconds(80))
+
+        let renders = await engine.renderRequests.count + engine.previewRequests.count
+        XCTAssertEqual(renders, 0, "an ungraded render must not replace the graded stored frame")
+        XCTAssertTrue(coordinator.hasDeferredSettledPreview)
+        coordinator.shutdown()
+        await destination.scheduler.cancelAllAndWait()
+    }
+
     /// Stores a preview for the destination's photo and runs the selection-time lookup, so the
     /// presentation coordinator holds it as the session's candidate.
     private func seedStoredFrame(
