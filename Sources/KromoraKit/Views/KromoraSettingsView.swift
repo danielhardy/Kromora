@@ -68,13 +68,11 @@ public struct KromoraSettingsView: View {
     public var body: some View {
         Form {
             Section {
-                Toggle("Always dark mode", isOn: $settings.alwaysDarkMode)
-                    .accessibilityLabel("Always dark mode")
-                    .accessibilityHint("Use dark appearance even when macOS is set to light mode")
+                AppearanceModePicker(selection: $settings.appearanceMode)
             } header: {
                 Text("Appearance")
             } footer: {
-                Text("When off, Kromora follows the macOS appearance setting.")
+                Text("System follows the macOS appearance. Light and Dark stay fixed.")
             }
 
             Section {

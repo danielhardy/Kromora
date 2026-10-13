@@ -3,12 +3,31 @@ import Combine
 
 /// The app-shell appearance requested by the user. `.system` deliberately maps to no
 /// window override so AppKit can follow the current macOS appearance.
-public enum KromoraAppearanceMode: Equatable, Sendable {
+public enum KromoraAppearanceMode: String, CaseIterable, Equatable, Sendable {
     case system
+    case light
     case dark
 
+    /// Maps the retired "Always dark mode" Boolean.
     public init(alwaysDarkMode: Bool) {
         self = alwaysDarkMode ? .dark : .system
+    }
+
+    public var title: String {
+        switch self {
+        case .system: return "System"
+        case .light: return "Light"
+        case .dark: return "Dark"
+        }
+    }
+
+    /// The AppKit override, or `nil` to follow macOS.
+    var appearance: NSAppearance? {
+        switch self {
+        case .system: return nil
+        case .light: return NSAppearance(named: .aqua)
+        case .dark: return NSAppearance(named: .darkAqua)
+        }
     }
 }
 
@@ -27,8 +46,8 @@ public final class AppKitWindowAppearanceController {
     private let applicationAppearanceApplier: @MainActor (NSAppearance?) -> Void
     /// The incoming publisher value is authoritative while `@Published` is in its `willSet`
     /// phase. Keeping it separately prevents a later window notification from re-reading the
-    /// stale property and reapplying dark mode during an off transition.
-    private var desiredAlwaysDarkMode: Bool
+    /// stale property and reapplying the previous mode during a transition.
+    private var desiredMode: KromoraAppearanceMode
     private var settingsCancellable: AnyCancellable?
     private var windowObservers: [NSObjectProtocol] = []
 
@@ -42,7 +61,7 @@ public final class AppKitWindowAppearanceController {
         self.settings = settings
         self.windowProvider = windowProvider
         self.applicationAppearanceApplier = applicationAppearanceApplier
-        self.desiredAlwaysDarkMode = settings.alwaysDarkMode
+        self.desiredMode = settings.appearanceMode
     }
 
     /// Begin observing the preference and newly presented windows. Calling this more than
@@ -56,12 +75,12 @@ public final class AppKitWindowAppearanceController {
         // behind the Settings toggle when the main actor is busy. `@Published` sends the incoming
         // value while its property is changing, so use that value directly instead of reading the
         // still-old stored property.
-        settingsCancellable = settings.$alwaysDarkMode
+        settingsCancellable = settings.$appearanceMode
             .dropFirst()
-            .sink { [weak self] alwaysDarkMode in
+            .sink { [weak self] mode in
                 guard let self else { return }
-                self.desiredAlwaysDarkMode = alwaysDarkMode
-                self.applyAppearance(alwaysDarkMode: alwaysDarkMode, includesApplication: true)
+                self.desiredMode = mode
+                self.applyAppearance(mode: mode, includesApplication: true)
             }
 
         let notificationCenter = NotificationCenter.default
@@ -97,28 +116,27 @@ public final class AppKitWindowAppearanceController {
     /// Apply the current preference to a supplied window set. The injectable set makes the
     /// propagation seam testable without requiring a launched application or a real window.
     public func applyCurrentAppearance(to windows: [NSWindow]) {
-        applyAppearance(alwaysDarkMode: settings.alwaysDarkMode, to: windows)
+        applyAppearance(mode: settings.appearanceMode, to: windows)
     }
 
     private func applyAppearance(
-        alwaysDarkMode: Bool,
+        mode: KromoraAppearanceMode,
         to windows: [NSWindow]? = nil,
         includesApplication: Bool = false
     ) {
-        let appearance = NSAppearance(named: .darkAqua)
-        let mode = KromoraAppearanceMode(alwaysDarkMode: alwaysDarkMode)
+        let appearance = mode.appearance
         if includesApplication {
             // A window appearance colors SwiftUI content, but Settings' native title bar belongs
             // to the application chrome. Apply the same override there before visiting windows.
-            applicationAppearanceApplier(mode == .dark ? appearance : nil)
+            applicationAppearanceApplier(appearance)
         }
         for window in windows ?? windowProvider() {
-            window.appearance = mode == .dark ? appearance : nil
+            window.appearance = appearance
         }
     }
 
     private func applyCurrentAppearance() {
-        applyAppearance(alwaysDarkMode: desiredAlwaysDarkMode, includesApplication: true)
+        applyAppearance(mode: desiredMode, includesApplication: true)
     }
 }
 

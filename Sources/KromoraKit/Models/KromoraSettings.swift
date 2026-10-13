@@ -64,6 +64,7 @@ public final class KromoraSettings: ObservableObject {
     private enum Key {
         static let schemaVersion = "Kromora.settings.schemaVersion"
         static let alwaysDarkMode = "Kromora.settings.alwaysDarkMode"
+        static let appearanceMode = "Kromora.settings.appearanceMode"
         static let showPhotoNames = "Kromora.settings.showPhotoNames"
         static let openFirstPhotoWhenEnteringEdit = "Kromora.settings.openFirstPhotoWhenEnteringEdit"
         static let showClippingAlerts = "Kromora.settings.showClippingAlerts"
@@ -80,10 +81,12 @@ public final class KromoraSettings: ObservableObject {
         let pathHint: String
     }
 
-    @Published public var alwaysDarkMode: Bool {
+    /// The app-shell appearance. A stored mode wins; otherwise the retired Boolean maps `true` to
+    /// Dark and `false` or absent to System.
+    @Published public var appearanceMode: KromoraAppearanceMode {
         didSet {
-            guard alwaysDarkMode != oldValue else { return }
-            preferences.set(alwaysDarkMode, forKey: Key.alwaysDarkMode)
+            guard appearanceMode != oldValue else { return }
+            preferences.set(appearanceMode.rawValue, forKey: Key.appearanceMode)
         }
     }
 
@@ -170,7 +173,7 @@ public final class KromoraSettings: ObservableObject {
         self.preferences = preferences
         self.fileManager = fileManager
         self.userLookFolderURL = userLookFolderURL ?? Self.defaultUserLookFolderURL(fileManager: fileManager)
-        self.alwaysDarkMode = preferences.object(forKey: Key.alwaysDarkMode) as? Bool ?? false
+        self.appearanceMode = Self.storedAppearanceMode(in: preferences)
         // An absent key means the user has never chosen a value. Keep an explicit stored choice,
         // including `true`, so changing the default does not override an opt-in.
         self.showPhotoNames = preferences.object(forKey: Key.showPhotoNames) as? Bool ?? false
@@ -183,7 +186,7 @@ public final class KromoraSettings: ObservableObject {
 
         migrateIfNeeded()
         // Migration may have supplied the appearance value.
-        self.alwaysDarkMode = preferences.object(forKey: Key.alwaysDarkMode) as? Bool ?? false
+        self.appearanceMode = Self.storedAppearanceMode(in: preferences)
         self.showPhotoNames = preferences.object(forKey: Key.showPhotoNames) as? Bool ?? false
         self.openFirstPhotoWhenEnteringEdit =
             preferences.object(forKey: Key.openFirstPhotoWhenEnteringEdit) as? Bool ?? false
@@ -379,6 +382,14 @@ public final class KromoraSettings: ObservableObject {
         } catch {
             return nil
         }
+    }
+
+    private static func storedAppearanceMode(in preferences: UserDefaults) -> KromoraAppearanceMode {
+        if let raw = preferences.string(forKey: Key.appearanceMode),
+           let mode = KromoraAppearanceMode(rawValue: raw) {
+            return mode
+        }
+        return KromoraAppearanceMode(alwaysDarkMode: preferences.object(forKey: Key.alwaysDarkMode) as? Bool ?? false)
     }
 
     private func migrateIfNeeded() {

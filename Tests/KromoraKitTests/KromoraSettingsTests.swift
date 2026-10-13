@@ -17,11 +17,11 @@ final class KromoraSettingsTests: TempDirectoryTestCase {
         defaults.set(["Info", "Look"], forKey: "kromora.inspector.tabs")
         let first = KromoraSettings(preferences: defaults, userLookFolderURL: tempDirectory)
 
-        XCTAssertFalse(first.alwaysDarkMode)
-        first.alwaysDarkMode = true
+        XCTAssertEqual(first.appearanceMode, .system)
+        first.appearanceMode = .light
 
         let relaunched = KromoraSettings(preferences: defaults, userLookFolderURL: tempDirectory)
-        XCTAssertTrue(relaunched.alwaysDarkMode)
+        XCTAssertEqual(relaunched.appearanceMode, .light)
         XCTAssertEqual(defaults.stringArray(forKey: "kromora.inspector.tabs"), ["Info", "Look"])
         XCTAssertEqual(defaults.integer(forKey: "Kromora.settings.schemaVersion"), 1)
     }
@@ -219,9 +219,31 @@ final class KromoraSettingsTests: TempDirectoryTestCase {
 
         let settings = KromoraSettings(preferences: defaults, userLookFolderURL: tempDirectory)
 
-        XCTAssertTrue(settings.alwaysDarkMode)
+        XCTAssertEqual(settings.appearanceMode, .dark)
         XCTAssertFalse(settings.showPhotoNames)
         XCTAssertTrue(defaults.bool(forKey: "Kromora.settings.alwaysDarkMode"))
         XCTAssertFalse(defaults.bool(forKey: "Kromora.settings.showPhotoNames"))
+    }
+
+    func testStoredBooleanMapsToAppearanceMode() {
+        let darkDefaults = makeDefaults()
+        darkDefaults.set(true, forKey: "Kromora.settings.alwaysDarkMode")
+        darkDefaults.set(1, forKey: "Kromora.settings.schemaVersion")
+        XCTAssertEqual(KromoraSettings(preferences: darkDefaults, userLookFolderURL: tempDirectory).appearanceMode, .dark)
+
+        let offDefaults = makeDefaults()
+        offDefaults.set(false, forKey: "Kromora.settings.alwaysDarkMode")
+        XCTAssertEqual(KromoraSettings(preferences: offDefaults, userLookFolderURL: tempDirectory).appearanceMode, .system)
+
+        let legacy = makeDefaults()
+        legacy.set(true, forKey: "Lumo.alwaysDarkMode")
+        XCTAssertEqual(KromoraSettings(preferences: legacy, userLookFolderURL: tempDirectory).appearanceMode, .dark)
+    }
+
+    func testStoredAppearanceModeWinsOverLegacyBoolean() {
+        let defaults = makeDefaults()
+        defaults.set(true, forKey: "Kromora.settings.alwaysDarkMode")
+        defaults.set("light", forKey: "Kromora.settings.appearanceMode")
+        XCTAssertEqual(KromoraSettings(preferences: defaults, userLookFolderURL: tempDirectory).appearanceMode, .light)
     }
 }
