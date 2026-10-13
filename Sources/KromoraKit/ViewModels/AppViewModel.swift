@@ -2227,10 +2227,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         loadRequestGeneration &+= 1
         let requestGeneration = loadRequestGeneration
         let previousActiveAssetID = activeAssetID
+        // A file-backed draft without a supplied identity publishes it once resolved off-main.
         presentation.setInspectorDocumentPending(
             previousActiveAssetID != nil
                 && previousActiveAssetID != importPlan.assetID
-                && editorDocument.session(for: importPlan.assetID) == nil)
+                && importPlan.assetID.map { editorDocument.session(for: $0) == nil } ?? true)
 
         // Make the source switch observable and invalidate old pixels immediately. Package state,
         // editor cleanup, and candidate materialization continue after the selection event yields.

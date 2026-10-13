@@ -112,6 +112,8 @@ final class ExportCoordinator {
         /// Stable identity used to find the item's persisted edit record. It is optional so the
         /// original panel-free API remains source-compatible for callers that only have a URL/data
         /// pair.
+        /// A URL with no supplied identity stays `nil` here so construction does no file I/O; use
+        /// `resolvedAssetID()` where the identity is needed.
         let assetID: PhotoAssetID?
         /// Opaque identity carried by the library source when available. The legacy `assetID` is
         /// retained for source compatibility, but it is never used as the persistence key.
@@ -137,11 +139,18 @@ final class ExportCoordinator {
             self.url = url
             self.data = data
             self.name = name
-            self.assetID = assetID ?? url.map(PhotoAssetID.file) ?? data.map(PhotoAssetID.data)
+            self.assetID = assetID ?? (url == nil ? data.map(PhotoAssetID.data) : nil)
             self.portableIdentity = portableIdentity
             self.bookmarkData = bookmarkData
             self.document = document
             self.lut = lut
+        }
+
+        /// The supplied identity, or the file-backed identity resolved off the calling actor.
+        func resolvedAssetID() async -> PhotoAssetID? {
+            if let assetID { return assetID }
+            guard let url else { return nil }
+            return await PhotoAssetID.resolveFile(url)
         }
     }
 
@@ -536,7 +545,7 @@ final class ExportCoordinator {
                     var interval = KromoraObservability.begin(.export, source: source, quality: .export)
                     defer { interval.end() }
                     let data = try await exportEngine.render(RenderRequest(
-                        source: source, assetID: item.assetID, document: itemDocument, lut: itemLUT,
+                        source: source, assetID: await item.resolvedAssetID(), document: itemDocument, lut: itemLUT,
                         quality: .export,
                         output: .encoded(
                             format: options.format, quality: CGFloat(options.quality)
@@ -713,7 +722,9 @@ final class ExportCoordinator {
         for item: BatchItem, fallback: EditDocument
     ) async -> (document: EditDocument, isPerAsset: Bool) {
         if let document = item.document { return (document, true) }
-        guard let editStore, let assetID = item.assetID else { return (fallback, false) }
+        guard let editStore, let assetID = await item.resolvedAssetID() else {
+            return (fallback, false)
+        }
         let result = await editStore.load(
             for: EditSourceReference(
                 assetID: assetID, portableIdentity: item.portableIdentity, url: item.url

@@ -7,7 +7,9 @@ struct SourceImportDraft: Sendable, Equatable {
     let name: String
     let url: URL?
     let data: Data?
-    let assetID: PhotoAssetID
+    /// The caller-supplied or data-derived identity. `nil` for a URL with no supplied identity: the
+    /// file-backed identity needs file I/O, so `resolved()` computes it off the main actor.
+    let assetID: PhotoAssetID?
     let portableIdentity: PortablePhotoIdentity?
     let fileChangeSignature: PhotoSourceFingerprint?
     let dataFingerprint: String?
@@ -26,20 +28,11 @@ struct SourceImportDraft: Sendable, Equatable {
         self.name = name
         self.url = url
         self.data = data
-        self.assetID =
-            assetID ?? url.map(PhotoAssetID.file)
-            ?? data.map(PhotoAssetID.data)
-            ?? .data(Data())
+        self.assetID = assetID ?? (url == nil ? (data.map(PhotoAssetID.data) ?? .data(Data())) : nil)
         self.portableIdentity = portableIdentity
         self.fileChangeSignature = fileChangeSignature
         self.dataFingerprint = dataFingerprint
         self.traceQuality = traceQuality
-    }
-
-    var sourceReference: EditSourceReference {
-        EditSourceReference(
-            assetID: assetID, portableIdentity: portableIdentity, url: url
-        )
     }
 
     var sourceRequest: ImageSource.Request {
@@ -57,7 +50,17 @@ struct SourceImportDraft: Sendable, Equatable {
 
     /// Resolve the source's identity off the main actor and complete the plan.
     func resolved() async -> SourceImportPlan {
-        SourceImportPlan(draft: self, source: await ImageSource.resolve(sourceRequest))
+        let resolvedID: PhotoAssetID
+        if let assetID {
+            resolvedID = assetID
+        } else if let url {
+            resolvedID = await PhotoAssetID.resolveFile(url)
+        } else {
+            resolvedID = .data(Data())
+        }
+        return SourceImportPlan(
+            draft: self, assetID: resolvedID, source: await ImageSource.resolve(sourceRequest)
+        )
     }
 }
 
@@ -68,15 +71,17 @@ struct SourceImportDraft: Sendable, Equatable {
 /// `AppViewModel`.
 struct SourceImportPlan: Sendable, Equatable {
     let draft: SourceImportDraft
+    let assetID: PhotoAssetID
     let source: ImageSource
 
     var name: String { draft.name }
     var url: URL? { draft.url }
     var data: Data? { draft.data }
-    var assetID: PhotoAssetID { draft.assetID }
     var portableIdentity: PortablePhotoIdentity? { draft.portableIdentity }
     var fileChangeSignature: PhotoSourceFingerprint? { draft.fileChangeSignature }
     var dataFingerprint: String? { draft.dataFingerprint }
     var traceQuality: String { draft.traceQuality }
-    var sourceReference: EditSourceReference { draft.sourceReference }
+    var sourceReference: EditSourceReference {
+        EditSourceReference(assetID: assetID, portableIdentity: portableIdentity, url: url)
+    }
 }

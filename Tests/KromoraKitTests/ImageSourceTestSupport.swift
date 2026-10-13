@@ -50,6 +50,10 @@ extension SourceImportPlan {
             portableIdentity: portableIdentity, fileChangeSignature: fileChangeSignature,
             dataFingerprint: dataFingerprint, traceQuality: traceQuality
         )
-        self.init(draft: draft, source: ImageSource.resolveBlocking(draft.sourceRequest))
+        let resolvedID =
+            draft.assetID ?? url.map(PhotoAssetID.file) ?? .data(Data())
+        self.init(
+            draft: draft, assetID: resolvedID,
+            source: ImageSource.resolveBlocking(draft.sourceRequest))
     }
 }

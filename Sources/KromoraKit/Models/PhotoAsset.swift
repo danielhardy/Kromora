@@ -23,6 +23,13 @@ struct PhotoAssetID: Codable, Hashable, Sendable, Equatable, CustomStringConvert
         return file(canonical, fingerprint: fingerprint)
     }
 
+    /// `file(_:)` for callers on the main actor: the resource-value read and sample digest run on the
+    /// concurrent pool, with identical identity semantics.
+    @concurrent
+    static func resolveFile(_ url: URL) async -> PhotoAssetID {
+        file(url)
+    }
+
     /// Identity for a file when its fingerprint has already been read by the caller. Keeping this
     /// seam explicit prevents a source construction from walking the file a second time just to
     /// derive the resource identifier.
