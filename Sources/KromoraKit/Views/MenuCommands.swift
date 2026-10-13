@@ -48,14 +48,15 @@ enum UndoRedoRouting {
 /// Kromora's File menu, replacing SwiftUI's default "New" group.
 ///
 /// One of two entry points KromoraKit exposes to the executable (the other is
-/// `ContentView`). Each item posts a notification that `MenuCommandReceivers`
-/// picks up on the view side — the menu bar is outside the view hierarchy, so
-/// it can't reach the view model directly.
+/// `ContentView`). Commands that need a photo or selection run through the focused
+/// `KeyboardCommandRouter` and are enabled by the focused `MenuCommandAvailability`; the remaining
+/// items post a notification that `MenuCommandReceivers` picks up on the view side.
 public struct KromoraCommands: Commands {
     @Environment(\.openWindow) private var openWindow
     @ObservedObject private var settings: KromoraSettings
     @FocusedValue(\.keyboardRouter) private var keyboardRouter
     @FocusedValue(\.keyboardContext) private var keyboardContext
+    @FocusedValue(\.menuAvailability) private var availability
 
     public init(settings: KromoraSettings = KromoraSettings()) {
         _settings = ObservedObject(wrappedValue: settings)
@@ -99,12 +100,12 @@ public struct KromoraCommands: Commands {
         CommandMenu("Tools") { keyboardItems(.tools) }
 
         // Undo/Redo live in the Edit menu. The items stay enabled: a focused text field can have
-        // text to undo while the photo has none, so photo `canUndo` is not the whole answer.
-        // Enablement follows the "Drive File/Edit command enablement from focused values" ticket.
+        // text to undo while the photo has none, so photo `canUndo` is not the whole answer. The
+        // titles follow the focused window's action name.
         CommandGroup(replacing: .undoRedo) {
-            Button("Undo") { UndoRedoRouting.perform(.undo, in: NSApp.keyWindow) }
+            Button(availability?.undoTitle ?? "Undo") { UndoRedoRouting.perform(.undo, in: NSApp.keyWindow) }
                 .keyboardShortcut("z", modifiers: [.command])
-            Button("Redo") { UndoRedoRouting.perform(.redo, in: NSApp.keyWindow) }
+            Button(availability?.redoTitle ?? "Redo") { UndoRedoRouting.perform(.redo, in: NSApp.keyWindow) }
                 .keyboardShortcut("z", modifiers: [.command, .shift])
         }
 
@@ -131,13 +132,15 @@ public struct KromoraCommands: Commands {
             Button("Refresh Library") { post(.refreshSourceFolder) }
                 .keyboardShortcut("r", modifiers: [.command])
 
-            Button("Delete Selected Photos") { post(.deleteSelectedPhotos) }
+            Button("Delete Selected Photos") { run(.deleteSelectedPhotos) }
                 .keyboardShortcut(.delete)
+                .disabled(!isEnabled(.deleteSelectedPhotos))
 
             Divider()
 
-            Button("Reset Photo") { post(.resetPhoto) }
+            Button("Reset Photo") { run(.resetPhoto) }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
+                .disabled(!isEnabled(.resetPhoto))
 
             Button(KromoraAutoAdjustmentShortcut.menuTitle) { post(.applyAutoAdjustment) }
                 .keyboardShortcut("a", modifiers: .shift)
@@ -145,38 +148,46 @@ public struct KromoraCommands: Commands {
 
             Divider()
 
-            Button("Copy Edits…") { post(.selectiveCopy) }
-            Button("Copy All Edits") { post(.copyAllEdits) }
+            Button("Copy Edits…") { run(.selectiveCopy) }
+                .disabled(!isEnabled(.selectiveCopy))
+            Button("Copy All Edits") { run(.copyAllEdits) }
                 .keyboardShortcut(
                     KromoraEditTransferShortcuts.copyKey,
                     modifiers: KromoraEditTransferShortcuts.modifiers
                 )
-            Button("Paste Edits") { post(.pasteEdits) }
+                .disabled(!isEnabled(.copyAllEdits))
+            Button("Paste Edits") { run(.pasteEdits) }
                 .keyboardShortcut(
                     KromoraEditTransferShortcuts.pasteKey,
                     modifiers: KromoraEditTransferShortcuts.modifiers
                 )
+                .disabled(!isEnabled(.pasteEdits))
 
             Divider()
 
             Button("Derive Look from JPG…") { post(.deriveRecipe) }
                 .keyboardShortcut("d")
 
-            Button("Save as Look/LUT…") { post(.saveLook) }
+            Button("Save as Look/LUT…") { run(.saveLook) }
+                .disabled(!isEnabled(.saveLook))
 
             Divider()
 
-            Button("Export...") { post(.exportImage) }
+            Button("Export...") { run(.export) }
                 .keyboardShortcut("s")
+                .disabled(!isEnabled(.export))
 
-            Button("Export Originals...") { post(.exportSelected) }
+            Button("Export Originals...") { run(.exportSelected) }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
+                .disabled(!isEnabled(.exportSelected))
 
-            Button("Edit in External Editor…") { post(.editInExternalEditor) }
+            Button("Edit in External Editor…") { run(.editInExternalEditor) }
                 .keyboardShortcut("e", modifiers: [.command, .option])
+                .disabled(!isEnabled(.editInExternalEditor))
 
-            Button("Export Original + Settings Bundle…") { post(.exportOriginalWithSettings) }
+            Button("Export Original + Settings Bundle…") { run(.exportOriginalWithSettings) }
                 .keyboardShortcut("b", modifiers: [.command, .option])
+                .disabled(!isEnabled(.exportOriginalWithSettings))
         }
     }
 
@@ -197,6 +208,12 @@ public struct KromoraCommands: Commands {
         return command.isAvailable(in: keyboardContext)
     }
 
+    private func run(_ command: MenuCommand) { keyboardRouter?.perform(command) }
+
+    private func isEnabled(_ command: MenuCommand) -> Bool {
+        availability?.isEnabled(command) ?? false
+    }
+
     private func post(_ name: Notification.Name) {
         NotificationCenter.default.post(name: name, object: nil)
     }
@@ -212,9 +229,7 @@ struct MenuCommandReceivers: ViewModifier {
         content
             .modifier(AutoAdjustmentCommandReceiver(viewModel: viewModel))
             .modifier(FileMenuCommandReceiver(viewModel: viewModel))
-            .modifier(SelectiveCopyMenuCommandReceiver(viewModel: viewModel))
             .modifier(ViewMenuCommandReceivers(viewModel: viewModel))
-            .modifier(DeleteMenuCommandReceiver(viewModel: viewModel))
     }
 }
 
@@ -223,15 +238,8 @@ private struct FileMenuCommandReceiver: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .modifier(ExternalExportCommandReceiver(viewModel: viewModel))
             .onReceive(NotificationCenter.default.publisher(for: .openImage)) { _ in
                 viewModel.openImageDialog()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .exportImage)) { _ in
-                viewModel.exportDialog()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .exportSelected)) { _ in
-                viewModel.exportSelectedDialog()
             }
             .onReceive(NotificationCenter.default.publisher(for: .chooseLookFolder)) { _ in
                 viewModel.chooseLookFolder()
@@ -262,20 +270,8 @@ private struct FileMenuCommandReceiver: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: .redoEdit)) { _ in
                 viewModel.redo()
             }
-            .onReceive(NotificationCenter.default.publisher(for: .resetPhoto)) { _ in
-                viewModel.resetPhoto()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .copyAllEdits)) { _ in
-                viewModel.copyAllEdits()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .pasteEdits)) { _ in
-                viewModel.pasteEdits()
-            }
             .onReceive(NotificationCenter.default.publisher(for: .deriveRecipe)) { _ in
                 viewModel.presentRecipeExtractor()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .saveLook)) { _ in
-                viewModel.presentSaveLook()
             }
     }
 }
@@ -286,40 +282,6 @@ private struct AutoAdjustmentCommandReceiver: ViewModifier {
     func body(content: Content) -> some View {
         content.onReceive(NotificationCenter.default.publisher(for: .applyAutoAdjustment)) { _ in
             viewModel.runAutoAdjustment()
-        }
-    }
-}
-
-private struct ExternalExportCommandReceiver: ViewModifier {
-    @ObservedObject var viewModel: AppViewModel
-
-    func body(content: Content) -> some View {
-        content
-            .onReceive(NotificationCenter.default.publisher(for: .editInExternalEditor)) { _ in
-                viewModel.editInExternalEditor()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .exportOriginalWithSettings)) { _ in
-                viewModel.exportOriginalWithSettings()
-            }
-    }
-}
-
-private struct SelectiveCopyMenuCommandReceiver: ViewModifier {
-    @ObservedObject var viewModel: AppViewModel
-
-    func body(content: Content) -> some View {
-        content.onReceive(NotificationCenter.default.publisher(for: .selectiveCopy)) { _ in
-            viewModel.presentSelectiveCopyDialog()
-        }
-    }
-}
-
-private struct DeleteMenuCommandReceiver: ViewModifier {
-    @ObservedObject var viewModel: AppViewModel
-
-    func body(content: Content) -> some View {
-        content.onReceive(NotificationCenter.default.publisher(for: .deleteSelectedPhotos)) { _ in
-            viewModel.requestDeleteSelectedLibraryItems()
         }
     }
 }
@@ -344,31 +306,19 @@ private struct ViewMenuCommandReceivers: ViewModifier {
 
 extension Notification.Name {
     static let openImage = Notification.Name("Kromora.openImage")
-    static let exportImage = Notification.Name("Kromora.exportImage")
-    static let exportSelected = Notification.Name("Kromora.exportSelected")
-    static let editInExternalEditor = Notification.Name("Kromora.editInExternalEditor")
-    static let exportOriginalWithSettings = Notification.Name("Kromora.exportOriginalWithSettings")
-    /// Compatibility name for callers from the pre-selection export flow.
-    static let exportAll = exportSelected
     static let chooseLookFolder = Notification.Name("Kromora.chooseLookFolder")
     static let importLook = Notification.Name("Kromora.importLook")
     static let importFromPhotos = Notification.Name("Kromora.importFromPhotos")
     static let openSourceFolder = Notification.Name("Kromora.openSourceFolder")
     static let importFromRemovableMedia = Notification.Name("Kromora.importFromRemovableMedia")
     static let refreshSourceFolder = Notification.Name("Kromora.refreshSourceFolder")
-    static let deleteSelectedPhotos = Notification.Name("Kromora.deleteSelectedPhotos")
     static let undoEdit = Notification.Name("Kromora.undoEdit")
     static let redoEdit = Notification.Name("Kromora.redoEdit")
-    static let resetPhoto = Notification.Name("Kromora.resetPhoto")
     static let applyAutoAdjustment = Notification.Name("Kromora.applyAutoAdjustment")
     /// Notification used by the View menu command to clear a committed rotation.
     static let resetRotation = Notification.Name("Kromora.resetRotation")
     static let toggleInspector = Notification.Name("Kromora.toggleInspector")
     static let showKeyboardShortcuts = Notification.Name("Kromora.showKeyboardShortcuts")
     static let toggleCaptureMetadataOverlay = Notification.Name("Kromora.toggleCaptureMetadataOverlay")
-    static let copyAllEdits = Notification.Name("Kromora.copyAllEdits")
-    static let selectiveCopy = Notification.Name("Kromora.selectiveCopy")
-    static let pasteEdits = Notification.Name("Kromora.pasteEdits")
     static let deriveRecipe = Notification.Name("Kromora.deriveRecipe")
-    static let saveLook = Notification.Name("Kromora.saveLook")
 }

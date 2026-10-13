@@ -35,12 +35,13 @@ final class MenuCommandTests: XCTestCase {
             contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/MenuCommands.swift"),
             encoding: .utf8
         )
-        XCTAssertEqual(source.components(separatedBy: "Button(\"Undo\")").count - 1, 1)
-        XCTAssertEqual(source.components(separatedBy: "Button(\"Redo\")").count - 1, 1)
+        XCTAssertEqual(source.components(separatedBy: "UndoRedoRouting.perform(.undo").count - 1, 1)
+        XCTAssertEqual(source.components(separatedBy: "Button(availability?.undoTitle").count - 1, 1)
+        XCTAssertEqual(source.components(separatedBy: "Button(availability?.redoTitle").count - 1, 1)
         let undoRedo = try XCTUnwrap(source.range(of: "CommandGroup(replacing: .undoRedo)"))
         let newItem = try XCTUnwrap(source.range(of: "CommandGroup(replacing: .newItem)"))
-        let undo = try XCTUnwrap(source.range(of: "Button(\"Undo\")"))
-        let redo = try XCTUnwrap(source.range(of: "Button(\"Redo\")"))
+        let undo = try XCTUnwrap(source.range(of: "Button(availability?.undoTitle"))
+        let redo = try XCTUnwrap(source.range(of: "Button(availability?.redoTitle"))
         XCTAssertTrue(undoRedo.upperBound <= undo.lowerBound && redo.lowerBound < newItem.lowerBound,
                       "Undo and Redo belong to the .undoRedo group, not File")
     }
@@ -77,7 +78,7 @@ final class MenuCommandTests: XCTestCase {
             encoding: .utf8
         )
 
-        XCTAssertTrue(menuCommands.contains("Button(\"Export Originals...\") { post(.exportSelected) }"))
+        XCTAssertTrue(menuCommands.contains("Button(\"Export Originals...\") { run(.exportSelected) }"))
         XCTAssertTrue(menuCommands.contains(".keyboardShortcut(\"e\", modifiers: [.command, .shift])"))
         XCTAssertFalse(menuCommands.contains("Button(\"Export Selected...\")"))
     }
@@ -260,5 +261,56 @@ final class MenuCommandTests: XCTestCase {
             inProgress.fittingSize,
             "the Auto toolbar button must not reflow when its icon changes"
         )
+    }
+
+    // MARK: - MenuCommandAvailability
+
+    func testNoPhotoDisablesEveryPhotoCommandButNotPaste() {
+        let a = MenuCommandAvailability()
+        for command: MenuCommand in [
+            .export, .exportSelected, .editInExternalEditor, .exportOriginalWithSettings,
+            .resetPhoto, .selectiveCopy, .copyAllEdits, .pasteEdits, .saveLook, .deleteSelectedPhotos,
+        ] {
+            XCTAssertFalse(a.isEnabled(command), "\(command)")
+        }
+    }
+
+    func testOpenPhotoEnablesPhotoCommands() {
+        let a = MenuCommandAvailability(hasPhoto: true, selectionCount: 1, canPaste: true)
+        for command: MenuCommand in [
+            .export, .exportSelected, .editInExternalEditor, .exportOriginalWithSettings,
+            .resetPhoto, .selectiveCopy, .copyAllEdits, .pasteEdits, .saveLook,
+        ] {
+            XCTAssertTrue(a.isEnabled(command), "\(command)")
+        }
+        XCTAssertFalse(a.isEnabled(.deleteSelectedPhotos), "Delete is a grid command")
+        XCTAssertFalse(MenuCommandAvailability(hasPhoto: true).isEnabled(.pasteEdits), "nothing copied")
+    }
+
+    func testGridWithSelectionEnablesBatchCommands() {
+        let a = MenuCommandAvailability(isGrid: true, selectionCount: 3, canPaste: true)
+        XCTAssertTrue(a.isEnabled(.deleteSelectedPhotos))
+        XCTAssertTrue(a.isEnabled(.exportSelected))
+        XCTAssertTrue(a.isEnabled(.pasteEdits))
+        XCTAssertFalse(a.isEnabled(.export))
+        XCTAssertFalse(a.isEnabled(.resetPhoto))
+    }
+
+    func testGridWithoutSelectionDisablesEverything() {
+        let a = MenuCommandAvailability(isGrid: true, selectionCount: 0, canPaste: true)
+        XCTAssertFalse(a.isEnabled(.deleteSelectedPhotos))
+        XCTAssertFalse(a.isEnabled(.exportSelected))
+        XCTAssertFalse(a.isEnabled(.pasteEdits))
+    }
+
+    func testUndoRedoTitlesUseActionNameWhenSupplied() {
+        XCTAssertEqual(MenuCommandAvailability().undoTitle, "Undo")
+        XCTAssertEqual(MenuCommandAvailability().redoTitle, "Redo")
+        let named = MenuCommandAvailability(
+            canUndo: true, canRedo: true, undoActionName: "Exposure", redoActionName: "Contrast"
+        )
+        XCTAssertEqual(named.undoTitle, "Undo Exposure")
+        XCTAssertEqual(named.redoTitle, "Redo Contrast")
+        XCTAssertEqual(MenuCommandAvailability(undoActionName: "").undoTitle, "Undo")
     }
 }

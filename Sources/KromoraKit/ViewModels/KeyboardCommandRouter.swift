@@ -98,6 +98,24 @@ final class KeyboardCommandRouter {
         self.viewModel = viewModel
     }
 
+    /// Runs a File-menu command that needs a photo or selection. The menu disables the item via
+    /// `MenuCommandAvailability`; the guard keeps a stale menu from acting on nothing.
+    func perform(_ command: MenuCommand) {
+        guard let vm = viewModel, MenuCommandAvailability(vm).isEnabled(command) else { return }
+        switch command {
+        case .export: vm.exportDialog()
+        case .exportSelected: vm.exportSelectedDialog()
+        case .editInExternalEditor: vm.editInExternalEditor()
+        case .exportOriginalWithSettings: vm.exportOriginalWithSettings()
+        case .resetPhoto: vm.resetPhoto()
+        case .selectiveCopy: vm.presentSelectiveCopyDialog()
+        case .copyAllEdits: vm.copyAllEdits()
+        case .pasteEdits: vm.pasteEdits()
+        case .saveLook: vm.presentSaveLook()
+        case .deleteSelectedPhotos: vm.requestDeleteSelectedLibraryItems()
+        }
+    }
+
     /// Returns true when the app claimed the key. `false` hands the key back to the responder
     /// chain / menu bar unchanged.
     @discardableResult

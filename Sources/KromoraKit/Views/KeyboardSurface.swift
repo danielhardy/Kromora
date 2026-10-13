@@ -21,6 +21,8 @@ extension FocusedValues {
     @Entry var keyboardRouter: KeyboardCommandRouter?
     /// Editor state that decides menu enablement; published alongside the router.
     @Entry var keyboardContext: KeyboardContext?
+    /// File/Edit command enablement and Undo/Redo titles for the focused window.
+    @Entry var menuAvailability: MenuCommandAvailability?
 }
 
 struct KeyboardSurface: ViewModifier {
@@ -53,6 +55,7 @@ struct KeyboardSurface: ViewModifier {
             .background(WindowReader(box: window, router: router))
             .focusedSceneValue(\.keyboardRouter, router)
             .focusedSceneValue(\.keyboardContext, KeyboardContext(viewModel))
+            .focusedSceneValue(\.menuAvailability, MenuCommandAvailability(viewModel))
             .onAppear { isSurfaceFocused = true }
             // A hold ends with its key-up, but that key-up goes elsewhere once focus leaves the
             // surface or the window stops being key. Restore the edited presentation then.
