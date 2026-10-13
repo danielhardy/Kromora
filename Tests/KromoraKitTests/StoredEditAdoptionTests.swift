@@ -357,13 +357,16 @@ final class StoredEditAdoptionTests: TempDirectoryTestCase {
         }
 
         await gate.release(oneID)
+        // The superseded open must not take over the editor. The collection item for one.png is
+        // deliberately not asserted: once two.png is idle, neighbour warming
+        // (`warmBrowsingNeighbourDocuments`) may legitimately resolve its placeholder, and whether
+        // that happens before this point depends on scheduling under the parallel lane.
         for _ in 0..<20 {
             XCTAssertEqual(viewModel.sourceName, "two.png")
+            XCTAssertEqual(viewModel.previewState, .ready)
+            XCTAssertTrue(viewModel.navigation.isEdit)
             try await Task.sleep(for: .milliseconds(10))
         }
-        XCTAssertTrue(
-            viewModel.collection.items.first { $0.displayName == "one.png" }?.asset.source
-                .portableIdentity.sourceFingerprint.isBrowsingPlaceholder ?? false)
     }
 
     func testOpeningCollectionAssetAfterShutdownDoesNotChangeNavigation() async throws {
