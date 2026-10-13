@@ -1490,7 +1490,7 @@ final class PortableLibrarySession {
         }.value
         let fingerprint = resolved.source.portableIdentity.sourceFingerprint
         if summary.sourceFingerprint != fingerprint {
-            try repairSourceFingerprintOnOpen(for: assetID, to: fingerprint)
+            repairSourceFingerprintOnOpen(for: assetID, to: fingerprint)
         }
         return resolved
     }
@@ -1507,15 +1507,21 @@ final class PortableLibrarySession {
     /// A session without a scheduler repairs inline. Failures are logged and never fail the open.
     private func repairSourceFingerprintOnOpen(
         for assetID: PortablePhotoAssetID, to fingerprint: PortablePhotoSourceFingerprint
-    ) throws {
+    ) {
         let package = self.package
         let lease = self.lease
         let clock = self.clock
         guard let scheduler else {
-            if let updated = try package.replaceSourceFingerprint(
-                for: assetID, with: fingerprint, lease: lease, now: clock.now()
-            ) {
-                try applyIndexDelta(.init(upserts: [updated]))
+            do {
+                if let updated = try package.replaceSourceFingerprint(
+                    for: assetID, with: fingerprint, lease: lease, now: clock.now()
+                ) {
+                    try applyIndexDelta(.init(upserts: [updated]))
+                }
+            } catch {
+                Self.repairLog.error(
+                    "Source fingerprint repair failed for \(assetID.raw, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                )
             }
             return
         }
