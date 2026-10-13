@@ -53,9 +53,10 @@ struct KeyInput: Equatable, Sendable {
 @MainActor
 final class KeyboardCommandRouter {
     private weak var viewModel: AppViewModel?
-    /// Tracks the Command+Backslash key-down independently of modifier flags on key-up. Users can
-    /// release Command before Backslash, but the temporary Original presentation must still end.
-    private(set) var commandBackslashIsHeld = false
+    /// Tracks the Backslash key-down independently of modifier flags on key-up. A modifier pressed
+    /// during the hold can change the key-up's flags, but the temporary Original presentation must
+    /// still end.
+    private(set) var backslashIsHeld = false
 
     init(viewModel: AppViewModel) {
         self.viewModel = viewModel
@@ -69,8 +70,8 @@ final class KeyboardCommandRouter {
 
         // A key-up can arrive after Command has been released. Once the matching key-down was
         // accepted, consume the key-up and always restore the edited presentation.
-        if !input.isDown, commandBackslashIsHeld, input.key == .character("\\") {
-            commandBackslashIsHeld = false
+        if !input.isDown, backslashIsHeld, input.key == .character("\\") {
+            backslashIsHeld = false
             _ = vm.showOriginal(false)
             return true
         }
@@ -108,16 +109,16 @@ final class KeyboardCommandRouter {
 
     /// Command-C opens Selective Copy and Command-A selects the grid; both are delivered by the
     /// standard Edit-menu commands (`onCopyCommand`, `onCommand(selectAll:)`) so a focused text
-    /// field keeps its normal copy and select-all. Command-Backslash is a hold gesture and arrives
+    /// field keeps its normal copy and select-all. Backslash is a hold gesture and arrives
     /// through the key surface.
-    private func handleCommandBackslash(_ input: KeyInput, vm: AppViewModel) -> Bool {
+    private func handleBackslash(_ input: KeyInput, vm: AppViewModel) -> Bool {
         // A key-up without an accepted key-down is not ours (for example, if focus changed while
         // the key was pressed), so do not disturb another transient gesture.
         guard input.isDown else { return false }
         guard vm.sourceImage != nil, vm.isComparisonAvailable, !vm.isSideBySide else {
             return false
         }
-        commandBackslashIsHeld = true
+        backslashIsHeld = true
         _ = vm.showOriginal(true)
         return true
     }
@@ -261,8 +262,8 @@ final class KeyboardCommandRouter {
     // MARK: - Character keys
 
     private func handleCharacter(_ characters: String, input: KeyInput, vm: AppViewModel) -> Bool {
-        if characters == "\\", input.modifiers == .command {
-            return handleCommandBackslash(input, vm: vm)
+        if characters == "\\", input.isPlain {
+            return handleBackslash(input, vm: vm)
         }
         // Option/Control/Command-modified characters belong to AppKit, input sources and the
         // menu bar. They are never Kromora's character shortcuts.

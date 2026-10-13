@@ -71,7 +71,7 @@ enum KeyboardShortcutCatalog {
             action: KromoraAutoAdjustmentShortcut.referenceAction,
             keys: KromoraAutoAdjustmentShortcut.displayString, area: "Edit", delivery: .standardMenu
         ),
-        .init(action: "Show original (hold)", keys: "Space or ⌘\\", area: "Edit", delivery: .surface),
+        .init(action: "Show original (hold)", keys: "Space or \\", area: "Edit", delivery: .surface),
         menuKey("Toggle comparison", .view, "v", area: "Edit", display: "V"),
         menuKey("Toggle capture information overlay", .view, "i", area: "Edit", display: "I"),
         .init(action: "Export edited photo", keys: "⌘S", area: "Edit", delivery: .standardMenu),

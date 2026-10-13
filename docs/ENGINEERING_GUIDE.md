@@ -307,7 +307,7 @@ now decides, and the app claims the keys it owns:
   alert. Items stay enabled and call `KeyboardCommandRouter`; an unavailable command is a claimed
   no-op, never a dead key. Do not give these Command/Option/Control modifiers: those belong to the
   system and to text editing.
-- **Arrows, Space, Return, Esc, Delete and the hold gestures (Space, ⌘\)** arrive through
+- **Arrows, Space, Return, Esc, Delete and the hold gestures (Space, \)** arrive through
   `.onKeyPress(phases: .all)` on the focusable root (`KeyboardSurface`). Return `.handled` for any
   key the app owns, including an intentional no-op; `.ignored` hands the key on. Arrows cannot be
   menu key equivalents because AppKit would deliver them even while a text field edits.

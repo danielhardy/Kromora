@@ -86,8 +86,8 @@ final class KeyboardCommandRouterTests: TempDirectoryTestCase {
             "auto-repeat navigates like a key-down"
         )
         XCTAssertEqual(
-            KeyboardSurface.input(key: "\\", modifiers: .command, phase: .down),
-            KeyInput(.character("\\"), modifiers: .command)
+            KeyboardSurface.input(key: "\\", modifiers: [], phase: .down),
+            KeyInput(.character("\\"))
         )
         XCTAssertEqual(KeyboardSurface.input(key: .space, modifiers: [], phase: .down)?.key, .space)
         XCTAssertEqual(KeyboardSurface.input(key: .deleteForward, modifiers: [], phase: .down)?.key, .forwardDelete)
@@ -188,32 +188,36 @@ final class KeyboardCommandRouterTests: TempDirectoryTestCase {
         XCTAssertTrue(viewModel.isLookNoneSelected)
     }
 
-    func testCommandBackslashKeyDownAndKeyUpFlashOriginal() {
+    func testBackslashKeyDownAndKeyUpFlashOriginal() {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.sourceImage = grayImage()
         viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.5)] }
         let router = router(viewModel)
 
-        XCTAssertTrue(press(router, .character("\\"), modifiers: .command))
+        XCTAssertTrue(press(router, .character("\\")))
         XCTAssertTrue(viewModel.isShowingOriginal)
-        XCTAssertTrue(router.commandBackslashIsHeld)
+        XCTAssertTrue(router.backslashIsHeld)
 
-        // Release Command first: the held-shortcut state still restores Edited on the Backslash
-        // key-up instead of leaving the transient preview armed.
-        XCTAssertTrue(press(router, .character("\\"), phase: .up))
+        // A modifier changing mid-hold must not leave the transient preview armed.
+        XCTAssertTrue(press(router, .character("\\"), modifiers: .shift, phase: .up))
         XCTAssertFalse(viewModel.isShowingOriginal)
-        XCTAssertFalse(router.commandBackslashIsHeld)
+        XCTAssertFalse(router.backslashIsHeld)
     }
 
-    func testUnavailableOrBareBackslashDoesNotChangeOriginalState() {
+    func testUnavailableOrModifiedBackslashDoesNotChangeOriginalState() {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         let router = router(viewModel)
 
-        XCTAssertFalse(press(router, .character("\\"), modifiers: .command))
-        XCTAssertFalse(viewModel.isShowingOriginal)
-        XCTAssertFalse(press(router, .character("\\")))
+        XCTAssertFalse(press(router, .character("\\")), "no photo: nothing to compare")
         XCTAssertFalse(viewModel.isShowingOriginal)
         XCTAssertFalse(press(router, .character("\\"), phase: .up), "a stray key-up is not ours")
+
+        viewModel.sourceImage = grayImage()
+        viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.5)] }
+        for modifier in [EventModifiers.command, .shift, .option, .control] {
+            XCTAssertFalse(press(router, .character("\\"), modifiers: modifier))
+            XCTAssertFalse(viewModel.isShowingOriginal)
+        }
     }
 
     func testCropShortcutIsPlainCOnly() {
