@@ -464,8 +464,10 @@ final class PackageEditProjectionTests: TempDirectoryTestCase {
     func testVirtualCopyHasIndependentIdentityAndEditHistory() async throws {
         let packageURL = tempDirectory.appendingPathComponent("VirtualCopies.kromoralibrary")
         let package = try PortableLibraryPackage.create(at: packageURL)
-        let sourceURL = tempDirectory.appendingPathComponent("portrait.jpg")
-        try Data("portable portrait".utf8).write(to: sourceURL)
+        let sourceURL = try Fixtures.writeGradientPNG(
+            width: 24, height: 16, named: "portrait.png", in: tempDirectory
+        )
+        let sourceBytes = try Data(contentsOf: sourceURL)
         let importLease = try PortablePackageLease.acquire(at: packageURL)
         let imported = try package.importSources([.init(url: sourceURL)], lease: importLease)
         try importLease.release()
@@ -474,24 +476,24 @@ final class PackageEditProjectionTests: TempDirectoryTestCase {
         let session = try PortableLibrarySession(at: packageURL)
         let copy = try await session.createVirtualCopy(of: original.assetID)
         XCTAssertNotEqual(copy.assetID, original.assetID)
-        XCTAssertEqual(copy.displayName, "portrait — Copy.jpg")
+        XCTAssertEqual(copy.displayName, "portrait — Copy.png")
         XCTAssertEqual(
             try package.readAssetRecord(for: copy.assetID).copyOfAssetID, original.assetID
         )
         let embeddedURL = try package.embeddedSourceURL(
             for: package.readAssetRecord(for: copy.assetID)
         )
-        XCTAssertEqual(embeddedURL.lastPathComponent, "portrait — Copy.jpg")
-        XCTAssertEqual(embeddedURL.pathExtension, "jpg")
+        XCTAssertEqual(embeddedURL.lastPathComponent, "portrait — Copy.png")
+        XCTAssertEqual(embeddedURL.pathExtension, "png")
         XCTAssertEqual(
             try Data(contentsOf: embeddedURL),
-            Data("portable portrait".utf8)
+            sourceBytes
         )
         let browsed = try session.browsingAssets().first {
             $0.source.portableIdentity.assetID == copy.assetID
         }
-        XCTAssertEqual(browsed?.url?.lastPathComponent, "portrait — Copy.jpg")
-        XCTAssertEqual(browsed?.url?.pathExtension, "jpg")
+        XCTAssertEqual(browsed?.url?.lastPathComponent, "portrait — Copy.png")
+        XCTAssertEqual(browsed?.url?.pathExtension, "png")
 
         let store = EditDocumentStore(package: package, lease: session.lease)
         let originalDocument = EditDocument(light: .init(exposure: -0.4))

@@ -12,6 +12,8 @@ final class EditHistoryCoordinatorTests: XCTestCase {
         var failSelect = false
         private(set) var calls: [String] = []
         private(set) var snapshots: [String] = []
+        private(set) var savedDocuments: [EditDocument] = []
+        private(set) var savedSources: [EditSourceReference] = []
         private var gate: CheckedContinuation<Void, Never>?
         private var gateEntered: CheckedContinuation<Void, Never>?
         private var gating = false
@@ -65,12 +67,15 @@ final class EditHistoryCoordinatorTests: XCTestCase {
         }
         func save(_ document: EditDocument, for source: EditSourceReference) async throws {
             calls.append("save")
+            savedDocuments.append(document)
+            savedSources.append(source)
         }
     }
 
     @MainActor
     private final class Host {
         var reference: EditSourceReference?
+        var document = EditDocument()
         var flushResult = true
         var events: [String] = []
         var adopted: [(EditDocument, [EditDocument])] = []
@@ -121,7 +126,7 @@ final class EditHistoryCoordinatorTests: XCTestCase {
             store: store,
             environment: .init(
                 activeSourceReference: { host.reference },
-                currentDocument: { EditDocument() },
+                currentDocument: { host.document },
                 endUndoGrouping: { host.events.append("endGrouping") },
                 flushPersistence: { await host.flush() },
                 adoptRestoredRevision: { document, prior in host.adopted.append((document, prior)) },
@@ -310,6 +315,7 @@ final class EditHistoryCoordinatorTests: XCTestCase {
         let store = FakeStore()
         let host = Host()
         host.reference = referenceA
+        host.document = EditDocument(light: .init(exposure: 0.42))
         let coordinator = makeCoordinator(store: store, host: host)
         let copy = EditHistoryCoordinator.VirtualCopy(
             sourceReference: referenceB, displayName: "Copy", assetID: PortablePhotoAssetID()
@@ -320,6 +326,10 @@ final class EditHistoryCoordinatorTests: XCTestCase {
             of: referenceA, makeCopy: { copy }, didCreate: { created.append($0.displayName) }
         )?.value
         XCTAssertEqual(created, ["Copy"])
+        let savedDocuments = await store.savedDocuments
+        let savedSources = await store.savedSources
+        XCTAssertEqual(savedDocuments, [host.document], "the active edits are saved onto the copy")
+        XCTAssertEqual(savedSources, [referenceB], "the edits target the independent copy identity")
         let calls = await store.calls
         XCTAssertEqual(calls.filter { $0 == "save" }.count, 1)
 
