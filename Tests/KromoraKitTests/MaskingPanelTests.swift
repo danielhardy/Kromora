@@ -26,9 +26,7 @@ final class MaskingPanelTests: XCTestCase {
         )
 
         model.load()
-        while model.isLoading {
-            await Task.yield()
-        }
+        try await pollUntil("masking panel to load") { !model.isLoading }
 
         XCTAssertEqual(model.availableSelections.map(\.kind), [.subject])
         XCTAssertEqual(model.selectedPixels?.values, [1, 0, 0, 1])
@@ -63,7 +61,7 @@ final class MaskingPanelTests: XCTestCase {
         )
 
         model.load()
-        while model.isLoading { await Task.yield() }
+        try await pollUntil("masking panel to load") { !model.isLoading }
         model.isInverted = true
         await model.apply()
 
@@ -95,7 +93,7 @@ final class MaskingPanelTests: XCTestCase {
         )
 
         model.load()
-        while model.isLoading { await Task.yield() }
+        try await pollUntil("masking panel to load") { !model.isLoading }
         XCTAssertFalse(model.canApplyMask)
         XCTAssertTrue(model.applyHelp.contains("cannot own a mask"))
         await model.apply()
@@ -122,7 +120,7 @@ final class MaskingPanelTests: XCTestCase {
         )
 
         model.load()
-        while model.isLoading { await Task.yield() }
+        try await pollUntil("masking panel to load") { !model.isLoading }
 
         XCTAssertTrue(model.availableSelections.isEmpty)
         XCTAssertEqual(model.errorMessage, "Mask generation failed for this photo. Retry to try again.")

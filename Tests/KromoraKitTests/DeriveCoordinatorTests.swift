@@ -367,7 +367,7 @@ final class DeriveCoordinatorTests: TempDirectoryTestCase {
         XCTAssertNotEqual(coordinator.stage, "Done")
 
         script.release[1].signal()
-        while coordinator.isDeriving { await Task.yield() }
+        try await pollUntil("derive to finish") { !coordinator.isDeriving }
 
         XCTAssertEqual(derived.count, 1)
         XCTAssertEqual(coordinator.report?.sampleCount, 1, "result belongs to B")

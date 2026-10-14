@@ -505,7 +505,7 @@ final class AutoEnhancementCoordinatorTests: TempDirectoryTestCase {
         XCTAssertEqual(requestCount, 0)
     }
 
-    func testCancellationDuringEvaluationReturnsWithoutApplying() async {
+    func testCancellationDuringEvaluationReturnsWithoutApplying() async throws {
         let current = EditDocument()
         let gate = GatedAutoSampler()
         let coordinator = AutoEnhancementCoordinator(engine: gate)
@@ -524,7 +524,7 @@ final class AutoEnhancementCoordinatorTests: TempDirectoryTestCase {
             )
         }
         // Wait until the baseline render is parked inside the sampler, then cancel.
-        while await gate.requestCount() == 0 { await Task.yield() }
+        try await pollUntil("baseline render to park in the sampler") { await gate.requestCount() > 0 }
         task.cancel()
         await gate.release()
         let result = await task.value

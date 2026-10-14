@@ -136,7 +136,7 @@ final class PhotosImportBatchCoordinatorTests: XCTestCase {
         XCTAssertFalse(coordinator.isBatchActive)
     }
 
-    func testSupersededAsyncInsertAndRefreshFailureCannotOpenAsset() async {
+    func testSupersededAsyncInsertAndRefreshFailureCannotOpenAsset() async throws {
         let destination = PhotosImportBatchDestinationFake()
         let coordinator = PhotosImportBatchCoordinator(destination: destination)
         let oldOperationID = destination.currentOperationID
@@ -145,7 +145,7 @@ final class PhotosImportBatchCoordinatorTests: XCTestCase {
             packageWasEmpty: true, packageAvailable: true
         )
         let insertion = Task { await coordinator.insertAsync(item(), ordinal: 0) }
-        while destination.asyncContinuation == nil { await Task.yield() }
+        try await pollUntil("async insert to suspend") { destination.asyncContinuation != nil }
         destination.currentOperationID = UUID()
         coordinator.begin(
             operationID: destination.currentOperationID, totalCount: 1,

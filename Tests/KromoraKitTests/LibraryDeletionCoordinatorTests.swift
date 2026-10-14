@@ -403,21 +403,21 @@ final class LibraryDeletionCoordinatorTests: TempDirectoryTestCase {
 
     private func holdPackageIOWorker(
         _ scheduler: ImageWorkScheduler
-    ) async -> OSAllocatedUnfairLock<Bool> {
+    ) async throws -> OSAllocatedUnfairLock<Bool> {
         let started = OSAllocatedUnfairLock(initialState: false)
         let release = OSAllocatedUnfairLock(initialState: false)
         scheduler.enqueuePackageIO(id: .init("deletion-test-blocker"), lane: .leaseHeartbeat) {
             started.withLock { $0 = true }
-            while !release.withLock({ $0 }) { await Task.yield() }
+            await holdUntilReleased { release.withLock { $0 } }
         }
-        for _ in 0..<10_000 where !started.withLock({ $0 }) { await Task.yield() }
+        try await pollUntil("package IO blocker to start") { started.withLock { $0 } }
         return release
     }
 
     func testMainActorStaysResponsiveWhileSessionRemovalIsGated() async throws {
         let fixture = try await makeScheduledFixture(count: 1)
         let item = try XCTUnwrap(fixture.collection.items.first)
-        let release = await holdPackageIOWorker(fixture.scheduler)
+        let release = try await holdPackageIOWorker(fixture.scheduler)
 
         let deletion = Task { @MainActor in
             await fixture.coordinator.delete([candidate(for: item, in: fixture.collection)])
@@ -443,7 +443,7 @@ final class LibraryDeletionCoordinatorTests: TempDirectoryTestCase {
         let fixture = try await makeScheduledFixture(count: 1)
         let item = try XCTUnwrap(fixture.collection.items.first)
         let candidate = candidate(for: item, in: fixture.collection)
-        let release = await holdPackageIOWorker(fixture.scheduler)
+        let release = try await holdPackageIOWorker(fixture.scheduler)
 
         let first = Task { @MainActor in await fixture.coordinator.delete([candidate]) }
         for _ in 0..<50 { await Task.yield() }
@@ -464,7 +464,7 @@ final class LibraryDeletionCoordinatorTests: TempDirectoryTestCase {
         let items = fixture.collection.items
         let firstCandidate = candidate(for: items[0], in: fixture.collection)
         let secondCandidate = candidate(for: items[1], in: fixture.collection)
-        let release = await holdPackageIOWorker(fixture.scheduler)
+        let release = try await holdPackageIOWorker(fixture.scheduler)
 
         let first = Task { @MainActor in await fixture.coordinator.delete([firstCandidate]) }
         for _ in 0..<50 { await Task.yield() }
@@ -485,7 +485,7 @@ final class LibraryDeletionCoordinatorTests: TempDirectoryTestCase {
     func testShutdownMidBatchLeavesNoHalfRemovedItem() async throws {
         let fixture = try await makeScheduledFixture(count: 3)
         let candidates = fixture.collection.items.map { candidate(for: $0, in: fixture.collection) }
-        let release = await holdPackageIOWorker(fixture.scheduler)
+        let release = try await holdPackageIOWorker(fixture.scheduler)
 
         let deletion = Task { @MainActor in await fixture.coordinator.delete(candidates) }
         for _ in 0..<50 { await Task.yield() }

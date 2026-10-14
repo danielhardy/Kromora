@@ -1826,9 +1826,13 @@ private actor ControllableStoredMaskProvider: SemanticMaskProviding {
     ) async throws -> RegionMask {
         callCount += 1
         do {
+            let deadline = ContinuousClock.now + .seconds(30)
             while !isReleased {
                 try Task.checkCancellation()
-                await Task.yield()
+                if ContinuousClock.now >= deadline {
+                    throw TestSynchronizationError.timedOut("mask release", "gate was never released")
+                }
+                try await Task.sleep(for: .milliseconds(5))
             }
             try Task.checkCancellation()
         } catch is CancellationError {

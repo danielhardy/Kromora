@@ -80,7 +80,7 @@ final class AnalysisDebugPanelTests: XCTestCase {
         )
 
         model.load()
-        while model.isLoading { await Task.yield() }
+        try await pollUntil("analysis panel to load") { !model.isLoading }
 
         XCTAssertNotNil(model.analysis)
         XCTAssertEqual(model.masks.count, 5)

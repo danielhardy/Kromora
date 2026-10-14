@@ -122,9 +122,9 @@ final class OpenImageDialogTests: TempDirectoryTestCase {
             id: .init("open-image-dialog-worker-gate"), lane: .maintenance
         ) {
             blockerStarted.withLock { $0 = true }
-            while !releaseBlocker.withLock({ $0 }) { await Task.yield() }
+            await holdUntilReleased { releaseBlocker.withLock { $0 } }
         })
-        for _ in 0..<10_000 where !blockerStarted.withLock({ $0 }) { await Task.yield() }
+        try await pollUntil("package IO blocker to start") { blockerStarted.withLock { $0 } }
         XCTAssertTrue(blockerStarted.withLock { $0 })
 
         let packageURL = tempDirectory.appendingPathComponent(

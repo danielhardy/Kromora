@@ -406,7 +406,7 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         let viewModel = makeAppViewModel(engine: engine, editStore: store)
 
         viewModel.openImage(url: imageURL)
-        while await engine.sourcePreparationCount < 1 { await Task.yield() }
+        try await pollUntil("source preparation to start") { await engine.sourcePreparationCount >= 1 }
         viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.9)] }
         await engine.releaseSourcePreparation()
 

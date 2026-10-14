@@ -108,7 +108,7 @@ final class SourcePresentationLifecycleTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.previewState, .loading)
 
         let shutdown = Task { @MainActor in await viewModel.shutdown() }
-        while !viewModel.presentation.isShutDown { await Task.yield() }
+        try await pollUntil("presentation to shut down") { viewModel.presentation.isShutDown }
         await engine.releaseSourcePreparation()
         await shutdown.value
         let settled = viewModel.presentation

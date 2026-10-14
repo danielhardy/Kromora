@@ -35,13 +35,9 @@ final class LibraryScanPerformanceTests: TempDirectoryTestCase {
             let start = DispatchTime.now().uptimeNanoseconds
             collection.loadFromFolder(folder)
             let firstRowStart = DispatchTime.now().uptimeNanoseconds
-            while collection.items.isEmpty {
-                await Task.yield()
-            }
+            try await pollUntil("first row to publish") { !collection.items.isEmpty }
             let firstRowEnd = DispatchTime.now().uptimeNanoseconds
-            while collection.isScanning {
-                await Task.yield()
-            }
+            try await pollUntil("scan to finish") { !collection.isScanning }
             let end = DispatchTime.now().uptimeNanoseconds
 
             XCTAssertEqual(collection.items.count, count)

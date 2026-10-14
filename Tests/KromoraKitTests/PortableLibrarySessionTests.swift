@@ -348,9 +348,9 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
             id: .init("presented-geometry-test-blocker"), lane: .maintenance
         ) {
             blockerStarted.withLock { $0 = true }
-            while !blockerRelease.withLock({ $0 }) { await Task.yield() }
+            await holdUntilReleased { blockerRelease.withLock { $0 } }
         })
-        for _ in 0..<10_000 where !blockerStarted.withLock({ $0 }) { await Task.yield() }
+        try await pollUntil("package IO blocker to start") { blockerStarted.withLock { $0 } }
         XCTAssertTrue(blockerStarted.withLock { $0 })
 
         let session = try PortableLibrarySession(
@@ -846,7 +846,7 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         let blockerRelease = OSAllocatedUnfairLock(initialState: false)
         XCTAssertTrue(scheduler.enqueuePackageIO(id: .init("verification-blocker"), lane: .maintenance) {
             blockerStarted.withLock { $0 = true }
-            while !blockerRelease.withLock({ $0 }) { await Task.yield() }
+            await holdUntilReleased { blockerRelease.withLock { $0 } }
         })
         for _ in 0..<1_000 {
             if blockerStarted.withLock({ $0 }) { break }
@@ -929,9 +929,9 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         let blockerRelease = OSAllocatedUnfairLock(initialState: false)
         XCTAssertTrue(scheduler.enqueuePackageIO(id: .init("startup-test-blocker"), lane: .maintenance) {
             blockerStarted.withLock { $0 = true }
-            while !blockerRelease.withLock({ $0 }) { await Task.yield() }
+            await holdUntilReleased { blockerRelease.withLock { $0 } }
         })
-        for _ in 0..<1_000 where !blockerStarted.withLock({ $0 }) { await Task.yield() }
+        try await pollUntil("package IO blocker to start") { blockerStarted.withLock { $0 } }
         XCTAssertTrue(blockerStarted.withLock { $0 })
 
         let session = try PortableLibrarySession(
@@ -981,9 +981,9 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         let blockerRelease = OSAllocatedUnfairLock(initialState: false)
         XCTAssertTrue(scheduler.enqueuePackageIO(id: .init("cancel-startup-blocker"), lane: .maintenance) {
             blockerStarted.withLock { $0 = true }
-            while !blockerRelease.withLock({ $0 }) { await Task.yield() }
+            await holdUntilReleased { blockerRelease.withLock { $0 } }
         })
-        for _ in 0..<1_000 where !blockerStarted.withLock({ $0 }) { await Task.yield() }
+        try await pollUntil("package IO blocker to start") { blockerStarted.withLock { $0 } }
         XCTAssertTrue(blockerStarted.withLock { $0 })
         let session = try PortableLibrarySession(
             at: packageURL, indexURL: indexURL, scheduler: scheduler,

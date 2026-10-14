@@ -80,3 +80,34 @@ enum TestSynchronization {
         }
     }
 }
+
+/// Polls `condition` until it holds, throwing `TestSynchronizationError.timedOut` at the deadline so
+/// a condition that never arrives fails the test instead of spinning the lane until it is killed.
+/// The closure runs on the caller's isolation, so main-actor state can be read directly.
+func pollUntil(
+    _ description: String,
+    timeout: Duration = .seconds(30),
+    isolation: isolated (any Actor)? = #isolation,
+    _ condition: () async -> Bool
+) async throws {
+    let deadline = ContinuousClock.now + timeout
+    while await !condition() {
+        if ContinuousClock.now >= deadline {
+            throw TestSynchronizationError.timedOut(description, "condition did not settle")
+        }
+        try await Task.sleep(for: .milliseconds(5))
+    }
+}
+
+/// Holds a gated worker until `released` reports true. A worker closure cannot throw into the test,
+/// so a gate nobody opens (the test failed first) releases after `timeout` rather than pinning a
+/// package-IO worker for the rest of the process.
+func holdUntilReleased(
+    timeout: Duration = .seconds(60),
+    _ released: () -> Bool
+) async {
+    let deadline = ContinuousClock.now + timeout
+    while !released(), !Task.isCancelled, ContinuousClock.now < deadline {
+        try? await Task.sleep(for: .milliseconds(5))
+    }
+}

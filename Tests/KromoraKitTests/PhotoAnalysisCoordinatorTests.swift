@@ -79,7 +79,7 @@ final class PhotoAnalysisCoordinatorTests: XCTestCase {
                 assetID: assetID, source: source, kind: .subject, quality: .analysis
             )
         }
-        await provider.waitUntilStarted()
+        try await provider.waitUntilStarted()
         request.cancel()
 
         do {
@@ -108,7 +108,7 @@ final class PhotoAnalysisCoordinatorTests: XCTestCase {
                 assetID: assetID, source: source, kind: .subject, quality: .preview
             )
         }
-        await provider.waitUntilStarted()
+        try await provider.waitUntilStarted()
         cancelled.cancel()
 
         let result = try await survivor.value
@@ -215,10 +215,8 @@ private actor CountingMaskProvider: SemanticMaskProviding {
         return Self.makeMask(kind: kind, quality: quality, size: image.dimensions)
     }
 
-    func waitUntilStarted() async {
-        while !started {
-            await Task.yield()
-        }
+    func waitUntilStarted() async throws {
+        try await pollUntil("mask provider to start") { started }
     }
 
     private static func makeMask(
