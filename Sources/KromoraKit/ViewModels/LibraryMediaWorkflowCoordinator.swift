@@ -1,5 +1,4 @@
 import AppKit
-import Combine
 import Foundation
 import UniformTypeIdentifiers
 
@@ -51,7 +50,8 @@ struct RemovableMediaImportRequest: Sendable {
 /// managed-versus-referenced policy, and active-source navigation in one place while preventing
 /// provider tasks and security-scoped access from becoming another AppViewModel concern.
 @MainActor
-final class LibraryMediaWorkflowCoordinator: ObservableObject {
+@Observable
+final class LibraryMediaWorkflowCoordinator {
     private enum DropAccess {
         case scoped(SecurityScopedResourceAccess)
         case unscoped
@@ -62,46 +62,46 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
         let access: SecurityScopedResourceAccess
     }
 
-    @Published private(set) var removableMediaVolumes: [MediaVolume] = []
-    @Published var isRemovableMediaSelectorPresented = false
-    @Published private(set) var removableMediaVolume: MediaVolume?
-    @Published private(set) var importSource: MediaImportSource = .removableMedia
-    @Published private(set) var removableMediaFiles: [MediaVolumeFile] = []
-    @Published private(set) var removableMediaWarnings: [String] = []
-    @Published private(set) var isRemovableMediaScanning = false
-    @Published private(set) var removableMediaSelection = MediaVolumeSelectionModel()
-    @Published private(set) var removableMediaImportProgress: MediaVolumeImportProgress?
+    private(set) var removableMediaVolumes: [MediaVolume] = []
+    var isRemovableMediaSelectorPresented = false
+    private(set) var removableMediaVolume: MediaVolume?
+    private(set) var importSource: MediaImportSource = .removableMedia
+    private(set) var removableMediaFiles: [MediaVolumeFile] = []
+    private(set) var removableMediaWarnings: [String] = []
+    private(set) var isRemovableMediaScanning = false
+    private(set) var removableMediaSelection = MediaVolumeSelectionModel()
+    private(set) var removableMediaImportProgress: MediaVolumeImportProgress?
     /// Ids of scanned files whose bytes are already in the open library. Filled progressively.
-    @Published private(set) var removableMediaInLibrary: Set<String> = []
+    private(set) var removableMediaInLibrary: Set<String> = []
     /// How many scanned files have been compared with the library so far.
-    @Published private(set) var removableMediaLibraryChecked = 0
-    @Published private(set) var isCheckingRemovableMediaLibrary = false
-    @Published var hidesInLibraryRemovableMedia = false
+    private(set) var removableMediaLibraryChecked = 0
+    private(set) var isCheckingRemovableMediaLibrary = false
+    var hidesInLibraryRemovableMedia = false
 
-    private let provider: any MediaVolumeProviding
-    private let fileDialog: any FileDialogProviding
-    private let fileDropActionPolicy: FileDropActionPolicy
-    private var discoveryTask: Task<Void, Never>?
-    private var scanTask: Task<Void, Never>?
-    private var importRequestTask: Task<Void, Never>?
-    private var removableMediaAccess: SecurityScopedResourceAccess?
-    private var isShuttingDown = false
-    private var importOperationID = UUID()
+    @ObservationIgnored private let provider: any MediaVolumeProviding
+    @ObservationIgnored private let fileDialog: any FileDialogProviding
+    @ObservationIgnored private let fileDropActionPolicy: FileDropActionPolicy
+    @ObservationIgnored private var discoveryTask: Task<Void, Never>?
+    @ObservationIgnored private var scanTask: Task<Void, Never>?
+    @ObservationIgnored private var importRequestTask: Task<Void, Never>?
+    @ObservationIgnored private var removableMediaAccess: SecurityScopedResourceAccess?
+    @ObservationIgnored private var isShuttingDown = false
+    @ObservationIgnored private var importOperationID = UUID()
     /// Streamed files are selected on arrival until the user takes over the selection, which
     /// matches the select-everything default of a finished scan.
-    private var selectsScanArrivals = true
-    private var libraryCheckTask: Task<Void, Never>?
-    private var libraryCheckInput: AsyncStream<[MediaVolumeFile]>.Continuation?
+    @ObservationIgnored private var selectsScanArrivals = true
+    @ObservationIgnored private var libraryCheckTask: Task<Void, Never>?
+    @ObservationIgnored private var libraryCheckInput: AsyncStream<[MediaVolumeFile]>.Continuation?
 
     /// Loads the open library's content hashes off the main actor. Nil when no library is open,
     /// in which case nothing is tagged.
-    var libraryMatcherLoader: (@Sendable () async throws -> LibraryMembershipMatcher)?
+    @ObservationIgnored var libraryMatcherLoader: (@Sendable () async throws -> LibraryMembershipMatcher)?
 
-    var onStatus: (@MainActor (String) -> Void)?
-    var onError: (@MainActor (String) -> Void)?
-    var onImageURL: (@MainActor (URL, SecurityScopedResourceAccess?) -> Void)?
-    var onImageURLs: (@MainActor ([URL], [SecurityScopedResourceAccess]) -> Void)?
-    var onImportRequest: (@MainActor (RemovableMediaImportRequest) -> Void)?
+    @ObservationIgnored var onStatus: (@MainActor (String) -> Void)?
+    @ObservationIgnored var onError: (@MainActor (String) -> Void)?
+    @ObservationIgnored var onImageURL: (@MainActor (URL, SecurityScopedResourceAccess?) -> Void)?
+    @ObservationIgnored var onImageURLs: (@MainActor ([URL], [SecurityScopedResourceAccess]) -> Void)?
+    @ObservationIgnored var onImportRequest: (@MainActor (RemovableMediaImportRequest) -> Void)?
 
     init(
         provider: any MediaVolumeProviding,

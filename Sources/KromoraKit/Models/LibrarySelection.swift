@@ -185,6 +185,18 @@ struct LibraryGridLayout: Sendable, Equatable {
         return (itemCount + columns - 1) / columns
     }
 
+    /// Rows to materialize for a viewport whose first intersecting row is `firstVisibleRow`:
+    /// the visible rows plus `prefetchRows` on each side. The size depends on the viewport, never
+    /// on `rowCount`, so row-model work stays flat as the collection grows.
+    func rowWindow(rowCount: Int, firstVisibleRow: Int, viewportHeight: Double, pitch: Double) -> Range<Int> {
+        guard rowCount > 0, pitch > 0 else { return 0..<0 }
+        let first = min(rowCount - 1, max(0, firstVisibleRow))
+        let visible = Int((max(0, viewportHeight) / pitch).rounded(.up)) + 1
+        let start = max(0, first - prefetchRows)
+        let end = min(rowCount, first + visible + prefetchRows)
+        return start..<max(start, end)
+    }
+
     /// Item indices whose rows intersect the viewport, expanded by `prefetchRows`.
     ///
     /// `contentOrigin` is the first row's y position inside the scroll content. Results stay in

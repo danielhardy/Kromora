@@ -5,15 +5,15 @@ import SwiftUI
 /// root `AppViewModel` observers. Ownership stays with `AppViewModel`; this only holds references.
 struct FeatureSheetsModifier: ViewModifier {
     let viewModel: AppViewModel
-    @ObservedObject var derive: DeriveCoordinator
-    @ObservedObject var lookSave: LookSaveCoordinator
-    @ObservedObject var media: LibraryMediaWorkflowCoordinator
+    @Bindable var derive: DeriveCoordinator
+    let lookSave: LookSaveCoordinator
+    @Bindable var media: LibraryMediaWorkflowCoordinator
 
     init(viewModel: AppViewModel) {
         self.viewModel = viewModel
-        _derive = ObservedObject(wrappedValue: viewModel.derive)
-        _lookSave = ObservedObject(wrappedValue: viewModel.lookSave)
-        _media = ObservedObject(wrappedValue: viewModel.libraryMediaWorkflow)
+        derive = viewModel.derive
+        lookSave = viewModel.lookSave
+        media = viewModel.libraryMediaWorkflow
     }
 
     func body(content: Content) -> some View {
@@ -36,7 +36,7 @@ struct FeatureSheetsModifier: ViewModifier {
 /// The Import ▸ Removable Media submenu, observing the media workflow directly.
 struct RemovableMediaMenu: View {
     let viewModel: AppViewModel
-    @ObservedObject var media: LibraryMediaWorkflowCoordinator
+    let media: LibraryMediaWorkflowCoordinator
 
     var body: some View {
         Menu("Removable Media") {
@@ -63,15 +63,10 @@ struct RemovableMediaMenu: View {
 /// category changes never invalidate `ContentView` or the root `AppViewModel` observers.
 struct SelectiveCopySheetModifier: ViewModifier {
     let viewModel: AppViewModel
-    @ObservedObject var clipboard: EditClipboardCoordinator
-
-    init(viewModel: AppViewModel) {
-        self.viewModel = viewModel
-        _clipboard = ObservedObject(wrappedValue: viewModel.editClipboardWorkflow)
-    }
 
     func body(content: Content) -> some View {
-        content.sheet(isPresented: $clipboard.isSelectiveCopyDialogPresented) {
+        @Bindable var clipboard = viewModel.editClipboardWorkflow
+        return content.sheet(isPresented: $clipboard.isSelectiveCopyDialogPresented) {
             SelectiveCopySheet(
                 categories: $clipboard.selectiveCopyCategories,
                 sourceName: viewModel.sourceName,

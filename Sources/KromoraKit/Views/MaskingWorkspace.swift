@@ -8,7 +8,7 @@ import SwiftUI
 /// mask, then shape it and set its adjustments. The overlay is a viewing aid: it is shown or
 /// hidden from the header (or with O), and its color and style are preferences in Settings.
 struct MaskingWorkspace: View {
-    @ObservedObject var viewModel: AppViewModel
+    let viewModel: AppViewModel
     @Bindable private var maskingState: MaskInteractionState
 
     @State private var adjustmentsExpanded = true
@@ -246,7 +246,7 @@ struct MaskingWorkspace: View {
         switch viewModel.previewState {
         case .failed:
             statusBanner(
-                title: "Preview unavailable", message: viewModel.statusMessage,
+                title: "Preview unavailable", message: viewModel.status.message,
                 retryTitle: "Retry preview", retry: viewModel.retryPreview)
                 .accessibilityHint("Retry without discarding the saved mask definition")
         default:
@@ -671,7 +671,7 @@ struct MaskingWorkspace: View {
                     }), range: 0...1)
         case .luminance(let definition):
             LuminanceRangeHistogram(
-                data: viewModel.histogram,
+                data: viewModel.info.histogram,
                 lower: componentValue(component.id, layerID: layerID,
                     get: { if case .luminance(let value) = $0 { return value.lower }; return definition.lower },
                 set: { source, number in if case .luminance(var value) = source { value.lower = min(number, value.upper); source = .luminance(value) } }),
@@ -1056,7 +1056,7 @@ fileprivate extension LocalAdjustmentControl {
 /// One mask in the list. The whole row selects the mask; the type icon, name, and summary say
 /// what it selects, and the switch and menu hold the few per-mask actions.
 private struct MaskLayerRow: View {
-    @ObservedObject var viewModel: AppViewModel
+    let viewModel: AppViewModel
     let maskingState: MaskInteractionState
     let layer: LocalAdjustmentLayer
     let index: Int
@@ -1186,7 +1186,7 @@ private struct MaskLayerRow: View {
 /// combines with the parts above it (the first part is the starting selection); selecting a part
 /// shows its controls in the Mask section and points canvas gestures at it.
 private struct MaskPartRow: View {
-    @ObservedObject var viewModel: AppViewModel
+    let viewModel: AppViewModel
     let maskingState: MaskInteractionState
     let layer: LocalAdjustmentLayer
     let component: MaskComponent
@@ -1436,7 +1436,7 @@ private struct LiveBrushStroke: Equatable {
 /// remains responsible for mask pixels; these guides give gradient/brush authors immediate handles
 /// without putting pointer-frequency geometry into AppViewModel's published document.
 struct MaskCanvasOverlay: View {
-    @ObservedObject var viewModel: AppViewModel
+    let viewModel: AppViewModel
     let maskingState: MaskInteractionState
     let sourceSize: CGSize
     let crop: CropAdjustments

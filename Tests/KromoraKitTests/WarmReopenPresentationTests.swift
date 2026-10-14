@@ -103,7 +103,7 @@ final class WarmReopenPresentationTests: TempDirectoryTestCase {
         XCTAssertGreaterThan(firstRenders, 0)
         harness.viewModel.inspectorState.isPresented = true
         harness.viewModel.inspectorState.tab = .info
-        try await waitUntil("first histogram") { harness.viewModel.histogram != nil }
+        try await waitUntil("first histogram") { harness.viewModel.info.histogram != nil }
         let firstHistograms = await harness.fake.histogramRequests.count
 
         harness.viewModel.openImage(data: harness.data, name: "warm.png")

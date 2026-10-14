@@ -4,7 +4,7 @@ import SwiftUI
 // reminder of the keys that do something on the right.
 
 struct StatusBar: View {
-    @ObservedObject var viewModel: AppViewModel
+    let viewModel: AppViewModel
     @Bindable var photosImportCoordinator: PhotosImportCoordinator
     @Bindable var export: ExportCoordinator
     @Bindable var collection: ImageCollection
@@ -49,7 +49,7 @@ struct StatusBar: View {
                     .padding(.leading, 8)
             } else if viewModel.isAutoAdjustmentInProgress {
                 Group {
-                    if let progress = viewModel.autoAdjustmentProgress {
+                    if let progress = viewModel.autoLook.autoAdjustmentProgress {
                         ProgressView(value: progress)
                             .frame(width: 110)
                             .controlSize(.small)
@@ -58,7 +58,7 @@ struct StatusBar: View {
                             .controlSize(.small)
                     }
                 }
-                Text(viewModel.statusMessage)
+                Text(viewModel.status.message)
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .lineLimit(1)
@@ -68,7 +68,7 @@ struct StatusBar: View {
                     .font(.caption)
                     .padding(.leading, 8)
             } else {
-                Text(viewModel.statusMessage)
+                Text(viewModel.status.message)
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .lineLimit(1)

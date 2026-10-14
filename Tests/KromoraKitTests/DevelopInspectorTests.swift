@@ -47,12 +47,12 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         let fake = FakeRenderEngine()
         await fake.setStubbedCapabilities(distinctiveCapabilities)
         let viewModel = makeAppViewModel(engine: fake)
-        XCTAssertNil(viewModel.rawCapabilities, "nothing open yet")
+        XCTAssertNil(viewModel.capabilities.rawCapabilities, "nothing open yet")
 
         try await openStandardImage(viewModel)
-        try await waitUntil("capabilities to arrive") { viewModel.rawCapabilities != nil }
+        try await waitUntil("capabilities to arrive") { viewModel.capabilities.rawCapabilities != nil }
 
-        XCTAssertEqual(viewModel.rawCapabilities, distinctiveCapabilities)
+        XCTAssertEqual(viewModel.capabilities.rawCapabilities, distinctiveCapabilities)
     }
 
     /// The probe costs ~25 ms. Paying that once per image is fine; paying it per render would put it
@@ -61,7 +61,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         let fake = FakeRenderEngine()
         let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
-        try await waitUntil("capabilities to arrive") { viewModel.rawCapabilities != nil }
+        try await waitUntil("capabilities to arrive") { viewModel.capabilities.rawCapabilities != nil }
 
         let afterOpen = await fake.capabilityProbeCount
         XCTAssertEqual(afterOpen, 1, "one open, one probe")
@@ -92,14 +92,14 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         let probeCount = await fake.capabilityProbeCount
         XCTAssertEqual(
             probeCount, 1, "the engine must still be consulted even with no develop stage")
-        XCTAssertNil(viewModel.rawCapabilities)
+        XCTAssertNil(viewModel.capabilities.rawCapabilities)
     }
 
     // MARK: - Three panel states, not two
 
     /// **The panel used to lie while the probe was in flight.**
     ///
-    /// `DevelopInspectorView` was `if let capabilities = viewModel.rawCapabilities { … } else {
+    /// `DevelopInspectorView` was `if let capabilities = viewModel.capabilities.rawCapabilities { … } else {
     /// notRAW }`, and `rawCapabilities` is `nil` in two situations that mean opposite things:
     /// "this file has no develop stage" and "this file's develop stage has not been measured yet".
     /// `refreshCapabilities()` clears it **synchronously** on open and refills it 25–170 ms later, so
@@ -247,14 +247,14 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         try await waitUntil("the probe to start") { await fake.capabilityProbeCount == 1 }
 
         XCTAssertTrue(viewModel.sourceIsRAW, "a DNG goes through the RAW decoder")
-        XCTAssertNil(viewModel.rawCapabilities, "precondition: the probe is still parked")
+        XCTAssertNil(viewModel.capabilities.rawCapabilities, "precondition: the probe is still parked")
         XCTAssertEqual(
             viewModel.developPanelState, .probing,
             "the panel would be telling the user this RAW has no develop stage"
         )
 
         await fake.releaseProbe()
-        try await waitUntil("the probe to answer") { viewModel.rawCapabilities != nil }
+        try await waitUntil("the probe to answer") { viewModel.capabilities.rawCapabilities != nil }
         XCTAssertEqual(viewModel.developPanelState, .ready(caps))
     }
 
@@ -486,7 +486,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
 
         await fake.releaseHistograms()
         try await waitUntil("the in-flight histogram to publish") {
-            viewModel.histogram != nil
+            viewModel.info.histogram != nil
         }
         viewModel.inspectorTab = .info
         viewModel.inspectorTab = .develop
@@ -521,7 +521,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
 
         let histogramRequests = await fake.histogramRequests
         XCTAssertEqual(histogramRequests.count, 1)
-        XCTAssertNotNil(viewModel.histogram)
+        XCTAssertNotNil(viewModel.info.histogram)
     }
 
     func testPendingHistogramSurvivesCanvasZoom() async throws {
@@ -537,7 +537,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
 
         viewModel.zoomCanvas(by: 1.5)
         await fake.releaseHistograms()
-        try await waitUntil("the pending histogram to publish") { viewModel.histogram != nil }
+        try await waitUntil("the pending histogram to publish") { viewModel.info.histogram != nil }
         try await Task.sleep(for: .milliseconds(150))
 
         let histogramRequests = await fake.histogramRequests
@@ -592,7 +592,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
                        "the coalesced tally must use the final slider value")
 
         await fake.releaseHistograms()
-        try await waitUntil("the final histogram") { viewModel.histogram != nil }
+        try await waitUntil("the final histogram") { viewModel.info.histogram != nil }
     }
 
     /// An in-flight tally from an earlier edit is allowed to finish, but it must not publish after a
@@ -616,12 +616,12 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         // would prove that the revision guard is missing.
         await fake.releaseNextHistogram()
         try await Task.sleep(for: .milliseconds(50))
-        XCTAssertNil(viewModel.histogram, "an obsolete histogram must not publish")
+        XCTAssertNil(viewModel.info.histogram, "an obsolete histogram must not publish")
 
         await fake.releaseHistograms()
-        try await waitUntil("the current histogram") { viewModel.histogram != nil }
+        try await waitUntil("the current histogram") { viewModel.info.histogram != nil }
         XCTAssertEqual(
-            viewModel.histogram?.red[105], 1,
+            viewModel.info.histogram?.red[105], 1,
                        "the published tally must describe the newer 0.5 EV edit")
     }
 
@@ -694,7 +694,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
             RAWCapabilities(asShotTemperature: 5842.2, asShotTint: 14.04))
         let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
-        try await waitUntil("capabilities") { viewModel.rawCapabilities != nil }
+        try await waitUntil("capabilities") { viewModel.capabilities.rawCapabilities != nil }
 
         XCTAssertNil(viewModel.document.rawDevelop.neutralTemperature, "nothing written yet")
         XCTAssertEqual(
@@ -712,7 +712,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         let fake = FakeRenderEngine()
         let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
-        try await waitUntil("capabilities") { viewModel.rawCapabilities != nil }
+        try await waitUntil("capabilities") { viewModel.capabilities.rawCapabilities != nil }
 
         for control in DevelopControl.allCases {
             _ = viewModel.developBinding(for: control).wrappedValue
@@ -735,7 +735,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         await fake.setStubbedCapabilities(caps)
         let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
-        try await waitUntil("capabilities") { viewModel.rawCapabilities != nil }
+        try await waitUntil("capabilities") { viewModel.capabilities.rawCapabilities != nil }
 
         let seeded: [(DevelopControl, Double)] = [
             (.baselineExposure, caps.baselineExposure),
@@ -803,7 +803,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         await fake.setStubbedCapabilities(RAWCapabilities.distinctivelySeeded)
         let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
-        try await waitUntil("capabilities") { viewModel.rawCapabilities != nil }
+        try await waitUntil("capabilities") { viewModel.capabilities.rawCapabilities != nil }
 
         for control in [DevelopControl.sharpness, .localToneMap] {
             XCTAssertEqual(control.range.upperBound, 1.1)
@@ -832,7 +832,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
             await fake.setStubbedCapabilities(RAWCapabilities(lensCorrectionEnabled: seedValue))
             let viewModel = makeAppViewModel(engine: fake)
             try await openStandardImage(viewModel)
-            try await waitUntil("capabilities") { viewModel.rawCapabilities != nil }
+            try await waitUntil("capabilities") { viewModel.capabilities.rawCapabilities != nil }
 
             XCTAssertEqual(
                 viewModel.developValue(for: .lensCorrection), seedValue ? 1 : 0,
@@ -853,7 +853,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
             RAWCapabilities(asShotTemperature: 5842.2, asShotTint: 14.04))
         let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
-        try await waitUntil("capabilities") { viewModel.rawCapabilities != nil }
+        try await waitUntil("capabilities") { viewModel.capabilities.rawCapabilities != nil }
 
         // Read, repeatedly. `.neutral` is byte-identical to `developRAWNeutral` *because it sets
         // nothing*; a getter that seeded on read would quietly end that and move the derive baseline.
@@ -957,7 +957,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         let fake = FakeRenderEngine()
         let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
-        try await waitUntil("capabilities") { viewModel.rawCapabilities != nil }
+        try await waitUntil("capabilities") { viewModel.capabilities.rawCapabilities != nil }
 
         viewModel.developBinding(for: .exposure).wrappedValue = 2.0
         XCTAssertEqual(viewModel.document.rawDevelop.exposure, 2.0)
@@ -979,7 +979,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         let fake = FakeRenderEngine()
         let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
-        try await waitUntil("capabilities") { viewModel.rawCapabilities != nil }
+        try await waitUntil("capabilities") { viewModel.capabilities.rawCapabilities != nil }
 
         viewModel.developBinding(for: .whiteBalance).wrappedValue = 3200
         viewModel.developTintBinding().wrappedValue = -42
@@ -1006,7 +1006,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         let fake = FakeRenderEngine()
         let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
-        try await waitUntil("capabilities") { viewModel.rawCapabilities != nil }
+        try await waitUntil("capabilities") { viewModel.capabilities.rawCapabilities != nil }
 
         viewModel.updateDocument { document in
             document.rawDevelop.neutralTemperature = 3200
@@ -1034,8 +1034,8 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         let viewModel = makeAppViewModel(engine: RenderEngine())
         viewModel.openImage(url: rawURL)
         try await waitUntil("RAW image") { viewModel.sourceImage != nil }
-        try await waitUntil("RAW capabilities") { viewModel.rawCapabilities != nil }
-        let seed = try XCTUnwrap(viewModel.rawCapabilities)
+        try await waitUntil("RAW capabilities") { viewModel.capabilities.rawCapabilities != nil }
+        let seed = try XCTUnwrap(viewModel.capabilities.rawCapabilities)
 
         viewModel.developBinding(for: .whiteBalance).wrappedValue = 3200
         viewModel.developTintBinding().wrappedValue = -40
@@ -1087,7 +1087,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         let fake = FakeRenderEngine()
         let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
-        try await waitUntil("capabilities") { viewModel.rawCapabilities != nil }
+        try await waitUntil("capabilities") { viewModel.capabilities.rawCapabilities != nil }
 
         for control in DevelopControl.allCases {
             // A value the seed cannot coincide with, so the write genuinely changes the document.

@@ -434,14 +434,14 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         }
 
         viewModel.isInspectorPresented = true
-        try await waitUntil("the first histogram") { viewModel.histogram != nil }
+        try await waitUntil("the first histogram") { viewModel.info.histogram != nil }
 
         viewModel.selectCollectionImage(at: 1)
         viewModel.selectCollectionImage(at: 1)
         try await waitUntil("the repeated second selection") {
             viewModel.sourceURL == second && viewModel.previewState == .ready
                 && viewModel.previewSurface.image != nil
-                && viewModel.histogram != nil
+                && viewModel.info.histogram != nil
         }
         _ = try await TestSynchronization.nextEvent(
             from: reader, "the second photo histogram completion"
@@ -454,12 +454,12 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
             "histogram requests=\(await engine.histogramRequests)"
         }
         try await waitUntil("the settled second photo histogram") {
-            viewModel.histogram != nil && !viewModel.isHistogramLoading
+            viewModel.info.histogram != nil && !viewModel.info.isHistogramLoading
         }
 
         XCTAssertEqual(viewModel.collection.selection.activeID, viewModel.collection.items[1].id)
-        XCTAssertEqual(viewModel.histogramErrorMessage, nil)
-        XCTAssertFalse(viewModel.isHistogramLoading)
+        XCTAssertEqual(viewModel.info.histogramErrorMessage, nil)
+        XCTAssertFalse(viewModel.info.isHistogramLoading)
         XCTAssertTrue(viewModel.canRunAutoAdjustment)
         let requests = await engine.histogramRequests
         XCTAssertTrue(requests.last?.source?.backing == .url(second))
@@ -816,7 +816,7 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         }
         try await waitUntil("the first photo after the switch back") {
             viewModel.sourceURL == first && viewModel.previewState == .ready
-                && viewModel.histogram != nil
+                && viewModel.info.histogram != nil
         }
         XCTAssertTrue(viewModel.canRunAutoAdjustment)
         let histogramRequests = await engine.histogramRequests
@@ -864,7 +864,7 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         await engine.gatePreviews()
         viewModel.selectCollectionImage(at: 1)
         try await waitUntil("the next photo source") { viewModel.sourceURL == second }
-        XCTAssertEqual(viewModel.autoAdjustmentState, .unavailable(
+        XCTAssertEqual(viewModel.autoLook.autoAdjustmentState, .unavailable(
             "Auto is available when the photo preview is ready."
         ))
 
@@ -877,7 +877,7 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         } diagnostics: {
             "histogram requests=\(await engine.histogramRequests.count), revisions=\(await engine.renderRequests.map(\.requestRevision))"
         }
-        XCTAssertEqual(viewModel.autoAdjustmentState, .unavailable(
+        XCTAssertEqual(viewModel.autoLook.autoAdjustmentState, .unavailable(
             "Auto is available when the photo preview is ready."
         ), "the old analysis must not publish ready for the loading photo")
         XCTAssertFalse(viewModel.canRunAutoAdjustment)
@@ -980,8 +980,8 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
                 && viewModel.previewState == .ready
                 && viewModel.previewSurface.image != nil
         }
-        XCTAssertNil(viewModel.histogramErrorMessage)
-        XCTAssertFalse(viewModel.isHistogramLoading)
+        XCTAssertNil(viewModel.info.histogramErrorMessage)
+        XCTAssertFalse(viewModel.info.isHistogramLoading)
     }
 
     func testFailedSourceAndFailedHistogramLeaveTerminalStates() async throws {
@@ -1019,10 +1019,10 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         }
         histogramViewModel.isInspectorPresented = true
         try await waitUntil("the histogram failure") {
-            !histogramViewModel.isHistogramLoading
-                && histogramViewModel.histogramErrorMessage != nil
+            !histogramViewModel.info.isHistogramLoading
+                && histogramViewModel.info.histogramErrorMessage != nil
         }
-        XCTAssertNil(histogramViewModel.histogram)
+        XCTAssertNil(histogramViewModel.info.histogram)
     }
 
     /// KRMA-308's Look-scan refresh re-requests every item whose materialized edited thumbnail

@@ -656,8 +656,8 @@ final class PhotosImportTests: TempDirectoryTestCase {
         let data = try Data(contentsOf: url)
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.inspectorTab = .effects
-        viewModel.metadata.make = "stale camera"
-        viewModel.histogram = HistogramData(
+        viewModel.info.metadata.make = "stale camera"
+        viewModel.info.histogram = HistogramData(
             red: [1], green: [1], blue: [1], luma: [1]
         )
 
@@ -671,8 +671,8 @@ final class PhotosImportTests: TempDirectoryTestCase {
 
         XCTAssertTrue(viewModel.isInspectorPresented)
         XCTAssertEqual(viewModel.inspectorTab, .effects)
-        XCTAssertTrue(viewModel.metadata.isEmpty)
-        XCTAssertNil(viewModel.histogram)
+        XCTAssertTrue(viewModel.info.metadata.isEmpty)
+        XCTAssertNil(viewModel.info.histogram)
 
         viewModel.appendPhotosImport(
             ImageCollection.PhotoImportItem(name: "Second", data: data, localIdentifier: "second"),

@@ -27,17 +27,13 @@ extension FocusedValues {
 
 struct KeyboardSurface: ViewModifier {
     let router: KeyboardCommandRouter
-    @ObservedObject var viewModel: AppViewModel
-    /// Paste availability in `MenuCommandAvailability` depends on the clipboard payload, which no
-    /// longer publishes through the root, so this surface observes the clipboard directly.
-    @ObservedObject private var clipboard: EditClipboardCoordinator
+    let viewModel: AppViewModel
     @FocusState private var isSurfaceFocused: Bool
     @State private var window = WindowBox()
 
     init(router: KeyboardCommandRouter, viewModel: AppViewModel) {
         self.router = router
         self.viewModel = viewModel
-        _clipboard = ObservedObject(wrappedValue: viewModel.editClipboardWorkflow)
     }
 
     func body(content: Content) -> some View {

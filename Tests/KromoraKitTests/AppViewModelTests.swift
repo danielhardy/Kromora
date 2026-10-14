@@ -906,7 +906,7 @@ final class AppViewModelTests: TempDirectoryTestCase {
         let missing = LUTID(raw: tempDirectory.appendingPathComponent("Gone.cube").path)
         viewModel.updateDocument { $0.lut.lutID = missing }
         XCTAssertEqual(
-            viewModel.lutResolutionStatus,
+            viewModel.autoLook.lutResolutionStatus,
                        "Look “Gone.cube” is unavailable; the stored reference was kept.")
         let requestsBeforeRescan = await fake.previewRequests.count
 
@@ -919,7 +919,7 @@ final class AppViewModelTests: TempDirectoryTestCase {
         XCTAssertEqual(
             viewModel.document.lut.lutID, LUTID(raw: url.path),
                        "resolving a missing LUT must not rewrite its stored reference")
-        XCTAssertNil(viewModel.lutResolutionStatus)
+        XCTAssertNil(viewModel.autoLook.lutResolutionStatus)
         let deadline = Date().addingTimeInterval(2)
         while await fake.previewRequests.count <= requestsBeforeRescan {
             if Date() > deadline { return XCTFail("the scan did not trigger a resolved preview") }

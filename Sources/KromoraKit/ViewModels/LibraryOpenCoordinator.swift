@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 /// Where the library package is in its open: not started, opening off the main actor, bound, or
 /// failed. Library-dependent commands are available only in `.ready`.
@@ -12,16 +13,17 @@ enum LibraryOpenState: Equatable, Sendable {
 /// Owns the asynchronous open of the library package after the first window exists: the optional
 /// takeover question, the off-main-actor open, binding on the main actor, and cancellation.
 @MainActor
+@Observable
 final class LibraryOpenCoordinator {
     private(set) var state: LibraryOpenState
     /// Called after every change of ``state``.
-    var onStateChange: (@MainActor (LibraryOpenState) -> Void)?
+    @ObservationIgnored var onStateChange: (@MainActor (LibraryOpenState) -> Void)?
 
-    private let opener: any PackageOpening
-    private var task: Task<Void, Never>?
+    @ObservationIgnored private let opener: any PackageOpening
+    @ObservationIgnored private var task: Task<Void, Never>?
     /// True while the task waits on the takeover question. No lease exists yet, and the question
     /// is a sheet that cannot be cancelled from here, so shutdown does not wait for it.
-    private var isAwaitingDecision = false
+    @ObservationIgnored private var isAwaitingDecision = false
 
     init(opener: any PackageOpening, state: LibraryOpenState = .idle) {
         self.opener = opener

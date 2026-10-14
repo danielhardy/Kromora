@@ -165,6 +165,88 @@ Prior art: KRMA-907 (step 3), KRMA-908 (step 4), KRMA-909 (step 5) are Phase 1 p
 Every step must leave `swift build` and `scripts/ci-tests.sh fast` + `serial` green, and the line count of
 `AppViewModel.swift` no larger than before the step.
 
+## Baseline (KRMA-972, 2026-10-13)
+
+Body evaluations caused by one change to one `AppViewModel` property, on a fresh model with the
+view hosted in an unshown `NSHostingView`. Counts are logical evaluations, not timings. "real" rows
+mount the production view (it counts itself through `RenderDiagnostics`); "mirror" rows are
+test-only views in `Tests/KromoraKitTests/Support/BodyProbe.swift` that read the same properties as
+the production view, so they are not the production view. Reproduce with
+`swift test --no-parallel --filter ObservationBodyBaselineTests` (rows print as `BODY-BASELINE`).
+Steps 2-10 fill in the "after" column; KRMA-980 completed it.
+
+| View | Kind | Property changed | Before | After |
+| --- | --- | --- | --- | --- |
+| StatusBar | real | document | 1 | 0 |
+| StatusBar | real | statusMessage | 1 | 1 |
+| StatusBar | real | histogram | 1 | 0 |
+| StatusBar | real | settings.showPhotoNames | 0 | 0 |
+| InfoInspectorView | real | document | 1 | 0 |
+| InfoInspectorView | real | statusMessage | 1 | 0 |
+| InfoInspectorView | real | histogram | 1 | 1 (reads `info.histogram`) |
+| InfoInspectorView | real | settings.showPhotoNames | 0 | 0 |
+| LightInspectorView | mirror | document | 1 | 1 |
+| LightInspectorView | mirror | statusMessage | 1 | 0 |
+| LightInspectorView | mirror | histogram | 1 | 0 |
+| LightInspectorView | mirror | settings.showPhotoNames | 0 | 0 |
+| ColorInspectorView | mirror | document | 1 | 1 |
+| ColorInspectorView | mirror | statusMessage | 1 | 0 |
+| ColorInspectorView | mirror | histogram | 1 | 0 |
+| ColorInspectorView | mirror | settings.showPhotoNames | 0 | 0 |
+| EffectsInspectorView | mirror | document | 1 | 1 |
+| EffectsInspectorView | mirror | statusMessage | 1 | 0 |
+| EffectsInspectorView | mirror | histogram | 1 | 0 |
+| EffectsInspectorView | mirror | settings.showPhotoNames | 0 | 0 |
+| PreviewView | mirror | document | 1 | 1 |
+| PreviewView | mirror | statusMessage | 1 | 1 |
+| PreviewView | mirror | histogram | 1 | 1 (reads `info.histogram`) |
+| PreviewView | mirror | settings.showPhotoNames | 1 | 0 |
+| PreviewView | mirror | whiteBalance.samplerPoint | 1 | 0 |
+| ColorInspectorView | mirror | whiteBalance.samplerPoint | 1 | 0 |
+| StatusBar | real | whiteBalance.samplerPoint | 1 | 0 |
+| WhiteBalanceLoupeOverlay | mirror | whiteBalance.samplerPoint | — | 1 |
+| StatusBar | real | autoLook.autoAdjustmentProgress | 1 | 1 |
+| ColorInspectorView | mirror | autoLook.autoAdjustmentProgress | 1 | 0 |
+| WhiteBalanceLoupeOverlay | mirror | autoLook.autoAdjustmentProgress | — | 0 |
+| InfoInspectorView | real | maskInteractionState.hoverPoint | 0 | 0 |
+| InfoInspectorView | real | maskInteractionState.brushRadius | 0 | 0 |
+| InfoInspectorView | real | retouchInteractionState.radius | 0 | 0 |
+| InfoInspectorView | real | retouchInteractionState.hover | 0 | 0 |
+| LightInspectorView | mirror | maskInteractionState.hoverPoint | 0 | 0 |
+| LightInspectorView | mirror | maskInteractionState.brushRadius | 0 | 0 |
+| LightInspectorView | mirror | retouchInteractionState.radius | 0 | 0 |
+| LightInspectorView | mirror | retouchInteractionState.hover | 0 | 0 |
+| ColorInspectorView | mirror | maskInteractionState.hoverPoint | 0 | 0 |
+| ColorInspectorView | mirror | maskInteractionState.brushRadius | 0 | 0 |
+| ColorInspectorView | mirror | retouchInteractionState.radius | 0 | 0 |
+| ColorInspectorView | mirror | retouchInteractionState.hover | 0 | 0 |
+| EffectsInspectorView | mirror | maskInteractionState.hoverPoint | 0 | 0 |
+| EffectsInspectorView | mirror | maskInteractionState.brushRadius | 0 | 0 |
+| EffectsInspectorView | mirror | retouchInteractionState.radius | 0 | 0 |
+| EffectsInspectorView | mirror | retouchInteractionState.hover | 0 | 0 |
+
+KRMA-978 view probe results: a `statusMessage` change evaluates the real `StatusBar` once and the
+`PreviewView` mirror once; `InfoInspectorView`, the Light/Color/Effects mirrors, and the
+`CullingBar`/`LibraryFacetSidebar` query mirrors stay at zero. `portableQuery` evaluates its two
+query mirrors once and leaves the real `StatusBar` at zero. `MaskingWorkspace` reads status text only
+in its failed-preview banner branch, so it observes status changes while that branch is active.
+
+KRMA-980 (step 9): `AppViewModel` is `@Observable`; every row above is the post-flip measurement. A
+`document` change evaluates only views that read `document` (the real InfoInspector and the real
+StatusBar stay at 0); a `statusMessage` change evaluates the real StatusBar and the PreviewView
+mirror only; `histogram` evaluates the real InfoInspector and the PreviewView mirror only.
+
+KRMA-979 (step 8): the sampler, capability and Auto/Look status state moved to
+`WhiteBalanceSamplerState`, `EditorCapabilityState` and `AutoLookStatusState`
+(`ViewModels/EditorAuxiliaryState.swift`). A `whiteBalance.samplerPoint` change evaluates only the
+loupe read set (`WhiteBalanceLoupeOverlay`, mirrored by `MirrorReadSet.loupe`) and leaves the Color
+mirror, `PreviewView` mirror and `StatusBar` at 0; an `autoLook.autoAdjustmentProgress` change
+evaluates the real `StatusBar` and leaves the Color mirror and loupe at 0. Color/Preview mirror
+rows that read `whiteBalance.isSampling` / `capabilities.rawCapabilities` are unchanged in the
+table above (the flag still changes rarely). `@Published` remaining on `AppViewModel`: exactly the nine
+named in the ticket; `virtualCopyMetadata` and `portableLibrary` are plain properties set once at
+bind time; the open flow's `navigation`/`presentation` publishes refresh their derived readers.
+
 ## Additions from ticket review (2026-10-13)
 
 The first inventory missed these root-invalidation paths. Each is assigned to a step below.

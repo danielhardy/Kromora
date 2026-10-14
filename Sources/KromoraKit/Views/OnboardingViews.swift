@@ -274,7 +274,7 @@ struct GuidedEditStep: Identifiable {
 }
 
 struct GuidedEditCards: View {
-    @ObservedObject var viewModel: AppViewModel
+    let viewModel: AppViewModel
     @AppStorage("guidedEditCardsDismissed") private var dismissed = false
 
     var body: some View {

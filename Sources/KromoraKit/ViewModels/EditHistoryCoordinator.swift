@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 /// The package edit-history operations the coordinator needs. `EditDocumentStore` conforms; tests
 /// supply a fake.
@@ -21,6 +22,7 @@ extension EditDocumentStore: EditHistoryStore {}
 /// `AppViewModel` stays the sole owner of the published `EditDocument`; it supplies narrow closures
 /// and applies the restored document itself. The coordinator never holds the view model.
 @MainActor
+@Observable
 final class EditHistoryCoordinator {
 
     /// The root's side of the boundary.
@@ -44,35 +46,21 @@ final class EditHistoryCoordinator {
         let assetID: PortablePhotoAssetID
     }
 
-    private(set) var history: [PortablePackageEditRevision] = [] {
-        willSet { willChange() }
-    }
-    private(set) var currentRevision: UInt64 = 0 {
-        willSet { willChange() }
-    }
+    private(set) var history: [PortablePackageEditRevision] = []
+    private(set) var currentRevision: UInt64 = 0
 
     /// True while a virtual copy is being written; a second request is rejected until it clears.
-    private(set) var isCreatingVirtualCopy = false {
-        willSet { willChange() }
-    }
+    private(set) var isCreatingVirtualCopy = false
 
-    private let store: any EditHistoryStore
-    private let environment: Environment
-    private let willChange: @MainActor () -> Void
+    @ObservationIgnored private let store: any EditHistoryStore
+    @ObservationIgnored private let environment: Environment
 
-    /// `willChange` runs before each published-state mutation so the root can forward
-    /// `objectWillChange`.
-    init(
-        store: any EditHistoryStore,
-        environment: Environment,
-        willChange: @escaping @MainActor () -> Void
-    ) {
+    init(store: any EditHistoryStore, environment: Environment) {
         self.store = store
         self.environment = environment
-        self.willChange = willChange
     }
 
-    private var isShutDown = false
+    @ObservationIgnored private var isShutDown = false
     private struct Operation {
         let task: Task<Void, Never>
         let cancelOnShutdown: Bool

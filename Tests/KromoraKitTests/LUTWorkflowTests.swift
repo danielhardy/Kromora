@@ -196,7 +196,7 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
         XCTAssertFalse(viewModel.isLookNoneSelected)
         XCTAssertEqual(viewModel.lookIntensity, 0.42)
         XCTAssertEqual(
-            viewModel.lutResolutionStatus,
+            viewModel.autoLook.lutResolutionStatus,
             "Look “Moved Look.cube” is unavailable; the stored reference was kept."
         )
 
@@ -399,7 +399,7 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
                 + "asset=\(relaunched.collection.selectedItem?.id.raw ?? "nil"), "
                 + "look=\(relaunched.document.lut.lutID?.raw ?? "nil"), "
                 + "intensity=\(relaunched.document.lut.intensity), "
-                + "storeStatus=\(relaunched.editStoreStatus ?? "nil")"
+                + "storeStatus=\(relaunched.capabilities.editStoreStatus ?? "nil")"
         )
 
         for url in [second, third] {

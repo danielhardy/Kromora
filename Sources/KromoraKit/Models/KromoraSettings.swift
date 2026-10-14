@@ -1,5 +1,5 @@
 import Foundation
-import Combine
+import Observation
 
 /// The two folder defaults that affect operations started after the setting changes.
 public enum KromoraFolderKind: String, CaseIterable, Codable, Sendable {
@@ -58,7 +58,8 @@ public struct KromoraFolderTestResult: Sendable, Equatable {
 /// accessibility work is kept in Foundation/FileManager seams so the Settings view can remain the
 /// only owner of folder-panel presentation.
 @MainActor
-public final class KromoraSettings: ObservableObject {
+@Observable
+public final class KromoraSettings {
     public static let currentSchemaVersion = 1
 
     private enum Key {
@@ -83,14 +84,15 @@ public final class KromoraSettings: ObservableObject {
 
     /// The app-shell appearance. A stored mode wins; otherwise the retired Boolean maps `true` to
     /// Dark and `false` or absent to System.
-    @Published public var appearanceMode: KromoraAppearanceMode {
+    public var appearanceMode: KromoraAppearanceMode {
         didSet {
             guard appearanceMode != oldValue else { return }
             preferences.set(appearanceMode.rawValue, forKey: Key.appearanceMode)
+            onAppearanceModeChange?(appearanceMode)
         }
     }
 
-    @Published public var showPhotoNames: Bool {
+    public var showPhotoNames: Bool {
         didSet {
             guard showPhotoNames != oldValue else { return }
             preferences.set(showPhotoNames, forKey: Key.showPhotoNames)
@@ -99,7 +101,7 @@ public final class KromoraSettings: ObservableObject {
 
     /// Draws the highlight and shadow clipping counts on the photo. Off until chosen from the
     /// View menu; the histogram header still shows the same counts.
-    @Published public var showClippingAlerts: Bool {
+    public var showClippingAlerts: Bool {
         didSet {
             guard showClippingAlerts != oldValue else { return }
             preferences.set(showClippingAlerts, forKey: Key.showClippingAlerts)
@@ -108,7 +110,7 @@ public final class KromoraSettings: ObservableObject {
 
     /// When Edit is entered with no library selection, open the first photo. Off leaves Edit
     /// unavailable until a photo is chosen.
-    @Published public var openFirstPhotoWhenEnteringEdit: Bool {
+    public var openFirstPhotoWhenEnteringEdit: Bool {
         didSet {
             guard openFirstPhotoWhenEnteringEdit != oldValue else { return }
             preferences.set(openFirstPhotoWhenEnteringEdit, forKey: Key.openFirstPhotoWhenEnteringEdit)
@@ -131,13 +133,20 @@ public final class KromoraSettings: ObservableObject {
 
     /// How mask overlays look in the Masking inspector. A display preference shared by every
     /// photo; it never changes an edit or an export.
-    @Published var maskOverlayAppearance: MaskOverlayAppearance {
+    var maskOverlayAppearance: MaskOverlayAppearance {
         didSet {
             guard maskOverlayAppearance != oldValue else { return }
             guard let data = try? JSONEncoder().encode(maskOverlayAppearance) else { return }
             preferences.set(data, forKey: Key.maskOverlayAppearance)
+            onMaskOverlayAppearanceChange?(maskOverlayAppearance)
         }
     }
+
+    /// Invoked synchronously after the new appearance mode is stored, so a consumer can apply it
+    /// in the same call as the assignment.
+    @ObservationIgnored var onAppearanceModeChange: ((KromoraAppearanceMode) -> Void)?
+    /// Invoked synchronously after the new overlay appearance is stored and persisted.
+    @ObservationIgnored var onMaskOverlayAppearanceChange: ((MaskOverlayAppearance) -> Void)?
 
     private static func storedMaskOverlayAppearance(in preferences: UserDefaults)
         -> MaskOverlayAppearance
@@ -148,18 +157,18 @@ public final class KromoraSettings: ObservableObject {
         return (try? JSONDecoder().decode(MaskOverlayAppearance.self, from: data)) ?? .standard
     }
 
-    @Published public private(set) var sourceFolderStatus: KromoraFolderStatus
-    @Published public private(set) var exportFolderStatus: KromoraFolderStatus
+    public private(set) var sourceFolderStatus: KromoraFolderStatus
+    public private(set) var exportFolderStatus: KromoraFolderStatus
 
     /// The app-owned location for user-created and imported Looks. Bundled Looks, if added later,
     /// remain a separate resource and are never mixed into this directory.
     public let userLookFolderURL: URL
     public var canonicalUserLookFolderURL: URL { userLookFolderURL }
 
-    let preferences: UserDefaults
-    private let fileManager: FileManager
-    private var records: [KromoraFolderKind: PersistedFolder] = [:]
-    private var retainedAccess: [KromoraFolderKind: SecurityScopedResourceAccess] = [:]
+    @ObservationIgnored let preferences: UserDefaults
+    @ObservationIgnored private let fileManager: FileManager
+    @ObservationIgnored private var records: [KromoraFolderKind: PersistedFolder] = [:]
+    @ObservationIgnored private var retainedAccess: [KromoraFolderKind: SecurityScopedResourceAccess] = [:]
 
     public convenience init() {
         self.init(preferences: .standard)

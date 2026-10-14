@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 /// user clicks Save. Observes `DeriveCoordinator` directly rather than the
 /// whole app view model — this sheet touches nothing else.
 struct RecipeExtractorSheet: View {
-    @ObservedObject var coordinator: DeriveCoordinator
+    let coordinator: DeriveCoordinator
     private let fileDialog: any FileDialogProviding
     @Environment(\.dismiss) private var dismiss
 

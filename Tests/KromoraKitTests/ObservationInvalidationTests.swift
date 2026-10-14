@@ -1,4 +1,8 @@
 import AppKit
+import Observation
+import os
+import Synchronization
+import SwiftUI
 import XCTest
 
 @testable import KromoraKit
@@ -7,7 +11,7 @@ import XCTest
 ///
 /// Verifies that high-frequency state (thumbnail streaming, import/export progress, canvas
 /// navigation) publishes through its own Observation boundary and never through AppViewModel's
-/// former objectWillChange fan-in, that LUT projections are memoized, and that navigation/slider
+/// former Combine publisher fan-in, that LUT projections are memoized, and that navigation/slider
 /// p95 does not regress.
 @MainActor
 final class ObservationInvalidationTests: TempDirectoryTestCase {
@@ -27,107 +31,273 @@ final class ObservationInvalidationTests: TempDirectoryTestCase {
         XCTAssertNotNil(viewModel.canvasState as Any)
     }
 
-    func testClipboardPresentationIsObservedDirectlyNotThroughRoot() {
-        // KRMA-909: the selective-copy sheet and paste availability observe the clipboard
-        // directly, so clipboard-only changes publish on the child and never on the root.
-        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
-        var rootChanges = 0
-        var clipboardChanges = 0
-        let subscriptions = [
-            viewModel.objectWillChange.sink { _ in rootChanges += 1 },
-            viewModel.editClipboardWorkflow.objectWillChange.sink { _ in clipboardChanges += 1 },
-        ]
-
-        viewModel.editClipboardWorkflow.selectiveCopyCategories = [.light]
-        viewModel.editClipboardWorkflow.isSelectiveCopyDialogPresented = true
-
-        XCTAssertEqual(clipboardChanges, 2, "the sheet's observer receives each presentation change")
-        XCTAssertEqual(rootChanges, 0, "clipboard presentation must not invalidate the root")
-        XCTAssertTrue(viewModel.isSelectiveCopyDialogPresented)
-        XCTAssertEqual(viewModel.selectiveCopyCategories, [.light])
-        withExtendedLifetime(subscriptions) {}
+    private func fires(_ read: @MainActor () -> Void, after mutate: @MainActor () -> Void) -> Bool {
+        let fired = OSAllocatedUnfairLock(initialState: false)
+        withObservationTracking { read() } onChange: { fired.withLock { $0 = true } }
+        mutate()
+        return fired.withLock { $0 }
     }
 
-    func testClosingAnUndoGroupPublishesHistoryAvailabilityOnTheRoot() {
-        // KRMA-909: the editor coordinator has no publisher. Ending a gesture group flips
-        // canUndo without a document change, so the root announces it before the mutation.
+    /// KRMA-977: histogram and metadata are tracked on `InfoState`, not on the root.
+    func testInfoStateHistogramTracksIndependentlyOfStatusMessage() {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        XCTAssertTrue(fires(
+            { _ = viewModel.info.histogram },
+            after: { viewModel.info.histogram = HistogramData(
+                red: [1], green: [1], blue: [1], luma: [1]) }))
+        XCTAssertFalse(fires(
+            { _ = viewModel.info.histogram },
+            after: { viewModel.statusMessage = "unrelated" }))
+    }
+
+    /// KRMA-978: status text and the library query are tracked on separate `@Observable` objects.
+    func testStatusMessageAndPortableQueryTrackIndependently() {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        XCTAssertTrue(fires(
+            { _ = viewModel.statusMessage }, after: { viewModel.statusMessage = "changed" }))
+        XCTAssertFalse(fires(
+            { _ = viewModel.statusMessage }, after: { viewModel.portableQuery.searchText = "x" }))
+        XCTAssertTrue(fires(
+            { _ = viewModel.portableQuery }, after: { viewModel.portableQuery.searchText = "y" }))
+        XCTAssertFalse(fires(
+            { _ = viewModel.portableQuery }, after: { viewModel.statusMessage = "again" }))
+        XCTAssertEqual(viewModel.status.message, "again")
+        XCTAssertEqual(viewModel.libraryPresentation.query.searchText, "y")
+    }
+
+    /// KRMA-979: pointer-rate sampler state and Auto progress are tracked on separate children.
+    func testSamplerPointAndAutoProgressTrackIndependently() {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        XCTAssertTrue(fires(
+            { _ = viewModel.whiteBalance.samplerPoint },
+            after: { viewModel.whiteBalance.samplerPoint = CGPoint(x: 12, y: 24) }))
+        XCTAssertFalse(fires(
+            { _ = viewModel.whiteBalance.samplerPoint },
+            after: { viewModel.autoLook.publishAuto(.analyzing, progress: 0.4) }))
+        XCTAssertTrue(fires(
+            { _ = viewModel.autoLook.autoAdjustmentProgress },
+            after: { viewModel.autoLook.publishAuto(.analyzing, progress: 0.6) }))
+        XCTAssertFalse(fires(
+            { _ = viewModel.autoLook.autoAdjustmentProgress },
+            after: { viewModel.whiteBalance.samplerPoint = CGPoint(x: 20, y: 32) }))
+    }
+
+    func testClipboardPresentationIsObservedDirectlyNotThroughRoot() {
+        // KRMA-976: root forwarders read `@Observable` children, so they are tracked transitively.
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        XCTAssertTrue(fires(
+            { _ = viewModel.isSelectiveCopyDialogPresented },
+            after: { viewModel.editClipboardWorkflow.isSelectiveCopyDialogPresented = true }))
+        XCTAssertTrue(fires(
+            { _ = viewModel.selectiveCopyCategories },
+            after: { viewModel.editClipboardWorkflow.selectiveCopyCategories = [.light] }))
+        XCTAssertTrue(viewModel.isSelectiveCopyDialogPresented)
+        XCTAssertEqual(viewModel.selectiveCopyCategories, [.light])
+    }
+
+    func testPasteAvailabilityIsTrackedThroughTheClipboardCoordinator() {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let destination = ClipboardTrackingDestination()
+        viewModel.editClipboardWorkflow.destination = destination
+
+        XCTAssertTrue(fires(
+            { _ = viewModel.canPasteEdits },
+            after: { viewModel.editClipboardWorkflow.copyAllEdits() }))
+        XCTAssertTrue(viewModel.canPasteEdits)
+    }
+
+    func testUndoAvailabilityIsTrackedThroughTheEditorCoordinator() {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.beginUndoGrouping()
-        viewModel.editorDocument.recordChange(from: viewModel.document, to: {
-            var changed = viewModel.document
-            changed.light.exposure = 0.5
-            return changed
-        }())
+        var changed = viewModel.document
+        changed.light.exposure = 0.5
+        viewModel.editorDocument.recordChange(from: viewModel.document, to: changed)
         XCTAssertFalse(viewModel.canUndo, "recording inside a group is deferred")
+        XCTAssertTrue(fires({ _ = viewModel.canUndo }, after: { viewModel.editorDocument.endGrouping(document: changed) }))
+        XCTAssertTrue(viewModel.canUndo)
+    }
 
-        var rootChanges = 0
-        let subscription = viewModel.objectWillChange.sink { _ in rootChanges += 1 }
-        viewModel.endUndoGrouping()
+    func testDurableHistoryAndVirtualCopyForwardersTrackTheirChildren() async throws {
+        let source = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "observation-forwarders.png", in: tempDirectory
+        )
+        let packageURL = tempDirectory.appendingPathComponent("ObservationForwarders.kromoralibrary")
+        let session = try PortableLibrarySession(at: packageURL)
+        let imported = try session.importURLs([source])
+        let originalID = try XCTUnwrap(imported.imported.first?.assetID)
+        let copy = try await session.createVirtualCopy(of: originalID)
+        let viewModel = makeAppViewModel(
+            engine: FakeRenderEngine(), portablePackageURL: packageURL,
+            portableLibrarySession: session
+        )
+        viewModel.collection.loadPortableAssets(try session.materializedAssets())
+        await viewModel.collection.scanCompletion()
 
-        XCTAssertEqual(rootChanges, 1)
-        withExtendedLifetime(subscription) {}
+        let copyIndex = try XCTUnwrap(
+            viewModel.collection.items.firstIndex { $0.displayName == copy.displayName })
+        let virtualCopyChanges = Mutex(0)
+        withObservationTracking {
+            _ = viewModel.virtualCopySourceDescription
+        } onChange: {
+            virtualCopyChanges.withLock { $0 += 1 }
+        }
+        viewModel.collection.setSelection(at: copyIndex)
+        viewModel.openActiveCollectionImage()
+        try await waitUntil("virtual-copy source description") {
+            viewModel.virtualCopySourceDescription != nil
+        }
+        XCTAssertEqual(virtualCopyChanges.withLock { $0 }, 1)
+        XCTAssertEqual(
+            viewModel.virtualCopySourceDescription,
+            "Virtual copy of \(originalID.raw.prefix(8))"
+        )
+
+        let historyChanges = Mutex(0)
+        withObservationTracking {
+            _ = viewModel.durableEditHistory
+        } onChange: {
+            historyChanges.withLock { $0 += 1 }
+        }
+        viewModel.saveEditSnapshot(named: "Tracked snapshot")
+        try await waitUntil("durable edit history") { !viewModel.durableEditHistory.isEmpty }
+        XCTAssertGreaterThan(historyChanges.withLock { $0 }, 0)
+    }
+
+    private func waitUntil(
+        _ description: String,
+        _ condition: @MainActor () -> Bool
+    ) async throws {
+        let deadline = ContinuousClock.now + .seconds(10)
+        while !condition() {
+            if ContinuousClock.now >= deadline {
+                throw TestSynchronizationError.timedOut(description, "condition did not settle")
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    func testRootHasNoObjectWillChangeSends() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources")
+        let files = try XCTUnwrap(FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil))
+        for case let url as URL in files where url.pathExtension == "swift" {
+            let text = try String(contentsOf: url, encoding: .utf8)
+            // Spelled in pieces so this file does not match its own search.
+            XCTAssertFalse(text.contains("object" + "WillChange"), "\(url.lastPathComponent)")
+            XCTAssertFalse(text.contains("Observed" + "Object var viewModel"), "\(url.lastPathComponent)")
+            XCTAssertFalse(text.contains("State" + "Object private var viewModel"), "\(url.lastPathComponent)")
+            XCTAssertFalse(text.contains("willChange"), "\(url.lastPathComponent)")
+        }
     }
 
     func testLibraryAndSettingsAreObservedDirectlyNotThroughRoot() {
-        // KRMA-908: LookInspectorView, FilmstripView and the other settings consumers hold the
-        // children directly, so child-only changes emit on their own publishers (before: one
-        // root event per change; after: zero) without touching the root.
+        // KRMA-975: both children are `@Observable`; a read of one property is invalidated by
+        // that property alone and never fans in to the root.
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
-        var rootChanges = 0
-        var settingsChanges = 0
-        var libraryChanges = 0
-        let subscriptions = [
-            viewModel.objectWillChange.sink { _ in rootChanges += 1 },
-            viewModel.settings.objectWillChange.sink { _ in settingsChanges += 1 },
-            viewModel.library.objectWillChange.sink { _ in libraryChanges += 1 },
-        ]
+        let probe = RootChangeProbe(viewModel)
+        let settingsChanges = OSAllocatedUnfairLock(initialState: 0)
+        let libraryChanges = OSAllocatedUnfairLock(initialState: 0)
 
+        withObservationTracking {
+            _ = viewModel.settings.showPhotoNames
+        } onChange: { settingsChanges.withLock { $0 += 1 } }
         viewModel.settings.showPhotoNames.toggle()
-        XCTAssertEqual(settingsChanges, 1)
-        viewModel.library.isScanning = true
-        viewModel.library.isScanning = false
-        XCTAssertEqual(libraryChanges, 2)
-        XCTAssertEqual(rootChanges, 0, "library/settings must not fan in to the root")
+        XCTAssertEqual(settingsChanges.withLock { $0 }, 1)
 
-        withExtendedLifetime(subscriptions) {}
+        withObservationTracking {
+            _ = viewModel.library.isScanning
+        } onChange: { libraryChanges.withLock { $0 += 1 } }
+        viewModel.library.isScanning = true
+        XCTAssertEqual(libraryChanges.withLock { $0 }, 1)
+        XCTAssertEqual(probe.count, 0, "library/settings must not fan in to the root")
     }
 
-    func testDeriveLookSaveAndMediaStateIsObservedDirectlyNotThroughRoot() {
-        // KRMA-907: these children are observed by FeatureSheetsModifier, RemovableMediaMenu and
-        // RemovableMediaSelectorView, so child-only changes reach their own publishers without
-        // touching the root. Status/error callbacks are detached because they are legitimate
-        // root effects.
+    func testMaskOverlayAppearanceReachesInteractionStateImmediately() {
+        let suite = "ObservationMask-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        var chosen = MaskOverlayAppearance.standard
+        chosen.opacity = 0.9
+        let seeded = KromoraSettings(preferences: defaults)
+        seeded.maskOverlayAppearance = chosen
+
+        let viewModel = makeAppViewModel(
+            engine: FakeRenderEngine(), preferences: defaults)
+        XCTAssertEqual(viewModel.maskInteractionState.overlayOpacity, 0.9,
+                       "launch applies the persisted appearance before any change")
+
+        var changed = chosen
+        changed.opacity = 0.3
+        viewModel.settings.maskOverlayAppearance = changed
+        XCTAssertEqual(viewModel.maskInteractionState.overlayOpacity, 0.3)
+    }
+
+    /// Mutates a presenting property and reports whether `read` (the code path a view uses) was
+    /// notified, and whether the root `AppViewModel` publisher stayed quiet.
+    private func assertPresentationIsTracked(
+        _ viewModel: AppViewModel,
+        read: @MainActor () -> Bool,
+        set: @MainActor (Bool) -> Void,
+        _ label: String,
+        file: StaticString = #filePath, line: UInt = #line
+    ) {
+        let probe = RootChangeProbe(viewModel)
+        let notified = Mutex(0)
+        withObservationTracking({ _ = read() }, onChange: { notified.withLock { $0 += 1 } })
+        set(true)
+        XCTAssertEqual(notified.withLock { $0 }, 1, "\(label) must notify its reader", file: file, line: line)
+        XCTAssertTrue(read(), file: file, line: line)
+        XCTAssertEqual(probe.count, 0, "\(label) must not fan into the root", file: file, line: line)
+        set(false)
+    }
+
+    func testDeriveLookSaveAndMediaPresentationIsTrackedWithoutRootForwarding() {
+        // KRMA-974: these children are @Observable and read directly by their views. Each
+        // presenting property is read through the path the view uses.
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.derive.onStatus = nil
-        viewModel.derive.onError = nil
         viewModel.lookSave.onStatus = nil
-        viewModel.lookSave.onError = nil
         viewModel.libraryMediaWorkflow.onStatus = nil
-        viewModel.libraryMediaWorkflow.onError = nil
-        var appChanges = 0
-        var deriveChanges = 0
-        var lookSaveChanges = 0
-        var mediaChanges = 0
-        let subscriptions = [
-            viewModel.objectWillChange.sink { _ in appChanges += 1 },
-            viewModel.derive.objectWillChange.sink { _ in deriveChanges += 1 },
-            viewModel.lookSave.objectWillChange.sink { _ in lookSaveChanges += 1 },
-            viewModel.libraryMediaWorkflow.objectWillChange.sink { _ in mediaChanges += 1 },
-        ]
+
+        assertPresentationIsTracked(
+            viewModel,
+            read: { viewModel.derive.isSheetPresented },
+            set: { viewModel.derive.isSheetPresented = $0 }, "derive sheet")
+        assertPresentationIsTracked(
+            viewModel,
+            read: { viewModel.lookSave.isSheetPresented },
+            set: { viewModel.lookSave.isSheetPresented = $0 }, "look-save sheet")
+        // Through the AppViewModel computed forwarder, which readers such as the menu commands use.
+        assertPresentationIsTracked(
+            viewModel,
+            read: { viewModel.isRemovableMediaSelectorPresented },
+            set: { viewModel.libraryMediaWorkflow.isRemovableMediaSelectorPresented = $0 },
+            "removable-media selector")
+    }
+
+    func testMountedSheetHostReEvaluatesWhenCoordinatorsPresent() {
+        // KRMA-974: a mounted view that holds the coordinators as the sheet host does must
+        // re-evaluate its body when a presenting property flips.
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let counter = BodyCounter()
+        let hosting = host(CoordinatorReadView(
+            derive: viewModel.derive, lookSave: viewModel.lookSave,
+            media: viewModel.libraryMediaWorkflow, counter: counter))
+        let initial = counter.count
 
         viewModel.derive.isSheetPresented = true
-        viewModel.derive.isSheetPresented = false
+        drainMainActor()
+        XCTAssertGreaterThan(counter.count, initial, "derive presentation re-evaluates the host")
+        let afterDerive = counter.count
         viewModel.lookSave.isSheetPresented = true
-        viewModel.lookSave.isSheetPresented = false
+        drainMainActor()
+        XCTAssertGreaterThan(counter.count, afterDerive, "look-save presentation re-evaluates")
+        let afterLook = counter.count
         viewModel.libraryMediaWorkflow.isRemovableMediaSelectorPresented = true
-        viewModel.libraryMediaWorkflow.isRemovableMediaSelectorPresented = false
-
-        XCTAssertEqual(deriveChanges, 2, "derive sheet still reaches its own observers")
-        XCTAssertEqual(lookSaveChanges, 2, "look-save sheet still reaches its own observers")
-        XCTAssertEqual(mediaChanges, 2, "removable-media chrome still reaches its own observers")
-        XCTAssertEqual(appChanges, 0, "migrated children must not fan into the root")
-
-        withExtendedLifetime(subscriptions) {}
+        drainMainActor()
+        XCTAssertGreaterThan(counter.count, afterLook, "selector presentation re-evaluates")
+        withExtendedLifetime(hosting) {}
     }
 
     func testViewModelImportCoordinatorProgressStaysIsolated() {
@@ -140,17 +310,14 @@ final class ObservationInvalidationTests: TempDirectoryTestCase {
         coordinator.destination = nil
         coordinator.onStatus = nil
         coordinator.onProgress = nil
-        var appChanges = 0
-        let subscription = viewModel.objectWillChange.sink { _ in appChanges += 1 }
+        let probe = RootChangeProbe(viewModel)
 
         coordinator.begin(totalCount: 2)
-        XCTAssertEqual(appChanges, 0)
+        XCTAssertEqual(probe.count, 0)
         coordinator.updatePhase(.transferring, name: "photo-1.jpg")
-        XCTAssertEqual(appChanges, 0)
+        XCTAssertEqual(probe.count, 0)
         coordinator.cancel()
-        XCTAssertEqual(appChanges, 0)
-
-        withExtendedLifetime(subscription) {}
+        XCTAssertEqual(probe.count, 0)
     }
 
     func testCollectionThumbnailStreamingDoesNotTriggerBroadPublisher() {
@@ -168,14 +335,11 @@ final class ObservationInvalidationTests: TempDirectoryTestCase {
                 filename: "thumb.jpg", fileType: "jpg"
             ))
         viewModel.collection.items = [item]
-        var appChanges = 0
-        let subscription = viewModel.objectWillChange.sink { _ in appChanges += 1 }
+        let probe = RootChangeProbe(viewModel)
 
         item.setOriginalThumbnail(NSImage(size: NSSize(width: 4, height: 4)))
-        XCTAssertEqual(appChanges, 0, "thumbnail arrival must not invalidate the root")
+        XCTAssertEqual(probe.count, 0, "thumbnail arrival must not invalidate the root")
         XCTAssertNotNil(item.thumbnail)
-
-        withExtendedLifetime(subscription) {}
     }
 
     func testThumbnailStreamingDoesNotTouchCollectionRevision() {
@@ -220,32 +384,27 @@ final class ObservationInvalidationTests: TempDirectoryTestCase {
         let coordinator = PhotosImportCoordinator()
         coordinator.onStatus = nil
         coordinator.onProgress = nil
-        var appChanges = 0
-        let subscription = viewModel.objectWillChange.sink { _ in appChanges += 1 }
+        let probe = RootChangeProbe(viewModel)
 
         coordinator.begin(totalCount: 3)
-        XCTAssertEqual(appChanges, 0)
+        XCTAssertEqual(probe.count, 0)
         XCTAssertNotNil(coordinator.progress)
 
         coordinator.updatePhase(.transferring, name: "photo-1.jpg")
-        XCTAssertEqual(appChanges, 0)
+        XCTAssertEqual(probe.count, 0)
 
         coordinator.cancel()
-        withExtendedLifetime(subscription) {}
     }
 
     func testExportProgressIsIsolatedFromBroadModelPublisher() {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
-        var appChanges = 0
-        let subscription = viewModel.objectWillChange.sink { _ in appChanges += 1 }
+        let probe = RootChangeProbe(viewModel)
 
         // Export progress lives on the coordinator; the broad publisher must stay silent.
         // Drive the coordinator directly through its public progress surface.
         let coordinator = viewModel.export
         XCTAssertFalse(coordinator.isExporting)
-        XCTAssertEqual(appChanges, 0)
-
-        withExtendedLifetime(subscription) {}
+        XCTAssertEqual(probe.count, 0)
     }
 
     func testCanvasNavigationDoesNotTriggerBroadModelPublisher() {
@@ -253,21 +412,29 @@ final class ObservationInvalidationTests: TempDirectoryTestCase {
         viewModel.sourceImage = CIImage(color: .gray).cropped(
             to: CGRect(x: 0, y: 0, width: 64, height: 64)
         )
-        var appChanges = 0
-        let subscription = viewModel.objectWillChange.sink { _ in appChanges += 1 }
+        let probe = RootChangeProbe(viewModel)
 
         viewModel.setCanvasZoom(2)
         viewModel.panCanvas(by: CGSize(width: 4, height: 4), viewportSize: CGSize(width: 80, height: 60))
-        XCTAssertEqual(appChanges, 0)
+        XCTAssertEqual(probe.count, 0)
         XCTAssertEqual(viewModel.canvasState.navigation.zoom, 2)
-
-        withExtendedLifetime(subscription) {}
     }
 
     // MARK: - LUT memoization
 
     func testLUTProjectionsAreMemoizedAgainstRevision() {
         let library = makeLUTLibrary()
+        let cacheFillChanges = OSAllocatedUnfairLock(initialState: 0)
+        withObservationTracking {
+            _ = library.starterCategories
+        } onChange: {
+            cacheFillChanges.withLock { $0 += 1 }
+        }
+        XCTAssertEqual(
+            cacheFillChanges.withLock { $0 }, 0,
+            "filling private projection caches must not invalidate a view"
+        )
+
         let firstStarter = library.starterCategories
         let firstRebuilds = library.projectionRebuildCount
         // Repeated reads without an intervening publish must not rebuild.
@@ -393,4 +560,38 @@ final class ObservationInvalidationTests: TempDirectoryTestCase {
         }
         XCTAssertEqual(scanned, types.count, "every converted type should be found by the scan")
     }
+}
+
+private struct CoordinatorReadView: View {
+    let derive: DeriveCoordinator
+    let lookSave: LookSaveCoordinator
+    let media: LibraryMediaWorkflowCoordinator
+    let counter: BodyCounter
+
+    var body: some View {
+        counter.note()
+        _ = derive.isSheetPresented
+        _ = lookSave.isSheetPresented
+        _ = media.isRemovableMediaSelectorPresented
+        return Color.clear
+    }
+}
+
+@MainActor
+private final class ClipboardTrackingDestination: EditClipboardDestination {
+    var clipboardHasCopySource = true
+    var clipboardSourceName = "Source"
+    var clipboardDocument = EditDocument()
+    var clipboardActiveSourceReference: EditSourceReference?
+    var clipboardActiveDestinationIsRAW: Bool? = false
+    var clipboardSelectedTargets: [EditClipboardTarget] = []
+
+    func updateDocument(_ transform: (inout EditDocument) -> Void) {}
+    func endUndoGrouping() {}
+    func activateClipboardAsset(_ assetID: PhotoAssetID) {}
+    func setClipboardStatus(_ message: String) {}
+    func persistInactiveClipboardDocument(
+        _ document: EditDocument, for reference: EditSourceReference
+    ) {}
+    func flushClipboardPersistence() {}
 }

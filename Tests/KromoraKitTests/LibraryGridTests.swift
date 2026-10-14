@@ -661,3 +661,38 @@ private actor LibraryGridThumbnailProviderCalls {
         count += 1
     }
 }
+
+@MainActor
+final class LibraryGridRowWindowTests: XCTestCase {
+    func testRowModelWorkStaysBoundedAcrossScriptedScrollOf10kItems() {
+        let layout = LibraryGridLayout()
+        let columns = 4
+        let itemCount = 12_000
+        let entries = (0..<itemCount).map {
+            ImageCollection.ThumbnailEntry(
+                id: PhotoAssetID(rawValue: "asset-\($0)"), itemIndex: $0)
+        }
+        let rowCount = layout.rowCount(itemCount: itemCount, columns: columns)
+        let pitch = 250.0
+        let viewport = 800.0
+        var maxRows = 0
+        var seen = Set<LibraryGridRowModel.ID>()
+        for first in stride(from: 0, to: rowCount, by: 7) {
+            let window = layout.rowWindow(
+                rowCount: rowCount, firstVisibleRow: first, viewportHeight: viewport, pitch: pitch)
+            let rows = LibraryGridRowModel.rows(in: window, itemCount: itemCount, columns: columns, entries: entries)
+            maxRows = max(maxRows, rows.count)
+            XCTAssertEqual(rows.first?.indices.lowerBound, window.lowerBound * columns)
+            seen.formUnion(rows.map(\.id))
+        }
+        // visible (800/250 → 4, +1) plus two prefetch rows each side.
+        XCTAssertLessThanOrEqual(maxRows, 5 + 2 * layout.prefetchRows + 1)
+        XCTAssertLessThan(maxRows, rowCount / 100)
+        // Identity is the first asset: stable regardless of which window produced the row.
+        let end = layout.rowWindow(
+            rowCount: rowCount, firstVisibleRow: rowCount - 1, viewportHeight: viewport, pitch: pitch)
+        let tail = LibraryGridRowModel.rows(in: end, itemCount: itemCount, columns: columns, entries: entries)
+        XCTAssertEqual(tail.last?.indices.upperBound, itemCount)
+        XCTAssertEqual(layout.rowWindow(rowCount: 0, firstVisibleRow: 0, viewportHeight: viewport, pitch: pitch), 0..<0)
+    }
+}

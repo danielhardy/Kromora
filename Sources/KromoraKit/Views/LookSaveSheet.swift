@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Reviews the versioned LUT support matrix before the user chooses a destination.
 struct LookSaveSheet: View {
-    @ObservedObject var coordinator: LookSaveCoordinator
+    @Bindable var coordinator: LookSaveCoordinator
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {

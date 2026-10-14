@@ -7,7 +7,7 @@ import AppKit
 /// without taking over the photo canvas. The view only talks to LightControl and AppViewModel value
 /// bindings; Core Image never appears in the editing surface.
 struct LightInspectorView: View {
-    @ObservedObject var viewModel: AppViewModel
+    let viewModel: AppViewModel
     @State private var toneSectionExpanded = true
     @State private var curveSectionExpanded = true
     @State private var advancedCurveSectionExpanded = false
@@ -120,7 +120,7 @@ struct LightInspectorView: View {
 /// A compact master RGB curve editor. Every control handle can be dragged and adjusted through
 /// the keyboard/VoiceOver adjustable action.
 private struct ToneCurveEditor: View {
-    @ObservedObject var viewModel: AppViewModel
+    let viewModel: AppViewModel
     @State private var curveDrag: CurveDragState?
     @Binding var channel: ToneCurveChannel
 
@@ -434,7 +434,7 @@ private struct ToneCurveEditor: View {
 /// Parametric region amounts and split points are secondary to direct curve editing, so they live
 /// in their own collapsed-by-default inspector section.
 struct ParametricToneCurveControls: View {
-    @ObservedObject var viewModel: AppViewModel
+    let viewModel: AppViewModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {

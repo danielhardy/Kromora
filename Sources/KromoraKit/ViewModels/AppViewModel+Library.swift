@@ -47,7 +47,6 @@ extension AppViewModel {
     }
 
     func libraryOpenStateDidChange(_ state: LibraryOpenState) {
-        objectWillChange.send()
         switch state {
         case .opening:
             statusMessage = "Opening library…"

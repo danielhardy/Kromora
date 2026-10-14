@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 /// What the inspector needs to know about the active photo's copy relationship.
 enum VirtualCopyPresentation: Equatable, Sendable {
@@ -13,20 +14,19 @@ enum VirtualCopyPresentation: Equatable, Sendable {
 /// actor, so view getters stay pure in-memory reads. The snapshot is presentation only: the
 /// create command still validates against package truth.
 @MainActor
+@Observable
 final class VirtualCopyMetadataCoordinator {
     typealias Reader = @Sendable (PortablePhotoAssetID) async -> VirtualCopyPresentation
 
     private(set) var presentation: VirtualCopyPresentation = .unknown
-    private let reader: Reader
-    private let willChange: @MainActor () -> Void
-    private var assetID: PortablePhotoAssetID?
-    private var generation: UInt64 = 0
-    private var task: Task<Void, Never>?
-    private var isShutDown = false
+    @ObservationIgnored private let reader: Reader
+    @ObservationIgnored private var assetID: PortablePhotoAssetID?
+    @ObservationIgnored private var generation: UInt64 = 0
+    @ObservationIgnored private var task: Task<Void, Never>?
+    @ObservationIgnored private var isShutDown = false
 
-    init(reader: @escaping Reader, willChange: @escaping @MainActor () -> Void) {
+    init(reader: @escaping Reader) {
         self.reader = reader
-        self.willChange = willChange
     }
 
     /// Reads the record with a detached package read. Missing or invalid records are unavailable.
@@ -86,7 +86,6 @@ final class VirtualCopyMetadataCoordinator {
 
     private func setPresentation(_ value: VirtualCopyPresentation) {
         guard value != presentation else { return }
-        willChange()
         presentation = value
     }
 }

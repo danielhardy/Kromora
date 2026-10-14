@@ -9,7 +9,7 @@ import SwiftUI
 /// entry; numeric edits and resets retain the existing settled/debounced behavior from
 /// `AppViewModel`.
 struct EffectsInspectorView: View {
-    @ObservedObject var viewModel: AppViewModel
+    let viewModel: AppViewModel
 
     @State private var sharpeningAdvancedExpanded = false
     @State private var noiseAdvancedExpanded = false

@@ -672,7 +672,7 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
             return viewModel.previewSurface.image != nil && rendered
         }
         XCTAssertFalse(viewModel.isInspectorPresented)
-        XCTAssertNil(viewModel.histogram)
+        XCTAssertNil(viewModel.info.histogram)
         let hiddenHistogramRequests = await fake.histogramRequests
         XCTAssertEqual(hiddenHistogramRequests.count, 0)
 
@@ -681,7 +681,7 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
         XCTAssertTrue(viewModel.navigation.isEdit)
         XCTAssertTrue(viewModel.isInspectorPresented)
         try await waitUntil("the initial Library-open histogram") {
-            viewModel.histogram != nil && !viewModel.isHistogramLoading
+            viewModel.info.histogram != nil && !viewModel.info.isHistogramLoading
         }
 
         let requests = await fake.histogramRequests
@@ -725,9 +725,9 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
         try await waitUntil("the first photo preview") { viewModel.previewSurface.image != nil }
         viewModel.openLibraryImageForEditing()
         try await waitUntil("the first photo histogram") {
-            viewModel.histogram != nil && !viewModel.isHistogramLoading
+            viewModel.info.histogram != nil && !viewModel.info.isHistogramLoading
         }
-        let firstHistogram = try XCTUnwrap(viewModel.histogram)
+        let firstHistogram = try XCTUnwrap(viewModel.info.histogram)
         XCTAssertEqual(firstHistogram.red[101], 1)
 
         // Hold the next tally so the chart can be checked during the photo transition.
@@ -741,9 +741,9 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
         } diagnostics: {
             "histogram requests=\(await fake.histogramRequests)"
         }
-        XCTAssertEqual(viewModel.histogram, firstHistogram,
+        XCTAssertEqual(viewModel.info.histogram, firstHistogram,
                        "a pending photo switch keeps the last published chart visible")
-        XCTAssertTrue(viewModel.isHistogramLoading)
+        XCTAssertTrue(viewModel.info.isHistogramLoading)
         XCTAssertFalse(
             viewModel.isNavigationLoading,
             "the selected frame is presented even while its histogram is still computing"
@@ -751,7 +751,7 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
 
         await fake.releaseNextHistogram()
         try await waitUntil("the current second photo histogram result") {
-            viewModel.histogram?.red[102] == 1 && !viewModel.isHistogramLoading
+            viewModel.info.histogram?.red[102] == 1 && !viewModel.info.isHistogramLoading
         }
 
         // Start another request for the third photo, then advance to a fourth photo before it
@@ -778,9 +778,9 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
         }
         await fake.releaseNextHistogram()
         try await waitUntil("the current fourth photo histogram result after the stale response") {
-            viewModel.histogram?.red[104] == 1 && !viewModel.isHistogramLoading
+            viewModel.info.histogram?.red[104] == 1 && !viewModel.info.isHistogramLoading
         }
-        XCTAssertEqual(viewModel.histogram?.red[103], 0,
+        XCTAssertEqual(viewModel.info.histogram?.red[103], 0,
                        "the obsolete third photo result must not be published")
     }
 

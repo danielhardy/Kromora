@@ -119,7 +119,7 @@ enum PhotosImportInsertionOutcome: Equatable, Sendable {
 ///
 /// Migrated to Observation (KRMA-521): progress publishes through this object's own boundary.
 /// Views observe the coordinator directly through `@Bindable` so import progress never passes
-/// through AppViewModel's former objectWillChange fan-in.
+/// through AppViewModel's former root notification fan-in.
 @MainActor
 @Observable
 final class PhotosImportCoordinator {

@@ -1163,7 +1163,7 @@ final class MaskingWorkspaceTests: TempDirectoryTestCase {
         } diagnostics: {
             "sourceName=\(reopened.sourceName), sourceRevision=\(reopened.maskingSourceRevision), "
                 + "hasSource=\(reopened.maskingSource != nil), hasImage=\(reopened.sourceImage != nil), "
-                + "editStoreStatus=\(reopened.editStoreStatus ?? "nil"), status=\(reopened.statusMessage)"
+                + "editStoreStatus=\(reopened.capabilities.editStoreStatus ?? "nil"), status=\(reopened.statusMessage)"
         }
         XCTAssertTrue(reopened.document.localAdjustments.isEmpty)
 

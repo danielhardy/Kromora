@@ -75,15 +75,15 @@ enum LookInspectorEmptyState: Equatable, Sendable {
 /// per-photo intensity. It is hosted in the editor inspector so Look is available without making
 /// one a prerequisite for ordinary editing.
 struct LookInspectorView: View {
-    @ObservedObject var viewModel: AppViewModel
+    let viewModel: AppViewModel
     /// Observed directly so scan/import/projection changes refresh the browser without
     /// invalidating the root `AppViewModel` observers.
-    @ObservedObject private var library: LUTLibrary
+    private let library: LUTLibrary
     @State private var searchText = ""
 
     init(viewModel: AppViewModel) {
         self.viewModel = viewModel
-        _library = ObservedObject(wrappedValue: viewModel.library)
+        library = viewModel.library
     }
 
     private var hasLooks: Bool { !library.allLUTs.isEmpty }
@@ -547,7 +547,7 @@ struct LookInspectorView: View {
         if viewModel.selectedLookID != nil && viewModel.selectedLook == nil {
             VStack(alignment: .leading, spacing: InspectorStyle.sectionContentInset) {
                 Label(
-                    viewModel.lutResolutionStatus ?? "This Look is still resolving.",
+                    viewModel.autoLook.lutResolutionStatus ?? "This Look is still resolving.",
                     systemImage: "exclamationmark.triangle"
                 )
                 .font(.caption)

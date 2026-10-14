@@ -5,7 +5,7 @@ import SwiftUI
 /// Keyboard shortcuts are fast once learned, but they are not the interface: every flag, rating,
 /// and filter operation is available here with its current state visible at a glance.
 struct CullingBarView: View {
-    @ObservedObject var viewModel: AppViewModel
+    let viewModel: AppViewModel
     @Bindable var collection: ImageCollection
     var isCompact: Bool = false
     /// Edit sits this bar on the photo canvas so the preview and filmstrip share one plane.
@@ -110,14 +110,14 @@ private struct CullingSelectionControls: View {
 
 struct LibraryFilterControls: View {
     @Bindable var collection: ImageCollection
-    @ObservedObject var viewModel: AppViewModel
+    let viewModel: AppViewModel
     let isCompact: Bool
     @State private var isFacetPopoverPresented = false
 
     private var isPortableWindowed: Bool { collection.isPortableWindowed }
 
     private var currentFilter: LibraryFilter {
-        isPortableWindowed ? viewModel.portableQuery.filter : collection.filter
+        isPortableWindowed ? viewModel.libraryPresentation.query.filter : collection.filter
     }
 
     private var countText: String {
@@ -138,7 +138,7 @@ struct LibraryFilterControls: View {
                 } label: {
                     Label(
                         "Filter",
-                        systemImage: viewModel.portableQuery.facets.isActive
+                        systemImage: viewModel.libraryPresentation.query.facets.isActive
                             ? "line.3.horizontal.decrease.circle.fill"
                             : "line.3.horizontal.decrease.circle"
                     )
@@ -146,7 +146,7 @@ struct LibraryFilterControls: View {
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(
-                    viewModel.portableQuery.facets.isActive
+                    viewModel.libraryPresentation.query.facets.isActive
                         ? KromoraTheme.primaryAccent : Color.secondary
                 )
                 .help("Show or hide the metadata filters")
@@ -212,7 +212,7 @@ struct LibraryFilterControls: View {
             get: { currentFilter.flag },
             set: { value in
                 if isPortableWindowed {
-                    var filter = viewModel.portableQuery.filter
+                    var filter = viewModel.libraryPresentation.query.filter
                     filter.flag = value
                     viewModel.setPortableFilter(filter)
                 } else {
@@ -229,7 +229,7 @@ struct LibraryFilterControls: View {
             get: { currentFilter.rating },
             set: { value in
                 if isPortableWindowed {
-                    var filter = viewModel.portableQuery.filter
+                    var filter = viewModel.libraryPresentation.query.filter
                     filter.rating = value
                     viewModel.setPortableFilter(filter)
                 } else {

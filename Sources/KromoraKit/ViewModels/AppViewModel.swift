@@ -1,5 +1,4 @@
 import AppKit
-import Combine
 import CoreImage
 import Foundation
 import ImageIO
@@ -80,8 +79,8 @@ public enum PersistenceFlushResult: Equatable, Sendable {
 }
 
 /// Central state for the Kromora app.
-@MainActor
-public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosImportDestination,
+@MainActor @Observable
+public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
     AsyncPhotosImportDestination, PhotosImportBatchDestination, MaskingWorkflowDestination,
     RetouchWorkflowDestination, EditedThumbnailDestination
 {
@@ -128,15 +127,18 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
     }
 
-    // MARK: - Published state
+    // MARK: - Observed state
 
-    @Published var sourceImage: CIImage?
-    @Published var sourceName: String = ""
-    @Published var sourceSize: CGSize = .zero
-    @Published var sourceURL: URL?
-    @Published var isWhiteBalanceSampling = false
-    @Published var whiteBalanceSamplerPoint: CGPoint?
-    @Published var whiteBalanceLoupeImage: CGImage?
+    var sourceImage: CIImage?
+    var sourceName: String = ""
+    var sourceSize: CGSize = .zero
+    var sourceURL: URL?
+    /// Sampler flag, point and loupe image; the point changes at pointer rate.
+    let whiteBalance = WhiteBalanceSamplerState()
+    /// RAW capability answer, probe completion and the edit-store status.
+    let capabilities = EditorCapabilityState()
+    /// Auto lifecycle/progress and the Look-resolution warning.
+    let autoLook = AutoLookStatusState()
 
     /// Identity shown by Inspect. Resolve through the durable collection record so Photos names
     /// and the library/filmstrip naming convention remain consistent during source navigation.
@@ -176,7 +178,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     ///
     /// Stored in a per-photo session keyed by stable source identity. Navigation restores the active
     /// photo's Light, other edits, and history without carrying them onto a different frame.
-    @Published private(set) var document = EditDocument()
+    private(set) var document = EditDocument()
     /// True while a cold photo-to-photo selection is waiting for its stored edit document. The
     /// inspector holds its current slider presentation during this short interval; the published
     /// document itself continues to belong to the newly selected photo.
@@ -198,10 +200,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     var canPasteEdits: Bool { editClipboardWorkflow.canPaste }
 
-    /// The most recent persistence warning. A damaged edit catalog must not prevent the source
-    /// image from opening, but it should remain visible to the user.
-    @Published private(set) var editStoreStatus: String?
-
     /// The status-bar text last published by a failed edit write. A later successful write clears
     /// the bar only when that text is still showing, so an unrelated status is left alone.
     private var persistenceFailureMessage: String?
@@ -215,21 +213,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private var imageSource: ImageSource? {
         didSet { if oldValue?.cacheFingerprint != imageSource?.cacheFingerprint { retouchWorkflow.activeSourceDidChange() } }
     }
-
-    /// What the open image's RAW decoder can do, and where its own defaults sit. `nil` for a
-    /// standard image, which has no develop stage at all — **and also `nil` while the probe is still
-    /// running on a RAW**, which is why the panel switches on `developPanelState` rather than on
-    /// this. See that property.
-    ///
-    /// Probed once per open rather than per render: the probe builds a `CIRAWFilter`, which measures
-    /// ~25 ms on a 30 MB DNG. Not memoized across images — one entry would save that on returning to
-    /// an image, at the cost of another cache whose invalidation nobody will remember.
-    @Published private(set) var rawCapabilities: RAWCapabilities?
-
-    /// Whether the capability answer belongs to the currently selected source. This is separate
-    /// from `rawCapabilities == nil`: a RAW can still be probing, or its decoder can answer that it
-    /// has no actionable develop controls.
-    @Published private(set) var capabilitiesProbeCompleted = false
 
     /// What the develop panel should be showing right now. The probe state is distinct from a
     /// completed answer that offers no usable controls.
@@ -251,8 +234,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         guard sourceImage != nil, sourceIsRAW else { return .noDevelopStage }
         return DevelopPanelState(
             sourceIsRAW: sourceIsRAW,
-            capabilities: rawCapabilities,
-            probeCompleted: capabilitiesProbeCompleted
+            capabilities: capabilities.rawCapabilities,
+            probeCompleted: capabilities.probeCompleted
         )
     }
 
@@ -333,7 +316,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         return InspectorTab.availableTabs(
             // Retain the visible tab set across a photo cutover. The histogram remains published
             // until the new source's histogram is ready, so it marks this brief loading interval.
-            hasImage: sourceImage != nil || histogram != nil,
+            hasImage: sourceImage != nil || info.histogram != nil,
             developPanelState: developPanelState,
             hasMaskingTarget: maskingAssetID != nil
         )
@@ -365,7 +348,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Keeping the snapshot outside the persisted edit document lets ordinary Temperature/Tint edits
     /// remain undoable without moving the comparison reference.
     private var comparisonBaselineDocument = EditDocument().comparisonBaseline
-    private lazy var previewPublicationCoordinator = PreviewPublicationCoordinator(
+    @ObservationIgnored private lazy var previewPublicationCoordinator = PreviewPublicationCoordinator(
         destination: self
     )
     var isPreviewInteractionActive: Bool {
@@ -374,9 +357,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
     /// Owns Look resolution (library scan, then derived registry), the missing-reference report,
     /// and selection/audition decisions. The document stays here; see `LookSelectionCoordinator`.
-    private lazy var lookSelection = LookSelectionCoordinator(library: library)
+    @ObservationIgnored private lazy var lookSelection = LookSelectionCoordinator(library: library)
     /// Package-backed edit history, named snapshots, and virtual-copy I/O for the active photo.
-    private lazy var editHistory = EditHistoryCoordinator(
+    @ObservationIgnored private lazy var editHistory = EditHistoryCoordinator(
         store: editStore,
         environment: .init(
             activeSourceReference: { [weak self] in self?.activeSourceReference },
@@ -390,8 +373,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 self?.adoptRestoredEditRevision(restored, priorDocuments: priorDocuments)
             },
             reportStatus: { [weak self] in self?.statusMessage = $0 }
-        ),
-        willChange: { [weak self] in self?.objectWillChange.send() }
+        )
     )
 
     /// The selected Look resolved from the active photo's persisted `LUTID`. Resolution is
@@ -422,10 +404,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// and an intensity changed while no LUT was selected.
     var hasLookAdjustments: Bool { document.lut != .none }
 
-    /// A missing LUT never prevents the source image from rendering. Keep the warning separate from
-    /// the transient image status so the stored `LUTID` remains visible to callers and recoverable.
-    @Published private(set) var lutResolutionStatus: String?
-
     /// Whether the transient A/B comparison — especially the Space-hold — has a meaningful
     /// before/after to show. Side-by-side presentation has a separate source-availability gate
     /// because an identity document still renders valid source pixels into both panes.
@@ -434,11 +412,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     ///
     var isComparisonAvailable: Bool { document.hasVisibleLookEdits }
 
-    @Published var isShowingOriginal: Bool = false
+    var isShowingOriginal: Bool = false
     /// The user's preferred comparison presentation. This is a display preference rather than
     /// per-photo edit state, so changing photos does not reset it and a new view model can restore
     /// it from `UserDefaults`.
-    @Published var isSideBySide: Bool = false {
+    var isSideBySide: Bool = false {
         didSet {
             guard isSideBySide != oldValue else { return }
             preferences.set(isSideBySide, forKey: Self.comparisonModeKey)
@@ -460,7 +438,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     /// High-frequency canvas and transient crop state live outside the broad application
     /// publisher. Only the views that observe `canvasState` reevaluate for pointer interaction.
-    private lazy var canvasWorkflow: CanvasWorkflowCoordinator = {
+    @ObservationIgnored private lazy var canvasWorkflow: CanvasWorkflowCoordinator = {
         let coordinator = CanvasWorkflowCoordinator(destination: self)
         return coordinator
     }()
@@ -630,8 +608,16 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             }
         }
     }
-    /// Source-folder file browser panel visibility.
-    @Published var isSourceBrowserPresented: Bool = false
+    let status = StatusState()
+    let libraryPresentation = LibraryPresentationState()
+    let chrome = ChromePresentationState()
+    var statusMessage: String { get { status.message } set { status.message = newValue } }
+    var errorMessage: String? { get { status.errorMessage } set { status.errorMessage = newValue } }
+    var isSourceBrowserPresented: Bool { get { chrome.isSourceBrowserPresented } set { chrome.isSourceBrowserPresented = newValue } }
+    var isPhotosPickerPresented: Bool { get { chrome.isPhotosPickerPresented } set { chrome.isPhotosPickerPresented = newValue } }
+    var libraryDeletionConfirmation: LibraryDeletionConfirmation? { get { libraryPresentation.deletionConfirmation } set { libraryPresentation.deletionConfirmation = newValue } }
+    var portableQuery: LibraryQuery { get { libraryPresentation.query } set { libraryPresentation.query = newValue } }
+    var portableImportProgress: PortablePackageImportProgress? { libraryPresentation.importProgress }
     var isSelectiveCopyDialogPresented: Bool {
         get { editClipboardWorkflow.isSelectiveCopyDialogPresented }
         set { editClipboardWorkflow.isSelectiveCopyDialogPresented = newValue }
@@ -642,31 +628,16 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
     /// The visible workspace. Library selection, the active edit document, and render surfaces
     /// remain owned by their existing collaborators; this value only composes those surfaces.
-    @Published private(set) var navigation = NavigationState()
+    private(set) var navigation = NavigationState()
 
-    /// EXIF/TIFF/GPS metadata of the loaded image, read at load time.
-    @Published var metadata: ImageMetadata = ImageMetadata()
-    /// Histogram of the currently displayed image (graded result, or original
-    /// while comparing). `nil` until computed / when no image is loaded.
-    @Published var histogram: HistogramData?
-    /// A nil histogram is otherwise ambiguous: it can mean loading, cancellation, an
-    /// unsupported source, or a failed calculation. Keep the terminal UI state explicit.
-    @Published private(set) var isHistogramLoading = false
-    @Published private(set) var histogramErrorMessage: String?
+    /// Metadata and histogram for the Info inspector; views read `info.*` directly.
+    let info = InfoState()
 
-    /// Auto has its own analysis lifecycle rather than borrowing the Info histogram's loading flag:
-    /// an Auto request must not make the histogram spinner appear to be waiting on unrelated work.
-    @Published private(set) var autoAdjustmentState: AutoAdjustmentState = .unavailable(
-        "Open a supported photo to enable Auto."
-    )
-    /// Determinate progress for the Auto lifecycle. `nil` means Auto is settled; unlike the Info
-    /// histogram flag, this value belongs only to the active Auto invocation.
-    @Published private(set) var autoAdjustmentProgress: Double?
     private let autoWorkflowCoordinator = AutoWorkflowCoordinator()
 
     /// Single owner of the source-loading presentation flags (KRMA-910). The façade properties
     /// below are read-only projections; every write goes through a named transition.
-    @Published private(set) var presentation = SourcePresentationState()
+    private(set) var presentation = SourcePresentationState()
     var isLoading: Bool { presentation.isLoading }
     /// Navigation waits only until the selected source has a usable frame on the surface. Full
     /// preview readiness remains separate because RAW development and other render work can
@@ -681,19 +652,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Source preparation and preview presentation are separate async stages. This state keeps
     /// the transparent source marker from making a not-yet-presented canvas look like a black one.
     var previewState: PreviewState { presentation.previewState }
-    @Published var statusMessage: String = "Open an image to get started"
     private var pendingImportOutcome: (summary: ImportOutcomeSummary, prefix: String)?
 
-    /// Non-nil when a hard failure should be surfaced as a dismissible alert.
-    /// Bound to an `.alert` in ContentView; cleared when the user dismisses it.
-    @Published var errorMessage: String?
-    /// The Library owns the confirmation presentation, while the model owns the immutable target
-    /// snapshot so a late selection change cannot redirect a destructive action.
-    @Published var libraryDeletionConfirmation: LibraryDeletionConfirmation?
-    /// Compatibility shim for callers that still mention the retired modal sheet.
-    @Published var isMaskingPanelPresented = false
-
-    @Published var isPhotosPickerPresented: Bool = false
     /// Compatibility projection for the import coordinator's operation state. The coordinator is
     /// the single owner so the picker and status bar cannot observe competing progress values.
     var photosImportProgress: PhotosImportProgress? { photosImportCoordinator.progress }
@@ -705,7 +665,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     var frameStoreFlushOperationsForTesting: FrameStoreFlushOperations?
     /// Every asynchronous import handoff captures this token. A late provider result can never
     /// publish into a newer import operation.
-    @Published private(set) var portableImportProgress: PortablePackageImportProgress?
 
     /// Removable volumes are discovered independently of the selector so the Import menu can name
     /// mounted volumes that contain supported images, or offer a permission-recovery path when
@@ -741,7 +700,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     let library: LUTLibrary
     let workScheduler: ImageWorkScheduler
     /// Edit-aware collection thumbnail scheduling and cache publication.
-    private lazy var editedThumbnailCoordinator = EditedThumbnailCoordinator(
+    @ObservationIgnored private lazy var editedThumbnailCoordinator = EditedThumbnailCoordinator(
         workScheduler: workScheduler, engine: engine, editStore: editStore,
         frameStore: thumbnailFrameStore, frameLookupLedger: frameLookupLedger, destination: self
     )
@@ -761,14 +720,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     let photosImportCoordinator: PhotosImportCoordinator
     let photosImportReview = PhotosImportReviewCoordinator()
     /// Shared package-write generation, cancellation, and progress owner for every import source.
-    private lazy var libraryImportCoordinator = LibraryImportCoordinator(
+    @ObservationIgnored private lazy var libraryImportCoordinator = LibraryImportCoordinator(
         package: portableLibrary,
         isShuttingDown: { [weak self] in self?.isShuttingDown ?? true },
-        publishProgress: { [weak self] progress in self?.portableImportProgress = progress },
+        publishProgress: { [weak self] progress in self?.libraryPresentation.setImportProgress(progress) },
         publishStatus: { [weak self] status in self?.statusMessage = status }
     )
     /// Folder, removable-media and Photos-drop import orchestration over the shared coordinator.
-    private lazy var packageSourceImports = PackageSourceImportCoordinator(
+    @ObservationIgnored private lazy var packageSourceImports = PackageSourceImportCoordinator(
         imports: libraryImportCoordinator, destination: self
     )
     /// Coalesced durable edit snapshots. The application model routes persistence policy here;
@@ -776,10 +735,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     let persistence: EditPersistenceCoordinator
     /// The production library boundary. Package membership and originals are canonical; the
     /// collection is only the bounded presentation bridge.
+    /// Not `@Published`: it changes only in `bindPortableLibrary`, and the open flow that follows
+    /// publishes navigation/presentation, which refreshes readers of the derived flags.
     private(set) var portableLibrary: PortableLibrarySession?
-    /// The single portable filter/sort/search authority (KRMA-519 scope item 3). The collection is
-    /// only a bounded presentation bridge; filtering runs in the query controller.
-    @Published var portableQuery = LibraryQuery.all
     /// Background compaction shares the scheduler with editor work but uses its detached
     /// package-I/O lane, so a foreground edit can take the admission window back immediately.
     /// Writing images to disk — the single export, the batch run, and naming. Production exports
@@ -794,7 +752,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     let lookSave = LookSaveCoordinator()
     let libraryMediaWorkflow: LibraryMediaWorkflowCoordinator
     private let libraryDeletionCoordinator: LibraryDeletionCoordinator
-    private lazy var libraryBrowsingCoordinator = LibraryBrowsingCoordinator(
+    @ObservationIgnored private lazy var libraryBrowsingCoordinator = LibraryBrowsingCoordinator(
         collection: collection, library: portableLibrary, destination: self,
         scheduler: workScheduler, frameStore: thumbnailFrameStore,
         hintsStore: LaunchHintsStore(url: KromoraStorage.launchHintsURL())
@@ -903,7 +861,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     func presentMaskingWorkspace() {
         inspectorState.select(.masking)
         inspectorState.isPresented = true
-        isMaskingPanelPresented = false
+        chrome.isMaskingPanelPresented = false
     }
 
     func dismissMaskingWorkspace() {
@@ -942,10 +900,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     func waitForCanonicalWriteForDiagnostics(for identity: PortablePhotoIdentity) async {
         await previewPresentation.waitForCanonicalWriteForDiagnostics(for: identity)
     }
-    private lazy var previewAdmissionCoordinator = PreviewAdmissionCoordinator(
+    @ObservationIgnored private lazy var previewAdmissionCoordinator = PreviewAdmissionCoordinator(
         workScheduler: workScheduler, engine: engine, destination: self
     )
-    private lazy var idleFrameWarmerCoordinator = IdleFrameWarmerCoordinator(
+    @ObservationIgnored private lazy var idleFrameWarmerCoordinator = IdleFrameWarmerCoordinator(
         scheduler: workScheduler, engine: engine, editStore: editStore,
         thumbnailStore: thumbnailFrameStore, previewPresentation: previewPresentation,
         destination: self
@@ -974,7 +932,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private var semanticCoordinatorInstallTask: Task<Void, Never>?
     private var pendingPersistenceFlush: Task<PersistenceFlushResult, Never>?
     private(set) var isShuttingDown = false
-    private var cancellables: [AnyCancellable] = []
     /// The reason the package is unavailable, once its open has failed.
     var portableLibraryOpenError: String? {
         if case .failed(let message) = libraryOpen.state { message } else { nil }
@@ -1256,7 +1213,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
         persistence.onStatusChange = { [weak self] status in
             guard let self else { return }
-            self.editStoreStatus = status
+            self.capabilities.setEditStoreStatus(status)
             if status == nil, let failure = self.persistenceFailureMessage,
                self.statusMessage == failure {
                 self.persistenceFailureMessage = nil
@@ -1359,7 +1316,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 publication.request.sourceRevision == self.sourceRevision,
                 publication.request.assetID == self.activeAssetID
             else { return }
-            self.metadata = publication.metadata
+            self.info.metadata = publication.metadata
             KromoraObservability.photoSwitchPhase(
                 "metadataPublished", since: self.previewPresentation.presentationSession?.selectionUptime
             )
@@ -1369,8 +1326,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 publication.request.sourceRevision == self.sourceRevision,
                 publication.request.assetID == self.activeAssetID
             else { return }
-            self.rawCapabilities = publication.capabilities
-            self.capabilitiesProbeCompleted = true
+            self.capabilities.publish(publication.capabilities)
             self.keepInspectorTabValid()
             KromoraObservability.photoSwitchPhase(
                 "capabilitiesPublished", since: self.previewPresentation.presentationSession?.selectionUptime
@@ -1396,9 +1352,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // removable-media, settings, the Look library and the edit clipboard are observed directly
         // by the views that render them (`FeatureSheetsModifier`, `SelectiveCopySheetModifier`,
         // `KeyboardSurface`, `LookInspectorView`, `FilmstripView`, ...), so no child notification
-        // is forwarded through the root. `EditorDocumentCoordinator` is a plain value-state owner
-        // with no publisher; undo/redo availability refreshes through root document publications
-        // and the explicit gesture-end publication in `endUndoGrouping`.
+        // is forwarded through the root. `EditorDocumentCoordinator`, `EditHistoryCoordinator`,
+        // `VirtualCopyMetadataCoordinator` and `LibraryOpenCoordinator` are `@Observable`, so the
+        // root's computed forwarders (`canUndo`, `durableEditHistory`, ...) are tracked transitively.
 
         // Inspector chrome is observed by its own view subtree. Histogram work still belongs to
         // this model. Use InspectorState's post-assignment callback so the gate sees the new
@@ -1408,11 +1364,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
 
         // The overlay's look is a Settings preference; the masking canvas reads it from its own
-        // interaction state. @Published delivers the stored value immediately, then each change.
-        cancellables.append(
-            settings.$maskOverlayAppearance.sink { [weak self] appearance in
-                self?.maskInteractionState.apply(appearance)
-            })
+        // interaction state. Apply the persisted value once, then each change from the setter.
+        maskInteractionState.apply(settings.maskOverlayAppearance)
+        settings.onMaskOverlayAppearanceChange = { [weak self] appearance in
+            self?.maskInteractionState.apply(appearance)
+        }
 
         previewCoordinator.onPublication = { [weak self] publication in
             self?.previewPublicationCoordinator.publish(publication)
@@ -1446,11 +1402,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     func bindPortableLibrary(
         _ session: PortableLibrarySession, recoveredPreviousWriter: Bool
     ) {
-        objectWillChange.send()
         portableLibrary = session
         virtualCopyMetadata = VirtualCopyMetadataCoordinator(
-            reader: VirtualCopyMetadataCoordinator.packageReader(session.package),
-            willChange: { [weak self] in self?.objectWillChange.send() }
+            reader: VirtualCopyMetadataCoordinator.packageReader(session.package)
         )
         libraryImportCoordinator.bind(package: session)
         libraryBrowsingCoordinator.bind(library: session)
@@ -1645,7 +1599,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
 
     var isAutoAdjustmentInProgress: Bool {
-        switch autoAdjustmentState {
+        switch autoLook.autoAdjustmentState {
         case .analyzing, .renderingCandidates, .validating, .applying:
             return true
         case .unavailable, .ready, .cancelled, .failed:
@@ -1655,7 +1609,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     var autoAdjustmentHelp: String {
         if canRunAutoAdjustment || isAutoAdjustmentInProgress {
-            return autoAdjustmentState.message
+            return autoLook.autoAdjustmentState.message
         }
         if previewState == .failed {
             return
@@ -1670,8 +1624,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private func publishAutoAdjustmentState(
         _ state: AutoAdjustmentState, progress: Double? = nil
     ) {
-        autoAdjustmentState = state
-        autoAdjustmentProgress = progress.map { min(max($0, 0), 1) }
+        autoLook.publishAuto(state, progress: progress)
     }
 
     /// Start Auto and apply its value-only result through the normal document commit path.
@@ -2244,7 +2197,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         refreshDurableEditHistory()
         KromoraObservability.photoSwitchPhase("editHistoryRefreshed", since: presentationSelectionUptime)
         lookSelection.resetReportedStatus()
-        lutResolutionStatus = nil
+        autoLook.setLUTResolutionStatus(nil)
         refreshLUTResolutionStatus()
         KromoraObservability.photoSwitchPhase("lutStatusRefreshed", since: presentationSelectionUptime)
 
@@ -2351,13 +2304,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // Space comparison is transient and belongs to the source being left. The user's
         // single-vs-side-by-side preference intentionally remains intact across photo switches.
         isShowingOriginal = false
-        metadata = ImageMetadata()
+        info.metadata = ImageMetadata()
         cancelComparisonPreview(pump: false)
         previewAdmissionCoordinator.resetComparisonPreviewAdmission()
         previewAdmissionCoordinator.cancelAdjacentPreviewPrefetch()
         cancelPendingPreviewDebounce()
-        rawCapabilities = nil
-        capabilitiesProbeCompleted = false
+        capabilities.reset()
         // Keep the tab during the transient no-source interval. The new source publication below
         // validates it once its actual capabilities are known; resetting here would make an import
         // change an unrelated inspector preference merely because source preparation is async.
@@ -2647,7 +2599,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // just opened, a corrupt-record warning belongs only to that record, and a load-time
         // write failure belongs only to that attempt. None should leak from photo A to photo B;
         // the store's separate worstActionableStatus owns any deliberately sticky diagnostic.
-        editStoreStatus = status.isActionable ? status.message : nil
+        capabilities.setEditStoreStatus(status.isActionable ? status.message : nil)
     }
 
     /// Warm at most the two nearest filtered neighbours after the active render has had an idle
@@ -3113,8 +3065,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         previewPublicationCoordinator.resetForSource()
         editorDocument.clearActiveHistory()
         document = EditDocument()
-        metadata = ImageMetadata()
-        histogram = nil
+        info.metadata = ImageMetadata()
+        info.histogram = nil
         presentation.clear()
         previewSurface.clear()
         originalPreviewSurface.clear()
@@ -3585,9 +3537,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         case .unchanged:
             break
         case .cleared:
-            lutResolutionStatus = nil
+            autoLook.setLUTResolutionStatus(nil)
         case .missing(let message):
-            lutResolutionStatus = message
+            autoLook.setLUTResolutionStatus(message)
             statusMessage = message
         }
     }
@@ -3803,9 +3755,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     /// Finish a continuous gesture. A gesture that did not change the document is not recorded.
     func endUndoGrouping() {
-        // Closing a gesture group can flip `canUndo` without a document change; announce it
-        // before the history mutates so undo controls refresh.
-        if editorDocument.isGrouping { objectWillChange.send() }
         let wasGrouping = editorDocument.endGrouping(document: document)
         if wasGrouping { saveActiveDocument(force: true) }
     }
@@ -4379,7 +4328,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         applicationShell.onMediaChanged = nil
         applicationShell.onApplicationActivated = nil
         applicationShell.onApplicationDeactivated = nil
-        cancellables.removeAll()
         await applicationShell.shutdown()
 
         await libraryBrowsingCoordinator.shutdown()
@@ -4637,8 +4585,8 @@ extension AppViewModel: PreviewAdmissionDestination {
         previewPublicationCoordinator.lastPresentedVisibleImage
     }
     var admissionInspectorPresented: Bool { isInspectorPresented }
-    var admissionHistogramLoading: Bool { isHistogramLoading }
-    var admissionHistogram: HistogramData? { histogram }
+    var admissionHistogramLoading: Bool { info.isHistogramLoading }
+    var admissionHistogram: HistogramData? { info.histogram }
     var admissionPresentationHistogramSample: HistogramData.PresentationSample? {
         previewSurface.presentationHistogramSample
     }
@@ -4647,7 +4595,7 @@ extension AppViewModel: PreviewAdmissionDestination {
         previewSurface.retryPresentationHistogramSample(surfaceRevision: surfaceRevision)
     }
     var admissionOriginalPreviewImage: CIImage? { originalPreviewSurface.image }
-    var admissionHistogramErrorMessage: String? { histogramErrorMessage }
+    var admissionHistogramErrorMessage: String? { info.histogramErrorMessage }
     var admissionSourceName: String { sourceName }
     var admissionCollection: ImageCollection { collection }
     var admissionEditStore: EditDocumentStore { editStore }
@@ -4778,9 +4726,9 @@ extension AppViewModel: PreviewAdmissionDestination {
         )
     }
 
-    func publishAdmissionHistogram(_ histogram: HistogramData?) { self.histogram = histogram }
-    func publishAdmissionHistogramLoading(_ isLoading: Bool) { isHistogramLoading = isLoading }
-    func publishAdmissionHistogramError(_ message: String?) { histogramErrorMessage = message }
+    func publishAdmissionHistogram(_ histogram: HistogramData?) { info.histogram = histogram }
+    func publishAdmissionHistogramLoading(_ isLoading: Bool) { info.setHistogramLoading(isLoading) }
+    func publishAdmissionHistogramError(_ message: String?) { info.setHistogramError(message) }
     func publishAdmissionStatus(_ message: String) { statusMessage = message }
     func admissionPresentOriginalPreview(_ image: CIImage, request: RenderRequest) -> Bool {
         let hadValidOriginal = originalPreviewSurface.image != nil

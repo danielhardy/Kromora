@@ -3,7 +3,7 @@ import SwiftUI
 /// The app-wide Settings surface. Folder defaults are intentionally separate from the currently
 /// open source/Look folders: changing one changes where a future panel starts, not existing files.
 public struct KromoraSettingsView: View {
-    @ObservedObject private var settings: KromoraSettings
+    @Bindable private var settings: KromoraSettings
     private let editDatabaseFileURL: URL?
     private let fileDialog: any FileDialogProviding
     private let workspace: any WorkspaceRevealing
@@ -18,7 +18,7 @@ public struct KromoraSettingsView: View {
         fileDialog: any FileDialogProviding = AppKitFileDialog(),
         workspace: any WorkspaceRevealing = AppKitWorkspaceRevealer()
     ) {
-        _settings = ObservedObject(wrappedValue: settings)
+        _settings = Bindable(wrappedValue: settings)
         self.editDatabaseFileURL = editDatabaseURL
         self.fileDialog = fileDialog
         self.workspace = workspace

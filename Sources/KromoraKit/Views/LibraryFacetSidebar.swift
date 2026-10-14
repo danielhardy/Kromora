@@ -4,10 +4,10 @@ import SwiftUI
 ///
 /// Counts come from the index off the main actor and are recomputed whenever the query changes.
 struct LibraryFacetSidebar: View {
-    @ObservedObject var viewModel: AppViewModel
+    let viewModel: AppViewModel
     @State private var counts = LibraryFacetCounts()
 
-    private var query: LibraryQuery { viewModel.portableQuery }
+    private var query: LibraryQuery { viewModel.libraryPresentation.query }
 
     /// Observed bounds, widened to include an active selection so it can always be adjusted.
     private func rangeBounds(for facet: LibraryRangeFacet) -> ClosedRange<Double>? {
@@ -210,7 +210,7 @@ struct LibraryFacetToolbarControls: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            let query = viewModel.portableQuery
+            let query = viewModel.libraryPresentation.query
             if query.hasActiveFilters {
                 let parts = query.activeFilterDescriptions
                 Text("\(parts.count) active filter\(parts.count == 1 ? "" : "s"): "

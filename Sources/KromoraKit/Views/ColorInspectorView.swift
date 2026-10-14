@@ -7,7 +7,7 @@ import SwiftUI
 /// preview coordinator's interactive quality while a committed field value follows the normal
 /// debounced settled path.
 struct ColorInspectorView: View {
-    @ObservedObject var viewModel: AppViewModel
+    let viewModel: AppViewModel
 
     @State private var whiteBalanceExpanded = true
     @State private var colorExpanded = true
@@ -50,40 +50,40 @@ struct ColorInspectorView: View {
                             }
                         }
                     }
-                    .disabled(viewModel.sourceIsRAW && viewModel.rawCapabilities == nil)
+                    .disabled(viewModel.sourceIsRAW && viewModel.capabilities.rawCapabilities == nil)
                     .accessibilityLabel("White balance preset")
                     Button {
-                        if viewModel.isWhiteBalanceSampling {
+                        if viewModel.whiteBalance.isSampling {
                             viewModel.cancelWhiteBalanceSampling()
                         } else {
                             viewModel.beginWhiteBalanceSampling()
                         }
                     } label: {
-                        Image(systemName: viewModel.isWhiteBalanceSampling ? "xmark" : "eyedropper")
+                        Image(systemName: viewModel.whiteBalance.isSampling ? "xmark" : "eyedropper")
                             .font(.system(size: 13, weight: .medium))
                             .frame(width: 24, height: 22)
                     }
                     .buttonStyle(.bordered)
-                    .tint(viewModel.isWhiteBalanceSampling ? KromoraTheme.primaryAccent : nil)
+                    .tint(viewModel.whiteBalance.isSampling ? KromoraTheme.primaryAccent : nil)
                     .controlSize(.small)
-                    .disabled(viewModel.isWhiteBalanceSampling
+                    .disabled(viewModel.whiteBalance.isSampling
                         ? false
                         : viewModel.sourceImage == nil ||
-                            (viewModel.sourceIsRAW && viewModel.rawCapabilities == nil))
-                    .help(viewModel.isWhiteBalanceSampling ? "Cancel Sample" : "Sample Neutral")
-                    .accessibilityLabel(viewModel.isWhiteBalanceSampling ? "Cancel white balance sample" : "Sample Neutral")
-                    .accessibilityHint(viewModel.isWhiteBalanceSampling
+                            (viewModel.sourceIsRAW && viewModel.capabilities.rawCapabilities == nil))
+                    .help(viewModel.whiteBalance.isSampling ? "Cancel Sample" : "Sample Neutral")
+                    .accessibilityLabel(viewModel.whiteBalance.isSampling ? "Cancel white balance sample" : "Sample Neutral")
+                    .accessibilityHint(viewModel.whiteBalance.isSampling
                         ? "Cancel sampling a neutral area"
                         : "Click a neutral area in the photo; an 11 by 11 display pixel area is averaged")
                 }
 
-                if viewModel.isWhiteBalanceSampling {
+                if viewModel.whiteBalance.isSampling {
                     Text("Click a neutral area in the photo to apply")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
-                if viewModel.sourceIsRAW && viewModel.rawCapabilities == nil {
+                if viewModel.sourceIsRAW && viewModel.capabilities.rawCapabilities == nil {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
                         Text("Reading the decoder's white balance…")
@@ -108,7 +108,7 @@ struct ColorInspectorView: View {
                         readout: temperatureReadout,
                         reset: { viewModel.resetWhiteBalance(.temperature) },
                         resetActionTitle: viewModel.sourceIsRAW ? "Reset to As Shot" : "Reset to neutral",
-                        disabled: viewModel.sourceIsRAW && viewModel.rawCapabilities == nil,
+                        disabled: viewModel.sourceIsRAW && viewModel.capabilities.rawCapabilities == nil,
                         usesTemperatureSlider: true
                     )
                     valueRow(
@@ -125,7 +125,7 @@ struct ColorInspectorView: View {
                         fieldFormat: ColorSettingFormatting.signedWholeNumberFormat,
                         reset: { viewModel.resetWhiteBalance(.tint) },
                         resetActionTitle: viewModel.sourceIsRAW ? "Reset to As Shot" : "Reset to neutral",
-                        disabled: viewModel.sourceIsRAW && viewModel.rawCapabilities == nil
+                        disabled: viewModel.sourceIsRAW && viewModel.capabilities.rawCapabilities == nil
                     )
                 }
             }

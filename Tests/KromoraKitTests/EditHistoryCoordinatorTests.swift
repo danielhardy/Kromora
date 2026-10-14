@@ -1,3 +1,5 @@
+import Observation
+import os
 import XCTest
 
 @testable import KromoraKit
@@ -5,6 +7,12 @@ import XCTest
 /// The durable-history coordinator runs against a fake store and closures; no `AppViewModel`.
 @MainActor
 final class EditHistoryCoordinatorTests: XCTestCase {
+    private final class Counter: Sendable {
+        private let storage = OSAllocatedUnfairLock(initialState: 0)
+        var value: Int { storage.withLock { $0 } }
+        func increment() { storage.withLock { $0 += 1 } }
+    }
+
     private actor FakeStore: EditHistoryStore {
         var revisions: [PortablePackageEditRevision] = []
         var current: UInt64 = 0
@@ -120,7 +128,7 @@ final class EditHistoryCoordinatorTests: XCTestCase {
     }
 
     private func makeCoordinator(
-        store: FakeStore, host: Host, changes: @escaping @MainActor () -> Void = {}
+        store: FakeStore, host: Host
     ) -> EditHistoryCoordinator {
         EditHistoryCoordinator(
             store: store,
@@ -131,8 +139,7 @@ final class EditHistoryCoordinatorTests: XCTestCase {
                 flushPersistence: { await host.flush() },
                 adoptRestoredRevision: { document, prior in host.adopted.append((document, prior)) },
                 reportStatus: { host.statuses.append($0) }
-            ),
-            willChange: changes
+            )
         )
     }
 
@@ -141,14 +148,15 @@ final class EditHistoryCoordinatorTests: XCTestCase {
         await store.set(revisions: [revision(1, exposure: 0.1), revision(2, exposure: 0.2)], current: 2)
         let host = Host()
         host.reference = referenceA
-        var changeCount = 0
-        let coordinator = makeCoordinator(store: store, host: host) { changeCount += 1 }
+        let coordinator = makeCoordinator(store: store, host: host)
+        let changeCount = Counter()
+        withObservationTracking { _ = coordinator.history } onChange: { changeCount.increment() }
 
         await coordinator.refresh()?.value
 
         XCTAssertEqual(coordinator.history.map(\.revision), [1, 2])
         XCTAssertEqual(coordinator.currentRevision, 2)
-        XCTAssertGreaterThan(changeCount, 0)
+        XCTAssertGreaterThan(changeCount.value, 0)
     }
 
     func testRefreshIsIgnoredWhenActiveReferenceChangesDuringRead() async throws {
@@ -435,8 +443,12 @@ final class EditHistoryCoordinatorTests: XCTestCase {
         await store.set(revisions: [revision(1, exposure: 0.1)], current: 1)
         let host = Host()
         host.reference = referenceA
-        var changeCount = 0
-        let coordinator = makeCoordinator(store: store, host: host) { changeCount += 1 }
+        let coordinator = makeCoordinator(store: store, host: host)
+        let changeCount = Counter()
+        withObservationTracking {
+            _ = coordinator.history
+            _ = coordinator.currentRevision
+        } onChange: { changeCount.increment() }
         await store.armGate()
         _ = coordinator.refresh()
         await store.waitUntilGateEntered()
@@ -449,7 +461,7 @@ final class EditHistoryCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(coordinator.history.isEmpty)
         XCTAssertEqual(coordinator.currentRevision, 0)
-        XCTAssertEqual(changeCount, 0)
+        XCTAssertEqual(changeCount.value, 0)
     }
 
     func testShutdownDrainsAcceptedSnapshotWithoutPublishing() async throws {

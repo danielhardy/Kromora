@@ -53,13 +53,13 @@ enum UndoRedoRouting {
 /// items post a notification that `MenuCommandReceivers` picks up on the view side.
 public struct KromoraCommands: Commands {
     @Environment(\.openWindow) private var openWindow
-    @ObservedObject private var settings: KromoraSettings
+    @Bindable private var settings: KromoraSettings
     @FocusedValue(\.keyboardRouter) private var keyboardRouter
     @FocusedValue(\.keyboardContext) private var keyboardContext
     @FocusedValue(\.menuAvailability) private var availability
 
     public init(settings: KromoraSettings = KromoraSettings()) {
-        _settings = ObservedObject(wrappedValue: settings)
+        _settings = Bindable(wrappedValue: settings)
     }
 
     public var body: some Commands {
@@ -227,7 +227,7 @@ public struct KromoraCommands: Commands {
 
 /// Bridges the menu's notifications back to the view model.
 struct MenuCommandReceivers: ViewModifier {
-    @ObservedObject var viewModel: AppViewModel
+    let viewModel: AppViewModel
 
     func body(content: Content) -> some View {
         content
@@ -238,7 +238,7 @@ struct MenuCommandReceivers: ViewModifier {
 }
 
 private struct FileMenuCommandReceiver: ViewModifier {
-    @ObservedObject var viewModel: AppViewModel
+    let viewModel: AppViewModel
 
     func body(content: Content) -> some View {
         content
@@ -281,7 +281,7 @@ private struct FileMenuCommandReceiver: ViewModifier {
 }
 
 private struct AutoAdjustmentCommandReceiver: ViewModifier {
-    @ObservedObject var viewModel: AppViewModel
+    let viewModel: AppViewModel
 
     func body(content: Content) -> some View {
         content.onReceive(NotificationCenter.default.publisher(for: .applyAutoAdjustment)) { _ in
@@ -293,7 +293,7 @@ private struct AutoAdjustmentCommandReceiver: ViewModifier {
 /// Receivers for the editor actions exposed from the View menu. Keeping these separate from the
 /// larger File-menu receiver chain keeps SwiftUI's modifier expression type-checkable.
 private struct ViewMenuCommandReceivers: ViewModifier {
-    @ObservedObject var viewModel: AppViewModel
+    let viewModel: AppViewModel
 
     func body(content: Content) -> some View {
         content

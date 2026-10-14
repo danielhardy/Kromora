@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 /// Owns the value-only editor session boundary.
 ///
@@ -11,11 +12,12 @@ import Foundation
 /// and receive `EditDocument`/`PhotoEditSession` values, which makes this workflow testable without
 /// constructing the application model.
 @MainActor
+@Observable
 final class EditorDocumentCoordinator {
     private(set) var activeHistory = EditHistory()
-    private var sessions: [PhotoAssetID: PhotoEditSession] = [:]
-    private var sessionRevisions: [PhotoAssetID: UInt64] = [:]
-    private var nextRevision: UInt64 = 0
+    @ObservationIgnored private var sessions: [PhotoAssetID: PhotoEditSession] = [:]
+    @ObservationIgnored private var sessionRevisions: [PhotoAssetID: UInt64] = [:]
+    @ObservationIgnored private var nextRevision: UInt64 = 0
 
     var canUndo: Bool { activeHistory.canUndo }
     var canRedo: Bool { activeHistory.canRedo }

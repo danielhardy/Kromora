@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Canvas guides and native pointer delivery for source-space retouch gestures.
 struct RetouchCanvasOverlay: View {
-    @ObservedObject var viewModel: AppViewModel
+    let viewModel: AppViewModel
     let state: RetouchInteractionState
     let sourceSize: CGSize
     let crop: CropAdjustments

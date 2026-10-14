@@ -4,7 +4,7 @@ import SwiftUI
 /// Toggled from the toolbar (and ⌘I).
 struct InfoInspectorView: View {
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
-    @ObservedObject var viewModel: AppViewModel
+    let viewModel: AppViewModel
     let inspectorState: AppViewModel.InspectorState
     @Bindable private var canvasState: CanvasInteractionState
 
@@ -26,7 +26,7 @@ struct InfoInspectorView: View {
                     VStack(spacing: 0) {
                         if Self.shouldShowEmptyState(
                             sourceImageAvailable: viewModel.sourceImage != nil,
-                            histogramAvailable: viewModel.histogram != nil,
+                            histogramAvailable: viewModel.info.histogram != nil,
                             isNavigationLoading: viewModel.isNavigationLoading
                         ) {
                             // No image, no tabs. Both halves describe *a picture*: with nothing open, the switcher
@@ -219,7 +219,7 @@ struct InfoInspectorView: View {
                         surface: viewModel.previewSurface,
                         sourceSize: viewModel.sourceSize,
                         crop: viewModel.document.crop,
-                        histogram: viewModel.histogram,
+                        histogram: viewModel.info.histogram,
                         isExpanded: $analysisExpanded,
                         onUseEditingMask: { kind, result, pixels in
                             viewModel.useInfoAnalysisMask(
@@ -347,7 +347,7 @@ struct InfoInspectorView: View {
                     .lineLimit(1)
                     .fixedSize()
                 Spacer(minLength: 4)
-                if let histogram = viewModel.histogram {
+                if let histogram = viewModel.info.histogram {
                     clippingCount(
                         histogram.clippedHighlights, systemImage: "sun.max.fill", tint: .orange,
                         meaning: "sampled pixels at pure white (clipped highlights)")
@@ -399,16 +399,16 @@ struct InfoInspectorView: View {
 
     @ViewBuilder
     private var histogramPlot: some View {
-        if let histogram = viewModel.histogram {
+        if let histogram = viewModel.info.histogram {
             HistogramChart(data: histogram, channel: channel)
                 .animation(
                     accessibilityReduceMotion ? nil : .easeInOut(duration: 0.45),
                     value: histogram
                 )
-        } else if viewModel.isHistogramLoading {
+        } else if viewModel.info.isHistogramLoading {
             ProgressView().controlSize(.small)
         } else {
-            Text(viewModel.histogramErrorMessage ?? "Histogram unavailable")
+            Text(viewModel.info.histogramErrorMessage ?? "Histogram unavailable")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -481,7 +481,7 @@ struct InfoInspectorView: View {
 
     @ViewBuilder
     private var metadataSection: some View {
-        let sections = viewModel.metadata.sections
+        let sections = viewModel.info.metadata.sections
         if sections.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 Text("No metadata available for this image.")

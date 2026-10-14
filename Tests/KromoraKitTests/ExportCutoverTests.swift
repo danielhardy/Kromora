@@ -451,7 +451,7 @@ final class ExportCutoverTests: TempDirectoryTestCase {
                        "histogram must share the planner's native-bounded preview scale")
         XCTAssertEqual(request.space, .current)
 
-        try await waitUntil("the histogram to be published") { viewModel.histogram != nil }
+        try await waitUntil("the histogram to be published") { viewModel.info.histogram != nil }
     }
 
     /// Nothing is tallied while the panel is closed — the reason the inspector gates it at all.
@@ -472,7 +472,7 @@ final class ExportCutoverTests: TempDirectoryTestCase {
 
         let requests = await fake.histogramRequests
         XCTAssertTrue(requests.isEmpty, "the closed inspector should not be tallying pixels")
-        XCTAssertNil(viewModel.histogram)
+        XCTAssertNil(viewModel.info.histogram)
     }
 
     /// The real engine, end to end through the view model: the published histogram must actually
@@ -483,12 +483,12 @@ final class ExportCutoverTests: TempDirectoryTestCase {
         try await waitUntil("the first preview") { viewModel.previewSurface.image != nil }
 
         viewModel.isInspectorPresented = true
-        try await waitUntil("the first histogram") { viewModel.histogram != nil }
-        let plain = try XCTUnwrap(viewModel.histogram)
+        try await waitUntil("the first histogram") { viewModel.info.histogram != nil }
+        let plain = try XCTUnwrap(viewModel.info.histogram)
 
         viewModel.updateDocument { $0.adjustments = [.exposure(ev: 1.2)] }
-        try await waitUntil("the adjusted histogram") { viewModel.histogram != plain }
-        XCTAssertNotEqual(try XCTUnwrap(viewModel.histogram).red, plain.red,
+        try await waitUntil("the adjusted histogram") { viewModel.info.histogram != plain }
+        XCTAssertNotEqual(try XCTUnwrap(viewModel.info.histogram).red, plain.red,
                           "an adjustment must move the histogram the user is looking at")
     }
 }

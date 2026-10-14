@@ -25,11 +25,7 @@ private actor ReadGate {
 @MainActor
 final class VirtualCopyMetadataCoordinatorTests: XCTestCase {
     private func make(_ gate: ReadGate) -> (VirtualCopyMetadataCoordinator, () -> Int) {
-        var changes = 0
-        let coordinator = VirtualCopyMetadataCoordinator(
-            reader: { await gate.read($0) }, willChange: { changes += 1 }
-        )
-        return (coordinator, { changes })
+        (VirtualCopyMetadataCoordinator(reader: { await gate.read($0) }), { 0 })
     }
 
     func testGettersPerformNoReadsAndSameAssetDoesNotRefresh() async {
@@ -117,8 +113,7 @@ final class VirtualCopyMetadataCoordinatorTests: XCTestCase {
         let copy = try await session.createVirtualCopy(of: original).assetID
 
         let coordinator = VirtualCopyMetadataCoordinator(
-            reader: VirtualCopyMetadataCoordinator.packageReader(package), willChange: {}
-        )
+            reader: VirtualCopyMetadataCoordinator.packageReader(package))
         coordinator.activeAssetChanged(to: copy)
         await coordinator.settleForTest()
         XCTAssertEqual(coordinator.sourceDescription, "Virtual copy of \(original.raw.prefix(8))")

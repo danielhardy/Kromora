@@ -7,12 +7,15 @@ import PhotosUI
 /// `KromoraCommands`); everything else in the module stays internal.
 public struct ContentView: View {
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
-    @StateObject private var viewModel: AppViewModel
+    @State private var viewModel: AppViewModel
     @Bindable private var photosImportCoordinator: PhotosImportCoordinator
     private let inspectorState: AppViewModel.InspectorState
     @Bindable private var canvasState: CanvasInteractionState
     @Bindable private var collection: ImageCollection
     @Bindable private var exportCoordinator: ExportCoordinator
+    @Bindable private var status: StatusState
+    @Bindable private var chrome: ChromePresentationState
+    @Bindable private var libraryPresentation: LibraryPresentationState
     @State private var photosSelection: [PhotosPickerItem] = []
     @AppStorage("hasSeenWelcome") private var hasSeenWelcome = false
     @State private var isWelcomePresented = false
@@ -29,24 +32,30 @@ public struct ContentView: View {
 
     public init() {
         let viewModel = AppViewModel(includeBundledLooks: true)
-        _viewModel = StateObject(wrappedValue: viewModel)
+        _viewModel = State(wrappedValue: viewModel)
         _photosImportCoordinator = Bindable(wrappedValue: viewModel.photosImportCoordinator)
         inspectorState = viewModel.inspectorState
         _canvasState = Bindable(wrappedValue: viewModel.canvasState)
         _collection = Bindable(wrappedValue: viewModel.collection)
         _exportCoordinator = Bindable(wrappedValue: viewModel.export)
+        _status = Bindable(wrappedValue: viewModel.status)
+        _chrome = Bindable(wrappedValue: viewModel.chrome)
+        _libraryPresentation = Bindable(wrappedValue: viewModel.libraryPresentation)
         _keyboardRouter = State(wrappedValue: KeyboardCommandRouter(viewModel: viewModel))
     }
 
     /// Allows the application delegate to share the model that owns the persistence queue, so clean
     /// termination can flush the same edit catalog the window has been using.
     public init(viewModel: AppViewModel) {
-        _viewModel = StateObject(wrappedValue: viewModel)
+        _viewModel = State(wrappedValue: viewModel)
         _photosImportCoordinator = Bindable(wrappedValue: viewModel.photosImportCoordinator)
         inspectorState = viewModel.inspectorState
         _canvasState = Bindable(wrappedValue: viewModel.canvasState)
         _collection = Bindable(wrappedValue: viewModel.collection)
         _exportCoordinator = Bindable(wrappedValue: viewModel.export)
+        _status = Bindable(wrappedValue: viewModel.status)
+        _chrome = Bindable(wrappedValue: viewModel.chrome)
+        _libraryPresentation = Bindable(wrappedValue: viewModel.libraryPresentation)
         _keyboardRouter = State(wrappedValue: KeyboardCommandRouter(viewModel: viewModel))
     }
 
@@ -58,7 +67,7 @@ public struct ContentView: View {
             .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
             .toolbarBackground(KromoraTheme.toolbarChrome, for: .windowToolbar)
             .photosPicker(
-                isPresented: $viewModel.isPhotosPickerPresented,
+                isPresented: $chrome.isPhotosPickerPresented,
                 selection: $photosSelection,
                 maxSelectionCount: 50,
                 matching: .images
@@ -127,25 +136,25 @@ public struct ContentView: View {
             .alert(
                 "Something went wrong",
                 isPresented: Binding(
-                    get: { viewModel.errorMessage != nil },
-                    set: { if !$0 { viewModel.errorMessage = nil } }
+                    get: { status.errorMessage != nil },
+                    set: { if !$0 { status.errorMessage = nil } }
                 ),
-                presenting: viewModel.errorMessage
+                presenting: status.errorMessage
             ) { _ in
-                Button("OK", role: .cancel) { viewModel.errorMessage = nil }
+                Button("OK", role: .cancel) { status.errorMessage = nil }
             } message: { message in
                 Text(message)
             }
             .confirmationDialog(
-                viewModel.libraryDeletionConfirmation?.title
+                libraryPresentation.deletionConfirmation?.title
                     ?? "Remove selected photo(s) from Library?",
                 isPresented: Binding(
-                    get: { viewModel.libraryDeletionConfirmation != nil },
-                    set: { if !$0 { viewModel.libraryDeletionConfirmation = nil } }
+                    get: { libraryPresentation.deletionConfirmation != nil },
+                    set: { if !$0 { libraryPresentation.deletionConfirmation = nil } }
                 ),
                 titleVisibility: .visible
             ) {
-                if let confirmation = viewModel.libraryDeletionConfirmation {
+                if let confirmation = libraryPresentation.deletionConfirmation {
                     let actionTitle = confirmation.count == 1
                         ? "Delete Photo" : "Delete \(confirmation.count) Photos"
                     Button(
@@ -156,10 +165,10 @@ public struct ContentView: View {
                     }
                 }
                 Button("Cancel", role: .cancel) {
-                    viewModel.libraryDeletionConfirmation = nil
+                    libraryPresentation.deletionConfirmation = nil
                 }
             } message: {
-                Text(viewModel.libraryDeletionConfirmation?.message ?? "")
+                Text(libraryPresentation.deletionConfirmation?.message ?? "")
             }
     }
 
@@ -216,7 +225,7 @@ public struct ContentView: View {
             } else {
                 HStack(spacing: 0) {
                     if !canvasState.isCropToolActive,
-                        viewModel.isSourceBrowserPresented && !collection.items.isEmpty {
+                        chrome.isSourceBrowserPresented && !collection.items.isEmpty {
                         // This is a transient image browser beside the active editor, sharing
                         // selection with the filmstrip; it is not a navigation hierarchy for the
                         // Grid/Edit workspaces. Keep its independent toggle and crop-mode behavior.
@@ -271,7 +280,7 @@ public struct ContentView: View {
         }
         .animation(.easeInOut(duration: 0.25), value: collection.isActive)
         .animation(chromeAnimation, value: canvasState.isCropToolActive)
-        .animation(chromeAnimation, value: viewModel.isSourceBrowserPresented)
+        .animation(chromeAnimation, value: chrome.isSourceBrowserPresented)
         .animation(.easeInOut(duration: 0.2), value: viewModel.navigation.mode)
         .toolbar {
             // Each cluster is its own toolbar item so the system draws one frosted group,

@@ -679,7 +679,7 @@ final class LatestPreviewFrameStoreTests: TempDirectoryTestCase {
 
         viewModel.inspectorState.isPresented = true
         viewModel.inspectorState.tab = .info
-        try await waitUntil("histogram from warm presentation") { viewModel.histogram != nil }
+        try await waitUntil("histogram from warm presentation") { viewModel.info.histogram != nil }
     }
 
     /// A cached entry is the whole photo at the canonical long edge. A zoomed request asks for an

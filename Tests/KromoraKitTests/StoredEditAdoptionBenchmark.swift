@@ -94,7 +94,7 @@ final class StoredEditAdoptionBenchmark: TempDirectoryTestCase {
             // This unmeasured return to A establishes the requested A→B→C→B measured sequence.
             try await settle(first, in: viewModel)
             for photo in [switchPhotos[1], switchPhotos[2], switchPhotos[1]] {
-                let previousHistogram = try XCTUnwrap(viewModel.histogram)
+                let previousHistogram = try XCTUnwrap(viewModel.info.histogram)
                 let sample = try await measure(
                     photo, at: try index(of: photo, in: viewModel),
                     previousHistogram: previousHistogram, in: viewModel)
@@ -165,7 +165,7 @@ final class StoredEditAdoptionBenchmark: TempDirectoryTestCase {
             // a value different from the previous photo prevents its intentionally retained chart
             // from satisfying this measurement while the newly selected image is loading.
             if sample.histogramMilliseconds == .infinity,
-                let histogram = viewModel.histogram, histogram != previousHistogram
+                let histogram = viewModel.info.histogram, histogram != previousHistogram
             {
                 sample.histogramMilliseconds = elapsed
             }
@@ -182,11 +182,11 @@ final class StoredEditAdoptionBenchmark: TempDirectoryTestCase {
     private func settle(_ photo: Photo, in viewModel: AppViewModel) async throws {
         let currentIndex = try index(of: photo, in: viewModel)
         if viewModel.sourceName == photo.name, viewModel.previewState == .ready,
-            viewModel.histogram != nil
+            viewModel.info.histogram != nil
         {
             return
         }
-        let previousHistogram = viewModel.histogram
+        let previousHistogram = viewModel.info.histogram
         _ = try await measure(
             photo, at: currentIndex, previousHistogram: previousHistogram,
             in: viewModel)

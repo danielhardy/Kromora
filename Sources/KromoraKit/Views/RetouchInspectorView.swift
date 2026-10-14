@@ -3,7 +3,7 @@ import SwiftUI
 /// Value editor for retouch recipes. Geometry stays in source-normalized coordinates so the
 /// recipes remain attached to the photograph through crop, rotation and perspective changes.
 struct RetouchInspectorView: View {
-    @ObservedObject var viewModel: AppViewModel
+    let viewModel: AppViewModel
     @State private var selectedSpotID: UUID?
     @State private var selectedEyeID: UUID?
     @State private var eyeKind: EyeKind = .human

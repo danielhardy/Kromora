@@ -65,7 +65,17 @@ struct LibraryGridView: View {
                     let contentWidth = max(1, geometry.size.width - contentPadding * 2)
                     let metrics = layout.metrics(for: contentWidth)
                     let pitch = layout.rowHeight(for: metrics) + layout.spacing
-                    let rows = GridRow.rows(itemCount: entries.count, columns: metrics.columns, entries: entries)
+                    let rowCount = layout.rowCount(itemCount: entries.count, columns: metrics.columns)
+                    let window = layout.rowWindow(
+                        rowCount: rowCount,
+                        firstVisibleRow: firstVisibleRow,
+                        viewportHeight: geometry.size.height,
+                        pitch: pitch
+                    )
+                    let rows = LibraryGridRowModel.rows(
+                        in: window, itemCount: entries.count, columns: metrics.columns, entries: entries)
+                    let rowHeight = CGFloat(layout.rowHeight(for: metrics))
+                    let spacing = CGFloat(layout.spacing)
                     let visibleIDs = visibleThumbnailIDs(
                         entries: entries,
                         width: contentWidth,
@@ -73,7 +83,13 @@ struct LibraryGridView: View {
                         pitch: pitch
                     )
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: CGFloat(layout.spacing)) {
+                        // Rows outside the window are fixed-height gaps, so the scroll extent and
+                        // offsets match a fully materialized grid while row models stay bounded.
+                        LazyVStack(alignment: .leading, spacing: spacing) {
+                            if window.lowerBound > 0 {
+                                Color.clear.frame(height: Self.gapHeight(
+                                    rows: window.lowerBound, rowHeight: rowHeight, spacing: spacing))
+                            }
                             ForEach(rows) { row in
                                 LibraryGridRow(
                                     indices: row.indices,
@@ -87,6 +103,10 @@ struct LibraryGridView: View {
                                     onOpen: onOpen,
                                     onAppearIndex: { viewModel.loadMorePortableIfNeeded(currentIndex: $0) }
                                 )
+                            }
+                            if window.upperBound < rowCount {
+                                Color.clear.frame(height: Self.gapHeight(
+                                    rows: rowCount - window.upperBound, rowHeight: rowHeight, spacing: spacing))
                             }
                         }
                         .padding(CGFloat(contentPadding))
@@ -151,6 +171,12 @@ struct LibraryGridView: View {
         }
     }
 
+    /// Height of `rows` skipped rows including the spacing LazyVStack places after each; zero
+    /// is skipped entirely when zero so no stray spacing is added.
+    private static func gapHeight(rows: Int, rowHeight: CGFloat, spacing: CGFloat) -> CGFloat {
+        max(0, CGFloat(rows) * (rowHeight + spacing) - spacing)
+    }
+
     private func visibleThumbnailIDs(
         entries: [ImageCollection.ThumbnailEntry],
         width: Double,
@@ -198,10 +224,10 @@ struct LibraryGridView: View {
 /// Non-blocking progress for a multi-photo package import, shown above the grid while photos
 /// arrive. The status bar keeps its text; this makes the running import hard to miss.
 private struct LibraryImportProgressBar: View {
-    @ObservedObject var viewModel: AppViewModel
+    let viewModel: AppViewModel
 
     var body: some View {
-        if let progress = viewModel.portableImportProgress, progress.total > 1 {
+        if let progress = viewModel.libraryPresentation.importProgress, progress.total > 1 {
             HStack(spacing: 10) {
                 ProgressView(value: progress.fraction)
                     .frame(width: 160)
@@ -236,7 +262,7 @@ private struct LibraryImportProgressBar: View {
 
 /// One laid-out row, identified by its first asset and the column count so inserted or removed
 /// items elsewhere in the library do not rebuild unrelated rows.
-private struct GridRow: Identifiable {
+struct LibraryGridRowModel: Identifiable {
     struct ID: Hashable {
         let firstAsset: PhotoAssetID
         let columns: Int
@@ -245,12 +271,15 @@ private struct GridRow: Identifiable {
     let id: ID
     let indices: Range<Int>
 
+    /// Builds models only for the rows in `window`; work is O(window), not O(itemCount).
     static func rows(
-        itemCount: Int, columns: Int, entries: [ImageCollection.ThumbnailEntry]
-    ) -> [GridRow] {
-        guard itemCount > 0 else { return [] }
-        return stride(from: 0, to: itemCount, by: columns).map { start in
-            GridRow(
+        in window: Range<Int>, itemCount: Int, columns: Int, entries: [ImageCollection.ThumbnailEntry]
+    ) -> [LibraryGridRowModel] {
+        guard itemCount > 0, columns > 0 else { return [] }
+        return window.compactMap { row in
+            let start = row * columns
+            guard start < itemCount else { return nil }
+            return LibraryGridRowModel(
                 id: ID(firstAsset: entries[start].id, columns: columns),
                 indices: start..<min(itemCount, start + columns)
             )
@@ -262,7 +291,7 @@ private struct LibraryGridRow: View {
     let indices: Range<Int>
     let entries: [ImageCollection.ThumbnailEntry]
     @Bindable var collection: ImageCollection
-    @ObservedObject var settings: KromoraSettings
+    let settings: KromoraSettings
     let cellEdge: Double
     let spacing: Double
     let admittedThumbnailIDs: [PhotoAssetID]
@@ -318,7 +347,7 @@ private struct LibraryGridRow: View {
 
 private struct LibraryEmptyState: View {
     @Bindable var collection: ImageCollection
-    @ObservedObject var viewModel: AppViewModel
+    let viewModel: AppViewModel
 
     var body: some View {
         VStack(spacing: 10) {
@@ -354,7 +383,7 @@ private struct LibraryEmptyState: View {
 
 private struct LibraryGridCell: View {
     @Bindable var item: ImageCollection.Item
-    @ObservedObject var settings: KromoraSettings
+    let settings: KromoraSettings
     let isSelected: Bool
     let isActive: Bool
     let edge: Double

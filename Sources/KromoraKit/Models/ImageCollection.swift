@@ -11,7 +11,7 @@ import Observation
 ///
 /// Migrated to Observation (KRMA-521): thumbnail arrivals, metadata, and scan ticks publish
 /// through this object's own observation boundary. Views observe the collection directly
-/// through `@Bindable` instead of through AppViewModel's former objectWillChange fan-in.
+/// through `@Bindable` instead of through AppViewModel's former root notification fan-in.
 @MainActor
 @Observable
 final class ImageCollectionPresentationModel {
@@ -974,7 +974,7 @@ final class ImageCollectionPresentationModel {
     }
     private func invalidateCollectionProjection(notify: Bool = false) {
         // `notify` is retained for call-site compatibility. Observation publishes the
-        // revision bump automatically; no manual objectWillChange fan-out is needed.
+        // revision bump automatically; no manual root notification is needed.
         _ = notify
         collectionRevision &+= 1
         recordCollectionProjectionInvalidationIfNeeded()

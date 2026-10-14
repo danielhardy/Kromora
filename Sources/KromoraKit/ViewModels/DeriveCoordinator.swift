@@ -14,40 +14,41 @@ import Darwin
 /// `performSave(to:)` core and a `saveDialog` wrapper, and status/error text
 /// leaves through closures so presentation stays with `AppViewModel`.
 @MainActor
-final class DeriveCoordinator: ObservableObject {
+@Observable
+final class DeriveCoordinator {
 
-    @Published var isSheetPresented: Bool = false
-    @Published private(set) var isDeriving: Bool = false
-    @Published private(set) var progress: Double = 0
-    @Published private(set) var stage: String = ""
-    @Published private(set) var derivedLUT: CubeLUT?
-    @Published private(set) var report: RecipeReport?
+    var isSheetPresented: Bool = false
+    private(set) var isDeriving: Bool = false
+    private(set) var progress: Double = 0
+    private(set) var stage: String = ""
+    private(set) var derivedLUT: CubeLUT?
+    private(set) var report: RecipeReport?
 
-    var onStatus: ((String) -> Void)?
-    var onError: ((String) -> Void)?
+    @ObservationIgnored var onStatus: ((String) -> Void)?
+    @ObservationIgnored var onError: ((String) -> Void)?
     /// Fired when a derive succeeds, so the app can preview the new look.
-    var onDerived: ((CubeLUT) -> Void)?
+    @ObservationIgnored var onDerived: ((CubeLUT) -> Void)?
     /// Where the Save panel should open, and what to re-scan afterwards.
-    var libraryFolder: (() -> URL?)?
+    @ObservationIgnored var libraryFolder: (() -> URL?)?
     /// Canonical app-owned fallback for a clean profile. Kept separate from `libraryFolder` so the
     /// existing testable/current-folder seam still reports whether the user selected a Look folder.
-    var canonicalLibraryFolder: (() -> URL?)?
+    @ObservationIgnored var canonicalLibraryFolder: (() -> URL?)?
     /// Called after a successful save so the sidebar picks the new file up.
-    var onSaved: ((URL) -> Void)?
+    @ObservationIgnored var onSaved: ((URL) -> Void)?
 
     /// The in-memory cube serialized to a temp .cube, so saving later is a
     /// single `FileManager.copy`. Cleared when a new derive starts.
-    private var scratchURL: URL?
+    @ObservationIgnored private var scratchURL: URL?
     /// Operation-owned directory holding `scratchURL`; nil for test-installed results.
-    private var scratchDirectory: URL?
+    @ObservationIgnored private var scratchDirectory: URL?
 
     /// Identity of the current operation. Bumped synchronously by `derive`, `dismiss` and
     /// `shutdown`, so any callback carrying an older value is stale and must not publish.
-    private var generation = 0
-    private var isShutdown = false
+    @ObservationIgnored private var generation = 0
+    @ObservationIgnored private var isShutdown = false
     /// Every worker not yet finished, including ones retired by `dismiss`, so `shutdown` can
     /// await them all.
-    private var workers: [Int: Task<Void, Never>] = [:]
+    @ObservationIgnored private var workers: [Int: Task<Void, Never>] = [:]
 
     /// The extraction seam. Production runs `RecipeExtractor.derive`; tests inject a controllable
     /// one. Parameters: RAW, JPG, progress, isCancelled.
@@ -55,8 +56,10 @@ final class DeriveCoordinator: ObservableObject {
         URL, URL, @escaping @Sendable (Double, String) -> Void, @escaping @Sendable () -> Bool
     ) throws -> RecipeExtractor.Result
 
-    private let extractor: Extractor
-    private let sheets: any SheetPresenting
+    @ObservationIgnored private let extractor: Extractor
+    @ObservationIgnored private let sheets: any SheetPresenting
+    /// Parent of the per-operation `KromoraDerive-*` directories; tests inject a private one.
+    @ObservationIgnored private let scratchRoot: URL
 
     init(
         extractor: @escaping Extractor = { raw, jpg, progress, isCancelled in
@@ -64,9 +67,11 @@ final class DeriveCoordinator: ObservableObject {
                 rawURL: raw, jpgURL: jpg, progress: progress, isCancelled: isCancelled
             )
         },
-        sheets: any SheetPresenting = AppKitSheetPresenter()
+        sheets: any SheetPresenting = AppKitSheetPresenter(),
+        scratchRoot: URL = FileManager.default.temporaryDirectory
     ) {
         self.extractor = extractor
+        self.scratchRoot = scratchRoot
         self.sheets = sheets
     }
 
@@ -161,6 +166,7 @@ final class DeriveCoordinator: ObservableObject {
         removeScratch()
 
         let extractor = self.extractor
+        let scratchRoot = self.scratchRoot
         workers[operation] = Task.detached {
             let outcome: Outcome
             var scratchDirectory: URL?
@@ -180,7 +186,7 @@ final class DeriveCoordinator: ObservableObject {
                 let name = Self.derivedName(forJPG: jpgURL, size: result.size)
                 // Operation-specific directory: a retired worker can never overwrite or delete
                 // the scratch file of the current one.
-                let directory = FileManager.default.temporaryDirectory
+                let directory = scratchRoot
                     .appendingPathComponent("KromoraDerive-\(UUID().uuidString)", isDirectory: true)
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
                 scratchDirectory = directory

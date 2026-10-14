@@ -122,7 +122,7 @@ final class EmbeddedFirstFrameTests: TempDirectoryTestCase {
         )
         XCTAssertNotNil(
             viewModel.sourceImage, "the transparent source marker remains authoritative")
-        XCTAssertNil(viewModel.histogram, "supporting work must wait for the settled confirmation")
+        XCTAssertNil(viewModel.info.histogram, "supporting work must wait for the settled confirmation")
         let thumbnailRequestCount = await fake.thumbnailRequests.count
         XCTAssertEqual(
             thumbnailRequestCount, 0,

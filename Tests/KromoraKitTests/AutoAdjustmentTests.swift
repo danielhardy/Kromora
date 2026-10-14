@@ -144,7 +144,7 @@ final class AutoAdjustmentTests: TempDirectoryTestCase {
         try await Task.sleep(for: .milliseconds(20))
 
         XCTAssertTrue(viewModel.canRunAutoAdjustment)
-        XCTAssertTrue(viewModel.isHistogramLoading)
+        XCTAssertTrue(viewModel.info.isHistogramLoading)
 
         await fake.releaseHistograms()
     }
@@ -250,8 +250,8 @@ final class AutoAdjustmentTests: TempDirectoryTestCase {
         let reader = FakeRenderEventReader(await fake.eventStream())
 
         viewModel.runAutoAdjustment()
-        XCTAssertEqual(viewModel.autoAdjustmentState, .analyzing)
-        XCTAssertEqual(viewModel.autoAdjustmentProgress, 0)
+        XCTAssertEqual(viewModel.autoLook.autoAdjustmentState, .analyzing)
+        XCTAssertEqual(viewModel.autoLook.autoAdjustmentProgress, 0)
         _ = try await TestSynchronization.nextEvent(from: reader, "Auto histogram request") {
             if case .histogramRequested = $0 { return true }
             return false
@@ -267,8 +267,8 @@ final class AutoAdjustmentTests: TempDirectoryTestCase {
         await viewModel.waitForAutoAdjustmentCompletion()
         XCTAssertTrue(viewModel.autoAdjustmentHelp.contains("could not analyze"))
         XCTAssertFalse(viewModel.isAutoAdjustmentInProgress)
-        XCTAssertNil(viewModel.autoAdjustmentProgress)
-        XCTAssertFalse(viewModel.isHistogramLoading)
+        XCTAssertNil(viewModel.autoLook.autoAdjustmentProgress)
+        XCTAssertFalse(viewModel.info.isHistogramLoading)
     }
 
     func testAnalysisShowsProgressWithoutBorrowingHistogramLoadingState() async throws {
@@ -279,9 +279,9 @@ final class AutoAdjustmentTests: TempDirectoryTestCase {
         let reader = FakeRenderEventReader(await fake.eventStream())
 
         viewModel.runAutoAdjustment()
-        XCTAssertEqual(viewModel.autoAdjustmentState, .analyzing)
-        XCTAssertEqual(viewModel.autoAdjustmentProgress, 0)
-        XCTAssertFalse(viewModel.isHistogramLoading)
+        XCTAssertEqual(viewModel.autoLook.autoAdjustmentState, .analyzing)
+        XCTAssertEqual(viewModel.autoLook.autoAdjustmentProgress, 0)
+        XCTAssertFalse(viewModel.info.isHistogramLoading)
         XCTAssertTrue(viewModel.autoAdjustmentHelp.contains("Analyzing"))
 
         _ = try await TestSynchronization.nextEvent(from: reader, "Auto histogram request") {
@@ -300,7 +300,7 @@ final class AutoAdjustmentTests: TempDirectoryTestCase {
         }
         await viewModel.waitForAutoAdjustmentCompletion()
         XCTAssertTrue(viewModel.statusMessage.hasPrefix("Auto applied"))
-        XCTAssertNil(viewModel.autoAdjustmentProgress)
+        XCTAssertNil(viewModel.autoLook.autoAdjustmentProgress)
         let requests = await fake.histogramRequests
         XCTAssertEqual(requests.last?.lutID, nil)
         XCTAssertTrue(requests.last?.document.light.isIdentity == true)
@@ -326,8 +326,8 @@ final class AutoAdjustmentTests: TempDirectoryTestCase {
 
         viewModel.cancelAutoAdjustment()
         XCTAssertFalse(viewModel.isAutoAdjustmentInProgress)
-        XCTAssertEqual(viewModel.autoAdjustmentState, .cancelled)
-        XCTAssertNil(viewModel.autoAdjustmentProgress)
+        XCTAssertEqual(viewModel.autoLook.autoAdjustmentState, .cancelled)
+        XCTAssertNil(viewModel.autoLook.autoAdjustmentProgress)
         await fake.releaseHistograms()
         _ = try await TestSynchronization.nextEvent(
             from: reader, "cancelled Auto histogram completion"

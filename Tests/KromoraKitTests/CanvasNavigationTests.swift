@@ -694,40 +694,37 @@ final class CanvasObservationTests: TempDirectoryTestCase {
             to: CGRect(x: 0, y: 0, width: 100, height: 80)
         )
 
-        var appChanges = 0
+        let probe = RootChangeProbe(viewModel)
         let inspectorChanges = OSAllocatedUnfairLock(initialState: 0)
-        let appSubscription = viewModel.objectWillChange.sink { _ in appChanges += 1 }
 
         // A wheel/pinch update is presentation-only and must not fan out through AppViewModel.
         // CanvasInteractionState is @Observable (KRMA-521): assert the value changed locally
         // while the broad model publisher stayed silent.
         let zoomBefore = viewModel.canvasState.navigation.zoom
         viewModel.setCanvasZoom(2)
-        XCTAssertEqual(appChanges, 0)
+        XCTAssertEqual(probe.count, 0)
         XCTAssertNotEqual(viewModel.canvasState.navigation.zoom, zoomBefore)
         XCTAssertEqual(viewModel.canvasState.navigation.zoom, 2)
 
         // Crop-handle movement has the same contract. The opening transition may update status,
         // so begin first and measure only the pointer-frequency draft mutation.
         viewModel.beginCrop()
-        appChanges = 0
+        probe.reset()
         viewModel.updateCropDraft(CGRect(x: 0.1, y: 0.1, width: 0.7, height: 0.7))
-        XCTAssertEqual(appChanges, 0)
+        XCTAssertEqual(probe.count, 0)
         XCTAssertNotNil(viewModel.canvasState.cropDraft)
 
         // Inspector chrome is independently observable and is not forwarded through the broad
         // model publisher either.
-        appChanges = 0
+        probe.reset()
         withObservationTracking {
             _ = viewModel.inspectorState.tab
         } onChange: {
             inspectorChanges.withLock { $0 += 1 }
         }
         viewModel.inspectorState.tab = .effects
-        XCTAssertEqual(appChanges, 0)
+        XCTAssertEqual(probe.count, 0)
         XCTAssertGreaterThan(inspectorChanges.withLock { $0 }, 0)
-
-        withExtendedLifetime(appSubscription) {}
     }
 
     func testSourceResetClearsNavigationAndCropTransientState() {

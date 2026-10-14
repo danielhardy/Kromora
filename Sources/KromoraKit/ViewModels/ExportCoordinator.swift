@@ -28,7 +28,7 @@ import Darwin
 ///
 /// Migrated to Observation (KRMA-521): batch progress publishes through this object's own
 /// boundary. The status bar observes the coordinator directly through `@Bindable` so export
-/// progress never passes through AppViewModel's former objectWillChange fan-in.
+/// progress never passes through AppViewModel's former root notification fan-in.
 @MainActor
 @Observable
 final class ExportCoordinator {

@@ -4,7 +4,7 @@ import SwiftUI
 /// and single-image mode. Hold Space to flash original in single mode.
 struct PreviewView: View {
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
-    @ObservedObject var viewModel: AppViewModel
+    let viewModel: AppViewModel
     @Bindable var canvasState: CanvasInteractionState
     // The preview image is owned by a separate observation boundary. Keep observing it even while
     // the spinner is on screen; otherwise a completed replacement render can sit in the surface
@@ -17,17 +17,17 @@ struct PreviewView: View {
     @State private var isCaptureOverlayVisible = false
     private let maskingState: MaskInteractionState
     private let retouchState: RetouchInteractionState
-    @ObservedObject private var settings: KromoraSettings
+    private let settings: KromoraSettings
 
     init(viewModel: AppViewModel, surfaceHeight: CGFloat? = nil) {
         self.surfaceHeight = surfaceHeight
-        _viewModel = ObservedObject(wrappedValue: viewModel)
+        self.viewModel = viewModel
         _canvasState = Bindable(wrappedValue: viewModel.canvasState)
         previewSurface = viewModel.previewSurface
         originalPreviewSurface = viewModel.originalPreviewSurface
         maskingState = viewModel.maskInteractionState
         retouchState = viewModel.retouchInteractionState
-        _settings = ObservedObject(wrappedValue: viewModel.settings)
+        settings = viewModel.settings
     }
 
     private var maskOverlayBackingScale: CGFloat {
@@ -113,12 +113,12 @@ struct PreviewView: View {
                 !isPreviewLoading,
                 !canvasState.isCropToolActive,
                 isCaptureOverlayVisible,
-                !viewModel.metadata.captureOverlayRows.isEmpty
+                !viewModel.info.metadata.captureOverlayRows.isEmpty
             {
                 VStack {
                     Spacer()
                     HStack {
-                        CaptureMetadataOverlay(rows: viewModel.metadata.captureOverlayRows)
+                        CaptureMetadataOverlay(rows: viewModel.info.metadata.captureOverlayRows)
                         Spacer(minLength: 0)
                     }
                 }
@@ -127,7 +127,7 @@ struct PreviewView: View {
             }
 
             if previewSurface.image != nil, !isPreviewLoading, settings.showClippingAlerts,
-               !canvasState.isCropToolActive, let histogram = viewModel.histogram,
+               !canvasState.isCropToolActive, let histogram = viewModel.info.histogram,
                histogram.clippedHighlights + histogram.clippedShadows > 0 {
                 VStack {
                     HStack(spacing: 8) {
@@ -161,7 +161,7 @@ struct PreviewView: View {
             }
         }
         .overlay(alignment: .bottom) {
-            if viewModel.statusMessage.hasPrefix("Exported") {
+            if viewModel.status.message.hasPrefix("Exported") {
                 HStack(spacing: 12) {
                     Label("Export complete", systemImage: "checkmark.circle.fill")
                     Button("Export another…") { viewModel.shareDialog() }
@@ -181,7 +181,7 @@ struct PreviewView: View {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 28, weight: .thin))
                 .foregroundStyle(.secondary.opacity(0.7))
-            Text(viewModel.statusMessage)
+            Text(viewModel.status.message)
                 .font(.caption)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
@@ -356,7 +356,7 @@ struct PreviewView: View {
                 onMagnify: { factor, point, viewportSize in
                     viewModel.zoomCanvas(by: factor, at: point, viewportSize: viewportSize)
                 },
-                isWhiteBalanceSampling: viewModel.isWhiteBalanceSampling && showsMaskOverlay,
+                isWhiteBalanceSampling: viewModel.whiteBalance.isSampling && showsMaskOverlay,
                 onWhiteBalanceSamplePoint: { point, viewportSize, commit in
                     viewModel.updateWhiteBalanceSample(
                         at: point, viewportSize: viewportSize, commit: commit)
@@ -426,29 +426,8 @@ struct PreviewView: View {
                     )
                 }
 
-                if showsMaskOverlay, viewModel.isWhiteBalanceSampling,
-                    let point = viewModel.whiteBalanceSamplerPoint,
-                    let image = viewModel.whiteBalanceLoupeImage
-                {
-                    Image(decorative: image, scale: 1)
-                        .resizable()
-                        .interpolation(.none)
-                        .frame(width: 132, height: 132)
-                        .clipShape(Circle())
-                        .overlay { Circle().strokeBorder(.white, lineWidth: 2) }
-                        .overlay {
-                            Image(systemName: "plus")
-                                .font(.system(size: 18, weight: .regular))
-                                .foregroundStyle(.white)
-                                .shadow(color: .black.opacity(0.8), radius: 2)
-                        }
-                        .shadow(radius: 5)
-                        .allowsHitTesting(false)
-                        .position(
-                            x: min(max(point.x + 78, 72), geometry.size.width - 72),
-                            y: min(max(point.y - 78, 72), geometry.size.height - 72)
-                        )
-                        .accessibilityLabel("White balance sampling loupe")
+                if showsMaskOverlay {
+                    WhiteBalanceLoupeOverlay(state: viewModel.whiteBalance, viewportSize: geometry.size)
                 }
             }
         }
@@ -534,5 +513,36 @@ struct ComparisonBadge: View {
             .padding(.vertical, 5)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
             .foregroundColor(.primary)
+    }
+}
+
+/// The sampler loupe. It is the only reader of the pointer-rate point and image, so a pointer move
+/// re-evaluates this view and not `PreviewView`.
+private struct WhiteBalanceLoupeOverlay: View {
+    let state: WhiteBalanceSamplerState
+    let viewportSize: CGSize
+
+    var body: some View {
+        if state.isSampling, let point = state.samplerPoint, let image = state.loupeImage {
+            Image(decorative: image, scale: 1)
+                .resizable()
+                .interpolation(.none)
+                .frame(width: 132, height: 132)
+                .clipShape(Circle())
+                .overlay { Circle().strokeBorder(.white, lineWidth: 2) }
+                .overlay {
+                    Image(systemName: "plus")
+                        .font(.system(size: 18, weight: .regular))
+                        .foregroundStyle(.white)
+                        .shadow(color: .black.opacity(0.8), radius: 2)
+                }
+                .shadow(radius: 5)
+                .allowsHitTesting(false)
+                .position(
+                    x: min(max(point.x + 78, 72), viewportSize.width - 72),
+                    y: min(max(point.y - 78, 72), viewportSize.height - 72)
+                )
+                .accessibilityLabel("White balance sampling loupe")
+        }
     }
 }

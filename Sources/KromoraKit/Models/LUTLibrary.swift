@@ -1,9 +1,10 @@
 import Foundation
-import Combine
+import Observation
 
 /// Manages discovered and explicitly imported LUT files, scanning and grouping by subfolder.
 @MainActor
-final class LUTLibrary: ObservableObject {
+@Observable
+final class LUTLibrary {
     private struct ImportedAccess {
         let url: URL
         let access: SecurityScopedResourceAccess
@@ -54,18 +55,18 @@ final class LUTLibrary: ObservableObject {
         return left.localizedStandardCompare(right) == .orderedAscending
     }
 
-    @Published var categories: [Category] = []
-    @Published var allLUTs: [CubeLUT] = []
-    @Published var folderURL: URL?
-    @Published var scanError: String?
+    var categories: [Category] = []
+    var allLUTs: [CubeLUT] = []
+    var folderURL: URL?
+    var scanError: String?
     /// True while a folder scan is running. Drives the sidebar's progress hint.
-    @Published var isScanning: Bool = false
+    var isScanning: Bool = false
     /// True while one or more explicitly imported files are being parsed.
-    @Published var isImporting: Bool = false
+    var isImporting: Bool = false
 
     /// Import failures are kept separate from folder-scan failures so one malformed external file
     /// does not blank a healthy Look folder.
-    @Published var importError: String?
+    var importError: String?
 
     /// The two product-facing collections are projections of the canonical category browser.
     /// Keeping the folder categories underneath preserves folder scans and older integrations,
@@ -125,11 +126,11 @@ final class LUTLibrary: ObservableObject {
     private(set) var libraryRevision: UInt64 = 0
     /// Number of times the starter-category projection was rebuilt. Test-only diagnostics;
     /// production code must read the memoized accessors, not this counter.
-    private(set) var projectionRebuildCount = 0
-    private var cachedStarterCategories: (revision: UInt64, value: [Category])?
-    private var cachedStarterLooks: (revision: UInt64, value: [CubeLUT])?
-    private var cachedMyLooks: (revision: UInt64, value: [CubeLUT])?
-    private var cachedLookCollections: (revision: UInt64, value: [LookCollection])?
+    @ObservationIgnored private(set) var projectionRebuildCount = 0
+    @ObservationIgnored private var cachedStarterCategories: (revision: UInt64, value: [Category])?
+    @ObservationIgnored private var cachedStarterLooks: (revision: UInt64, value: [CubeLUT])?
+    @ObservationIgnored private var cachedMyLooks: (revision: UInt64, value: [CubeLUT])?
+    @ObservationIgnored private var cachedLookCollections: (revision: UInt64, value: [LookCollection])?
 
     /// Content hashes of every Look the browser holds, refreshed by each publish. A value snapshot
     /// rather than a live query, so an owner can diff two of them without racing a scan.
@@ -147,15 +148,15 @@ final class LUTLibrary: ObservableObject {
     /// `restoreFolder`, and the rescan after a save — instead of relying on the next person to
     /// remember. The library stays ignorant of the renderer, which is why this is a closure the owner
     /// wires rather than an engine reference held here.
-    var onScanned: ((LookLibraryDelta) -> Void)?
+    @ObservationIgnored var onScanned: ((LookLibraryDelta) -> Void)?
     /// Fired after a valid external file has joined the canonical Look browser.
-    var onImported: ((CubeLUT) -> Void)?
+    @ObservationIgnored var onImported: ((CubeLUT) -> Void)?
     /// Fired when an explicit import cannot be read or parsed.
-    var onImportError: ((String) -> Void)?
+    @ObservationIgnored var onImportError: ((String) -> Void)?
 
     /// Non-fatal diagnostics from the bundled starter resource loader. A damaged starter entry is
     /// omitted, but these diagnostics never replace a healthy user library.
-    @Published private(set) var bundledLoadWarnings: [String]
+    private(set) var bundledLoadWarnings: [String]
 
     /// The acknowledgement text shown in the Look inspector and sourced from the bundled manifest.
     let bundledAcknowledgement: String
@@ -170,21 +171,21 @@ final class LUTLibrary: ObservableObject {
 
     /// Folder whose security scope we hold open, so it can be released when we
     /// move to a different folder or the library goes away.
-    private var scopedAccess: SecurityScopedResourceAccess?
-    private var scanTask: Task<Void, Never>?
-    private var importTask: Task<Void, Never>?
-    private var scannedCategories: [Category] = []
-    private let bundledCategories: [Category]
-    private var importedSourceURLs: [URL] = []
-    private var importedLUTs: [CubeLUT] = []
-    private var importedAccesses: [ImportedAccess] = []
+    @ObservationIgnored private var scopedAccess: SecurityScopedResourceAccess?
+    @ObservationIgnored private var scanTask: Task<Void, Never>?
+    @ObservationIgnored private var importTask: Task<Void, Never>?
+    @ObservationIgnored private var scannedCategories: [Category] = []
+    @ObservationIgnored private let bundledCategories: [Category]
+    @ObservationIgnored private var importedSourceURLs: [URL] = []
+    @ObservationIgnored private var importedLUTs: [CubeLUT] = []
+    @ObservationIgnored private var importedAccesses: [ImportedAccess] = []
 
     /// The app-owned home for user-created/imported Looks. A user-selected folder may still be
     /// browsed through `setFolder`, but saved Looks have one stable destination supplied here.
     let userLookFolderURL: URL
     /// Explicit product-facing spelling for callers that need the canonical storage location.
     var canonicalUserLookFolderURL: URL { userLookFolderURL }
-    private let preferences: UserDefaults
+    @ObservationIgnored private let preferences: UserDefaults
 
     init(
         preferences: UserDefaults = .standard,

@@ -4,7 +4,7 @@ import AppKit
 /// Horizontal thumbnail strip for browsing imported images.
 struct FilmstripView: View {
     @Bindable var collection: ImageCollection
-    @ObservedObject var settings: KromoraSettings
+    let settings: KromoraSettings
     let onSelect: (Int, LibrarySelectionModel.Modifiers) -> Void
 
     var body: some View {
@@ -90,7 +90,7 @@ enum FilmstripLayout {
 
 struct FilmstripThumbnail: View {
     @Bindable var item: ImageCollection.Item
-    @ObservedObject var settings: KromoraSettings
+    let settings: KromoraSettings
     let isSelected: Bool
 
     var body: some View {

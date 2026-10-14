@@ -6,7 +6,7 @@ import AppKit
 /// choosing files and explicitly adding them to the library.
 struct RemovableMediaSelectorView: View {
     let viewModel: AppViewModel
-    @ObservedObject var media: LibraryMediaWorkflowCoordinator
+    @Bindable var media: LibraryMediaWorkflowCoordinator
 
     private var isFolder: Bool { media.importSource == .folder }
 

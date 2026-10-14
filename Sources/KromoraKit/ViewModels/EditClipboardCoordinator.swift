@@ -1,5 +1,5 @@
-import Combine
 import Foundation
+import Observation
 
 /// Value snapshot of a selected destination; source classification stays at the library adapter.
 struct EditClipboardTarget: Sendable {
@@ -29,16 +29,17 @@ protocol EditClipboardDestination: AnyObject {
 /// Owns clipboard values, selective-copy presentation/preferences, and single/batch paste routing.
 /// Sessions and undo remain in `EditorDocumentCoordinator`; active edits always use updateDocument.
 @MainActor
-final class EditClipboardCoordinator: ObservableObject {
-    @Published private(set) var clipboard: EditClipboardPayload?
-    @Published private(set) var clipboardCategories: Set<EditClipboardPayload.Category> =
+@Observable
+final class EditClipboardCoordinator {
+    private(set) var clipboard: EditClipboardPayload?
+    private(set) var clipboardCategories: Set<EditClipboardPayload.Category> =
         Set(EditClipboardPayload.Category.allCases)
-    @Published var isSelectiveCopyDialogPresented = false
-    @Published var selectiveCopyCategories: Set<EditClipboardPayload.Category>
+    var isSelectiveCopyDialogPresented = false
+    var selectiveCopyCategories: Set<EditClipboardPayload.Category>
 
-    weak var destination: (any EditClipboardDestination)?
-    private let editor: EditorDocumentCoordinator
-    private let settings: KromoraSettings
+    @ObservationIgnored weak var destination: (any EditClipboardDestination)?
+    @ObservationIgnored private let editor: EditorDocumentCoordinator
+    @ObservationIgnored private let settings: KromoraSettings
 
     init(
         editor: EditorDocumentCoordinator,

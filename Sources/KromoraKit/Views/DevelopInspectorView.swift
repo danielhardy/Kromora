@@ -17,7 +17,7 @@ import SwiftUI
 /// rather than here: this repo has no SwiftUI view tests, so a state that exists only inside a
 /// `ViewBuilder` cannot be asserted.
 struct DevelopInspectorView: View {
-    @ObservedObject var viewModel: AppViewModel
+    let viewModel: AppViewModel
 
     var body: some View {
         Group {

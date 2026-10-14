@@ -176,7 +176,7 @@ extension AppViewModel {
     // MARK: - White balance
 
     func applyWhiteBalancePreset(_ preset: WhiteBalancePreset) {
-        guard !sourceIsRAW || rawCapabilities != nil else { return }
+        guard !sourceIsRAW || capabilities.rawCapabilities != nil else { return }
         cancelWhiteBalanceSampling()
         switch preset {
         case .asShot:
@@ -200,22 +200,18 @@ extension AppViewModel {
     }
 
     func beginWhiteBalanceSampling() {
-        guard sourceImage != nil, (!sourceIsRAW || rawCapabilities != nil) else { return }
-        isWhiteBalanceSampling = true
-        whiteBalanceSamplerPoint = nil
-        whiteBalanceLoupeImage = nil
+        guard sourceImage != nil, (!sourceIsRAW || capabilities.rawCapabilities != nil) else { return }
+        whiteBalance.begin()
     }
 
     func cancelWhiteBalanceSampling() {
-        isWhiteBalanceSampling = false
-        whiteBalanceSamplerPoint = nil
-        whiteBalanceLoupeImage = nil
+        whiteBalance.end()
     }
 
     /// The sampler's fixed 11 × 11 display-pixel square is averaged on the currently rendered
     /// preview. That makes the visible loupe and the committed correction refer to the same edit.
     func updateWhiteBalanceSample(at point: CGPoint, viewportSize: CGSize, commit: Bool) {
-        guard isWhiteBalanceSampling,
+        guard whiteBalance.isSampling,
               let image = previewSurface.image,
               let virtualExtent = previewSurface.presentationImageExtent,
               viewportSize.width > 0, viewportSize.height > 0
@@ -231,8 +227,7 @@ extension AppViewModel {
         let localX = imagePointX / layoutExtent.width
         let localY = imagePointY / layoutExtent.height
         guard localX >= 0, localX <= 1, localY >= 0, localY <= 1 else {
-            whiteBalanceSamplerPoint = nil
-            whiteBalanceLoupeImage = nil
+            whiteBalance.clearSample()
             return
         }
         let center = CGPoint(
@@ -249,8 +244,8 @@ extension AppViewModel {
         guard let values = whiteBalanceSampleValues(
             from: sampleRect, image: image, loupeSide: sampleSide * 3
         ) else { return }
-        whiteBalanceSamplerPoint = point
-        whiteBalanceLoupeImage = values.loupe
+        whiteBalance.samplerPoint = point
+        whiteBalance.loupeImage = values.loupe
         if commit {
             commitWhiteBalanceSample(values)
             cancelWhiteBalanceSampling()

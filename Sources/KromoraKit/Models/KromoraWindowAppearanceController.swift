@@ -1,5 +1,4 @@
 import AppKit
-import Combine
 
 /// The app-shell appearance requested by the user. `.system` deliberately maps to no
 /// window override so AppKit can follow the current macOS appearance.
@@ -44,11 +43,10 @@ public final class AppKitWindowAppearanceController {
     private let settings: KromoraSettings
     private let windowProvider: @MainActor () -> [NSWindow]
     private let applicationAppearanceApplier: @MainActor (NSAppearance?) -> Void
-    /// The incoming publisher value is authoritative while `@Published` is in its `willSet`
-    /// phase. Keeping it separately prevents a later window notification from re-reading the
-    /// stale property and reapplying the previous mode during a transition.
+    /// The value delivered by the setter callback is authoritative. Keeping it separately prevents
+    /// a later window notification from reapplying a stale mode during a transition.
     private var desiredMode: KromoraAppearanceMode
-    private var settingsCancellable: AnyCancellable?
+    private var isStarted = false
     private var windowObservers: [NSObjectProtocol] = []
 
     public init(
@@ -67,21 +65,17 @@ public final class AppKitWindowAppearanceController {
     /// Begin observing the preference and newly presented windows. Calling this more than
     /// once is harmless, which keeps app launch and test setup idempotent.
     public func start() {
-        guard settingsCancellable == nil else { return }
+        guard !isStarted else { return }
 
-        // Subscribe to the value rather than `objectWillChange`. The latter only says that some
-        // setting is changing, and the previous implementation had to enqueue another main-actor
-        // task before it could read the new value. That makes an already-open window visibly lag
-        // behind the Settings toggle when the main actor is busy. `@Published` sends the incoming
-        // value while its property is changing, so use that value directly instead of reading the
-        // still-old stored property.
-        settingsCancellable = settings.$appearanceMode
-            .dropFirst()
-            .sink { [weak self] mode in
-                guard let self else { return }
-                self.desiredMode = mode
-                self.applyAppearance(mode: mode, includesApplication: true)
-            }
+        // Take the value from the setter callback rather than observing the object. The callback
+        // runs synchronously inside the assignment, so an already-open window cannot lag behind
+        // the Settings toggle while the main actor is busy.
+        isStarted = true
+        settings.onAppearanceModeChange = { [weak self] mode in
+            guard let self else { return }
+            self.desiredMode = mode
+            self.applyAppearance(mode: mode, includesApplication: true)
+        }
 
         let notificationCenter = NotificationCenter.default
         for name in [
@@ -105,8 +99,8 @@ public final class AppKitWindowAppearanceController {
     /// deinitializers are nonisolated, while NotificationCenter and AppKit require main-actor
     /// access.
     public func stop() {
-        settingsCancellable?.cancel()
-        settingsCancellable = nil
+        settings.onAppearanceModeChange = nil
+        isStarted = false
         for observer in windowObservers {
             NotificationCenter.default.removeObserver(observer)
         }

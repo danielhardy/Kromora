@@ -295,14 +295,18 @@ final class DeriveCoordinatorTests: TempDirectoryTestCase {
          try Fixtures.writeJPEG(width: 16, height: 16, orientation: 1, named: "a.jpg", in: tempDirectory))
     }
 
+    /// Private scratch root per test, so concurrent tests' `KromoraDerive-*` output is invisible here.
+    private var scratchRoot: URL { tempDirectory.appendingPathComponent("scratch", isDirectory: true) }
+
     private func scratchDirectories() throws -> [String] {
-        try FileManager.default.contentsOfDirectory(atPath: FileManager.default.temporaryDirectory.path)
+        try FileManager.default.createDirectory(at: scratchRoot, withIntermediateDirectories: true)
+        return try FileManager.default.contentsOfDirectory(atPath: scratchRoot.path)
             .filter { $0.hasPrefix("KromoraDerive-") }
     }
 
     func testStaleSuccessAfterDismissDoesNotPublish() async throws {
         let script = Script()
-        let coordinator = DeriveCoordinator(extractor: script.extractor)
+        let coordinator = DeriveCoordinator(extractor: script.extractor, scratchRoot: scratchRoot)
         var derived = 0, errors = 0
         coordinator.onDerived = { _ in derived += 1 }
         coordinator.onError = { _ in errors += 1 }

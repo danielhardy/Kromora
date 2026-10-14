@@ -7,25 +7,26 @@ import UniformTypeIdentifiers
 /// writing never call back into `AppViewModel`, so cancellation or failure cannot touch the active
 /// document or its undo history. A successful save only publishes a file for the Look browser.
 @MainActor
-final class LookSaveCoordinator: ObservableObject {
-    @Published var isSheetPresented = false
-    @Published private(set) var isConverting = false
-    @Published private(set) var conversion: LookLUTConversion?
-    @Published var name = ""
-    @Published var allowsApproximateSave = false
-    @Published private(set) var saveError: String?
+@Observable
+final class LookSaveCoordinator {
+    var isSheetPresented = false
+    private(set) var isConverting = false
+    private(set) var conversion: LookLUTConversion?
+    var name = ""
+    var allowsApproximateSave = false
+    private(set) var saveError: String?
 
-    var onStatus: ((String) -> Void)?
-    var onError: ((String) -> Void)?
-    var onSaved: ((URL) -> Void)?
-    var libraryFolder: (() -> URL?)?
+    @ObservationIgnored var onStatus: ((String) -> Void)?
+    @ObservationIgnored var onError: ((String) -> Void)?
+    @ObservationIgnored var onSaved: ((URL) -> Void)?
+    @ObservationIgnored var libraryFolder: (() -> URL?)?
     /// Canonical app-owned fallback used when the user has not selected an external Look folder.
-    var canonicalLibraryFolder: (() -> URL?)?
+    @ObservationIgnored var canonicalLibraryFolder: (() -> URL?)?
 
-    private var document = EditDocument()
-    private var lut: CubeLUT?
-    private var conversionTask: Task<Void, Never>?
-    private let sheets: any SheetPresenting
+    @ObservationIgnored private var document = EditDocument()
+    @ObservationIgnored private var lut: CubeLUT?
+    @ObservationIgnored private var conversionTask: Task<Void, Never>?
+    @ObservationIgnored private let sheets: any SheetPresenting
 
     init(sheets: any SheetPresenting = AppKitSheetPresenter()) {
         self.sheets = sheets
