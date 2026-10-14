@@ -16,12 +16,10 @@ final class ObservationInvalidationTests: TempDirectoryTestCase {
 
     func testNoTaskPerChildNotificationRemains() {
         // High-frequency children are @Observable and observed directly via `@Bindable`;
-        // they must never pass through AppViewModel fan-in. Low-frequency ObservableObject
-        // children (editor document, edit clipboard)
-        // are still consumed via `viewModel.*` until their views hold them directly, so they
-        // forward synchronously with `objectWillChange.send()` in the same turn — never via
-        // a Task, which had incorrect will-change timing. Assert the composition root exposes
-        // the isolated children that views must observe directly.
+        // they must never pass through AppViewModel fan-in. Clipboard presentation observes its
+        // coordinator directly, while EditorDocumentCoordinator is plain value state. Assert
+        // the composition root still exposes the children that need direct observation without
+        // introducing another owner.
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         XCTAssertNotNil(viewModel.collection as Any)
         XCTAssertNotNil(viewModel.photosImportCoordinator as Any)
