@@ -4263,6 +4263,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
     /// has chosen Quit Without Saving; ordinary edits and failed flushes leave snapshots dirty.
     public func discardPendingWrites() async {
         await persistence.discard()
+        await portableLibrary?.discardPendingLibraryState()
     }
 
     /// Cancel all work owned by this testable application model and wait until its collaborators

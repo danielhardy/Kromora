@@ -268,6 +268,32 @@ final class CullingStateBatchWriteTests: TempDirectoryTestCase {
         await session.shutdown()
     }
 
+    func testDiscardPendingWritesDoesNotRetryFailedCullingChangesOnShutdown() async throws {
+        let (session, _, ids) = try makeSession(assetCount: 1)
+        let viewModel = makeAppViewModel(portableLibrarySession: session)
+        let shard = PortableLibraryPackage.shard(for: ids[0])
+        let initial = try XCTUnwrap(
+            try session.package.readMembershipShard(shard).entries
+                .first { $0.assetID == ids[0] }
+        ).summary
+        let repair = try corruptShard(session, shard)
+        session.enqueueLibraryStateUpdates(updates(ids, rating: 4, flag: .pick)) { _ in }
+
+        let failed = await viewModel.flushPendingWrites()
+        guard case .failure = failed else {
+            return XCTFail("expected the failed culling write to block a clean quit")
+        }
+
+        try repair()
+        await viewModel.discardPendingWrites()
+        await viewModel.shutdown()
+
+        let stored = try session.package.readMembershipShard(shard).entries
+            .first { $0.assetID == ids[0] }
+        XCTAssertEqual(stored?.summary.rating, initial.rating)
+        XCTAssertEqual(stored?.summary.flag, initial.flag)
+    }
+
     func testNewerIntentReplacesFailedValue() async throws {
         let (session, _, ids) = try makeSession(assetCount: 1)
         let shard = PortableLibraryPackage.shard(for: ids[0])

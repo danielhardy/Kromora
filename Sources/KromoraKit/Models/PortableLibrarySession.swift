@@ -1883,6 +1883,16 @@ final class PortableLibrarySession {
         return .failure("Kromora could not save \(unsaved) \(noun) to the library.")
     }
 
+    /// Abandons culling changes after the user chooses Quit Without Saving. Wait for an active
+    /// write to settle first so its completion cannot restore a failed batch after it is cleared.
+    func discardPendingLibraryState() async {
+        if isDrainingLibraryState {
+            await withCheckedContinuation { libraryStateIdleWaiters.append($0) }
+        }
+        pendingLibraryStateUpdates.removeAll()
+        failedLibraryStateUpdates.removeAll()
+    }
+
     private func startLibraryStateDrain() {
         // Retry earlier failures with this drain; anything newer already in the queue wins.
         for (assetID, update) in failedLibraryStateUpdates
