@@ -396,6 +396,118 @@ final class PortablePackageTransactionTests: TempDirectoryTestCase {
         try replacement.release()
     }
 
+    private func makeOldStateAndStagedTransaction(
+        packageURL: URL, lease: PortablePackageLease
+    ) throws -> (state: URL, transaction: OSAllocatedUnfairLock<PortablePackageTransaction>) {
+        let stateURL = packageURL.appendingPathComponent("State/value.txt")
+        try FileManager.default.createDirectory(
+            at: stateURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("old".utf8).write(to: stateURL)
+        var transaction = try PortablePackageTransaction.begin(
+            at: packageURL, lease: lease, now: now)
+        try transaction.stage(data: Data("new".utf8), at: "State/value.txt")
+        return (stateURL, OSAllocatedUnfairLock(initialState: transaction))
+    }
+
+    /// A commit paused after its ownership check holds the fence: racing recovery contends without
+    /// touching the writer, journal or staging, and the commit then publishes normally.
+    func testCommitPausedAfterOwnershipCheckMakesRacingRecoveryContend() throws {
+        let packageURL = try makePackage()
+        let lease = try acquireRemoteLease(at: packageURL, duration: 10)
+        let (stateURL, transaction) = try makeOldStateAndStagedTransaction(
+            packageURL: packageURL, lease: lease)
+        let later = now.addingTimeInterval(11)
+        let commitTime = now
+        let journalDirectory = packageURL.appendingPathComponent("Recovery/Transactions")
+        let paused = DispatchSemaphore(value: 0)
+        let resume = DispatchSemaphore(value: 0)
+        let firstStep = OSAllocatedUnfairLock(initialState: true)
+        let committed = expectation(description: "commit finished")
+
+        DispatchQueue.global().async {
+            // Validate against a time inside the lease; recovery below observes it expired.
+            try? transaction.withLock { try $0.commit(now: commitTime, afterOwnershipCheck: {
+                let first = firstStep.withLock { isFirst -> Bool in
+                    defer { isFirst = false }
+                    return isFirst
+                }
+                if first {
+                    paused.signal()
+                    resume.wait()
+                }
+            }) }
+            committed.fulfill()
+        }
+        paused.wait()
+
+        let lockBefore = try Data(contentsOf: packageURL.appendingPathComponent("manifest.lock"))
+        XCTAssertThrowsError(
+            try PortablePackageLease.recoverExpiredWriter(at: packageURL, now: later)
+        ) {
+            guard case .contended(let holder) = $0 as? PortablePackageLeaseError else {
+                return XCTFail("expected contention with in-flight commit, got \($0)")
+            }
+            XCTAssertEqual(holder.ownerID, lease.ownerID)
+        }
+        XCTAssertEqual(
+            try Data(contentsOf: packageURL.appendingPathComponent("manifest.lock")), lockBefore)
+        XCTAssertEqual(Self.journalCount(journalDirectory), 1)
+        XCTAssertEqual(Self.stagingCount(packageURL), 1)
+        XCTAssertEqual(try String(contentsOf: stateURL, encoding: .utf8), "old")
+
+        resume.signal()
+        wait(for: [committed], timeout: 10)
+        XCTAssertEqual(try String(contentsOf: stateURL, encoding: .utf8), "new")
+        XCTAssertEqual(Self.journalCount(journalDirectory), 0)
+        XCTAssertEqual(Self.stagingCount(packageURL), 0)
+        XCTAssertEqual(PortablePackageLease.existingInfo(at: packageURL)?.ownerID, lease.ownerID)
+    }
+
+    /// Recovery wins first: a commit that starts during takeover waits on the fence, then fails its
+    /// ownership check without publishing or recreating any transaction state.
+    func testStaleCommitCannotPublishOrRecreateJournalAfterRecoveryTakesOver() throws {
+        let packageURL = try makePackage()
+        let lease = try acquireRemoteLease(at: packageURL, duration: 10)
+        let (stateURL, transaction) = try makeOldStateAndStagedTransaction(
+            packageURL: packageURL, lease: lease)
+        let later = now.addingTimeInterval(11)
+        let commitTime = now
+        let journalDirectory = packageURL.appendingPathComponent("Recovery/Transactions")
+        let paused = DispatchSemaphore(value: 0)
+        let resume = DispatchSemaphore(value: 0)
+        let recovered = expectation(description: "recovery finished")
+        let commitResult = OSAllocatedUnfairLock<Result<Void, Error>?>(initialState: nil)
+        let commitDone = expectation(description: "stale commit finished")
+
+        DispatchQueue.global().async {
+            try? PortablePackageLease.recoverExpiredWriter(at: packageURL, now: later) {
+                paused.signal()
+                resume.wait()
+            }
+            recovered.fulfill()
+        }
+        paused.wait()
+        DispatchQueue.global().async {
+            let result = Result { try transaction.withLock { try $0.commit(now: commitTime) } }
+            commitResult.withLock { $0 = result }
+            commitDone.fulfill()
+        }
+        Thread.sleep(forTimeInterval: 0.2)
+        XCTAssertNil(commitResult.withLock { $0 }, "commit must wait on the recovery fence")
+
+        resume.signal()
+        wait(for: [recovered, commitDone], timeout: 10)
+        guard case .failure(let error)? = commitResult.withLock({ $0 }) else {
+            return XCTFail("stale commit must not succeed")
+        }
+        XCTAssertEqual(error as? PortablePackageLeaseError, .lostDuringSession)
+        XCTAssertEqual(try String(contentsOf: stateURL, encoding: .utf8), "old")
+        XCTAssertEqual(Self.journalCount(journalDirectory), 0)
+        XCTAssertEqual(Self.stagingCount(packageURL), 0)
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: packageURL.appendingPathComponent("manifest.lock").path))
+    }
+
     func testRecoveryFailureRestoresLockJournalAndStagingThenRetrySucceeds() throws {
         let packageURL = try makePackage()
         let lease = try acquireRemoteLease(at: packageURL, duration: 10)

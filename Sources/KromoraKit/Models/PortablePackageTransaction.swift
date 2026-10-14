@@ -466,6 +466,26 @@ final class PortablePackageLease: Sendable {
         }
     }
 
+    /// Runs `body` with ownership validated and the package fence held throughout, so expired
+    /// recovery cannot take over between the check and the mutations in `body`. A transaction that
+    /// obtains the fence first makes recovery back off with contention; one that finds recovery
+    /// already finished fails the ownership check and mutates nothing. Waiting is bounded by the
+    /// duration of one recovery or one publication step. `afterOwnershipCheck` is a test seam.
+    func withOwnershipFence<T>(
+        at date: Date,
+        faultInjector: PortablePackageFaultInjector? = nil,
+        afterOwnershipCheck: @Sendable () throws -> Void = {},
+        _ body: () throws -> T
+    ) throws -> T {
+        try fenceGate.withLock {
+            try Self.withFence(at: packageRoot, blocking: true) {
+                try assertOwnership(at: date, faultInjector: faultInjector)
+                try afterOwnershipCheck()
+                return try body()
+            }
+        }
+    }
+
     func assertOwnership(
         at date: Date = Date(),
         faultInjector: PortablePackageFaultInjector? = nil
@@ -964,16 +984,25 @@ struct PortablePackageTransaction {
         cleanupCommittedArtifacts()
     }
 
+    /// Every journal write and publication move below runs inside `lease.withOwnershipFence`, so
+    /// expired recovery either waits for the step to finish (and then contends) or has already
+    /// taken over, in which case the ownership check fails before this writer touches the package.
+    /// `afterOwnershipCheck` is a test seam that runs inside each fenced step after validation.
     mutating func commit(
-        now: Date = Date(), isCancelled: @Sendable () -> Bool = { false }
+        now: Date = Date(),
+        isCancelled: @Sendable () -> Bool = { false },
+        afterOwnershipCheck: @Sendable () throws -> Void = {}
     ) throws {
         guard journal.state != .committed else {
             throw PortablePackageTransactionError.transactionAlreadyCommitted
         }
         if isCancelled() { throw CancellationError() }
-        try lease.assertOwnership(at: now, faultInjector: faultInjector)
-        journal.state = .flushing
-        try persistJournal()
+        try lease.withOwnershipFence(
+            at: now, faultInjector: faultInjector, afterOwnershipCheck: afterOwnershipCheck
+        ) {
+            journal.state = .flushing
+            try persistJournal()
+        }
         for file in journal.files {
             if isCancelled() { throw CancellationError() }
             let url = try packageURL(for: file.stagingPath)
@@ -1025,12 +1054,16 @@ struct PortablePackageTransaction {
                 )).path
             return prepared
         }
-        journal.state = .publishing
-        try persistJournal()
+        try lease.withOwnershipFence(at: now, afterOwnershipCheck: afterOwnershipCheck) {
+            journal.state = .publishing
+            try persistJournal()
+        }
 
         for index in journal.removals.indices {
             if isCancelled() { throw CancellationError() }
-            try lease.assertOwnership(at: now, faultInjector: faultInjector)
+            try lease.withOwnershipFence(
+                at: now, faultInjector: faultInjector, afterOwnershipCheck: afterOwnershipCheck
+            ) {
             journal.removals[index].publicationState = .started
             try persistJournal()
             let target = try packageURL(for: journal.removals[index].relativePath)
@@ -1046,12 +1079,15 @@ struct PortablePackageTransaction {
             try fullSyncDirectory(backup.deletingLastPathComponent())
             journal.removals[index].publicationState = .published
             try persistJournal()
+            }
             try faultInjector?.check(.publish)
         }
 
         for index in journal.moves.indices {
             if isCancelled() { throw CancellationError() }
-            try lease.assertOwnership(at: now, faultInjector: faultInjector)
+            try lease.withOwnershipFence(
+                at: now, faultInjector: faultInjector, afterOwnershipCheck: afterOwnershipCheck
+            ) {
             journal.moves[index].publicationState = .started
             try persistJournal()
             let source = try packageURL(for: journal.moves[index].sourcePath)
@@ -1071,6 +1107,7 @@ struct PortablePackageTransaction {
             try fullSyncDirectory(target.deletingLastPathComponent())
             journal.moves[index].publicationState = .published
             try persistJournal()
+            }
             try faultInjector?.check(.publish)
         }
 
@@ -1079,7 +1116,9 @@ struct PortablePackageTransaction {
         }
         for item in ordered {
             if isCancelled() { throw CancellationError() }
-            try lease.assertOwnership(at: now, faultInjector: faultInjector)
+            let currentIndex = try lease.withOwnershipFence(
+                at: now, faultInjector: faultInjector, afterOwnershipCheck: afterOwnershipCheck
+            ) { () throws -> Int in
             guard
                 let currentIndex = journal.files.firstIndex(where: {
                     $0.relativePath == item.relativePath
@@ -1124,10 +1163,15 @@ struct PortablePackageTransaction {
             try fullSyncDirectory(target.deletingLastPathComponent())
             journal.files[currentIndex].publicationState = .published
             try persistJournal()
+            return currentIndex
+            }
+            _ = currentIndex
             try faultInjector?.check(.publish)
         }
-        journal.state = .committed
-        try persistJournal()
+        try lease.withOwnershipFence(at: now, afterOwnershipCheck: afterOwnershipCheck) {
+            journal.state = .committed
+            try persistJournal()
+        }
         cleanupCommittedArtifacts()
     }
 
