@@ -21,6 +21,8 @@ final class EditorDocumentCoordinator {
 
     var canUndo: Bool { activeHistory.canUndo }
     var canRedo: Bool { activeHistory.canRedo }
+    var undoActionName: String? { activeHistory.undoActionName }
+    var redoActionName: String? { activeHistory.redoActionName }
     var undoDepth: Int { activeHistory.undoCount }
     var isGrouping: Bool { activeHistory.isGrouping }
 

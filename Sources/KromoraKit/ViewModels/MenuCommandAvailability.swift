@@ -64,7 +64,9 @@ struct MenuCommandAvailability: Equatable, Sendable {
             canPaste: vm.canPasteEdits,
             canUndo: vm.canUndo,
             canRedo: vm.canRedo,
-            isLibraryReady: vm.canImportIntoPortableLibrary
+            isLibraryReady: vm.canImportIntoPortableLibrary,
+            undoActionName: vm.undoActionName,
+            redoActionName: vm.redoActionName
         )
     }
 

@@ -3761,6 +3761,8 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
 
     var canUndo: Bool { editorDocument.canUndo }
     var canRedo: Bool { editorDocument.canRedo }
+    var undoActionName: String? { editorDocument.undoActionName }
+    var redoActionName: String? { editorDocument.redoActionName }
     var undoDepth: Int { editorDocument.undoDepth }
 
     func refreshDurableEditHistory() { editHistory.refresh() }
