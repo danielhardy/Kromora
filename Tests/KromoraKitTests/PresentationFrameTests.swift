@@ -817,4 +817,18 @@ final class PresentationFrameEnvelopeTests: TempDirectoryTestCase {
             XCTAssertEqual($0 as? PresentationFrameEnvelope.DecodeError, .invalidDimensions)
         }
     }
+
+    func testLedgerCapsRetainedRecordsWhileSummaryCountsEverything() async {
+        let ledger = FrameLookupLedger()
+        let total = FrameLookupLedger.maximumRetainedRecords + 50
+        for _ in 0..<total { await ledger.record(surface: .gridEdited, outcome: .rejected(.assetMismatch)) }
+        await ledger.record(surface: .filmstrip, outcome: .exact)
+        let retained = await ledger.snapshot().count
+        XCTAssertEqual(retained, FrameLookupLedger.maximumRetainedRecords)
+        let gridTotal = await ledger.totalCount(for: .gridEdited)
+        XCTAssertEqual(gridTotal, total)
+        let summary = await ledger.summary(for: .gridEdited)
+        XCTAssertTrue(summary.contains("count=\(total)"))
+        XCTAssertTrue(summary.contains("topRejection=assetMismatch:\(total)"))
+    }
 }

@@ -42,33 +42,49 @@ struct FrameLookupRecord: Sendable, Equatable {
 actor FrameLookupLedger {
     static let shared = FrameLookupLedger()
 
+    static let maximumRetainedRecords = 256
+
+    private struct SurfaceTotals {
+        var count = 0
+        var outcomes: [String: Int] = [:]
+        var rejections: [String: Int] = [:]
+    }
+
+    /// The most recent lookups. Summaries read `totals`, which keep counting after old records drop.
     private var records: [FrameLookupRecord] = []
+    private var totals: [FrameLookupSurface: SurfaceTotals] = [:]
 
     func record(surface: FrameLookupSurface, outcome: FrameLookupOutcome) {
         records.append(FrameLookupRecord(
             surface: surface, outcome: outcome,
             timestampNanoseconds: DispatchTime.now().uptimeNanoseconds
         ))
+        if records.count > Self.maximumRetainedRecords {
+            records.removeFirst(records.count - Self.maximumRetainedRecords)
+        }
+        var surfaceTotals = totals[surface, default: SurfaceTotals()]
+        surfaceTotals.count += 1
+        surfaceTotals.outcomes[outcome.label, default: 0] += 1
+        if case .rejected(let reason) = outcome {
+            surfaceTotals.rejections[reason.rawValue, default: 0] += 1
+        }
+        totals[surface] = surfaceTotals
     }
 
     func snapshot() -> [FrameLookupRecord] { records }
 
+    /// Cumulative lookups for a surface, including records no longer retained.
+    func totalCount(for surface: FrameLookupSurface) -> Int { totals[surface]?.count ?? 0 }
+
     func summary(for surface: FrameLookupSurface) -> String {
-        let selected = records.filter { $0.surface == surface }
-        var counts: [String: Int] = [:]
-        var reasons: [String: Int] = [:]
-        for record in selected {
-            counts[record.outcome.label, default: 0] += 1
-            if case .rejected(let reason) = record.outcome {
-                reasons[reason.rawValue, default: 0] += 1
-            }
-        }
-        let countsText = counts.keys.sorted().compactMap { key in
-            counts[key].map { "\(key)=\($0)" }
+        let surfaceTotals = totals[surface] ?? SurfaceTotals()
+        let countsText = surfaceTotals.outcomes.keys.sorted().compactMap { key in
+            surfaceTotals.outcomes[key].map { "\(key)=\($0)" }
         }.joined(separator: ",")
-        let topReason = reasons.sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }
+        let topReason = surfaceTotals.rejections
+            .sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }
             .first.map { "\($0.key):\($0.value)" } ?? "none"
-        return "FrameLookup surface=\(surface.rawValue) count=\(selected.count) "
+        return "FrameLookup surface=\(surface.rawValue) count=\(surfaceTotals.count) "
             + "outcomes={\(countsText)} topRejection=\(topReason)"
     }
 

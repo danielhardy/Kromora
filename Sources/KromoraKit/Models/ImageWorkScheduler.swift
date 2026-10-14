@@ -22,7 +22,7 @@ final class ImageWorkScheduler {
         case background = 6
     }
 
-    enum Lane: Sendable, Equatable {
+    enum Lane: Sendable, Hashable {
         case editor
         case thumbnail
         /// All package reads and writes share this scheduler with rendering work.
@@ -137,7 +137,21 @@ final class ImageWorkScheduler {
     /// Number of package jobs that were ready but deliberately held behind editor contention.
     /// This is useful telemetry as well as a fairness-test seam.
     private(set) var yieldedPackageIOCount = 0
+    /// The most recent admissions, capped at `maximumRetainedAdmissions`. Cumulative totals live in
+    /// `admissionCount` and `admissionCounts` and keep growing after old records are dropped.
     private(set) var admissionLog: [Admission] = []
+    private(set) var admissionCount = 0
+    private(set) var admissionCounts: [Lane: Int] = [:]
+    static let maximumRetainedAdmissions = 256
+
+    private func recordAdmission(_ admission: Admission) {
+        admissionCount += 1
+        admissionCounts[admission.lane, default: 0] += 1
+        admissionLog.append(admission)
+        if admissionLog.count > Self.maximumRetainedAdmissions {
+            admissionLog.removeFirst(admissionLog.count - Self.maximumRetainedAdmissions)
+        }
+    }
 
     init(configuration: Configuration = .default) {
         self.configuration = Configuration(
@@ -242,7 +256,7 @@ final class ImageWorkScheduler {
         }
         let admitted = queued[job.id] != nil
         if admitted || running[job.id] != nil {
-            admissionLog.append(Admission(id: job.id, lane: lane, priority: priority))
+            recordAdmission(Admission(id: job.id, lane: lane, priority: priority))
         }
         updatePeakQueue()
         pump()
@@ -292,7 +306,7 @@ final class ImageWorkScheduler {
 
         let admitted = queued[job.id] != nil
         if admitted || running[job.id] != nil {
-            admissionLog.append(Admission(id: job.id, lane: .packageIO, priority: job.priority))
+            recordAdmission(Admission(id: job.id, lane: .packageIO, priority: job.priority))
         }
         updatePeakQueue()
         pump()
@@ -332,7 +346,7 @@ final class ImageWorkScheduler {
             worst.onTerminal(.evicted)
         }
         queued[job.id] = job
-        admissionLog.append(Admission(id: job.id, lane: .frameRead, priority: priority))
+        recordAdmission(Admission(id: job.id, lane: .frameRead, priority: priority))
         pump()
         return queued[job.id] != nil || running[job.id] != nil
     }

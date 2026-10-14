@@ -60,6 +60,24 @@ final class ImageWorkSchedulerTests: XCTestCase {
         try await waitUntil("the scheduler to drain") { scheduler.isIdle }
     }
 
+    func testAdmissionHistoryIsCappedWhileCumulativeCountersKeepGrowing() async throws {
+        let scheduler = ImageWorkScheduler(
+            configuration: .init(maxConcurrentThumbnails: 1, maxQueuedThumbnails: 4))
+        let total = ImageWorkScheduler.maximumRetainedAdmissions + 20
+        for index in 0..<total {
+            var finished = false
+            scheduler.enqueue(id: .init("job-\(index)"), lane: .thumbnail, priority: .background) {
+                finished = true
+            }
+            try await waitUntil("job \(index)") { finished }
+        }
+        try await waitUntil("the scheduler to drain") { scheduler.isIdle }
+        XCTAssertEqual(scheduler.admissionLog.count, ImageWorkScheduler.maximumRetainedAdmissions)
+        XCTAssertEqual(scheduler.admissionCount, total)
+        XCTAssertEqual(scheduler.admissionCounts[.thumbnail], total)
+        XCTAssertEqual(scheduler.admissionLog.last?.id, .init("job-\(total - 1)"))
+    }
+
     func testQueuedThumbnailCanBeCancelledBeforeItStarts() async throws {
         let scheduler = ImageWorkScheduler(
             configuration: .init(
