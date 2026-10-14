@@ -177,6 +177,20 @@ final class ImageCollectionPresentationModel {
             }
         }
 
+        /// Drop every decoded raster so an item outside the working set keeps only identity and
+        /// metadata. The edit revision and stored-frame tag go with the pixels they described, so a
+        /// revisit hydrates from the durable frame instead of trusting pixels that are gone.
+        @MainActor func releaseDecodedThumbnails() {
+            displayedThumbnail = nil
+            originalThumbnail = nil
+            editedThumbnailImage = nil
+            editedThumbnailUsesFallback = false
+            storedEditedFrameMetadata = nil
+            editedThumbnailRevision = nil
+            pendingThumbnailSource = nil
+            asset.thumbnailState = .notRequested
+        }
+
         /// Open Image… historically presents selected files without their extensions. Keep that
         /// presentation-only convention separate from the package's durable source filename.
         func setDisplayNameOverride(_ name: String?) {
@@ -853,12 +867,15 @@ final class ImageCollectionPresentationModel {
         thumbnailDemandIDs.remove(id)
         thumbnailDemandPriorities.removeValue(forKey: id)
         visibleEditedThumbnailIDs.removeAll { $0 == id }
-        guard !preparedThumbnailIDs.contains(id),
-              let index = itemIndex(for: id), items[index].thumbnail == nil else { return }
+        guard !preparedThumbnailIDs.contains(id), let index = itemIndex(for: id) else { return }
         let jobID = thumbnailJobID(for: items[index])
         scheduler.cancel(id: jobID)
         thumbnailJobIDs.remove(jobID)
-        items[index].asset.thumbnailState = .notRequested
+        // A decoded item outside the visible window and navigation neighborhood gives its pixels
+        // back. The packed frame stays on disk, so forgetting that it was read lets a revisit
+        // hydrate it again without a new render.
+        items[index].releaseDecodedThumbnails()
+        completedFrameReadIDs.remove(id)
     }
 
     func selectAll() {

@@ -565,6 +565,62 @@ final class LibraryGridTests: TempDirectoryTestCase {
         await collection.shutdown()
     }
 
+    func testReleasingDecodedThumbnailDropsPixelsAndLaterPageKeepsNone() async throws {
+        let image = try Fixtures.makeCGImage(width: 64, height: 48)
+        let collection = ImageCollection(originalThumbnailProvider: { _, _, _, _, _, _, _ in image })
+        let assets = (0..<12).map {
+            PhotoAsset(url: tempDirectory.appendingPathComponent("evict-\($0).jpg"))
+        }
+        collection.loadPortableWindow(
+            assets: Array(assets.prefix(8)), totalCount: 12, pageIndex: 0,
+            pageSize: 8, query: .all
+        )
+        collection.beginThumbnailDemand()
+        let far = assets[7].id
+        collection.requestThumbnail(for: far)
+        try await waitForThumbnails(in: collection, ids: [far])
+        let item = collection.items[7]
+        let edited = NSImage(cgImage: image, size: NSSize(width: 64, height: 48))
+        item.applyEditedThumbnail(edited, revision: "r1")
+        XCTAssertNotNil(item.originalThumbnailForPresentation)
+        XCTAssertNotNil(item.editedThumbnailForPresentation)
+
+        collection.releaseThumbnail(for: far)
+        XCTAssertNil(item.thumbnail)
+        XCTAssertNil(item.originalThumbnailForPresentation)
+        XCTAssertNil(item.editedThumbnailForPresentation)
+        XCTAssertNil(item.editedThumbnailRevision)
+        XCTAssertEqual(item.id, far, "identity survives eviction")
+
+        XCTAssertTrue(collection.appendPortableWindow(assets: Array(assets.suffix(4)), pageIndex: 1))
+        XCTAssertTrue(collection.items[7] === item)
+        XCTAssertTrue(collection.items.suffix(5).allSatisfy {
+            $0.thumbnail == nil && $0.editedThumbnailForPresentation == nil
+        })
+        await collection.shutdown()
+    }
+
+    func testEvictedThumbnailRehydratesOnRevisit() async throws {
+        let image = try Fixtures.makeCGImage(width: 64, height: 48)
+        let collection = ImageCollection(originalThumbnailProvider: { _, _, _, _, _, _, _ in image })
+        let assets = (0..<8).map {
+            PhotoAsset(url: tempDirectory.appendingPathComponent("revisit-\($0).jpg"))
+        }
+        collection.loadPortableWindow(
+            assets: assets, totalCount: 8, pageIndex: 0, pageSize: 8, query: .all
+        )
+        collection.beginThumbnailDemand()
+        let id = assets[7].id
+        collection.requestThumbnail(for: id)
+        try await waitForThumbnails(in: collection, ids: [id])
+        collection.releaseThumbnail(for: id)
+        XCTAssertNil(collection.items[7].thumbnail)
+        collection.requestThumbnail(for: id)
+        try await waitForThumbnails(in: collection, ids: [id])
+        XCTAssertNotNil(collection.items[7].thumbnail)
+        await collection.shutdown()
+    }
+
     private func waitForThumbnails(
         in collection: ImageCollection, ids: [PhotoAssetID]
     ) async throws {
