@@ -639,6 +639,39 @@ the <= 3 ms budget. Selection sync is about 1.4 ms per switch. For context, warm
 closed as won't-do after a release build felt fast (KRMA-748/749/750). Regression guard without a
 window: `ImageSourceIdentityReuseTests` (the date round-trip test fails without the fix).
 
+### Last-known-frame measured state on Apple M1 Pro (2026-10-14)
+
+One `scripts/run-kromora-capture.sh --benchmark last-known-frame --source realworldtest/DSC01019.ARW --iterations 30`
+run on commit `aef050e8`, Release, Apple M1 Pro (16 GB), macOS 27.0.1 (26A434), `DSC01019.ARW`
+(9504×6336), viewport 1440×897 points, backing 2880×1794. Instruments recorded a Metal System Trace,
+so this is comparable to the 2026-10-01 M1 Pro table above and not to the 2026-10-11 M4 Pro
+`--no-trace` series. The XCTest passed (1 test, 0 failures, 44.7 s). Budgets were not enforced.
+Report, summary, and trace:
+`/tmp/kromora-capture/KROMORA-last-known-frame-DSC01019-20261014-084221-report.jsonl`,
+`-summary.txt`, and `.trace`.
+
+| Scenario | p50 | p95 | Samples | Budget | Result |
+| --- | ---: | ---: | ---: | --- | --- |
+| Exact warm Edit | 268 ms | 268 ms | 1 | zero renders, one confirmed frame | **pass** |
+| Stale warm Edit | 228 ms | 228 ms | 1 | one provisional, at most one confirmed | **pass** |
+| Warm Edit first pixel | 249 ms | 286 ms | 30 | p95 <= 50 ms | miss |
+| Main-actor before first suspension | — | 1.32 ms | 30 | <= 2 ms; median p95 <= 3 ms passes | **pass** |
+| Warm 30-cell grid re-entry | 210 ms | 247 ms | 30 | p95 <= 100 ms | miss |
+
+`LAST_KNOWN_FRAME_BUDGET_SUMMARY exact=PASS stale=PASS grid=FAIL edit=FAIL`. Exact warm Edit had 0
+render admissions, 1 provisional, and 1 confirmed frame. Stale warm Edit had 1 render admission,
+1 provisional, and 1 confirmed frame. Warm Edit navigation had 0 render admissions, 0 crossfades,
+0 thumbnail swaps, and 30 provisional / 30 confirmed frames. The grid had 30 mounts, 0 thumbnail
+swaps, and 0 render admissions. Cold grid hydration was 1270 ms (one visit, not a budget).
+`zeroPresentedTimeFallbacks` was 1 on exact warm Edit and 2 on the other three scenarios, which is
+normal for this harness; the times are handler time.
+
+Cite this capture for later M1 Pro traced runs. It sits in the same band as the 2026-10-01 three-run
+median (Edit first-pixel p95 293 ms, grid p95 235 ms, main-actor p95 2.03 ms) after the Library and
+Edit paths changed substantially. The 50 ms and 100 ms misses stay the closed won't-do work in
+KRMA-748, KRMA-749, and KRMA-750. A wall-clock miss on an unchanged tree is a handoff with this
+profile (ADR-LKF-001); do not start another capture to reproduce it.
+
 ### Persisted package identity hash reuse (KRMA-753, 2026-10-01)
 
 Release last-known-frame capture after reusing the asset record's content hash for an unchanged
