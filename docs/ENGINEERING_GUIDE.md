@@ -86,9 +86,11 @@ by `ExportOptions` and applied after sizing, so it does not change the edit docu
 `RenderEngine` is an actor and the GPU/Core Image isolation boundary. `CIImage` and `CIContext` are
 `Sendable` on the current SDK (`CIFilter` is not), so keeping Core Image graph construction,
 `CIFilter`, `CIRAWFilter`, `CIContext`, mutable GPU resources, and render caches inside the engine is
-a design rule rather than a compiler requirement. The one `CIImage` that crosses `RenderEngining` is
-the completed, GPU-backed `sending CIImage?` from `makeCIImage`; otherwise only Sendable request
-values and rendered values cross it. New work should use the existing
+a design rule rather than a compiler requirement. Detached developed-source tasks may return a
+`CIImage` because it is `Sendable`; the result stays in the engine's render flow. `makeCIImage`
+returns a completed, GPU-backed `sending CIImage?` to presentation, while analysis and presentation
+seams may accept completed `sending CIImage` values back into the engine. Otherwise only Sendable
+request values and rendered values cross the boundary. New work should use the existing
 request funnel and injected protocol seams rather than adding a second renderer or context.
 
 Interactive preview decode budgets 1.5 MP for a fit view and 4 MP of visible pixels for a zoomed view
