@@ -299,6 +299,31 @@ final class ExportWorkflowCoordinatorTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
     }
 
+    func testMultiPhotoShareDisambiguatesCaseInsensitiveFilenameCollisions() async throws {
+        let root = try makeShareRoot()
+        let engine = FakeRenderEngine()
+        let (workflow, destination, window) = makeMultiShare(engine: engine, root: root)
+        destination.batch = ExportBatchRequest(
+            items: [
+                ExportCoordinator.BatchItem(url: nil, data: Data([1]), name: "Photo.dng"),
+                ExportCoordinator.BatchItem(url: nil, data: Data([2]), name: "photo.cr3"),
+            ],
+            document: EditDocument(), lut: nil
+        )
+        var items: [Any] = []
+        workflow.showPicker = { pickerItems, _, _ in items = pickerItems }
+
+        workflow.shareDialog()
+
+        let providers = try XCTUnwrap(items as? [NSItemProvider])
+        XCTAssertEqual(providers.map(\.suggestedName), ["Photo", "photo 2"])
+        for provider in providers {
+            _ = try await loadFile(provider)
+        }
+        XCTAssertEqual(try shareFileExtensions(in: root), ["heic", "heic"])
+        withExtendedLifetime((window, destination)) {}
+    }
+
     func testMultiPhotoShareRetriesJPEGWhenHEIFFailsWithoutDroppingItems() async throws {
         let root = try makeShareRoot()
         let engine = FakeRenderEngine()

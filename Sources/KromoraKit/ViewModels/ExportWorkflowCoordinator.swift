@@ -281,13 +281,16 @@ final class ExportWorkflowCoordinator {
         }
         // The picker appears before any render. Each item is a lazy file representation that
         // renders only when the chosen service loads it, from the snapshot taken here.
-        var usedNames = Set<String>()
+        var usedNameKeys = Set<String>()
         let providers = request.items.map { item -> NSItemProvider in
             let stem = URL(fileURLWithPath: item.name).deletingPathExtension().lastPathComponent
             let base = stem.isEmpty ? "Photo" : stem
             var candidate = base
             var counter = 2
-            while !usedNames.insert(candidate).inserted {
+            // The share directory usually lives on a case-insensitive APFS volume. Distinct
+            // source names that differ only by case (or Unicode canonical form) must not map to
+            // the same lazily written file there.
+            while !usedNameKeys.insert(Self.shareFilenameCollisionKey(candidate)).inserted {
                 candidate = "\(base) \(counter)"
                 counter += 1
             }
@@ -323,6 +326,11 @@ final class ExportWorkflowCoordinator {
             return provider
         }
         presentSharePicker(for: providers, in: directory)
+    }
+
+    private static func shareFilenameCollisionKey(_ name: String) -> String {
+        name.folding(options: [.caseInsensitive], locale: nil)
+            .precomposedStringWithCanonicalMapping
     }
 
     /// Shows the picker at once. The photo renders when the user picks a service, so there is no
