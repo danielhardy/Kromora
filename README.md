@@ -40,8 +40,10 @@ MVP commitments.
    left alone.
 3. Edit non-destructively. Kromora stores value-based edit documents and uses one render pipeline
    for previews and full-resolution output.
-4. Export an edited photo or a batch to TIFF, JPEG, PNG, or HEIF. Choose supported sizing, color,
-   bit-depth, alpha, and metadata options; GPS is excluded by default.
+4. Export an edited photo or a batch to TIFF, JPEG, PNG, or HEIF. The save accessory
+   exposes the format, metadata and GPS inclusion (GPS is excluded by default), optional delivery to
+   Photos, and output sharpening. Sizing, color space, bit depth, and alpha exist on the export
+   value model but are not yet panel controls.
 
 For the current release bar and explicit exclusions, see the
 [MVP scope](docs/PRODUCT_SCOPE.md). For package ownership and data safety, including how to move or

@@ -13,8 +13,10 @@ import ImageIO
 /// structural rather than a coincidence that two code paths currently maintain. See
 /// `docs/ENGINEERING_GUIDE.md`.
 ///
-/// Nothing here is rasterized. Every stage hands the next a lazy `CIImage`, so the whole chain costs
-/// one GPU pass when the engine finally renders it.
+/// Nothing here is rasterized. Every stage hands the next a lazy `CIImage`, so no pixels are produced
+/// until the engine renders the graph. How many GPU passes that takes is Core Image's decision (it may
+/// fuse kernels or split the graph at stages that need intermediates) and is not asserted here;
+/// measure it with a profile rather than inferring it from the graph being lazy.
 enum RenderPipeline {
 
     /// Increment whenever the pixels produced by the graph can change without a cache-key input

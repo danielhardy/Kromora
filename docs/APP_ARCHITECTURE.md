@@ -22,8 +22,10 @@ state from `ImageCollection`, which no longer has a folder-backed mode.
 collaborators, owns published cross-feature presentation state, and sequences source/revision
 fences. Feature workflows do not reach into one another's private state.
 
-`AppViewModel.swift` is 5,105 lines after the coordinator extractions. `PackageSettingsTests.testAppViewModelDoesNotRegrow`
-fails above 5,120 lines as a trend guard; extract new workflows into coordinators rather than raising the ceiling.
+`AppViewModel.swift` is a size-guarded file: `PackageSettingsTests.testAppViewModelDoesNotRegrow` holds
+the line ceiling as a trend guard (the test owns the number; this page does not copy it). Extract new
+workflows into coordinators rather than raising the ceiling. A dated measurement: 5,033 lines on
+2026-10-14.
 
 ## Boundaries
 
@@ -310,7 +312,8 @@ source-identity late-result rejection, revision composition, and identity-docume
 
 `AppViewModel` is the composition root, the main-window command façade, and the sole publisher of
 the active `EditDocument`. The inventory below reflects the current `AppViewModel.swift` MARKs
-after the ownership stages; the main file is 5,105 lines, recorded here only as supporting context.
+after the ownership stages. Line counts are intentionally not recorded here; they drift (see the dated
+measurement above).
 
 | MARK / remaining workflow | Owner and root responsibility |
 | --- | --- |

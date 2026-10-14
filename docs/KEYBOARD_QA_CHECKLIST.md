@@ -9,7 +9,10 @@ fails when this table and the catalog disagree. Add a row here whenever a shortc
 - **Date:** 2026-10-13
 - **Heard any system alert beep during the run?** No
 
-## Results (2026-10-13 spot check)
+## Results (2026-10-13 spot check, original observations)
+
+The numbered list records what was observed on 2026-10-13 and is kept as history; the
+"Current status" notes below say what has changed since.
 
 This was a hands-on spot check of clicking around and using the keyboard in the signed build, not a
 cell-by-cell run of the grid below. The per-cell result columns were not filled in, and the
@@ -24,14 +27,20 @@ available as an optional aid for future keyboard changes.
 3. Failure found: **Esc does not cancel the crop tool**. Tracked in KRMA-969.
 4. Unrelated polish found: the top-right toolbar buttons are all bronze. Tracked in KRMA-970.
 
+Current status (2026-10-14, from the issue records; not re-observed in a signed build): the
+failures in items 3 and 4 are resolved — KRMA-969 and KRMA-970 are `done`. Item 2's ⌘V behavior is
+current. Re-run the affected rows in a signed build before citing them as freshly verified.
+
 ## How to run
 
 Open a collection with several photos, then for each focus state put the focus there and press the
 key. Record **P** (matches expected), **F** (differs; note what happened), **B** (correct but the
 system beep sounded) or **-** (not applicable). Every cell must also be silent.
 
-Menu items are always enabled by design, so a command that is unavailable in the current context
-(for example `H` outside Retouch, a rating with no active collection) is a silent no-op, not a beep.
+Menu commands follow the availability gates in `MenuCommands.swift` (`MenuCommandAvailability` and
+the keyboard context), so a command that is unavailable in the current context (for example `H`
+outside Retouch, a rating with no active collection) is a disabled or silent no-op, not a beep. An
+earlier revision of this checklist said menu items were always enabled; that is no longer true.
 Where a cell says "runs" the command must run only if it is available in that context; otherwise
 it must do nothing, silently.
 
