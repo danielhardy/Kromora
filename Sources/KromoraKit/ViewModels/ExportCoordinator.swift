@@ -373,15 +373,8 @@ final class ExportCoordinator {
             throw ImageError.exportFailed
         }
         let itemAssetID = await item.resolvedAssetID()
-        let resolution = await resolvedDocument(for: item, assetID: itemAssetID, fallback: document)
-        let itemLUT: CubeLUT?
-        if let itemLUTValue = item.lut {
-            itemLUT = itemLUTValue
-        } else if resolution.isPerAsset {
-            itemLUT = lutResolver?(resolution.document.lut.lutID)
-        } else {
-            itemLUT = lutResolver?(resolution.document.lut.lutID) ?? lut
-        }
+        let resolution = try await resolvedDocument(for: item, assetID: itemAssetID, fallback: document)
+        let itemLUT = try resolvedLUT(for: item, resolution: resolution, fallback: lut)
         let hasSourceScope = sourceAccess.url?.startAccessingSecurityScopedResource() ?? false
         defer {
             if hasSourceScope { sourceAccess.url?.stopAccessingSecurityScopedResource() }
@@ -598,24 +591,28 @@ final class ExportCoordinator {
             if let sourceAccess = await Self.sourceAccess(for: item) {
                 let source = sourceAccess.source
                 let itemAssetID = await item.resolvedAssetID()
-                let documentResolution = await resolvedDocument(
-                    for: item, assetID: itemAssetID, fallback: document
-                )
+                let documentResolution: DocumentResolution
+                let itemLUT: CubeLUT?
+                do {
+                    documentResolution = try await resolvedDocument(
+                        for: item, assetID: itemAssetID, fallback: document
+                    )
+                    itemLUT = try resolvedLUT(
+                        for: item, resolution: documentResolution, fallback: lut
+                    )
+                } catch {
+                    failed += 1
+                    onStatus?("Skipped \(item.name): \(error.localizedDescription)")
+                    let done = exported + failed
+                    batchCompleted = done
+                    batchProgress = Double(done) / Double(total)
+                    continue
+                }
                 guard !Task.isCancelled, !batchCancellationRequested else {
                     cancelled = true
                     break
                 }
                 let itemDocument = documentResolution.document
-                let itemLUT: CubeLUT?
-                if let itemLUTValue = item.lut {
-                    itemLUT = itemLUTValue
-                } else if documentResolution.isPerAsset {
-                    // A missing Look is an intentional unresolved reference, not permission to
-                    // leak the active photo's Look onto this asset.
-                    itemLUT = lutResolver?(itemDocument.lut.lutID)
-                } else {
-                    itemLUT = lutResolver?(itemDocument.lut.lutID) ?? lut
-                }
                 let lookName = options.filenamePolicy == .sourceNameWithLook ? itemLUT?.name : nil
                 let base = options.filenamePolicy.baseName(source: item.name, look: lookName)
                 var dest = uniqueExportURL(
@@ -812,19 +809,58 @@ final class ExportCoordinator {
         return resolved
     }
 
+    /// Which edit one batch item exports, and whether it is that item's own.
+    ///
+    /// An item with a live snapshot or a durable record always exports that edit. A healthy package
+    /// asset with no saved edit exports neutral. Only an item with no store identity at all (a
+    /// caller exporting loose files) takes the caller's `fallback`; the active photo's edit is never
+    /// substituted for a package asset whose own edit could not be established.
+    private struct DocumentResolution {
+        let document: EditDocument
+        let isPerAsset: Bool
+    }
+
+    private struct ItemExportError: LocalizedError {
+        let errorDescription: String?
+    }
+
     private func resolvedDocument(
         for item: BatchItem, assetID: PhotoAssetID?, fallback: EditDocument
-    ) async -> (document: EditDocument, isPerAsset: Bool) {
-        if let document = item.document { return (document, true) }
+    ) async throws -> DocumentResolution {
+        if let document = item.document { return DocumentResolution(document: document, isPerAsset: true) }
         guard let editStore, let assetID else {
-            return (fallback, false)
+            return DocumentResolution(document: fallback, isPerAsset: false)
         }
         let result = await editStore.load(
             for: EditSourceReference(
                 assetID: assetID, portableIdentity: item.portableIdentity, url: item.url
             )
         )
-        return result.found ? (result.document, true) : (fallback, false)
+        guard result.isUsableForPrefetch else {
+            throw ItemExportError(
+                errorDescription: "its saved edit could not be read (\(result.status.message ?? "unreadable"))"
+            )
+        }
+        return DocumentResolution(
+            document: result.found ? result.document : EditDocument(), isPerAsset: true
+        )
+    }
+
+    /// The Look for one item. A per-asset document that names a Look which cannot be loaded fails
+    /// the item rather than exporting without it and reporting a fully reproduced edit.
+    private func resolvedLUT(
+        for item: BatchItem, resolution: DocumentResolution, fallback lut: CubeLUT?
+    ) throws -> CubeLUT? {
+        if let itemLUT = item.lut { return itemLUT }
+        let lutID = resolution.document.lut.lutID
+        let resolved = lutResolver?(lutID)
+        if resolution.isPerAsset {
+            if lutID != nil, resolved == nil {
+                throw ItemExportError(errorDescription: "its Look could not be loaded")
+            }
+            return resolved
+        }
+        return resolved ?? lut
     }
 
     /// The line shown when a batch finishes.

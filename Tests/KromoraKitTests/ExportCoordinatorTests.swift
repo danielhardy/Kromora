@@ -489,6 +489,156 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
         )
     }
 
+    // MARK: - Per-item document resolution (KRMA-995)
+
+    private func makeRegisteredSources(
+        _ names: [String], package: EditPackageFixture
+    ) throws -> [ExportCoordinator.BatchItem] {
+        let folder = tempDirectory.appendingPathComponent("sources-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return try names.map { name in
+            let url = try Fixtures.writeGradientPNG(
+                width: 48, height: 32, named: "\(name).png", in: folder)
+            try package.register(url)
+            return ExportCoordinator.BatchItem(url: url, data: nil, name: name)
+        }
+    }
+
+    private func corruptCurrentRevision(of item: ExportCoordinator.BatchItem, in package: EditPackageFixture) throws {
+        let reference = EditSourceReference(assetID: .file(item.url!), url: item.url!)
+        let record = try package.package.readAssetRecord(for: reference.portableAssetID)
+        let pointer = try XCTUnwrap(record.editHistory.edits.first)
+        try Data("corrupt revision".utf8).write(
+            to: package.package.rootURL.appendingPathComponent(pointer.relativePath)
+        )
+    }
+
+    func testUntouchedUnopenedPhotoExportsNeutralNotTheActiveEdit() async throws {
+        let package = makeEditPackageFixture()
+        let items = try makeRegisteredSources(["untouched"], package: package)
+        let fake = FakeRenderEngine()
+        let coordinator = ExportCoordinator(engine: fake, editStore: package.store())
+        let active = EditDocument(adjustments: [.exposure(ev: 2)])
+
+        let outcome = await coordinator.performBatchExport(
+            items, document: active, lut: nil, format: .png, to: try destinationFolder()
+        )
+
+        XCTAssertEqual(outcome, .init(exported: 1, failed: 0, total: 1))
+        let requests = await fake.encodeRequests
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertTrue(try XCTUnwrap(requests.first).document.isIdentity)
+    }
+
+    func testUnreadableSavedEditFailsTheItemInsteadOfExportingTheActiveEdit() async throws {
+        let package = makeEditPackageFixture()
+        let items = try makeRegisteredSources(["broken"], package: package)
+        let item = items[0]
+        try await package.store().save(
+            EditDocument(adjustments: [.vibrance(amount: 0.5)]),
+            for: EditSourceReference(assetID: .file(item.url!), url: item.url!)
+        )
+        try corruptCurrentRevision(of: item, in: package)
+
+        let fake = FakeRenderEngine()
+        let coordinator = ExportCoordinator(engine: fake, editStore: package.store())
+        let statuses = OSAllocatedUnfairLock(initialState: [String]())
+        coordinator.onStatus = { message in statuses.withLock { $0.append(message) } }
+        let outcome = await coordinator.performBatchExport(
+            items, document: EditDocument(adjustments: [.exposure(ev: 2)]), lut: nil,
+            format: .png, to: try destinationFolder()
+        )
+
+        XCTAssertEqual(outcome, .init(exported: 0, failed: 1, total: 1))
+        let requests = await fake.encodeRequests
+        XCTAssertTrue(requests.isEmpty)
+        XCTAssertTrue(statuses.withLock { $0 }.contains { $0.hasPrefix("Skipped broken: its saved edit could not be read") })
+    }
+
+    func testMixedBatchResolvesEachItemOnItsOwn() async throws {
+        let package = makeEditPackageFixture()
+        let items = try makeRegisteredSources(["edited", "untouched", "broken"], package: package)
+        let store = package.store()
+        let editedDocument = EditDocument(adjustments: [.exposure(ev: 0.25)])
+        try await store.save(
+            editedDocument, for: EditSourceReference(assetID: .file(items[0].url!), url: items[0].url!)
+        )
+        try await store.save(
+            EditDocument(adjustments: [.vibrance(amount: 0.5)]),
+            for: EditSourceReference(assetID: .file(items[2].url!), url: items[2].url!)
+        )
+        try corruptCurrentRevision(of: items[2], in: package)
+
+        let fake = FakeRenderEngine()
+        let coordinator = ExportCoordinator(engine: fake, editStore: package.store())
+        let outcome = await coordinator.performBatchExport(
+            items, document: EditDocument(adjustments: [.exposure(ev: 2)]), lut: nil,
+            format: .png, to: try destinationFolder()
+        )
+
+        XCTAssertEqual(outcome, .init(exported: 2, failed: 1, total: 3))
+        let requests = await fake.encodeRequests
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertTrue(requests.contains {
+            $0.source?.backing == .url(items[0].url!) && $0.document == editedDocument
+        })
+        XCTAssertTrue(requests.contains {
+            $0.source?.backing == .url(items[1].url!) && $0.document.isIdentity
+        })
+    }
+
+    func testLazyShareRenderUsesTheSamePerItemResolution() async throws {
+        let package = makeEditPackageFixture()
+        let items = try makeRegisteredSources(["untouched", "broken"], package: package)
+        try await package.store().save(
+            EditDocument(adjustments: [.vibrance(amount: 0.5)]),
+            for: EditSourceReference(assetID: .file(items[1].url!), url: items[1].url!)
+        )
+        try corruptCurrentRevision(of: items[1], in: package)
+
+        let fake = FakeRenderEngine()
+        let coordinator = ExportCoordinator(engine: fake, editStore: package.store())
+        let active = EditDocument(adjustments: [.exposure(ev: 2)])
+        let options = ExportOptions(format: .png)
+
+        _ = try await coordinator.renderEncodedData(
+            for: items[0], document: active, lut: nil, options: options
+        )
+        let requests = await fake.encodeRequests
+        XCTAssertTrue(try XCTUnwrap(requests.first).document.isIdentity)
+        do {
+            _ = try await coordinator.renderEncodedData(
+                for: items[1], document: active, lut: nil, options: options
+            )
+            XCTFail("an unreadable saved edit must not render")
+        } catch {
+            let count = await fake.encodeRequests.count
+            XCTAssertEqual(count, 1)
+        }
+    }
+
+    func testPerAssetDocumentWithAnUnloadableLookFailsTheItem() async throws {
+        let package = makeEditPackageFixture()
+        var items = try makeRegisteredSources(["looked"], package: package)
+        let lookID = LUTID(raw: "missing-look")
+        items[0] = ExportCoordinator.BatchItem(
+            url: items[0].url, data: nil, name: "looked",
+            document: EditDocument(lut: LUTSettings(lutID: lookID))
+        )
+        let fake = FakeRenderEngine()
+        let coordinator = ExportCoordinator(
+            engine: fake, editStore: package.store(), lutResolver: { _ in nil }
+        )
+
+        let outcome = await coordinator.performBatchExport(
+            items, document: EditDocument(), lut: nil, format: .png, to: try destinationFolder()
+        )
+
+        XCTAssertEqual(outcome, .init(exported: 0, failed: 1, total: 1))
+        let requests = await fake.encodeRequests
+        XCTAssertTrue(requests.isEmpty)
+    }
+
     func testSelectedExportContainsExactlyTheLibrarySelectionAndUsesOriginals() async throws {
         let libraryFolder = tempDirectory.appendingPathComponent("selected-library")
         try FileManager.default.createDirectory(
@@ -582,9 +732,11 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
             try Fixtures.writeGradientPNG(
                 width: 40, height: 24, named: "\($0).png", in: libraryFolder)
         }
+        let package = makeEditPackageFixture()
+        for url in urls { try package.register(url) }
         let fake = FakeRenderEngine()
         await fake.gateEncodeAfterFirst()
-        let viewModel = makeAppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake, editStore: package.store())
         viewModel.collection.setSourceFolder(libraryFolder)
         try await waitUntil { viewModel.collection.items.count == urls.count }
 
