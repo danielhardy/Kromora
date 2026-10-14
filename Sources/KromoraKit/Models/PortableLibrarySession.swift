@@ -846,6 +846,11 @@ final class PortableLibrarySession {
         queryController.selectAll(query: query)
     }
 
+    func restrictPortableSelection(to query: LibraryQuery) {
+        startupFirstPage = nil
+        queryController.restrictSelection(to: query)
+    }
+
     /// Windowed browsing projection for grid/filmstrip. Returns the assets for exactly one page
     /// plus the total match count for that query, so callers can bound retained Items to the
     /// visible window while keeping stable `portable:<uuid>` identity across page changes.

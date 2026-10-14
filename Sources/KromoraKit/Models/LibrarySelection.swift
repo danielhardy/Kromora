@@ -79,6 +79,16 @@ struct LibrarySelectionModel: Equatable, Sendable {
         }
     }
 
+    /// Replace the selection with the package authority's ids, loaded or not. `orderedIDs` is the
+    /// selection in display order; ids outside the loaded window stay selected so a page load
+    /// never narrows a cross-page selection.
+    mutating func adopt(_ orderedIDs: [PhotoAssetID], active: PhotoAssetID?) {
+        selectedIDs = Set(orderedIDs)
+        selectionOrder = orderedIDs
+        activeID = active.flatMap { selectedIDs.contains($0) ? $0 : nil } ?? orderedIDs.last
+        anchorID = activeID
+    }
+
     /// Make an item the keyboard focus while retaining any multi-selection that is still useful.
     /// This is used when a filter hides the previous active item; hidden selected IDs remain in the
     /// model and are not confused with culling state.

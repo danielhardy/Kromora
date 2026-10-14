@@ -728,19 +728,30 @@ final class ImageCollectionPresentationModel {
         selectedIDs: Set<PortablePhotoAssetID>, activeID: PortablePhotoAssetID?
     ) {
         guard portableTotalCount != nil else { return }
-        let ordered = items.compactMap { item -> PhotoAssetID? in
+        // The authority owns the full id set. Loaded rows come first in display order; ids whose
+        // rows are not loaded stay selected (no item or thumbnail is needed to hold them).
+        let loaded = items.compactMap { item -> PhotoAssetID? in
             guard let id = Self.portableID(for: item.id), selectedIDs.contains(id) else { return nil }
             return item.id
         }
+        let loadedSet = Set(loaded)
+        let unloaded = selectedIDs.map(Self.photoID(for:)).filter { !loadedSet.contains($0) }
+        let loadedActive = activeID.map(Self.photoID(for:)).flatMap { id in
+            items.contains(where: { $0.id == id }) ? id : nil
+        }
         var next = selection
-        next.clear()
-        for id in ordered { next.focus(id, in: items.map(\.id)) }
-        if let activeID, items.contains(where: { $0.id == Self.photoID(for: activeID) }) {
-            let photoID = Self.photoID(for: activeID)
-            next.focus(photoID, in: items.map(\.id))
-            selectedIndex = items.firstIndex(where: { $0.id == photoID }) ?? selectedIndex
+        next.adopt(loaded + unloaded, active: loadedActive ?? loaded.last)
+        if let loadedActive {
+            selectedIndex = items.firstIndex(where: { $0.id == loadedActive }) ?? selectedIndex
         }
         selection = next
+    }
+
+    /// Ids of the whole selection, including photos whose rows are not loaded.
+    var selectedAssetIDs: [PhotoAssetID] {
+        let loaded = selection.orderedIDs(from: items.map(\.id))
+        let loadedSet = Set(loaded)
+        return loaded + selection.selectedIDs.filter { !loadedSet.contains($0) }
     }
 
     func refresh() { /* Package refreshes are explicit session/index reloads. */ }
@@ -1509,7 +1520,7 @@ final class ImageCollectionPresentationModel {
     private func thumbnailJobID(for item: Item) -> ImageWorkScheduler.JobID {
         ImageWorkScheduler.JobID(item.url.map { "thumbnail:url:\($0.standardizedFileURL.path)" } ?? "thumbnail:item:\(item.id.raw)")
     }
-    private static func portableID(for photoID: PhotoAssetID) -> PortablePhotoAssetID? {
+    static func portableID(for photoID: PhotoAssetID) -> PortablePhotoAssetID? {
         guard photoID.raw.hasPrefix("portable:"), let uuid = UUID(uuidString: String(photoID.raw.dropFirst(9))) else { return nil }
         return PortablePhotoAssetID(uuid: uuid)
     }

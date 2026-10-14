@@ -17,6 +17,10 @@ protocol LibraryBrowsingProviding: AnyObject {
     func browsingAssets(for items: [LibraryQueryItem]) throws -> [PhotoAsset]
     func select(_ assetID: PortablePhotoAssetID, additive: Bool)
     func setPortableSelection(_ assetIDs: [PortablePhotoAssetID], activeID: PortablePhotoAssetID?)
+    /// Select every id matching `query`, loaded or not.
+    func selectAllPortable(query: LibraryQuery)
+    /// Narrow the selection to the ids `query` still matches.
+    func restrictPortableSelection(to query: LibraryQuery)
     func togglePortableSelection(_ assetID: PortablePhotoAssetID)
     func resolveEmbeddedSourceURL(for assetID: PortablePhotoAssetID) throws -> URL
     func materializedAsset(for assetID: PortablePhotoAssetID) async throws -> PhotoAsset
@@ -329,18 +333,21 @@ final class LibraryBrowsingCoordinator {
     func setPortableFilter(_ filter: LibraryFilter) {
         guard let destination, destination.portableQuery.filter != filter else { return }
         destination.portableQuery.filter = filter
+        library?.restrictPortableSelection(to: destination.portableQuery)
         try? reloadPortableWindow(pageIndex: 0)
     }
 
     func setPortableFacets(_ facets: LibraryFacetSelection) {
         guard let destination, destination.portableQuery.facets != facets else { return }
         destination.portableQuery.facets = facets
+        library?.restrictPortableSelection(to: destination.portableQuery)
         try? reloadPortableWindow(pageIndex: 0)
     }
 
     func clearPortableFilters() {
         guard let destination, destination.portableQuery.hasActiveFilters else { return }
         destination.portableQuery = destination.portableQuery.clearingFilters()
+        library?.restrictPortableSelection(to: destination.portableQuery)
         try? reloadPortableWindow(pageIndex: 0)
     }
 
@@ -352,6 +359,7 @@ final class LibraryBrowsingCoordinator {
     func setPortableSort(_ sort: LibraryQuerySort) {
         guard let destination, destination.portableQuery.sort != sort else { return }
         destination.portableQuery.sort = sort
+        library?.restrictPortableSelection(to: destination.portableQuery)
         try? reloadPortableWindow(pageIndex: 0)
     }
 
@@ -361,7 +369,21 @@ final class LibraryBrowsingCoordinator {
         let next = (normalized?.isEmpty == false) ? normalized : nil
         guard destination.portableQuery.searchText != next else { return }
         destination.portableQuery.searchText = next
+        library?.restrictPortableSelection(to: destination.portableQuery)
         try? reloadPortableWindow(pageIndex: 0)
+    }
+
+    /// The Select All command. A package-backed library selects every id the current query
+    /// matches, whether or not its row is loaded, then mirrors that into the visible rows.
+    func selectAllInGrid() {
+        // No package authority (a collection without a bound library) keeps the loaded-item
+        // Select All.
+        guard let library, let destination, collection.isPortableWindowed else {
+            collection.selectAll()
+            return
+        }
+        library.selectAllPortable(query: destination.portableQuery)
+        syncPortableSelection()
     }
 
     func selectPortableItem(at index: Int, modifiers: LibrarySelectionModel.Modifiers = []) {

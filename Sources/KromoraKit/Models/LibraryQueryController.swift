@@ -730,6 +730,20 @@ struct LibraryQueryController: Sendable {
         activeAssetID = matching.first?.assetID
     }
 
+    /// Keep only the selected ids that the query matches. A query or filter change narrows the
+    /// selection to this intersection and never adds new matches.
+    mutating func restrictSelection(to query: LibraryQuery) {
+        guard !selectedAssetIDs.isEmpty else { return }
+        let foldedSearchText = query.searchText?.foldedForLibrarySearch
+        let matching = Set(
+            index.entries.filter {
+                matches($0, query: query, foldedSearchText: foldedSearchText)
+            }.map(\.assetID))
+        selectedAssetIDs.formIntersection(matching)
+        if let activeAssetID, selectedAssetIDs.contains(activeAssetID) { return }
+        activeAssetID = selectedAssetIDs.first
+    }
+
     mutating func clearSelection() {
         selectedAssetIDs.removeAll()
         activeAssetID = nil

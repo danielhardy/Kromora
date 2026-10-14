@@ -4081,8 +4081,30 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
 
     /// The panel-free request used by Export Originals; never widened to the whole collection.
     var selectedBatchExportRequest: ExportWorkflowCoordinator.BatchRequest {
-        makeBatchExportRequest(from: collection.selectedItems)
+        makeBatchExportRequest(from: collection.selectedItems, unloaded: unloadedSelectedAssets())
     }
+
+    /// Browsing assets for selected ids whose rows are not loaded. They resolve to package file
+    /// URLs from the index; no original is read or decoded to learn the id list. Resolution runs in
+    /// bounded chunks so a library-wide selection never materializes every asset in one call.
+    private func unloadedSelectedAssets() -> [PhotoAsset] {
+        guard let portableLibrary else { return [] }
+        let loaded = Set(collection.items.map(\.id))
+        let ids = collection.selection.selectedIDs.subtracting(loaded)
+            .compactMap { ImageCollection.portableID(for: $0) }
+        var assets: [PhotoAsset] = []
+        assets.reserveCapacity(ids.count)
+        for start in stride(from: 0, to: ids.count, by: Self.bulkSelectionChunkSize) {
+            let chunk = Array(ids[start..<min(ids.count, start + Self.bulkSelectionChunkSize)])
+            assets += (try? portableLibrary.browsingAssets(forIDs: chunk)) ?? []
+        }
+        return assets
+    }
+
+    private static let bulkSelectionChunkSize = 500
+
+    /// The Select All command for the grid; see `LibraryBrowsingCoordinator.selectAllInGrid`.
+    func selectAllInGrid() { libraryBrowsingCoordinator.selectAllInGrid() }
 
     var selectedExportRequest: ExportWorkflowCoordinator.BatchRequest { selectedBatchExportRequest }
 
@@ -4103,30 +4125,35 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
     }
 
     private func makeBatchExportRequest(
-        from sourceItems: [ImageCollection.Item]
+        from sourceItems: [ImageCollection.Item],
+        unloaded: [PhotoAsset] = []
     ) -> ExportWorkflowCoordinator.BatchRequest {
         // Snapshot only Sendable source/edit values — never carry NSImage thumbnails into export.
         // A missing session document is intentional: ExportCoordinator asks EditDocumentStore for
         // the durable record, so unopened selected photos still export their own saved edits.
-        let items = sourceItems.map { item in
+        func batchItem(
+            id: PhotoAssetID, asset: PhotoAsset, name: String
+        ) -> ExportCoordinator.BatchItem {
             let itemDocument: EditDocument?
-            if item.id == activeAssetID {
+            if id == activeAssetID {
                 itemDocument = document
             } else {
-                itemDocument = editorDocument.session(for: item.id)?.document
+                itemDocument = editorDocument.session(for: id)?.document
             }
             let itemLUT = itemDocument.flatMap { resolvedLUT($0.lut.lutID) }
             return ExportCoordinator.BatchItem(
-                url: item.url,
-                data: item.imageData,
-                name: item.displayName,
-                assetID: item.id,
-                portableIdentity: persistencePortableIdentity(for: item),
-                bookmarkData: item.asset.bookmarkData,
+                url: asset.url,
+                data: asset.source.data,
+                name: name,
+                assetID: id,
+                portableIdentity: asset.source.portableIdentity,
+                bookmarkData: asset.bookmarkData,
                 document: itemDocument,
                 lut: itemLUT
             )
         }
+        let items = sourceItems.map { batchItem(id: $0.id, asset: $0.asset, name: $0.displayName) }
+            + unloaded.map { batchItem(id: $0.id, asset: $0, name: $0.displayName) }
         return ExportWorkflowCoordinator.BatchRequest(items: items, document: document, lut: selectedLook)
     }
 
@@ -4959,7 +4986,7 @@ extension AppViewModel: EditClipboardDestination {
 }
 
 extension AppViewModel: ExportWorkflowDestination {
-    var exportSelectionCount: Int { collection.selectedItems.count }
+    var exportSelectionCount: Int { collection.selectedAssetIDs.count }
     var exportActiveAssetID: PhotoAssetID? { activeAssetID }
     var exportSourceName: String { sourceName }
 

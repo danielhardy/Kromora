@@ -50,7 +50,7 @@ struct KeyboardSurface: ViewModifier {
             // Escape as the text-input system's cancel command (see `KeyboardChainTail`).
             .onExitCommand { router.perform(KeyInput(.escape)) }
             .onCommand(#selector(NSResponder.selectAll(_:))) {
-                if viewModel.navigation.isGrid { viewModel.collection.selectAll() }
+                if viewModel.navigation.isGrid { viewModel.selectAllInGrid() }
             }
             // Command-V pastes edits. It must be a standard Paste command rather than a key
             // handler: a menu item with no responder to enable it swallows Command-V before the

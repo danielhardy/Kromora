@@ -114,6 +114,13 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
             self.activeID = activeID
         }
 
+        func selectAllPortable(query: LibraryQuery) {
+            selectedIDs = Set(assets.prefix(committedCount).map { $0.source.portableIdentity.assetID })
+            activeID = selectedIDs.first
+        }
+
+        func restrictPortableSelection(to query: LibraryQuery) {}
+
         func togglePortableSelection(_ assetID: PortablePhotoAssetID) {
             if !selectedIDs.insert(assetID).inserted { selectedIDs.remove(assetID) }
             activeID = selectedIDs.contains(assetID) ? assetID : selectedIDs.first
