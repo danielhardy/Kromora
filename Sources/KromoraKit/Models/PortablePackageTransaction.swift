@@ -179,7 +179,7 @@ enum PortablePackageLeaseError: Error, Equatable, LocalizedError, CustomStringCo
 ///
 /// Acquisition uses O_EXCL, so two processes cannot both become the owner. Expired leases are
 /// reported rather than silently broken; callers must explicitly call `breakExpired` or
-/// `recoverExpiredWriter` after any transaction recovery and, normally, user confirmation.
+/// `recoverExpiredWriter` and, normally, user confirmation.
 final class PortablePackageLease: Sendable {
     static let defaultDuration: TimeInterval = 180
 
@@ -287,11 +287,66 @@ final class PortablePackageLease: Sendable {
         try? fm.removeItem(at: quarantine)
     }
 
-    /// Rolls back any interrupted package transaction, then removes an expired writer lock.
-    /// Live (unexpired) leases are still reported as contended; this never steals a lock.
-    static func recoverExpiredWriter(at packageRoot: URL, now: Date = Date()) throws {
-        _ = try PortablePackageTransaction.recover(at: packageRoot)
-        try breakExpired(at: packageRoot, now: now)
+    /// Takes exclusive ownership of an expired writer lock, then rolls back its interrupted
+    /// transactions. Live (unexpired) leases are still reported as contended; this never steals one.
+    ///
+    /// Ownership is established before anything is mutated: the lock file is renamed to a private
+    /// claim name (atomic, so exactly one recoverer wins) and the claimed lease is re-read. If it is
+    /// not expired at `now` it is put back untouched and the journal and staging are never opened.
+    /// While the rollback runs, this process holds a fresh lease on `manifest.lock`, so a concurrent
+    /// opener sees contention rather than starting a transaction that recovery would roll back, and
+    /// a former owner's `assertOwnership` fails instead of publishing. If the rollback fails, the
+    /// original expired lock is restored so the next opener still sees the journal and recovers it.
+    ///
+    /// `afterClaim` is a test seam that runs after the expiry check and before the rollback.
+    static func recoverExpiredWriter(
+        at packageRoot: URL,
+        now: Date = Date(),
+        afterClaim: @Sendable () throws -> Void = {}
+    ) throws {
+        let fm = FileManager.default
+        let lockURL = packageRoot.appendingPathComponent("manifest.lock")
+        let claimURL = packageRoot.appendingPathComponent("manifest.lock.claim-\(UUID().uuidString)")
+        guard fm.fileExists(atPath: lockURL.path) else { throw PortablePackageLeaseError.missing }
+        guard rename(lockURL.path, claimURL.path) == 0 else {
+            // Another recoverer or releaser took the lock between the check and the claim.
+            throw errno == ENOENT ? PortablePackageLeaseError.missing : PortablePackageLeaseError.invalid
+        }
+        let claimed: PortablePackageLeaseInfo
+        do {
+            claimed = try readInfo(at: claimURL)
+        } catch {
+            try restoreClaim(claimURL, to: lockURL)
+            throw PortablePackageLeaseError.invalid
+        }
+        guard claimed.expiresAt <= now else {
+            try restoreClaim(claimURL, to: lockURL)
+            throw PortablePackageLeaseError.contended(claimed)
+        }
+        let recoveryLease: PortablePackageLease
+        do {
+            recoveryLease = try acquire(at: packageRoot, now: now)
+        } catch let error as PortablePackageLeaseError {
+            if case .invalid = error { try? restoreClaim(claimURL, to: lockURL) }
+            else { try? fm.removeItem(at: claimURL) }  // someone else already replaced the expired lock
+            throw error
+        }
+        do {
+            try afterClaim()
+            _ = try PortablePackageTransaction.recover(at: packageRoot)
+        } catch {
+            try? recoveryLease.release()
+            try? restoreClaim(claimURL, to: lockURL)
+            throw error
+        }
+        try recoveryLease.release()
+        try? fm.removeItem(at: claimURL)
+    }
+
+    private static func restoreClaim(_ claimURL: URL, to lockURL: URL) throws {
+        guard renamex_np(claimURL.path, lockURL.path, UInt32(RENAME_EXCL)) == 0 else {
+            throw PortablePackageLeaseError.invalid
+        }
     }
 
     /// Rolls back transactions from a conclusively dead same-host writer, even when its lease

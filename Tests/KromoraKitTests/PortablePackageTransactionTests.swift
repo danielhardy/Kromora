@@ -142,6 +142,132 @@ final class PortablePackageTransactionTests: TempDirectoryTestCase {
         _ = stale
     }
 
+    /// Stages an uncommitted transaction (commit fails at `.publish`) and returns the paths to watch.
+    private func stageInterruptedTransaction(
+        lease: PortablePackageLease, packageURL: URL
+    ) throws -> (journalDirectory: URL, lockBytes: () throws -> Data) {
+        let injector = PortablePackageFaultInjector(failingAt: .publish)
+        var transaction = try PortablePackageTransaction.begin(
+            at: packageURL, lease: lease, now: now, faultInjector: injector)
+        try transaction.stage(data: Data("new".utf8), at: "State/value.txt")
+        XCTAssertThrowsError(try transaction.commit(now: now))
+        let lockURL = packageURL.appendingPathComponent("manifest.lock")
+        return (
+            packageURL.appendingPathComponent("Recovery/Transactions"),
+            { try Data(contentsOf: lockURL) }
+        )
+    }
+
+    private func journalCount(_ directory: URL) -> Int {
+        let urls = (try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil)) ?? []
+        return urls.filter { $0.pathExtension == "json" }.count
+    }
+
+    func testRecoverExpiredWriterRejectsUnexpiredLeaseWithoutTouchingJournal() throws {
+        let packageURL = try makePackage()
+        let lease = try PortablePackageLease.acquire(at: packageURL, now: now, duration: 10)
+        let watched = try stageInterruptedTransaction(lease: lease, packageURL: packageURL)
+        let lockBefore = try watched.lockBytes()
+
+        XCTAssertThrowsError(try PortablePackageLease.recoverExpiredWriter(at: packageURL, now: now)) {
+            guard case .contended = $0 as? PortablePackageLeaseError else {
+                return XCTFail("expected contention, got \($0)")
+            }
+        }
+        XCTAssertEqual(journalCount(watched.journalDirectory), 1)
+        XCTAssertEqual(try watched.lockBytes(), lockBefore)
+        XCTAssertNoThrow(try lease.assertOwnership(at: now))
+    }
+
+    /// Same-process, real package and lock files. The first read saw an expired lease; the owner
+    /// then renewed, so the recoverer's own exclusive re-read must reject the takeover.
+    func testRecoverExpiredWriterSparesOwnerThatRenewedAfterExpiryWasObserved() throws {
+        let packageURL = try makePackage()
+        let lease = try PortablePackageLease.acquire(at: packageURL, now: now, duration: 10)
+        let watched = try stageInterruptedTransaction(lease: lease, packageURL: packageURL)
+        let later = now.addingTimeInterval(11)
+        XCTAssertThrowsError(try PortablePackageLease.acquire(at: packageURL, now: later)) {
+            guard case .expired = $0 as? PortablePackageLeaseError else {
+                return XCTFail("expected expiry observation, got \($0)")
+            }
+        }
+        try lease.renew(now: now.addingTimeInterval(9))
+        let lockBefore = try watched.lockBytes()
+
+        XCTAssertThrowsError(try PortablePackageLease.recoverExpiredWriter(at: packageURL, now: later)) {
+            guard case .contended = $0 as? PortablePackageLeaseError else {
+                return XCTFail("expected contention, got \($0)")
+            }
+        }
+        XCTAssertEqual(journalCount(watched.journalDirectory), 1)
+        XCTAssertEqual(try watched.lockBytes(), lockBefore)
+        XCTAssertNoThrow(try lease.assertOwnership(at: later))
+    }
+
+    func testRecoverExpiredWriterFencesTheFormerOwnerDuringRollback() throws {
+        let packageURL = try makePackage()
+        let lease = try PortablePackageLease.acquire(at: packageURL, now: now, duration: 10)
+        _ = try stageInterruptedTransaction(lease: lease, packageURL: packageURL)
+        let later = now.addingTimeInterval(11)
+
+        try PortablePackageLease.recoverExpiredWriter(at: packageURL, now: later) {
+            XCTAssertThrowsError(try lease.renew(now: later))
+            XCTAssertThrowsError(
+                try PortablePackageLease.acquire(at: packageURL, now: later)
+            ) {
+                guard case .contended = $0 as? PortablePackageLeaseError else {
+                    return XCTFail("expected contention during rollback, got \($0)")
+                }
+            }
+        }
+        let replacement = try PortablePackageLease.acquire(at: packageURL, now: later)
+        try replacement.release()
+    }
+
+    func testOnlyOneConcurrentRecovererRollsBackAnExpiredWriter() throws {
+        let packageURL = try makePackage()
+        let lease = try PortablePackageLease.acquire(at: packageURL, now: now, duration: 10)
+        let watched = try stageInterruptedTransaction(lease: lease, packageURL: packageURL)
+        let later = now.addingTimeInterval(11)
+        let successes = OSAllocatedUnfairLock(initialState: 0)
+
+        DispatchQueue.concurrentPerform(iterations: 8) { _ in
+            if (try? PortablePackageLease.recoverExpiredWriter(at: packageURL, now: later)) != nil {
+                successes.withLock { $0 += 1 }
+            }
+        }
+        XCTAssertGreaterThanOrEqual(successes.withLock { $0 }, 1)
+        XCTAssertEqual(journalCount(watched.journalDirectory), 0)
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: packageURL.appendingPathComponent("manifest.lock").path))
+    }
+
+    func testFailureAfterOwnershipCheckLeavesJournalVisibleToTheNextRecovery() throws {
+        let packageURL = try makePackage()
+        let stateURL = packageURL.appendingPathComponent("State/value.txt")
+        try FileManager.default.createDirectory(
+            at: stateURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("old".utf8).write(to: stateURL)
+        let lease = try PortablePackageLease.acquire(at: packageURL, now: now, duration: 10)
+        let watched = try stageInterruptedTransaction(lease: lease, packageURL: packageURL)
+        let later = now.addingTimeInterval(11)
+
+        XCTAssertThrowsError(
+            try PortablePackageLease.recoverExpiredWriter(at: packageURL, now: later) {
+                throw PortablePackageTransactionError.injectedFailure(.publish)
+            })
+        XCTAssertEqual(journalCount(watched.journalDirectory), 1)
+        XCTAssertThrowsError(try PortablePackageLease.acquire(at: packageURL, now: later)) {
+            guard case .expired = $0 as? PortablePackageLeaseError else {
+                return XCTFail("next opener must still see the expired writer, got \($0)")
+            }
+        }
+        try PortablePackageLease.recoverExpiredWriter(at: packageURL, now: later)
+        XCTAssertEqual(journalCount(watched.journalDirectory), 0)
+        XCTAssertEqual(try String(contentsOf: stateURL, encoding: .utf8), "old")
+    }
+
     func testDeadLocalWriterRecoversBeforeLeaseExpiryAndRollsBackFirst() throws {
         let packageURL = try makePackage()
         let stateURL = packageURL.appendingPathComponent("State/value.txt")
