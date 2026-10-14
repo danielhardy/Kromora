@@ -5,6 +5,28 @@ import CoreGraphics
 /// Export policy is deliberately tested without presenting either export panel.
 final class ExportOptionsTests: TempDirectoryTestCase {
 
+    @MainActor
+    func testAccessoryOptionsCarryOutputSharpeningToFileAndFolderDestinations() {
+        let accessory = ExportFormatAccessoryView(selectedFormat: .jpeg)
+        let folder = URL(fileURLWithPath: "/tmp/out", isDirectory: true)
+        let file = folder.appendingPathComponent("a.jpg")
+
+        // Default accessory state keeps today's batch behavior: no sharpening.
+        XCTAssertEqual(accessory.exportOptions(destination: .folder(folder)).outputSharpening, .none)
+
+        let chosen = OutputSharpening(medium: .glossy, strength: .high)
+        accessory.select(outputSharpening: chosen)
+
+        let batch = accessory.exportOptions(destination: .folder(folder))
+        let single = accessory.exportOptions(destination: .file(file))
+        XCTAssertEqual(batch.outputSharpening, chosen)
+        XCTAssertEqual(single.outputSharpening, chosen)
+        XCTAssertEqual(batch.format, single.format)
+        XCTAssertEqual(batch.metadata, single.metadata)
+        XCTAssertEqual(batch.location, single.location)
+        XCTAssertEqual(batch.photos, single.photos)
+    }
+
     func testDefaultsAreFullSizeHighQualityAndSessionCompatible() throws {
         let options = ExportOptions.default
 

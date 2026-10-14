@@ -325,14 +325,7 @@ final class ExportCoordinator {
             assetID: assetID,
             document: document,
             lut: lut,
-            options: ExportOptions(
-                format: formatPicker.selectedFormat,
-                destination: .file(url),
-                metadata: formatPicker.metadataPolicy,
-                location: formatPicker.locationPolicy,
-                photos: formatPicker.photosOptions,
-                outputSharpening: formatPicker.outputSharpening
-            ),
+            options: formatPicker.exportOptions(destination: .file(url)),
             to: url,
             access: .systemGranted(for: url)
         )
@@ -537,13 +530,7 @@ final class ExportCoordinator {
         }
         // Record the choice as soon as the dialog completes, before the async batch starts.
         lastUsedFormat = format
-        let options = ExportOptions(
-            format: format,
-            destination: .folder(folder),
-            metadata: formatPicker.metadataPolicy,
-            location: formatPicker.locationPolicy,
-            photos: formatPicker.photosOptions
-        )
+        let options = formatPicker.exportOptions(destination: .folder(folder))
         let task = Task { [weak self, access] in
             guard let self else {
                 access.release()
@@ -991,7 +978,7 @@ final class ExportCoordinator {
 /// editor toolbar. Keeping this as an AppKit accessory also lets the Save panel update its filename
 /// extension and content-type filter as the user changes the explicit export choice.
 @MainActor
-private final class ExportFormatAccessoryView: NSView {
+final class ExportFormatAccessoryView: NSView {
     private let picker: NSSegmentedControl
     private let metadataCheckbox: NSButton
     private let locationCheckbox: NSButton
@@ -1126,6 +1113,29 @@ private final class ExportFormatAccessoryView: NSView {
         let strengthIndex = max(0, min(OutputSharpeningStrength.allCases.count - 1,
                                        sharpeningStrength.indexOfSelectedItem))
         return OutputSharpening(medium: media, strength: OutputSharpeningStrength.allCases[strengthIndex])
+    }
+
+    /// The options this accessory describes, shared by single and batch export so a control can't
+    /// apply to one and be silently dropped by the other.
+    func exportOptions(destination: ExportDestination) -> ExportOptions {
+        ExportOptions(
+            format: selectedFormat,
+            destination: destination,
+            metadata: metadataPolicy,
+            location: locationPolicy,
+            photos: photosOptions,
+            outputSharpening: outputSharpening
+        )
+    }
+
+    /// Select a sharpening choice programmatically (tests; the popups are otherwise user-driven).
+    func select(outputSharpening: OutputSharpening) {
+        if let medium = OutputSharpeningMedium.allCases.firstIndex(of: outputSharpening.medium) {
+            sharpeningMedium.selectItem(at: medium)
+        }
+        if let strength = OutputSharpeningStrength.allCases.firstIndex(of: outputSharpening.strength) {
+            sharpeningStrength.selectItem(at: strength)
+        }
     }
 
     @objc private func selectionChanged() {
