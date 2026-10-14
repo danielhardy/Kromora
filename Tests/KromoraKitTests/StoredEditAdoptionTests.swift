@@ -328,7 +328,7 @@ final class StoredEditAdoptionTests: TempDirectoryTestCase {
     func testShutdownWaitsForPlaceholderMaterializationAndSuppressesItsResult() async throws {
         let packageURL = try await makePackage(storedExposures: ["one.png": 1.5])
         try makeLegacyPlaceholders(in: packageURL)
-        let (viewModel, fake, session) = try await reopen(
+        let (viewModel, _, session) = try await reopen(
             packageURL, browsingAssets: true, holdPreparation: false)
         let id = try portableID("one.png", in: viewModel)
         let gate = installGate(holding: [id], on: session)
@@ -336,13 +336,13 @@ final class StoredEditAdoptionTests: TempDirectoryTestCase {
         try select("one.png", in: viewModel)
         try await waitForArrival(gate)
 
-        let preparationsBeforeShutdown = await fake.sourcePreparationCount
+        let sourceNameBeforeShutdown = viewModel.sourceName
         var shutdownFinished = false
         let shutdown = Task { @MainActor in
             await viewModel.shutdown()
             shutdownFinished = true
         }
-        try await Task.sleep(for: .milliseconds(50))
+        try await waitUntil("shutdown to begin") { viewModel.admissionIsShuttingDown }
         XCTAssertFalse(shutdownFinished, "shutdown must wait for the in-flight materialization")
 
         await gate.release(id)
@@ -351,8 +351,12 @@ final class StoredEditAdoptionTests: TempDirectoryTestCase {
             viewModel.collection.items.first { $0.displayName == "one.png" }?.asset.source
                 .portableIdentity.sourceFingerprint.isBrowsingPlaceholder ?? false,
             "a result arriving after shutdown must not replace the collection item")
-        let preparations = await fake.sourcePreparationCount
-        XCTAssertEqual(preparations, preparationsBeforeShutdown)
+        // The engine-wide preparation count is not a usable signal here: the edited-thumbnail
+        // coordinator also prepares this photo's source, and a job scheduled before shutdown may
+        // reach the engine at any point under the parallel lane. The open path leaves its own
+        // marks instead: it names the source and starts a source-session request.
+        XCTAssertEqual(viewModel.sourceName, sourceNameBeforeShutdown)
+        XCTAssertFalse(viewModel.admissionSourceSessionIsBusy)
         XCTAssertNil(viewModel.sourceImage)
         await viewModel.shutdown()
     }
