@@ -64,8 +64,9 @@ recipe; a target with no viable source remains unchanged under the existing rend
 
 ## Retouch quality evaluation
 
-Run `swift test --filter RetouchQualityEvaluationTests` for the deterministic ground-truth quality
-gate. It generates clean and damaged 96 × 72 pixel pairs (192 × 144 for the 60 px dust case) in
+Run `swift test --filter RetouchQualityEvaluationTests` for the deterministic ground-truth stress
+report and supported-class shipping gate. It generates clean and damaged 96 × 72 pixel pairs
+(192 × 144 for the 60 px dust case) in
 `Tests/KromoraKitTests/Fixtures.swift` and prints rows for Heal, automatic Heal, Clone, and the
 current Heal behavior. The corpus covers a smooth noisy sky, cloud boundary, foliage, water, brick
 crossed by a wire, and skin-like texture; defects include soft dust with 5 px and 60 px diameters, a
@@ -161,9 +162,10 @@ Two different numbers come from this suite; do not conflate them.
 Both run on 96 × 72 px synthetic fixtures. Neither is a camera-scale sign-off; camera-scale
 inspection is tracked in KRMA-1016.
 
-The gate measures Heal and Clone quality against the unchanged KRMA-658 limits. Manual fixture
-offsets passed 8/36 Heal rows and 7/36 Clone rows; the automatic picker passed 5/36 Heal rows in
-the corpus run of 2026-10-12. These are generated-fixture results, not claims about
-camera-image performance. The evaluation limits are a quality gate, not a timing benchmark. For
+The stress report measures Heal and Clone quality against the unchanged KRMA-658 limits. Manual
+fixture offsets passed 8/36 Heal rows and 7/36 Clone rows; the automatic picker passed 5/36 Heal
+rows in the corpus run of 2026-10-12. The shipping gate applies those limits only to the supported
+classes and enforces the per-class floors above. These are generated-fixture results, not claims
+about camera-image performance. The evaluation limits are a quality gate, not a timing benchmark. For
 real-camera coverage, use local RAW fixtures in `realworldtest/` or another fixture directory with
 `KROMORA_RAW_FIXTURE_DIR`; the normal quality suite does not use those images.

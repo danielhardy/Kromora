@@ -56,6 +56,8 @@ final class RetouchQualityEvaluationTests: TempDirectoryTestCase {
         "hair/fibre": ["Heal": 1, "Heal (auto)": 0, "Clone": 1],
     ]
 
+    private static let shippingModes = ["Heal", "Heal (auto)", "Clone"]
+
     private struct Row {
         let background: String, defect: String, label: String
         let metrics: Metrics
@@ -136,9 +138,16 @@ final class RetouchQualityEvaluationTests: TempDirectoryTestCase {
     /// passing is not camera-scale sign-off (see KRMA-1016).
     func testShippingGateHoldsSupportedClassFloors() throws {
         let table = try evaluateCorpus()
+        XCTAssertEqual(Set(Self.shippingFloors.keys), Set(Self.shippingClasses.keys),
+            "every supported shipping class must define floors")
         for (name, defects) in Self.shippingClasses.sorted(by: { $0.key < $1.key }) {
+            XCTAssertTrue(defects.allSatisfy(RetouchQualityFixtures.defects.contains),
+                "shipping class \(name) must name corpus defects")
+            let floors = Self.shippingFloors[name, default: [:]]
+            XCTAssertEqual(Set(floors.keys), Set(Self.shippingModes),
+                "shipping class \(name) must define a floor for every shipping mode")
             let total = RetouchQualityFixtures.backgrounds.count * defects.count
-            for (label, floor) in Self.shippingFloors[name, default: [:]].sorted(by: { $0.key < $1.key }) {
+            for (label, floor) in floors.sorted(by: { $0.key < $1.key }) {
                 let passes = table.filter {
                     $0.label == label && defects.contains($0.defect) && $0.failed.isEmpty
                 }.count
