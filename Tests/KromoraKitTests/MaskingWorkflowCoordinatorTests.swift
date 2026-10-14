@@ -144,6 +144,20 @@ final class MaskingWorkflowCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.discoveryState.request?.phase, .resolved(regionMask().reference))
     }
 
+    func testResolvedSmartMaskTurnsHiddenOverlayBackOn() async {
+        let analysis = FakeAnalysisProvider()
+        await analysis.configure(delay: .zero, result: .success(regionMask()))
+        let (coordinator, destination, _) = makeCoordinator(analysis: analysis)
+        destination.maskingSource = makeSource()
+        destination.maskingAssetID = PhotoAssetID(rawValue: "asset-1")
+
+        coordinator.createSmartMask(.subject)
+        coordinator.interactionState.showOverlay = false  // user hides masks during the wait
+        await coordinator.waitForInFlightSmartMask()
+
+        XCTAssertTrue(coordinator.interactionState.showOverlay)
+    }
+
     func testCreateSmartMaskWithoutOpenSourceReportsUnavailable() async {
         let (coordinator, destination, analysis) = makeCoordinator()
         destination.maskingSource = nil

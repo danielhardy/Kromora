@@ -100,6 +100,24 @@ fragment float4 mask_discovery_fragment(
     color += mix(amber, float3(1.0, 0.86, 0.62), 0.55) * (caustic * 0.15 * safelight * breathe) * edgeFade;
     color += shimmer * edgeFade;
 
+    if (!still) {
+        // Whole-frame development: the same silver grain that later nucleates on the returned
+        // coverage drifts in slow, uniform waves across the entire photograph, so the wait
+        // already reads as the reveal's vocabulary. It is a field, not a region: it never
+        // favors any part of the image and carries no information about the analysis.
+        float2 gp = local * float2(u.display.x, 1.0);
+        float clump = clumped_noise(gp * 140.0 + float2(t * 0.05, 0.0));
+        float wave = 0.5 + 0.5 * sin(t * 0.45 + clump * 6.28318);
+        float developed = smoothstep(0.55, 0.9, wave) * (0.35 + 0.65 * clump);
+        float fine = hash21(floor(gp * 520.0) + floor(t * 6.0) * 3.1);
+        float sparkle = developed * smoothstep(0.7, 0.97, fine);
+        float ambient = safelight;
+        float3 silver = float3(0.84, 0.93, 1.0);
+        float lift = (developed * 0.03 + sparkle * 0.2) * ambient;
+        color += silver * lift;
+        alpha += lift * 0.4;
+    }
+
     if (u.display.z > 0.5) {
         float coverage = mask.sample(linearSampler, source).r;
         float2 texel = 1.0 / float2(mask.get_width(), mask.get_height());

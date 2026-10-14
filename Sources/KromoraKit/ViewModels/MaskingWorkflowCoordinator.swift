@@ -561,6 +561,8 @@ final class MaskingWorkflowCoordinator {
                 self.insertDurableMask(kind, faceIndex: faceIndex, destination: destination)
                 self.smartMaskRetryContext = nil
                 self.interactionState.markMaskResolved()
+                // The reveal's conclusion is the mask itself, so show it even if the user hid overlays.
+                self.interactionState.showOverlay = true
                 self.discoveryState.resolve(discoveryID, reference: mask.reference)
                 let title = target == .face ? "Face \(faceIndex + 1)" : kind.title
                 destination.setMaskingStatusMessage("Created \(title) mask")
@@ -865,6 +867,8 @@ final class MaskingWorkflowCoordinator {
                     mode: mode)
                 self.smartMaskRetryContext = nil
                 self.interactionState.markMaskResolved()
+                // The reveal's conclusion is the mask itself, so show it even if the user hid overlays.
+                self.interactionState.showOverlay = true
                 self.discoveryState.resolve(discoveryID, reference: mask.reference)
                 let title = target == .face ? "Face \(faceIndex + 1)" : kind.title
                 destination.setMaskingStatusMessage("Added \(title) component")
