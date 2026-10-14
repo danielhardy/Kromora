@@ -36,6 +36,7 @@ final class ModelDependencyTests: XCTestCase {
         let allowed = Set([
             "ImageCollection.swift",
             "Thumbnails.swift",
+            "PhotosThumbnailLoader.swift",
             "KromoraWindowAppearanceController.swift",
         ])
         let enumerator = try XCTUnwrap(
@@ -58,6 +59,7 @@ final class ModelDependencyTests: XCTestCase {
         let expectedMarkers = [
             ("Sources/KromoraKit/Models/ImageCollection.swift", "ImageCollectionPresentationModel"),
             ("Sources/KromoraKit/Models/Thumbnails.swift", "PlatformThumbnailProvider"),
+            ("Sources/KromoraKit/Models/PhotosThumbnailLoader.swift", "PhotoKitThumbnailProvider"),
             ("Sources/KromoraKit/Models/KromoraWindowAppearanceController.swift", "AppKitWindowAppearanceController"),
             ("Sources/KromoraKit/Presentation/MaskInteractionPresentationBridge.swift", "extension MaskInteractionState"),
             ("Sources/KromoraKit/Platform/PhotoAssetImageMetadataAdapter.swift", "extension PhotoAsset"),
