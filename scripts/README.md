@@ -20,7 +20,7 @@ measurements. Current requirements and verification limits are summarized in
 | Active | `verify-app-icon.sh` | Verify Icon Composer inputs and packaged icon/resource outputs | Xcode-built `.build/xcode/Build/Products/Release/Kromora.app`, Icon Composer asset, Python 3 |
 | Active | `verify-app-signature.sh` | Verify the app signature and expected entitlements | Xcode-built `.build/xcode/Build/Products/Release/Kromora.app`, `codesign`, Python 3 |
 | Active | `verify-xcode-app.sh` | Verify the built app's identity, metadata, packaged resources, signature, and icon | Xcode-built `.build/xcode/Build/Products/Release/Kromora.app`, Swift, Python 3 |
-| Active | `verify-library-package-metadata.sh` | Verify the `.kromoralibrary` document/UTI declaration and Pictures entitlement | Source plist files, Python 3 |
+| Active | `verify-library-package-metadata.sh` | Verify the `.kromoralibrary` UTI declaration, absent Finder document type, and Pictures entitlement | Source plist files, Python 3 |
 
 Kromora is distributed through the Mac App Store, with prerelease builds tested through TestFlight;
 developers can build the source with SwiftPM. Xcode Organizer handles archive validation and the

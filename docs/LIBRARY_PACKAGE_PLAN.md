@@ -11,6 +11,10 @@
 > this proposal conflicts with those documents or the shipped code, the current architecture and
 > tests take precedence. In particular, referenced-folder browsing has no product mode and the
 > package sidecars, not `EditDocumentStore`, own durable edits.
+>
+> The verified backup/restore proposal in §7 describes retained `PortableLibraryBackup` /
+> `PortableLibraryRestore` model code only. It is not shipped; the supported path is to quit Kromora
+> and copy the package, as described in [`STORAGE_POLICY.md`](STORAGE_POLICY.md).
 
 **Status:** the Pictures-backed package and storage boundary are active. The original sequenced
 implementation records were KRMA-389 (phase 0), KRMA-390 (phase 1), KRMA-391 (phase 2), KRMA-392

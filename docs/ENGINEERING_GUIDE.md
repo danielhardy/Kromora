@@ -166,7 +166,8 @@ mask sources.
 
 [`STORAGE_POLICY.md`](STORAGE_POLICY.md) is the source-of-truth matrix for the durable package,
 the Application Support projection, device caches, and user-visible output destinations.
-`PortableLibraryValidation` is the reusable read-only scrub boundary for package backup and restore.
+`PortableLibraryValidation` is the reusable read-only scrub boundary used by the unwired
+`PortableLibraryBackup` / `PortableLibraryRestore` model code; neither operation is exposed to users.
 It walks the manifest, all membership shards, reachable asset records, originals, edit revisions,
 XMP companions, and embedded Look blobs, verifying structure and the checksums stored in portable
 identity/reference values. These findings are reported in `criticalFailures`. Package `Derived/`

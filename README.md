@@ -44,7 +44,8 @@ MVP commitments.
    bit-depth, alpha, and metadata options; GPS is excluded by default.
 
 For the current release bar and explicit exclusions, see the
-[MVP scope](docs/PRODUCT_SCOPE.md). For package ownership, moving or backing up a library by copy, and data safety, see
+[MVP scope](docs/PRODUCT_SCOPE.md). For package ownership and data safety, including how to move or
+back up a library by copy, see
 [`docs/STORAGE_POLICY.md`](docs/STORAGE_POLICY.md).
 
 ## Current capabilities
@@ -63,8 +64,8 @@ For the current release bar and explicit exclusions, see the
   RAW/JPG pair, and save it for reuse. Film-inspired names describe the look; they do not claim
   camera-profile or commercial-film emulation.
 - **Review and recovery:** compare single and side-by-side views, inspect histogram and metadata,
-  copy edits, use history and named snapshots, and create virtual copies. The package includes
-  package trash/recovery. Verified backup/restore is post-MVP; to move or back up a library, quit
+  copy edits, use history and named snapshots, and create virtual copies. Package trash and recovery
+  are available. Verified backup/restore is post-MVP; to move or back up a library, quit
   Kromora and copy the package (see [`docs/STORAGE_POLICY.md`](docs/STORAGE_POLICY.md)).
 - **Onboarding and export handoff:** sample photos and a short workflow tour are available. A
   rendered TIFF can be handed to an external editor and reimported as a separate library photo;

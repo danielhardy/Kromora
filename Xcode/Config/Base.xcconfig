@@ -10,7 +10,7 @@ ARCHS = arm64
 MARKETING_VERSION = 0.1
 CURRENT_PROJECT_VERSION = 1
 
-// Use the shared source plist for document/UTI declarations and the app's usage strings.
+// Use the shared source plist for package UTI declarations and the app's usage strings.
 INFOPLIST_FILE = $(SRCROOT)/../App/Info.plist
 
 // Apply the app's declared sandbox capabilities and hardened runtime when signing.

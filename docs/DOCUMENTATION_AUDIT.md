@@ -16,7 +16,7 @@ the active MVP or roadmap.
 | [`APP_ARCHITECTURE.md`](APP_ARCHITECTURE.md) | Current architecture | Workflow ownership, coordinators, package-library boundary. |
 | [`ENGINEERING_GUIDE.md`](ENGINEERING_GUIDE.md) | Current engineering contract | Render, concurrency, persistence, masking, UI and contributor invariants. |
 | [`MODEL_ARCHITECTURE.md`](MODEL_ARCHITECTURE.md) | Current architecture reference | Module direction and model/source boundaries. |
-| [`STORAGE_POLICY.md`](STORAGE_POLICY.md) | Current data-safety contract | Canonical package data, projections, caches, backup, restore, and output. |
+| [`STORAGE_POLICY.md`](STORAGE_POLICY.md) | Current data-safety contract | Manual package-copy path, canonical data, projections, caches, dormant backup/restore model, and output. |
 | [`TESTING.md`](TESTING.md) | Current operations | Required and optional verification lanes, profiling, manual UI checks. |
 | [`PACKAGING.md`](PACKAGING.md) | Current operations | App bundle, identity, sandbox, signing, and release workflow. |
 | [`APP_STORE_SUBMISSION.md`](APP_STORE_SUBMISSION.md) | Current operations | App Store Connect submission checklist, privacy, and review notes. |
