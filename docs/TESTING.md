@@ -672,6 +672,52 @@ Edit paths changed substantially. The 50 ms and 100 ms misses stay the closed wo
 KRMA-748, KRMA-749, and KRMA-750. A wall-clock miss on an unchanged tree is a handoff with this
 profile (ADR-LKF-001); do not start another capture to reproduce it.
 
+### Warm navigation profile without a window (KRMA-1002, 2026-10-14)
+
+`WarmNavigationProfileBenchmark` (optional lane; `KROMORA_WARM_NAVIGATION_PROFILE=1 swift test -c release --filter WarmNavigationProfileBenchmark`)
+mounts the shipping `ContentView` in an `NSHostingView` that is never attached to an `NSWindow`,
+lays it out by hand at 1440×897 points, and drives `selectCollectionImage` / `navigate(to:)`. It
+uses the exact stored frame, so the warm Edit path is the zero-render case. Two runs, Release,
+Apple M4 Pro (48 GB), macOS 27.2 (26B5112a), commit `6568ffbd`, `DSC01019.ARW` (9504×6336), 30
+samples after 5 unmeasured warm-up opens, package library of 30 items, no window, no compositor.
+These are **not** comparable to the M1 Pro capture above (different chip, no display path); the
+only like-for-like context is the 2026-10-11 M4 Pro capture (Edit p95 187-197 ms, grid p95 154-157 ms).
+
+| Phase (p50 / p95, run 1; run 2 in parentheses) | Library → Edit | Edit → Library |
+| --- | ---: | ---: |
+| State publication (`selectCollectionImage` / `navigate` return) | 0.33 / 0.35 ms (0.32 / 0.37) | 0.03 / 0.03 ms |
+| View mount + layout (first synchronous `layoutSubtreeIfNeeded`) | 24.6 / 28.8 ms (25.0 / 27.3) | 28.4 / 29.9 ms (28.4 / 30.3) |
+| All layout passes until settled | 30.6 / 35.7 ms (31.5 / 42.1) | same as first pass |
+| Frame hydration (selection → `previewSurface.image` set) | 46.9 / 54.7 ms (46.5 / 58.1) | 28.4 / 29.9 ms (grid cells already hydrated) |
+| Drawable presentation | not measurable without a window | not measurable without a window |
+
+Counts: warm Edit admitted 1 and 2 renders over 30 samples (plus 1 in the 5 warm-ups) because with no
+window the presentation session never confirms; the capture's zero-render result remains the
+authority. Edit → Library admitted 0. Body evaluations per sample: about 10.5 (Edit) and 4.0 (grid).
+`AppViewModel.document` published **0** Observation invalidations per sample in both directions.
+
+What this shows. On this machine the whole main-actor chain up to a hydrated frame is about 47-58 ms
+for Edit and about 30 ms for the grid, and state publication is under 0.4 ms. Mounting and laying
+out the hierarchy is a single synchronous pass of 25-29 ms and is the largest window-independent
+piece. The recorded 187-197 ms (M4 Pro) and 286 ms (M1 Pro) capture p95s therefore leave roughly
+130+ ms for drawable acquisition, Core Image presentation encoding, compositor scheduling, and
+window-attached layout, which this harness cannot see. Some capture timestamps are callback-handler
+fallbacks, so that remainder also includes handler timing. The profile does **not** show `document`
+invalidation rebuilding Light, Color, Effects, and the preview together on this path (document never
+published), so no Observation-splitting ticket was filed.
+
+Proposed targets (proposals only; nothing is adopted in code, and KRMA-952 decides):
+
+| Target | Proposal | CI-assertable? |
+| --- | --- | --- |
+| First meaningful pixels (stored frame on canvas) | p95 ≤ 150 ms on M4-class, ≤ 250 ms on M1-class | Supervised capture only; window-free proxy: hydration p95 ≤ 100 ms (this benchmark, optional lane) |
+| Usable controls (inspector sliders respond) | main-actor work before first suspension p95 ≤ 3 ms (already asserted); mount + layout pass p95 ≤ 40 ms | Pre-suspension is already structural; layout is optional-lane evidence |
+| Final-quality settlement | confirmed full-quality frame p95 ≤ 1 s with ≤ 1 render | Render counts in CI (`WarmReopenPresentationTests`); time is supervised |
+| p99 frame gaps during navigation | no gap > 50 ms after first pixel | Supervised capture only (needs a display link) |
+| Cancellation under rapid navigation | N rapid selections leave one live session, 0 stale-generation presentations | Yes, fake-engine tests (`PreviewPresentationCoordinatorTests` style) |
+
+Reproduce with the command above; do not run `scripts/run-kromora-capture.sh` for this question.
+
 ### Persisted package identity hash reuse (KRMA-753, 2026-10-01)
 
 Release last-known-frame capture after reusing the asset record's content hash for an unchanged
