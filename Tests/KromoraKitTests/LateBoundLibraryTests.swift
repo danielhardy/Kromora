@@ -71,6 +71,9 @@ final class LateBoundLibraryTests: TempDirectoryTestCase {
 
     func testUnboundStoreFailsClosedForReadWriteFlushAndShutdown() async throws {
         let store = EditDocumentStore.makeUnboundStore()
+        let viewModel = makeAppViewModel(
+            editStore: store, portablePackageURL: packageURL, defersLibraryOpen: true
+        )
 
         let loaded = await store.load(for: reference())
         XCTAssertFalse(loaded.found)
@@ -89,8 +92,29 @@ final class LateBoundLibraryTests: TempDirectoryTestCase {
         let writes = await store.writeCount
         XCTAssertEqual(writes, 0)
 
+        _ = await viewModel.flushPendingWrites()
+        await viewModel.shutdown()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: packageURL.path))
+
         await store.awaitEmbeddedLooks()
         _ = await store.cancelEmbeddedLookLoading()
+    }
+
+    func testOpenLibraryRejectsBoundStoreAndReleasesOpenedLease() async throws {
+        _ = try PortableLibraryPackage.create(at: packageURL)
+        let (otherPackage, otherLease) = try makePackage()
+        defer { try? otherLease.release() }
+        let store = EditDocumentStore(package: otherPackage, lease: otherLease)
+        let viewModel = makeAppViewModel(
+            editStore: store, portablePackageURL: packageURL, defersLibraryOpen: true
+        )
+
+        await viewModel.openLibrary()
+
+        XCTAssertNil(viewModel.portableLibrary)
+        XCTAssertTrue(viewModel.portableLibraryOpenError?.contains("already bound") == true)
+        let reacquiredLease = try PortablePackageLease.acquire(at: packageURL)
+        try reacquiredLease.release()
     }
 
     func testFailedOpenStoreStillReportsActionablePackageFailure() async {

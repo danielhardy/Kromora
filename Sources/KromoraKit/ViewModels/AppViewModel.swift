@@ -1452,7 +1452,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 at: portablePackageURL, confirmer: confirmer, scheduler: workScheduler,
                 asynchronousIndexLoading: true
             )
-            await editStore.bind(package: opened.session.package, lease: opened.session.lease)
+            guard await editStore.bind(package: opened.session.package, lease: opened.session.lease) else {
+                await opened.session.shutdown()
+                portableLibraryOpenError = "The edit store is already bound to a library."
+                reportPortableLibraryUnavailable()
+                return
+            }
             portableLibraryOpenError = nil
             bindPortableLibrary(opened.session, recoveredPreviousWriter: opened.recoveredPreviousWriter)
         } catch {
