@@ -379,3 +379,13 @@ scheduler.
 - Persistence, export, comparison, undo/redo, and navigation retain their existing semantics; a
   coordinator extraction is complete only when the old AppViewModel façade still routes the same
   operation.
+
+## Active library selection
+
+`ActiveLibrarySelection` (Models) owns which `.kromoralibrary` package a launch opens. Settings >
+Choose Library… runs `ActiveLibraryChooser`, which picks a folder through `FileDialogProviding`,
+validates it with `PortableLibraryPackage.open(at:)`, stores a security-scoped bookmark and offers
+Relaunch / Later. There is no runtime swap. `AppLaunch.open()` resolves the bookmark (else the
+default), holds the security scope for the session, and passes the URL to the view model. A stale,
+unresolvable or missing choice falls back to the default with a one-time notice and clears only the
+bookmark; the old path is never touched. "Use Default Library" clears the bookmark.

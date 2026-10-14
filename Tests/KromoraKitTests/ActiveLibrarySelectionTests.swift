@@ -1,0 +1,157 @@
+import XCTest
+import UniformTypeIdentifiers
+@testable import KromoraKit
+
+@MainActor
+final class ActiveLibrarySelectionTests: XCTestCase {
+    private var directory: URL!
+    private var defaults: UserDefaults!
+    private var defaultURL: URL!
+
+    override func setUp() async throws {
+        directory = try Fixtures.makeTempDirectory("ActiveLibrarySelectionTests")
+        defaults = UserDefaults(suiteName: "ActiveLibrarySelectionTests-\(UUID().uuidString)")!
+        defaultURL = directory.appendingPathComponent("Default.kromoralibrary")
+    }
+
+    override func tearDown() async throws {
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    private var selection: ActiveLibrarySelection {
+        ActiveLibrarySelection(preferences: defaults, defaultURL: defaultURL)
+    }
+
+    private func makePackage(_ name: String) async throws -> URL {
+        let url = directory.appendingPathComponent(name)
+        let session = try PortableLibrarySession(at: url)
+        try session.lease.release()
+        return url
+    }
+
+    private func access(_ url: URL) -> SecurityScopedResourceAccess {
+        .systemGranted(for: url, stop: { _ in })
+    }
+
+    func testValidPackageIsAcceptedAndResolvedAtLaunch() async throws {
+        let url = try await makePackage("Chosen.kromoralibrary")
+        try selection.choose(url, access: access(url))
+        XCTAssertTrue(selection.hasChoice)
+        let resolution = selection.resolve()
+        XCTAssertEqual(resolution.url.standardizedFileURL.resolvingSymlinksInPath(),
+                       url.standardizedFileURL.resolvingSymlinksInPath())
+        XCTAssertNil(resolution.notice)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: defaultURL.path))
+    }
+
+    func testInvalidFolderIsRejectedAndChangesNothing() throws {
+        let folder = directory.appendingPathComponent("Plain.kromoralibrary")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        XCTAssertThrowsError(try selection.choose(folder, access: access(folder))) {
+            XCTAssertEqual($0 as? ActiveLibrarySelection.ChoiceError, .notALibrary(name: "Plain.kromoralibrary"))
+        }
+        XCTAssertFalse(selection.hasChoice)
+        XCTAssertEqual(selection.resolve().url, defaultURL)
+    }
+
+    func testBookmarkRoundTripsAndUseDefaultClearsIt() async throws {
+        let url = try await makePackage("Chosen.kromoralibrary")
+        try selection.choose(url, access: access(url))
+        XCTAssertEqual(selection.chosenURL?.resolvingSymlinksInPath(), url.resolvingSymlinksInPath())
+        selection.useDefault()
+        XCTAssertFalse(selection.hasChoice)
+        XCTAssertNil(selection.chosenURL)
+        XCTAssertEqual(selection.resolve().url, defaultURL)
+    }
+
+    func testUnresolvableBookmarkFallsBackWithNoticeOnce() {
+        defaults.set(Data("not a bookmark".utf8), forKey: ActiveLibrarySelection.bookmarkKey)
+        let first = selection.resolve()
+        XCTAssertEqual(first.url, defaultURL)
+        XCTAssertNotNil(first.notice)
+        XCTAssertNil(selection.resolve().notice)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: defaultURL.path))
+    }
+
+    func testMissingChosenPackageFallsBackWithoutRecreatingIt() async throws {
+        let url = try await makePackage("Gone.kromoralibrary")
+        try selection.choose(url, access: access(url))
+        try FileManager.default.removeItem(at: url)
+        let resolution = selection.resolve()
+        XCTAssertEqual(resolution.url, defaultURL)
+        XCTAssertNotNil(resolution.notice)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    func testLaunchOpensChosenLibraryFromSettings() async throws {
+        let url = try await makePackage("Chosen.kromoralibrary")
+        let settings = KromoraSettings(preferences: defaults)
+        try ActiveLibrarySelection(preferences: defaults).choose(url, access: access(url))
+        var opened: URL?
+        let launch = AppLaunch(settings: settings, sheets: FakeSheets(), makeViewModel: { settings, packageURL, confirmer in
+            opened = packageURL
+            return AppViewModel(
+                engine: RenderEngine.shared, preferences: self.defaults, includeBundledLooks: false,
+                portablePackageURL: packageURL, leaseRecoveryConfirmer: confirmer, settings: settings)
+        })
+        let model = await launch.open()
+        XCTAssertEqual(opened?.resolvingSymlinksInPath(), url.resolvingSymlinksInPath())
+        await model.shutdown()
+    }
+
+    // MARK: Chooser
+
+    private final class StubDialog: FileDialogProviding {
+        var folder: URL?
+        func chooseFiles(title: String, allowedContentTypes: [UTType], allowsMultipleSelection: Bool,
+                         startingAt directoryURL: URL?) -> [URL]? { nil }
+        func chooseFolder(title: String, prompt: String, startingAt directoryURL: URL?,
+                          canCreateDirectories: Bool) -> URL? { folder }
+    }
+
+    private final class SpyRelauncher: AppRelaunching {
+        var count = 0
+        func relaunch() { count += 1 }
+    }
+
+    func testChooserPromptsRelaunchAfterValidChoice() async throws {
+        let url = try await makePackage("Chosen.kromoralibrary")
+        let dialog = StubDialog(); dialog.folder = url
+        let sheets = FakeSheets(); sheets.confirmResult = true
+        let relauncher = SpyRelauncher()
+        let chooser = ActiveLibraryChooser(
+            selection: selection, fileDialog: dialog, sheets: sheets, relauncher: relauncher)
+        await chooser.choose()
+        XCTAssertEqual(sheets.lastConfirmButtons, ["Relaunch", "Later"])
+        XCTAssertEqual(relauncher.count, 1)
+        XCTAssertFalse(chooser.isUsingDefault)
+        XCTAssertEqual(chooser.errorMessage, "")
+    }
+
+    func testChooserShowsOneErrorForInvalidFolderWithoutPrompting() async throws {
+        let folder = directory.appendingPathComponent("Plain")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let dialog = StubDialog(); dialog.folder = folder
+        let sheets = FakeSheets()
+        let chooser = ActiveLibraryChooser(
+            selection: selection, fileDialog: dialog, sheets: sheets, relauncher: SpyRelauncher())
+        await chooser.choose()
+        XCTAssertFalse(chooser.errorMessage.isEmpty)
+        XCTAssertEqual(sheets.confirmCalls, 0)
+        XCTAssertTrue(chooser.isUsingDefault)
+    }
+
+    func testChooserLaterKeepsRunningAndUseDefaultClears() async throws {
+        let url = try await makePackage("Chosen.kromoralibrary")
+        let dialog = StubDialog(); dialog.folder = url
+        let sheets = FakeSheets(); sheets.confirmResult = false
+        let relauncher = SpyRelauncher()
+        let chooser = ActiveLibraryChooser(
+            selection: selection, fileDialog: dialog, sheets: sheets, relauncher: relauncher)
+        await chooser.choose()
+        XCTAssertEqual(relauncher.count, 0)
+        await chooser.useDefault()
+        XCTAssertTrue(chooser.isUsingDefault)
+        XCTAssertFalse(selection.hasChoice)
+    }
+}

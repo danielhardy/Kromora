@@ -156,7 +156,7 @@ public final class KromoraSettings: ObservableObject {
     public let userLookFolderURL: URL
     public var canonicalUserLookFolderURL: URL { userLookFolderURL }
 
-    private let preferences: UserDefaults
+    let preferences: UserDefaults
     private let fileManager: FileManager
     private var records: [KromoraFolderKind: PersistedFolder] = [:]
     private var retainedAccess: [KromoraFolderKind: SecurityScopedResourceAccess] = [:]

@@ -10,6 +10,7 @@ public struct KromoraSettingsView: View {
     @State private var sourceTestMessage = ""
     @State private var exportTestMessage = ""
     @State private var editDatabaseURL: URL?
+    @State private var libraryChooser: ActiveLibraryChooser
 
     public init(
         settings: KromoraSettings,
@@ -21,6 +22,8 @@ public struct KromoraSettingsView: View {
         self.editDatabaseFileURL = editDatabaseURL
         self.fileDialog = fileDialog
         self.workspace = workspace
+        _libraryChooser = State(initialValue: ActiveLibraryChooser(
+            selection: settings.activeLibrary, fileDialog: fileDialog))
     }
 
     private var maskOverlaySection: some View {
@@ -59,6 +62,34 @@ public struct KromoraSettingsView: View {
         }
     }
 
+    private var librarySection: some View {
+        Section {
+            LabeledContent("Library") {
+                Text(libraryChooser.displayPath)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+            }
+            HStack {
+                Button("Choose Library…") { Task { await libraryChooser.choose() } }
+                    .accessibilityLabel("Choose Library")
+                Button("Use Default Library") { Task { await libraryChooser.useDefault() } }
+                    .disabled(libraryChooser.isUsingDefault)
+                Spacer()
+            }
+            if !libraryChooser.errorMessage.isEmpty {
+                Text(libraryChooser.errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        } header: {
+            Text("Library location")
+        } footer: {
+            Text("The library you choose is used the next time Kromora launches. The current library is not moved or changed.")
+        }
+    }
+
     /// The edit store may not create its persistent file until the first successful save.
     /// A requested on-disk URL is therefore only revealable once the file exists.
     static func revealableEditDatabaseURL(for url: URL?) -> URL? {
@@ -92,6 +123,8 @@ public struct KromoraSettingsView: View {
                         + "When off, choose a photo in the Library before switching to Edit."
                 )
             }
+
+            librarySection
 
             maskOverlaySection
 
