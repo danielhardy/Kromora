@@ -602,7 +602,11 @@ final class LibraryGridTests: TempDirectoryTestCase {
 
     func testEvictedThumbnailRehydratesOnRevisit() async throws {
         let image = try Fixtures.makeCGImage(width: 64, height: 48)
+        let frameStore = ThumbnailFrameStore(
+            directory: tempDirectory.appendingPathComponent("revisit-frames")
+        )
         let collection = ImageCollection(originalThumbnailProvider: { _, _, _, _, _, _, _ in image })
+        collection.thumbnailFrameStore = frameStore
         let assets = (0..<8).map {
             PhotoAsset(url: tempDirectory.appendingPathComponent("revisit-\($0).jpg"))
         }
@@ -613,11 +617,43 @@ final class LibraryGridTests: TempDirectoryTestCase {
         let id = assets[7].id
         collection.requestThumbnail(for: id)
         try await waitForThumbnails(in: collection, ids: [id])
+        let initialFrameReadCount = await frameStore.readCount
         collection.releaseThumbnail(for: id)
         XCTAssertNil(collection.items[7].thumbnail)
         collection.requestThumbnail(for: id)
         try await waitForThumbnails(in: collection, ids: [id])
         XCTAssertNotNil(collection.items[7].thumbnail)
+        let revisitFrameReadCount = await frameStore.readCount
+        XCTAssertGreaterThan(revisitFrameReadCount, initialFrameReadCount)
+        await collection.shutdown()
+        await frameStore.shutdown()
+    }
+
+    func testVisibleWindowReleaseDropsDecodedThumbnailsFromEarlierViewport() async throws {
+        let image = try Fixtures.makeCGImage(width: 64, height: 48)
+        let assets = (0..<40).map {
+            PhotoAsset(url: tempDirectory.appendingPathComponent("window-\($0).jpg"))
+        }
+        let collection = ImageCollection(originalThumbnailProvider: { _, _, _, _, _, _, _ in image })
+        collection.loadPortableWindow(
+            assets: assets, totalCount: assets.count, pageIndex: 0,
+            pageSize: assets.count, query: .all
+        )
+        collection.beginThumbnailDemand()
+        let firstVisible = Array(assets.prefix(5).map(\.id))
+        collection.requestVisibleThumbnails(for: firstVisible)
+        try await waitForThumbnails(in: collection, ids: firstVisible)
+
+        collection.focus(id: assets[32].id)
+        let nextVisible = Array(assets[30..<35].map(\.id))
+        collection.requestVisibleThumbnails(for: nextVisible)
+        for id in firstVisible { collection.releaseThumbnail(for: id) }
+        try await waitForThumbnails(in: collection, ids: nextVisible)
+
+        for asset in assets.prefix(5) {
+            XCTAssertNil(collection.items.first { $0.id == asset.id }?.thumbnail, asset.id.raw)
+        }
+        XCTAssertTrue(collection.items[30..<35].allSatisfy { $0.thumbnail != nil })
         await collection.shutdown()
     }
 

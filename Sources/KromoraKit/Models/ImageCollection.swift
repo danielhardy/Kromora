@@ -377,6 +377,7 @@ final class ImageCollectionPresentationModel {
     private var frameReadJobIDs: Set<ImageWorkScheduler.JobID> = []
     private var pendingFrameReadIDs: Set<PhotoAssetID> = []
     private var completedFrameReadIDs: Set<PhotoAssetID> = []
+    private var frameReadWindowIDs: Set<PhotoAssetID> = []
     private var frameReadWaiters: [CheckedContinuation<Void, Never>] = []
 
     private var collectionRevision: UInt64 = 0
@@ -819,7 +820,7 @@ final class ImageCollectionPresentationModel {
         // read is still pending. A reload replaces that raster without another onAppear.
         thumbnailDemandIDs.insert(id)
         thumbnailDemandPriorities[id] = priority
-        admitFrameReads(visible: [id], indexByID: [id: index], prefetch: false)
+        _ = admitFrameReads(visible: [id], indexByID: [id: index], prefetch: false)
         if pendingFrameReadIDs.contains(id) {
             let generation = thumbnailGeneration
             Task { @MainActor [weak self] in
@@ -845,6 +846,7 @@ final class ImageCollectionPresentationModel {
     func requestVisibleThumbnails(for ids: [PhotoAssetID]) {
         guard !ids.isEmpty else { return }
         if !isThumbnailDemandDriven { beginThumbnailDemand() }
+        let previousFrameReadWindowIDs = frameReadWindowIDs
         var indexByID: [PhotoAssetID: Int] = [:]
         indexByID.reserveCapacity(ids.count)
         var admitted: [PhotoAssetID] = []
@@ -854,11 +856,14 @@ final class ImageCollectionPresentationModel {
             indexByID[id] = index
             admitted.append(id)
         }
+        visibleEditedThumbnailIDs = admitted
         onVisibleIDsPublished?(admitted)
         // Persisted frames are read for the whole window before any source decode or edited
         // render is admitted; both of those then find most of the window already painted.
-        admitFrameReads(visible: admitted, indexByID: indexByID, prefetch: true)
-        visibleEditedThumbnailIDs = admitted
+        frameReadWindowIDs = Set(admitFrameReads(
+            visible: admitted, indexByID: indexByID, prefetch: true
+        ))
+        evictThumbnailsOutsideWorkingSet(previousFrameReadWindowIDs.subtracting(frameReadWindowIDs))
         scheduleVisibleEditedThumbnails()
     }
 
@@ -867,15 +872,39 @@ final class ImageCollectionPresentationModel {
         thumbnailDemandIDs.remove(id)
         thumbnailDemandPriorities.removeValue(forKey: id)
         visibleEditedThumbnailIDs.removeAll { $0 == id }
-        guard !preparedThumbnailIDs.contains(id), let index = itemIndex(for: id) else { return }
-        let jobID = thumbnailJobID(for: items[index])
+        guard !isThumbnailInWorkingSet(id), let index = itemIndex(for: id) else { return }
+        evictDecodedThumbnails(for: id, item: items[index])
+    }
+
+    private func evictThumbnailsOutsideWorkingSet(_ ids: Set<PhotoAssetID>) {
+        for id in ids where !isThumbnailInWorkingSet(id) {
+            guard let index = itemIndex(for: id) else { continue }
+            evictDecodedThumbnails(for: id, item: items[index])
+        }
+    }
+
+    private func evictDecodedThumbnails(for id: PhotoAssetID, item: Item) {
+        let jobID = thumbnailJobID(for: item)
         scheduler.cancel(id: jobID)
         thumbnailJobIDs.remove(jobID)
+        let frameReadID = ImageWorkScheduler.JobID("frame-read:\(id.raw)")
+        if frameReadJobIDs.remove(frameReadID) != nil {
+            scheduler.cancel(id: frameReadID)
+        }
+        pendingFrameReadIDs.remove(id)
+        completedFrameReadIDs.remove(id)
+        resumeFrameReadWaiters()
         // A decoded item outside the visible window and navigation neighborhood gives its pixels
         // back. The packed frame stays on disk, so forgetting that it was read lets a revisit
         // hydrate it again without a new render.
-        items[index].releaseDecodedThumbnails()
-        completedFrameReadIDs.remove(id)
+        item.releaseDecodedThumbnails()
+    }
+
+    private func isThumbnailInWorkingSet(_ id: PhotoAssetID) -> Bool {
+        thumbnailDemandIDs.contains(id)
+            || preparedThumbnailIDs.contains(id)
+            || visibleEditedThumbnailIDs.contains(id)
+            || frameReadWindowIDs.contains(id)
     }
 
     func selectAll() {
@@ -1133,6 +1162,7 @@ final class ImageCollectionPresentationModel {
         frameReadJobIDs.removeAll()
         pendingFrameReadIDs.removeAll()
         completedFrameReadIDs.removeAll()
+        frameReadWindowIDs.removeAll()
         thumbnailDemandIDs.removeAll()
         thumbnailDemandPriorities.removeAll()
         preparedThumbnailIDs.removeAll()
@@ -1145,12 +1175,12 @@ final class ImageCollectionPresentationModel {
     // MARK: Persisted frames
 
     /// Admit bounded, priority-ordered reads of the packed frames for a window: every visible photo
-    /// plus one prefetch page of the photos that follow it. A photo is read once per collection
-    /// load; one that already shows edited pixels needs nothing.
+    /// plus one prefetch page of the photos that follow it. A photo already showing edited pixels
+    /// needs nothing; rows that leave the tracked window can be read again on revisit.
     private func admitFrameReads(
         visible: [PhotoAssetID], indexByID: [PhotoAssetID: Int], prefetch: Bool
-    ) {
-        guard let store = thumbnailFrameStore, !visible.isEmpty else { return }
+    ) -> [PhotoAssetID] {
+        guard let store = thumbnailFrameStore, !visible.isEmpty else { return [] }
         var following: [PhotoAssetID] = []
         if prefetch, let last = visible.compactMap({ indexByID[$0] }).max() {
             let end = min(items.count, last + 1 + ThumbnailFrameReadPolicy.prefetchPageSize)
@@ -1184,7 +1214,8 @@ final class ImageCollectionPresentationModel {
                     let readAt = clock.now
                     guard !Task.isCancelled else { return }
                     await self?.applyStoredFrames(
-                        frames, itemID: id, identity: identity, generation: generation
+                        frames, itemID: id, identity: identity, generation: generation,
+                        requireWorkingSet: true
                     )
                     KromoraObservability.thumbnailDiagnostic(
                         .thumbnailFrameRead,
@@ -1200,6 +1231,7 @@ final class ImageCollectionPresentationModel {
                 frameReadJobIDs.remove(jobID)
             }
         }
+        return window.filter { indexByID[$0] != nil }
     }
 
     private func finishFrameRead(
@@ -1209,7 +1241,11 @@ final class ImageCollectionPresentationModel {
         guard generation == thumbnailGeneration else { return }
         pendingFrameReadIDs.remove(id)
         frameReadJobIDs.remove(jobID)
-        if outcome == .completed { completedFrameReadIDs.insert(id) }
+        if outcome == .completed, isThumbnailInWorkingSet(id) {
+            completedFrameReadIDs.insert(id)
+        } else {
+            completedFrameReadIDs.remove(id)
+        }
         fillThumbnailQueue()
         resumeFrameReadWaiters()
     }
@@ -1231,10 +1267,11 @@ final class ImageCollectionPresentationModel {
     private func applyStoredFrames(
         _ frames: ThumbnailFrameStore.StoredFrames, itemID: PhotoAssetID,
         identity: PortablePhotoIdentity, generation: UInt64,
-        surface: FrameLookupSurface = .gridOriginal
+        surface: FrameLookupSurface = .gridOriginal, requireWorkingSet: Bool = false
     ) {
         guard generation == thumbnailGeneration,
               let index = itemIndex(for: itemID), case let item = items[index],
+              (!requireWorkingSet || isThumbnailInWorkingSet(itemID)),
               item.asset.source.portableIdentity == identity else { return }
         if let hit = frames.edited {
             let result = FrameClassifier.classifyWithReason(
@@ -1449,7 +1486,9 @@ final class ImageCollectionPresentationModel {
         around index: Int, requestsEditedThumbnails: Bool = true
     ) {
         guard isThumbnailDemandDriven else { return }
+        let previousPreparedIDs = preparedThumbnailIDs
         preparedThumbnailIDs = Set(items.indices.filter { abs($0 - index) <= 2 }.map { items[$0].id })
+        evictThumbnailsOutsideWorkingSet(previousPreparedIDs.subtracting(preparedThumbnailIDs))
         for id in preparedThumbnailIDs {
             thumbnailDemandPriorities[id] = .adjacentFilmstrip
         }
@@ -1458,7 +1497,7 @@ final class ImageCollectionPresentationModel {
         for (itemIndex, item) in items.enumerated() { indexByID[item.id] = itemIndex }
         let preparedIDs = items.indices.filter { preparedThumbnailIDs.contains(items[$0].id) }
             .map { items[$0].id }
-        admitFrameReads(visible: preparedIDs, indexByID: indexByID, prefetch: false)
+        _ = admitFrameReads(visible: preparedIDs, indexByID: indexByID, prefetch: false)
         fillThumbnailQueue()
         guard requestsEditedThumbnails else { return }
         for id in preparedThumbnailIDs { onThumbnailDemand?(id, .adjacentFilmstrip) }
