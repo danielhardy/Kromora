@@ -83,9 +83,12 @@ local mask layers can also scope sharpening, noise cleanup, and moiré softening
 sharpening is a separate delivery choice (screen, matte, or glossy, each low/standard/high) carried
 by `ExportOptions` and applied after sizing, so it does not change the edit document or preview.
 
-`RenderEngine` is an actor and the GPU/Core Image isolation boundary. `CIImage`, `CIFilter`,
-`CIRAWFilter`, `CIContext`, mutable GPU resources, and render caches stay inside it. Only
-Sendable request values and rendered values cross `RenderEngining`. New work should use the existing
+`RenderEngine` is an actor and the GPU/Core Image isolation boundary. `CIImage` and `CIContext` are
+`Sendable` on the current SDK (`CIFilter` is not), so keeping Core Image graph construction,
+`CIFilter`, `CIRAWFilter`, `CIContext`, mutable GPU resources, and render caches inside the engine is
+a design rule rather than a compiler requirement. The one `CIImage` that crosses `RenderEngining` is
+the completed, GPU-backed `sending CIImage?` from `makeCIImage`; otherwise only Sendable request
+values and rendered values cross it. New work should use the existing
 request funnel and injected protocol seams rather than adding a second renderer or context.
 
 Interactive preview decode budgets 1.5 MP for a fit view and 4 MP of visible pixels for a zoomed view

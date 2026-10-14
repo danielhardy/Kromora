@@ -71,9 +71,13 @@ Practical consequences when writing code here:
   method the owner calls (a `stop()`/teardown the owning view or coordinator invokes).
 - **Closures handed to an unstructured `Task` must be `@Sendable`.** Mark the parameter rather than
   reaching for an opt-out.
-- **`CIImage`, `CIFilter` and `CIContext` are not `Sendable`** and must stay inside `RenderEngine`.
-  Only values cross the boundary — `EditDocument`, `ImageSource`, `CubeLUT`, `WorkingSpace`,
-  `RenderScale` — plus a `sending CGImage?` or `Data` on the way out.
+- **Keep Core Image graph construction inside `RenderEngine`** (a design rule, not a compiler fact).
+  On the current SDK `CIImage` and `CIContext` are `Sendable`; `CIFilter` is not. `RenderEngine`
+  still owns every `CIFilter`, `CIRAWFilter`, `CIContext`, and render cache, and Task closures that
+  return a `CIImage` (the detached developed-source tasks) are valid because it is `Sendable`. The
+  only `CIImage` that leaves the engine is the completed, GPU-backed `sending CIImage?` from
+  `makeCIImage`. Otherwise values cross the boundary — `EditDocument`, `ImageSource`, `CubeLUT`,
+  `WorkingSpace`, `RenderScale` — plus a `sending CGImage?` or `Data` on the way out.
 - If something genuinely cannot be expressed safely, raise it rather than silencing it. The zero-opt-out
   property is what makes "Swift 6 mode is on" mean anything; the mode is trivially satisfiable file
   by file otherwise.
