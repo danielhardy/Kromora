@@ -173,10 +173,17 @@ final class ExportJobOwnershipTests: TempDirectoryTestCase {
     func testViewModelTerminationGuardSeesRegisteredJobs() throws {
         let viewModel = AppViewModel()
         XCTAssertTrue(viewModel.terminationGuard.activities.isEmpty)
-        let id = try XCTUnwrap(viewModel.export.admitJob(.originalBundle))
-        XCTAssertEqual(viewModel.terminationGuard.activities.count, 1)
-        viewModel.export.finishJob(id)
-        XCTAssertTrue(viewModel.terminationGuard.activities.isEmpty)
+        let cases: [(ExportJobKind, String)] = [
+            (.single, "export of 1 photo"),
+            (.share, "Share export"),
+            (.originalBundle, "original + settings bundle export"),
+        ]
+        for (kind, description) in cases {
+            let id = try XCTUnwrap(viewModel.export.admitJob(kind))
+            XCTAssertEqual(viewModel.terminationGuard.activities.map(\.description), [description])
+            viewModel.export.finishJob(id)
+            XCTAssertTrue(viewModel.terminationGuard.activities.isEmpty)
+        }
     }
 
     func testMenuDisablesExportCommandsWhileBusy() {
