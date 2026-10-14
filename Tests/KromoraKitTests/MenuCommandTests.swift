@@ -269,6 +269,20 @@ final class MenuCommandTests: XCTestCase {
 
     // MARK: - MenuCommandAvailability
 
+    func testLibraryMenuItemsFailClosedWithoutFocusedAvailability() {
+        XCTAssertFalse(MenuCommandAvailability.isLibraryReady(nil))
+        XCTAssertFalse(
+            MenuCommandAvailability.isLibraryReady(
+                MenuCommandAvailability(isLibraryReady: false)
+            )
+        )
+        XCTAssertTrue(
+            MenuCommandAvailability.isLibraryReady(
+                MenuCommandAvailability(isLibraryReady: true)
+            )
+        )
+    }
+
     func testNoPhotoDisablesEveryPhotoCommandButNotPaste() {
         let a = MenuCommandAvailability()
         for command: MenuCommand in [

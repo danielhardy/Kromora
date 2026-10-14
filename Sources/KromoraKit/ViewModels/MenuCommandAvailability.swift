@@ -68,6 +68,11 @@ struct MenuCommandAvailability: Equatable, Sendable {
         )
     }
 
+    /// Menu commands must fail closed when no scene is focused and no availability was published.
+    static func isLibraryReady(_ availability: Self?) -> Bool {
+        availability?.isLibraryReady == true
+    }
+
     func isEnabled(_ command: MenuCommand) -> Bool {
         guard isLibraryReady else { return false }
         return switch command {

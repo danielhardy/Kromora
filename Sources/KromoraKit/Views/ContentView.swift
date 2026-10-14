@@ -102,6 +102,7 @@ public struct ContentView: View {
             }
             .sheet(isPresented: $isWelcomePresented, onDismiss: { hasSeenWelcome = true }) {
                 WelcomeView(
+                    canImportIntoLibrary: viewModel.canImportIntoPortableLibrary,
                     onImport: {
                         isWelcomePresented = false
                         Task { @MainActor in await Task.yield(); viewModel.openImageDialog() }

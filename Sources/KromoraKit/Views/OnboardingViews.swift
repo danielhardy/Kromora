@@ -10,6 +10,7 @@ enum StarterSampleLibrary {
 }
 
 struct WelcomeView: View {
+    let canImportIntoLibrary: Bool
     let onImport: () -> Void
     let onPhotos: () -> Void
     let onSamples: () -> Void
@@ -37,18 +38,21 @@ struct WelcomeView: View {
                     detail: "From your computer",
                     symbol: "photo.badge.plus",
                     recommended: true,
+                    isEnabled: canImportIntoLibrary,
                     action: onImport
                 )
                 choiceCard(
                     title: "From Photos Library",
                     detail: "Already on this Mac",
                     symbol: "photo.on.rectangle",
+                    isEnabled: canImportIntoLibrary,
                     action: onPhotos
                 )
                 choiceCard(
                     title: "Sample Library",
                     detail: "\(StarterSampleLibrary.urls.count) photos to explore",
                     symbol: "square.stack.3d.up",
+                    isEnabled: canImportIntoLibrary,
                     action: onSamples
                 )
             }
@@ -78,6 +82,7 @@ struct WelcomeView: View {
         detail: String,
         symbol: String,
         recommended: Bool = false,
+        isEnabled: Bool = true,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
@@ -125,6 +130,7 @@ struct WelcomeView: View {
             .contentShape(RoundedRectangle(cornerRadius: 14))
         }
         .buttonStyle(.plain)
+        .disabled(!isEnabled)
         .accessibilityLabel(recommended ? "Import Photos, recommended. \(detail)" : "\(title). \(detail)")
     }
 }
