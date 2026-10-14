@@ -110,6 +110,9 @@ final class PortableLibrarySession {
     private var isShuttingDown = false
     private var pendingLibraryStateUpdates: [PortablePhotoAssetID: LibraryStateUpdate] = [:]
     private var isDrainingLibraryState = false
+    /// The batch currently being written, so a newer partial change can merge with it before its
+    /// summary reaches the index.
+    private var inFlightLibraryStateUpdates: [PortablePhotoAssetID: LibraryStateUpdate] = [:]
     private var libraryStateIndexWriteMayBeLost = false
     /// Culling changes whose shard failed to commit. They stay dirty until a later drain (the next
     /// enqueue or flush) writes them or a newer intent for the same asset replaces them.
@@ -1905,6 +1908,15 @@ final class PortableLibrarySession {
         if !isDrainingLibraryState { startLibraryStateDrain() }
     }
 
+    /// The newest culling state for `assetID` that is queued, being written, or failed and still
+    /// dirty. The index summary lags these, so a change to one field must start from this value
+    /// rather than the summary or it would revert a field changed a moment earlier.
+    func newestLibraryState(for assetID: PortablePhotoAssetID) -> LibraryStateUpdate? {
+        pendingLibraryStateUpdates[assetID]
+            ?? inFlightLibraryStateUpdates[assetID]
+            ?? failedLibraryStateUpdates[assetID]
+    }
+
     /// Suspends until every queued culling change has been written or has failed. Changes that
     /// failed earlier are retried first. Used before quit so a rating made just before ⌘Q is
     /// durable; a failure means some changes are still dirty, so the caller can offer a retry.
@@ -1943,6 +1955,8 @@ final class PortableLibrarySession {
         pendingLibraryStateUpdates.removeAll()
         guard !batch.isEmpty else { finishLibraryStateDrain(); return }
         isDrainingLibraryState = true
+        inFlightLibraryStateUpdates = Dictionary(
+            batch.map { ($0.assetID, $0) }, uniquingKeysWith: { _, latest in latest })
 
         guard let scheduler else {
             completeLibraryStateBatch(batch, outcome: writeLibraryStateInline(batch))
@@ -2026,6 +2040,8 @@ final class PortableLibrarySession {
                 libraryStateFailureHandler?(mapped)
             }
         }
+        // The index now reflects every committed shard; failed ones are held in the failed set.
+        inFlightLibraryStateUpdates.removeAll()
         if pendingLibraryStateUpdates.isEmpty {
             finishLibraryStateDrain()
         } else {

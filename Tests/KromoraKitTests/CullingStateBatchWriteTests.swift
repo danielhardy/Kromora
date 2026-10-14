@@ -194,6 +194,59 @@ final class CullingStateBatchWriteTests: TempDirectoryTestCase {
         await viewModel.shutdown()
     }
 
+    /// KRMA-1020: a flag queued behind an unwritten rating must carry the new rating, not the
+    /// stale index summary, for photos outside the loaded window.
+    func testQueuedFlagKeepsQueuedRatingForUnloadedSelection() async throws {
+        let scheduler = ImageWorkScheduler()
+        let gate = CullingPackageIOGate()
+        let blockerID = ImageWorkScheduler.JobID("culling-merge-test-blocker")
+        scheduler.enqueuePackageIO(
+            id: blockerID, lane: .leaseHeartbeat, priority: .packageIO,
+            operation: { await gate.wait() }
+        )
+        let startDeadline = Date().addingTimeInterval(5)
+        while !(await gate.started()), Date() < startDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        guard await gate.started() else {
+            await gate.release()
+            XCTFail("package-I/O blocker did not start")
+            return
+        }
+
+        let packageURL = tempDirectory.appendingPathComponent("Merge.kromoralibrary")
+        let indexURL = tempDirectory.appendingPathComponent("MergeIndex/LibraryIndex.store")
+        let session = try PortableLibrarySession(
+            at: packageURL, indexURL: indexURL, pageSize: 2, scheduler: scheduler
+        )
+        let urls = try (0..<3).map { ordinal in
+            try Fixtures.writeJPEG(
+                width: 16 + ordinal, height: 12, orientation: 1,
+                named: "merge-\(ordinal).jpg", in: tempDirectory
+            )
+        }
+        let imported = try session.importURLs(urls).imported.map(\.assetID)
+        XCTAssertEqual(imported.count, 3)
+        let viewModel = makeAppViewModel(portableLibrarySession: session)
+        XCTAssertEqual(viewModel.collection.items.count, 2)
+        viewModel.selectAllInGrid()
+
+        _ = viewModel.setFocusedRating(4)
+        _ = viewModel.setFocusedFlag(.pick)
+
+        await gate.release()
+        let flushed = await session.flushPendingLibraryState()
+        await scheduler.cancelAndWait(id: blockerID)
+        XCTAssertEqual(flushed, .success)
+
+        let states = try reopenedStates(packageURL)
+        for id in imported {
+            XCTAssertEqual(states[id]?.0, 4)
+            XCTAssertEqual(states[id]?.1, PhotoFlag.pick.rawValue)
+        }
+        await viewModel.shutdown()
+    }
+
     func testInlineFallbackWithoutScheduler() async throws {
         let (session, packageURL, ids) = try makeSession(assetCount: 4)
         session.enqueueLibraryStateUpdates(updates(ids, rating: 2, flag: .pick)) { _ in

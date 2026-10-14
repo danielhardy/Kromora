@@ -31,6 +31,9 @@ protocol LibraryBrowsingProviding: AnyObject {
         _ updates: [PortableLibrarySession.LibraryStateUpdate],
         onFailure: @escaping @MainActor (Error) -> Void
     )
+    /// The newest queued, in-flight, or still-dirty culling state for an asset, if any.
+    func newestLibraryState(for assetID: PortablePhotoAssetID)
+        -> PortableLibrarySession.LibraryStateUpdate?
     /// Rebuild the disposable index from package membership (the package is canonical).
     func rebuildIndex() throws
 }
@@ -643,11 +646,16 @@ final class LibraryBrowsingCoordinator {
         var changed = false
         library.forEachBrowsingAssetChunk(forIDs: ids) { assets in
             let updates = assets.compactMap { asset -> PortableLibrarySession.LibraryStateUpdate? in
+                let assetID = asset.source.portableIdentity.assetID
+                // The index summary lags queued writes; merge with the newest known state.
+                let queued = library.newestLibraryState(for: assetID)
+                let currentRating = queued?.rating ?? asset.rating
+                let currentFlag = queued?.flag ?? asset.flag
                 let value = newValue(asset)
-                let rating = value.rating ?? asset.rating
-                let flag = value.flag ?? asset.flag
-                guard rating != asset.rating || flag != asset.flag else { return nil }
-                return .init(assetID: asset.source.portableIdentity.assetID, rating: rating, flag: flag)
+                let rating = value.rating ?? currentRating
+                let flag = value.flag ?? currentFlag
+                guard rating != currentRating || flag != currentFlag else { return nil }
+                return .init(assetID: assetID, rating: rating, flag: flag)
             }
             guard !updates.isEmpty else { return }
             changed = true

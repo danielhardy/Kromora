@@ -150,6 +150,11 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
             for update in updates { persistedStates.append((update.assetID, update.rating, update.flag)) }
         }
 
+        func newestLibraryState(for assetID: PortablePhotoAssetID)
+            -> PortableLibrarySession.LibraryStateUpdate? {
+            persistedStates.last { $0.0 == assetID }.map { .init(assetID: $0.0, rating: $0.1, flag: $0.2) }
+        }
+
         func rebuildIndex() throws { rebuildCount += 1 }
     }
 
