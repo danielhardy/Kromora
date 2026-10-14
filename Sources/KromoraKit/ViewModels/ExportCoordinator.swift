@@ -129,8 +129,8 @@ final class ExportCoordinator {
         /// A live session snapshot wins over disk when the user edited this photo moments ago.
         /// `nil` means the coordinator should resolve the durable record.
         let document: EditDocument?
-        /// The resolved table for `document.lut`. The document remains authoritative; a nil LUT is
-        /// safe when the referenced Look is unavailable.
+        /// An optional pre-resolved table for `document.lut`. When absent, the coordinator resolves
+        /// the document's Look ID; a missing per-asset Look causes that item to fail.
         let lut: CubeLUT?
 
         init(
