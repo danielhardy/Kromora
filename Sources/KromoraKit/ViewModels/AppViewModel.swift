@@ -975,18 +975,30 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private var pendingPersistenceFlush: Task<PersistenceFlushResult, Never>?
     private(set) var isShuttingDown = false
     private var cancellables: [AnyCancellable] = []
-    private(set) var portableLibraryOpenError: String?
-    private let portablePackageURL: URL
+    /// The reason the package is unavailable, once its open has failed.
+    var portableLibraryOpenError: String? {
+        if case .failed(let message) = libraryOpen.state { message } else { nil }
+    }
+    let portablePackageURL: URL
+    let libraryOpen: LibraryOpenCoordinator
 
     var canImportIntoPortableLibrary: Bool { portableLibrary != nil }
 
     private var portableLibraryUnavailableMessage: String {
+        if libraryOpen.state == .opening {
+            return "Kromora is still opening the library. Try again in a moment."
+        }
         let reason = portableLibraryOpenError ?? "The library package is unavailable."
         return "\(reason) Resolve the library issue and relaunch Kromora before importing."
     }
 
-    private func reportPortableLibraryUnavailable() {
-        presentError(portableLibraryUnavailableMessage)
+    func reportPortableLibraryUnavailable() {
+        // A command attempted mid-open is not a failure; the status line is enough.
+        if libraryOpen.state == .opening {
+            statusMessage = portableLibraryUnavailableMessage
+        } else {
+            presentError(portableLibraryUnavailableMessage)
+        }
     }
 
     /// Changes whenever a Look thumbnail's source or edit recipe can change. Look rows use this as
@@ -1055,7 +1067,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         settings injectedSettings: KromoraSettings? = nil,
         portableLibrarySession injectedPortableLibrarySession: PortableLibrarySession? = nil,
         asynchronousPortableLibraryIndexLoading: Bool = false,
-        defersLibraryOpen: Bool = false
+        defersLibraryOpen: Bool = false,
+        packageOpener: any PackageOpening = PortablePackageOpener()
     ) {
         var interval = KromoraSignpostInterval(.launch, context: .unknown)
         defer { interval.end() }
@@ -1088,13 +1101,16 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             if let injectedPortableLibrarySession {
                 session = injectedPortableLibrarySession
             } else {
-                let opened = try Self.openPortableLibrarySession(
+                let opened = try PortablePackageOpener.openBlocking(
                     at: normalizedPortablePackageURL,
-                    confirmer: leaseRecoveryConfirmer,
-                    scheduler: packageIOScheduler,
                     asynchronousIndexLoading: asynchronousPortableLibraryIndexLoading
-                )
-                session = opened.session
+                ) { info in
+                    leaseRecoveryConfirmer?.confirmBreakExpiredWriterLease(
+                        packageURL: normalizedPortablePackageURL, info: info) == true
+                }
+                session = try PortableLibrarySession(
+                    opened: opened, scheduler: packageIOScheduler,
+                    asynchronousIndexLoading: asynchronousPortableLibraryIndexLoading)
                 recoveredPreviousWriter = opened.recoveredPreviousWriter
             }
             openedPortableLibrary = session
@@ -1120,7 +1136,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             effectiveEditStore = editStore ?? EditDocumentStore.makeInMemoryProjectionStore()
           }
         }
-        self.portableLibraryOpenError = portableOpenError
+        self.libraryOpen = LibraryOpenCoordinator(
+            opener: packageOpener,
+            state: openedPortableLibrary != nil ? .ready
+                : portableOpenError.map { .failed($0) } ?? .idle
+        )
         self.editStore = effectiveEditStore
         self.editorDocument = EditorDocumentCoordinator()
         self.photosImportCoordinator = PhotosImportCoordinator()
@@ -1436,6 +1456,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
 
         wireCoordinators()
+        libraryOpen.onStateChange = { [weak self] state in self?.libraryOpenStateDidChange(state) }
         if let openedPortableLibrary {
             bindPortableLibrary(openedPortableLibrary, recoveredPreviousWriter: recoveredPreviousWriter)
         } else if !defersLibraryOpen {
@@ -1444,32 +1465,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         configureEmbeddedLooks()
     }
 
-    /// Opens the package for a `defersLibraryOpen` model, binds the store, then the session wiring.
-    func openLibrary(confirmer: (any PortablePackageLeaseRecoveryConfirming)? = nil) async {
-        guard portableLibrary == nil else { return }
-        do {
-            let opened = try Self.openPortableLibrarySession(
-                at: portablePackageURL, confirmer: confirmer, scheduler: workScheduler,
-                asynchronousIndexLoading: true
-            )
-            guard await editStore.bind(package: opened.session.package, lease: opened.session.lease) else {
-                await opened.session.shutdown()
-                portableLibraryOpenError = "The edit store is already bound to a library."
-                reportPortableLibraryUnavailable()
-                return
-            }
-            portableLibraryOpenError = nil
-            bindPortableLibrary(opened.session, recoveredPreviousWriter: opened.recoveredPreviousWriter)
-        } catch {
-            portableLibraryOpenError =
-                "Kromora could not open its library package at \(portablePackageURL.path): "
-                + error.localizedDescription
-            reportPortableLibraryUnavailable()
-        }
-    }
-
     /// The single place that threads an opened session into the model and its coordinators.
-    private func bindPortableLibrary(
+    func bindPortableLibrary(
         _ session: PortableLibrarySession, recoveredPreviousWriter: Bool
     ) {
         objectWillChange.send()
@@ -1646,48 +1643,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         guard let current = document.lut.lutID, current == derive.derivedLUT?.lutID else { return }
         endUndoGrouping()
         updateDocument { $0.lut.lutID = saved.lutID }
-    }
-
-    private static func openPortableLibrarySession(
-        at url: URL,
-        confirmer: (any PortablePackageLeaseRecoveryConfirming)?,
-        scheduler: ImageWorkScheduler,
-        asynchronousIndexLoading: Bool = false
-    ) throws -> (session: PortableLibrarySession, recoveredPreviousWriter: Bool) {
-        do {
-            return (try PortableLibrarySession(
-                at: url, scheduler: scheduler,
-                asynchronousIndexLoading: asynchronousIndexLoading
-            ), false)
-        } catch let error as PortablePackageLeaseError {
-            switch error {
-            case .contended(let info) where info.localWriterState == .dead:
-                try PortablePackageLease.recoverDeadWriter(at: url)
-                return (try PortableLibrarySession(
-                    at: url, scheduler: scheduler,
-                    asynchronousIndexLoading: asynchronousIndexLoading
-                ), true)
-            case .expired(let info):
-                let shouldRecover: Bool
-                switch info.localWriterState {
-                case .dead:
-                    shouldRecover = true
-                case .live, .remoteOrUnknown:
-                    shouldRecover = confirmer?.confirmBreakExpiredWriterLease(
-                        packageURL: url, info: info) == true
-                }
-                guard shouldRecover else { throw error }
-                return (
-                    try PortableLibrarySession(
-                        at: url, recoverExpiredLease: true, scheduler: scheduler,
-                        asynchronousIndexLoading: asynchronousIndexLoading
-                    ),
-                    true
-                )
-            default:
-                throw error
-            }
-        }
     }
 
     // MARK: - Error presentation
@@ -4386,6 +4341,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     public func shutdown() async {
         guard !isShuttingDown else { return }
         isShuttingDown = true
+        // Before anything else: an open still in flight must finish unwinding (binding is refused
+        // once `isShuttingDown` is set, so it releases its lease) before the lease owner is torn down.
+        await libraryOpen.cancelAndWait()
         presentation.shutDown()
 
         // Invalidate every generation before awaiting anything. A renderer or framework call may

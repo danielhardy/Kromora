@@ -53,14 +53,15 @@ final class AppLaunchTests: XCTestCase {
             settings: KromoraSettings(preferences: defaults),
             packageURL: url,
             sheets: sheets,
-            makeViewModel: { settings, packageURL, confirmer in
+            makeViewModel: { settings, packageURL in
                 AppViewModel(
                     engine: RenderEngine.shared,
                     preferences: defaults,
                     includeBundledLooks: false,
                     portablePackageURL: packageURL,
-                    leaseRecoveryConfirmer: confirmer,
-                    settings: settings
+                    settings: settings,
+                    asynchronousPortableLibraryIndexLoading: true,
+                    defersLibraryOpen: true
                 )
             }
         )
@@ -70,8 +71,14 @@ final class AppLaunchTests: XCTestCase {
         let (url, stale) = try makeStaleLibrary()
         let sheets = FakeSheets()
         sheets.confirmResult = true
-        let model = await launch(url, sheets: sheets).open()
+        let appLaunch = launch(url, sheets: sheets)
+        let model = appLaunch.open()
+        XCTAssertEqual(model.libraryOpen.state, .opening, "the window does not wait for the open")
+        XCTAssertFalse(model.canImportIntoPortableLibrary)
+        await appLaunch.waitForLibraryOpen()
         XCTAssertNil(model.errorMessage)
+        XCTAssertEqual(sheets.confirmCalls, 1, "the takeover question is asked exactly once")
+        XCTAssertEqual(model.libraryOpen.state, .ready)
         XCTAssertTrue(model.canImportIntoPortableLibrary)
         await model.shutdown()
         _ = stale
@@ -82,7 +89,9 @@ final class AppLaunchTests: XCTestCase {
         let sheets = FakeSheets()
         sheets.confirmResult = false
         let appLaunch = launch(url, sheets: sheets)
-        let model = await appLaunch.open()
+        let model = appLaunch.open()
+        await appLaunch.waitForLibraryOpen()
+        XCTAssertEqual(sheets.confirmCalls, 1)
         XCTAssertFalse(model.canImportIntoPortableLibrary)
         XCTAssertNotNil(model.errorMessage)
         XCTAssertTrue(appLaunch.viewModel === model)

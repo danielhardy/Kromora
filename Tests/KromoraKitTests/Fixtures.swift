@@ -797,7 +797,8 @@ class TempDirectoryTestCase: XCTestCase {
         fileDialog: any FileDialogProviding = AppKitFileDialog(),
         sheets: any SheetPresenting = FakeSheets(),
         fileDropActionPolicy: FileDropActionPolicy = FileDropActionPolicy(),
-        leaseRecoveryConfirmer: (any PortablePackageLeaseRecoveryConfirming)? = nil
+        leaseRecoveryConfirmer: (any PortablePackageLeaseRecoveryConfirming)? = nil,
+        packageOpener: any PackageOpening = PortablePackageOpener()
     ) -> AppViewModel {
         let isolatedPreferences: UserDefaults
         if let preferences {
@@ -833,7 +834,8 @@ class TempDirectoryTestCase: XCTestCase {
             leaseRecoveryConfirmer: leaseRecoveryConfirmer,
             portableLibrarySession: portableLibrarySession,
             asynchronousPortableLibraryIndexLoading: asynchronousPortableLibraryIndexLoading,
-            defersLibraryOpen: defersLibraryOpen
+            defersLibraryOpen: defersLibraryOpen,
+            packageOpener: packageOpener
         )
         appViewModels.append(viewModel)
         return viewModel

@@ -25,6 +25,9 @@ struct MenuCommandAvailability: Equatable, Sendable {
     var canPaste = false
     var canUndo = false
     var canRedo = false
+    /// False while the library package is opening or failed to open; every library-dependent
+    /// command (import, open, export, delete) is disabled until it is true.
+    var isLibraryReady = true
     var undoActionName: String?
     var redoActionName: String?
 
@@ -35,6 +38,7 @@ struct MenuCommandAvailability: Equatable, Sendable {
         canPaste: Bool = false,
         canUndo: Bool = false,
         canRedo: Bool = false,
+        isLibraryReady: Bool = true,
         undoActionName: String? = nil,
         redoActionName: String? = nil
     ) {
@@ -44,6 +48,7 @@ struct MenuCommandAvailability: Equatable, Sendable {
         self.canPaste = canPaste
         self.canUndo = canUndo
         self.canRedo = canRedo
+        self.isLibraryReady = isLibraryReady
         self.undoActionName = undoActionName
         self.redoActionName = redoActionName
     }
@@ -58,12 +63,14 @@ struct MenuCommandAvailability: Equatable, Sendable {
                 ? (selection.activeID == nil ? 0 : 1) : selection.selectedIDs.count,
             canPaste: vm.canPasteEdits,
             canUndo: vm.canUndo,
-            canRedo: vm.canRedo
+            canRedo: vm.canRedo,
+            isLibraryReady: vm.canImportIntoPortableLibrary
         )
     }
 
     func isEnabled(_ command: MenuCommand) -> Bool {
-        switch command {
+        guard isLibraryReady else { return false }
+        return switch command {
         case .export, .editInExternalEditor, .exportOriginalWithSettings,
              .resetPhoto, .selectiveCopy, .copyAllEdits, .saveLook:
             hasPhoto

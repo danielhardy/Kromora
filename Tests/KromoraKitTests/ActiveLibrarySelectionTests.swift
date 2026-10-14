@@ -88,13 +88,15 @@ final class ActiveLibrarySelectionTests: XCTestCase {
         let settings = KromoraSettings(preferences: defaults)
         try ActiveLibrarySelection(preferences: defaults).choose(url, access: access(url))
         var opened: URL?
-        let launch = AppLaunch(settings: settings, sheets: FakeSheets(), makeViewModel: { settings, packageURL, confirmer in
+        let launch = AppLaunch(settings: settings, sheets: FakeSheets(), makeViewModel: { settings, packageURL in
             opened = packageURL
             return AppViewModel(
                 engine: RenderEngine.shared, preferences: self.defaults, includeBundledLooks: false,
-                portablePackageURL: packageURL, leaseRecoveryConfirmer: confirmer, settings: settings)
+                portablePackageURL: packageURL, settings: settings,
+                asynchronousPortableLibraryIndexLoading: true, defersLibraryOpen: true)
         })
-        let model = await launch.open()
+        let model = launch.open()
+        await launch.waitForLibraryOpen()
         XCTAssertEqual(opened?.resolvingSymlinksInPath(), url.resolvingSymlinksInPath())
         await model.shutdown()
     }

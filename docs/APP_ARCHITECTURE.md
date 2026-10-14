@@ -389,3 +389,13 @@ Relaunch / Later. There is no runtime swap. `AppLaunch.open()` resolves the book
 default), holds the security scope for the session, and passes the URL to the view model. A stale,
 unresolvable or missing choice falls back to the default with a one-time notice and clears only the
 bookmark; the old path is never touched. "Use Default Library" clears the bookmark.
+
+## Library open (KRMA-984)
+
+`AppLaunch.open()` builds `AppViewModel` immediately with `defersLibraryOpen`, then
+`beginOpeningLibrary` starts `LibraryOpenCoordinator`. The coordinator asks the lease-takeover
+question (if needed), runs a `PackageOpening` implementation off the main actor, and binds the
+resulting `OpenedPackage` (a `Sendable` package + lease) on the main actor, where the session is
+built. State is `.idle → .opening → .ready | .failed`; library-dependent commands stay disabled
+until `.ready`. `AppViewModel.shutdown()` cancels the open first: a cancelled open releases its
+unbound lease instead of binding (the blocking filesystem work itself cannot be interrupted).

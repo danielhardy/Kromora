@@ -46,7 +46,7 @@ struct KromoraRootView: View {
             ProgressView()
                 .controlSize(.large)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .task { await launch.open() }
+                .task { launch.open() }
         }
     }
 }

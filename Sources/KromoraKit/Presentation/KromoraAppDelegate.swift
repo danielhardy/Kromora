@@ -43,6 +43,8 @@ public final class KromoraAppDelegate: NSObject, NSApplicationDelegate {
 
     public func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !terminationFlushInProgress else { return .terminateLater }
+        // No model yet means nothing has opened. Once it exists, `shutdown()` also cancels an open
+        // still in flight and releases its lease, so quitting mid-open goes through the same path.
         guard let viewModel else { return .terminateNow }
         terminationFlushInProgress = true
         // Confirmation is a sheet, so the reply is deferred until it is answered.

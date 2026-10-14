@@ -115,7 +115,7 @@ final class PortableLibrarySession {
     private var libraryStateFailureHandler: (@MainActor (Error) -> Void)?
     private var lostDuringSession = false
 
-    init(
+    convenience init(
         at rootURL: URL,
         indexURL: URL? = nil,
         pageSize: Int = 500,
@@ -127,26 +127,62 @@ final class PortableLibrarySession {
         asynchronousIndexLoading: Bool = false,
         presentedAspectRatioRepairLockHook: (@Sendable () -> Void)? = nil
     ) throws {
-        self.presentedAspectRatioRepairLockHook = presentedAspectRatioRepairLockHook
-        let normalizedRoot = rootURL.standardizedFileURL
-        let acquisitionNow = now ?? clock.now()
-        let fileManager = FileManager.default
-        let package: PortableLibraryPackage
+        let opened = try Self.acquire(
+            at: rootURL, now: now ?? clock.now(), leaseDuration: leaseDuration,
+            recoverExpiredLease: recoverExpiredLease,
+            asynchronousIndexLoading: asynchronousIndexLoading
+        )
+        try self.init(
+            opened: opened, indexURL: indexURL, pageSize: pageSize, leaseDuration: leaseDuration,
+            clock: clock, scheduler: scheduler, asynchronousIndexLoading: asynchronousIndexLoading,
+            presentedAspectRatioRepairLockHook: presentedAspectRatioRepairLockHook
+        )
+    }
 
+    /// The blocking half of opening: opens (or, for a missing path, creates) the package and
+    /// acquires its writer lease. It touches no main-actor state, so launch runs it off the main
+    /// actor and builds the session from the result with ``init(opened:)``.
+    nonisolated static func acquire(
+        at rootURL: URL,
+        now: Date,
+        leaseDuration: TimeInterval = PortablePackageLease.defaultDuration,
+        recoverExpiredLease: Bool = false,
+        asynchronousIndexLoading: Bool = false
+    ) throws -> OpenedPackage {
+        let normalizedRoot = rootURL.standardizedFileURL
         // A missing path is the only create case. An existing placeholder, file, or malformed
         // package is opened and rejected; it is never replaced with an empty library.
-        if fileManager.fileExists(atPath: normalizedRoot.path) {
+        let package: PortableLibraryPackage
+        if FileManager.default.fileExists(atPath: normalizedRoot.path) {
             package = try asynchronousIndexLoading
                 ? PortableLibraryPackage.openForQuery(at: normalizedRoot)
                 : PortableLibraryPackage.open(at: normalizedRoot)
         } else {
             package = try PortableLibraryPackage.create(at: normalizedRoot)
         }
-
-        let lease = try Self.acquireWriterLease(
-            at: normalizedRoot, now: acquisitionNow, duration: leaseDuration,
+        let lease = try acquireWriterLease(
+            at: normalizedRoot, now: now, duration: leaseDuration,
             recoverExpired: recoverExpiredLease
         )
+        return OpenedPackage(package: package, lease: lease)
+    }
+
+    /// Builds the session around an already-open package and lease. A throw releases the lease.
+    init(
+        opened: OpenedPackage,
+        indexURL: URL? = nil,
+        pageSize: Int = 500,
+        leaseDuration: TimeInterval = PortablePackageLease.defaultDuration,
+        clock: PortableLibrarySessionClock = .init(),
+        scheduler: ImageWorkScheduler? = nil,
+        asynchronousIndexLoading: Bool = false,
+        presentedAspectRatioRepairLockHook: (@Sendable () -> Void)? = nil
+    ) throws {
+        self.presentedAspectRatioRepairLockHook = presentedAspectRatioRepairLockHook
+        let package = opened.package
+        let lease = opened.lease
+        let normalizedRoot = package.rootURL.standardizedFileURL
+        let fileManager = FileManager.default
         do {
             self.package = package
             self.lease = lease
@@ -221,7 +257,7 @@ final class PortableLibrarySession {
         }
     }
 
-    private static func acquireWriterLease(
+    nonisolated private static func acquireWriterLease(
         at packageRoot: URL, now: Date, duration: TimeInterval, recoverExpired: Bool
     ) throws -> PortablePackageLease {
         do {

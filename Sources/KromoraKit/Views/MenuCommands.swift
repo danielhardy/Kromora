@@ -112,6 +112,7 @@ public struct KromoraCommands: Commands {
         CommandGroup(replacing: .newItem) {
             Button("Open Image...") { post(.openImage) }
                 .keyboardShortcut("o")
+                .disabled(availability?.isLibraryReady == false)
 
             Button("Choose Look Folder...") { post(.chooseLookFolder) }
                 .keyboardShortcut("l", modifiers: [.command, .shift])
@@ -123,11 +124,14 @@ public struct KromoraCommands: Commands {
 
             Button("Import from Photos...") { post(.importFromPhotos) }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
+                .disabled(availability?.isLibraryReady == false)
 
             Button("Open Source Folder...") { post(.openSourceFolder) }
                 .keyboardShortcut("i", modifiers: [.command, .option])
+                .disabled(availability?.isLibraryReady == false)
 
             Button("Import from Removable Media...") { post(.importFromRemovableMedia) }
+                .disabled(availability?.isLibraryReady == false)
 
             Button("Refresh Library") { post(.refreshSourceFolder) }
                 .keyboardShortcut("r", modifiers: [.command])
