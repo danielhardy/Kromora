@@ -279,10 +279,14 @@ public struct ContentView: View {
                 }
             }
         }
-        .animation(.easeInOut(duration: 0.25), value: collection.isActive)
+        .animation(
+            .easeInOut(duration: 0.25).respectingReduceMotion(accessibilityReduceMotion),
+            value: collection.isActive)
         .animation(chromeAnimation, value: canvasState.isCropToolActive)
         .animation(chromeAnimation, value: chrome.isSourceBrowserPresented)
-        .animation(.easeInOut(duration: 0.2), value: viewModel.navigation.mode)
+        .animation(
+            .easeInOut(duration: 0.2).respectingReduceMotion(accessibilityReduceMotion),
+            value: viewModel.navigation.mode)
         .toolbar {
             // Each cluster is its own toolbar item so the system draws one frosted group,
             // the same material as the Library/Edit picker. A fixed spacer keeps the groups
@@ -314,7 +318,7 @@ public struct ContentView: View {
     }
 
     private var chromeAnimation: Animation? {
-        accessibilityReduceMotion ? nil : .easeInOut(duration: 0.3)
+        .easeInOut(duration: 0.3).respectingReduceMotion(accessibilityReduceMotion)
     }
 
     private var sourceBrowserTransition: AnyTransition {

@@ -6,6 +6,7 @@ import AppKit
 /// into view, staying in sync with the filmstrip and ←/→ navigation.
 struct SourceBrowserView: View {
     let viewModel: AppViewModel
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @Bindable var collection: ImageCollection
 
     init(viewModel: AppViewModel) {
@@ -93,7 +94,9 @@ struct SourceBrowserView: View {
             .scrollContentBackground(.hidden)
             .onChange(of: collection.selectedIndex) { _, idx in
                 guard collection.items.indices.contains(idx) else { return }
-                withAnimation(.easeInOut(duration: 0.2)) {
+                withAnimation(
+                    .easeInOut(duration: 0.2).respectingReduceMotion(accessibilityReduceMotion)
+                ) {
                     proxy.scrollTo(collection.items[idx].id, anchor: .center)
                 }
             }

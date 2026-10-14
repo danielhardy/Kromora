@@ -59,6 +59,7 @@ struct InspectorHeading: View {
 struct InspectorDisclosure<Content: View>: View {
     let title: String
     @Binding var isExpanded: Bool
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     var titleFont: Font
     var trailingActionTitle: String?
     var trailingActionEnabled: Bool
@@ -145,7 +146,9 @@ struct InspectorDisclosure<Content: View>: View {
         // explicit source avoids stacking overlapping animated transactions on the scroll
         // view's content size — overlapping size transactions are what widen the window for
         // AppKit's display-cycle constraint re-entrancy (KRMA-687).
-        withAnimation(.easeInOut(duration: 0.2)) {
+        withAnimation(
+            .easeInOut(duration: 0.2).respectingReduceMotion(accessibilityReduceMotion)
+        ) {
             isExpanded.toggle()
         }
     }

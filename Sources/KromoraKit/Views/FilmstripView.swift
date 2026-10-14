@@ -4,6 +4,7 @@ import AppKit
 /// Horizontal thumbnail strip for browsing imported images.
 struct FilmstripView: View {
     @Bindable var collection: ImageCollection
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     let settings: KromoraSettings
     let onSelect: (Int, LibrarySelectionModel.Modifiers) -> Void
 
@@ -63,7 +64,9 @@ struct FilmstripView: View {
             .onAppear { collection.beginThumbnailDemand() }
             .onChange(of: collection.selectedIndex) { _, newIndex in
                 guard collection.items.indices.contains(newIndex) else { return }
-                withAnimation(.easeInOut(duration: 0.2)) {
+                withAnimation(
+                    .easeInOut(duration: 0.2).respectingReduceMotion(accessibilityReduceMotion)
+                ) {
                     proxy.scrollTo(collection.items[newIndex].id, anchor: .center)
                 }
             }

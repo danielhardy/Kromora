@@ -10,6 +10,7 @@ import SwiftUI
 /// `AppViewModel`.
 struct EffectsInspectorView: View {
     let viewModel: AppViewModel
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
     @State private var sharpeningAdvancedExpanded = false
     @State private var noiseAdvancedExpanded = false
@@ -256,7 +257,9 @@ struct EffectsInspectorView: View {
         isModified: Bool
     ) -> some View {
         Button {
-            withAnimation(.easeInOut(duration: 0.25)) {
+            withAnimation(
+                .easeInOut(duration: 0.25).respectingReduceMotion(accessibilityReduceMotion)
+            ) {
                 isExpanded.wrappedValue.toggle()
             }
         } label: {
