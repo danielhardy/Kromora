@@ -103,7 +103,7 @@ enum KeyboardShortcutCatalog {
         .init(action: "Open photos", keys: "⌘O", area: "Library", delivery: .standardMenu),
         .init(action: "Import from Photos", keys: "⌘⇧I", area: "Library", delivery: .standardMenu),
         .init(action: "Open source folder", keys: "⌘⌥I", area: "Library", delivery: .standardMenu),
-        .init(action: "Refresh library", keys: "⌘R", area: "Library", delivery: .standardMenu),
+        .init(action: "Rebuild library index", keys: "⌘R", area: "Library", delivery: .standardMenu),
         .init(
             action: "Delete selected photos", keys: "Delete", area: "Library",
             delivery: .surface([KeyInput(.delete), KeyInput(.forwardDelete)])

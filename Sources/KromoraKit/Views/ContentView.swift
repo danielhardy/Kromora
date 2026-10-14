@@ -421,22 +421,22 @@ public struct ContentView: View {
     private var transferToolbarPill: some View {
         ControlGroup {
             Menu {
-                Button("Open Image...") {
+                Button("Open Image…") {
                     viewModel.openImageDialog()
                 }
                 .disabled(!viewModel.canImportIntoPortableLibrary)
                 Divider()
-                Button("Import from Photos...") {
+                Button("Import from Photos…") {
                     viewModel.importFromPhotos()
                 }
                 .disabled(!viewModel.canImportIntoPortableLibrary)
-                Button("Open Source Folder...") {
+                Button("Import Folder…") {
                     viewModel.chooseSourceFolder()
                 }
                 .disabled(!viewModel.canImportIntoPortableLibrary)
                 RemovableMediaMenu(viewModel: viewModel, media: viewModel.libraryMediaWorkflow)
                 if !collection.items.isEmpty {
-                    Button("Refresh Library") {
+                    Button("Rebuild Library Index") {
                         viewModel.refreshSource()
                     }
                 }

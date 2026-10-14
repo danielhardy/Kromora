@@ -68,6 +68,24 @@ final class MenuCommandTests: XCTestCase {
         XCTAssertEqual(Notification.Name.importLook.rawValue, "Kromora.importLook")
     }
 
+    func testMenuTitlesUseSingleEllipsisCharacterAndLibraryWording() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // KromoraKitTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // package root
+        for file in ["MenuCommands.swift", "ContentView.swift"] {
+            let source = try String(
+                contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/\(file)"),
+                encoding: .utf8
+            )
+            for line in source.split(separator: "\n") where line.contains("Button(\"") {
+                XCTAssertFalse(line.contains("...\""), "Use the single ellipsis character in: \(line)")
+            }
+            XCTAssertFalse(source.contains("Open Source Folder"))
+            XCTAssertFalse(source.contains("\"Refresh Library\""))
+        }
+    }
+
     func testBatchExportMenuUsesOriginalsLabelAndExistingRoute() throws {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent() // KromoraKitTests
@@ -78,7 +96,7 @@ final class MenuCommandTests: XCTestCase {
             encoding: .utf8
         )
 
-        XCTAssertTrue(menuCommands.contains("Button(\"Export Originals...\") { run(.exportSelected) }"))
+        XCTAssertTrue(menuCommands.contains("Button(\"Export Originals…\") { run(.exportSelected) }"))
         XCTAssertTrue(menuCommands.contains(".keyboardShortcut(\"e\", modifiers: [.command, .shift])"))
         XCTAssertFalse(menuCommands.contains("Button(\"Export Selected...\")"))
     }

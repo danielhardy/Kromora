@@ -62,7 +62,7 @@ Legend for expected results:
 | Open photos | ⌘O | Library | standardMenu | runs (menu) | runs (menu) | runs (menu) | runs (menu) | menu/field default | runs (menu) | suppressed or sheet default |
 | Import from Photos | ⌘⇧I | Library | standardMenu | runs (menu) | runs (menu) | runs (menu) | runs (menu) | menu/field default | runs (menu) | suppressed or sheet default |
 | Open source folder | ⌘⌥I | Library | standardMenu | runs (menu) | runs (menu) | runs (menu) | runs (menu) | menu/field default | runs (menu) | suppressed or sheet default |
-| Refresh library | ⌘R | Library | standardMenu | runs (menu) | runs (menu) | runs (menu) | runs (menu) | menu/field default | runs (menu) | suppressed or sheet default |
+| Rebuild library index | ⌘R | Library | standardMenu | runs (menu) | runs (menu) | runs (menu) | runs (menu) | menu/field default | runs (menu) | suppressed or sheet default |
 | Delete selected photos | Delete | Library | surface | runs | runs | runs | runs | types | runs | suppressed |
 | Library workspace | G | Navigation | menu key, view | runs | runs | runs | runs | types | runs | suppressed |
 | Edit workspace / erase mask tool | E | Navigation | menu key, view | runs | runs | runs | runs | types | runs | suppressed |

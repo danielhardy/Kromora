@@ -110,30 +110,30 @@ public struct KromoraCommands: Commands {
         }
 
         CommandGroup(replacing: .newItem) {
-            Button("Open Image...") { post(.openImage) }
+            Button("Open Image…") { post(.openImage) }
                 .keyboardShortcut("o")
                 .disabled(!MenuCommandAvailability.isLibraryReady(availability))
 
-            Button("Choose Look Folder...") { post(.chooseLookFolder) }
+            Button("Choose Look Folder…") { post(.chooseLookFolder) }
                 .keyboardShortcut("l", modifiers: [.command, .shift])
 
-            Button("Import Look...") { post(.importLook) }
+            Button("Import Look…") { post(.importLook) }
                 .keyboardShortcut("l", modifiers: [.command, .option])
 
             Divider()
 
-            Button("Import from Photos...") { post(.importFromPhotos) }
+            Button("Import from Photos…") { post(.importFromPhotos) }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
                 .disabled(!MenuCommandAvailability.isLibraryReady(availability))
 
-            Button("Open Source Folder...") { post(.openSourceFolder) }
+            Button("Import Folder…") { post(.openSourceFolder) }
                 .keyboardShortcut("i", modifiers: [.command, .option])
                 .disabled(!MenuCommandAvailability.isLibraryReady(availability))
 
-            Button("Import from Removable Media...") { post(.importFromRemovableMedia) }
+            Button("Import from Removable Media…") { post(.importFromRemovableMedia) }
                 .disabled(!MenuCommandAvailability.isLibraryReady(availability))
 
-            Button("Refresh Library") { post(.refreshSourceFolder) }
+            Button("Rebuild Library Index") { post(.refreshSourceFolder) }
                 .keyboardShortcut("r", modifiers: [.command])
 
             Button("Delete Selected Photos") { run(.deleteSelectedPhotos) }
@@ -177,11 +177,11 @@ public struct KromoraCommands: Commands {
 
             Divider()
 
-            Button("Export...") { run(.export) }
+            Button("Export…") { run(.export) }
                 .keyboardShortcut("s")
                 .disabled(!isEnabled(.export))
 
-            Button("Export Originals...") { run(.exportSelected) }
+            Button("Export Originals…") { run(.exportSelected) }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
                 .disabled(!isEnabled(.exportSelected))
 

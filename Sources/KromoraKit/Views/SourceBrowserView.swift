@@ -55,7 +55,7 @@ struct SourceBrowserView: View {
                 }
                 .buttonStyle(.borderless)
                 .foregroundColor(.secondary)
-                .help("Refresh library")
+                .help("Rebuild library index")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
