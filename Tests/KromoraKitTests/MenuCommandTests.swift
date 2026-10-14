@@ -96,7 +96,7 @@ final class MenuCommandTests: XCTestCase {
             encoding: .utf8
         )
 
-        XCTAssertTrue(menuCommands.contains("Button(\"Export Originals…\") { run(.exportSelected) }"))
+        XCTAssertTrue(menuCommands.contains("Button(\"Export Selected Photos…\") { run(.exportSelected) }"))
         XCTAssertTrue(menuCommands.contains(".keyboardShortcut(\"e\", modifiers: [.command, .shift])"))
         XCTAssertFalse(menuCommands.contains("Button(\"Export Selected...\")"))
     }

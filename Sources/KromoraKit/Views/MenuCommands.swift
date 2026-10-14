@@ -181,7 +181,7 @@ public struct KromoraCommands: Commands {
                 .keyboardShortcut("s")
                 .disabled(!isEnabled(.export))
 
-            Button("Export Originals…") { run(.exportSelected) }
+            Button("Export Selected Photos…") { run(.exportSelected) }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
                 .disabled(!isEnabled(.exportSelected))
 

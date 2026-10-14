@@ -4079,7 +4079,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         makeBatchExportRequest(from: collection.items)
     }
 
-    /// The panel-free request used by Export Originals; never widened to the whole collection.
+    /// The panel-free request used by Export Selected Photos; never widened to the whole collection.
     var selectedBatchExportRequest: ExportWorkflowCoordinator.BatchRequest {
         makeBatchExportRequest(from: collection.selectedItems, unloaded: unloadedSelectedAssets())
     }
