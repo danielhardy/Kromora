@@ -11,7 +11,8 @@ final class AppLaunchTests: XCTestCase {
         let session = try PortableLibrarySession(at: packageURL)
         try session.lease.release()
         return (packageURL, try PortablePackageLease.acquire(
-            at: packageURL, deviceName: "killed-swift-run", duration: -1
+            at: packageURL, deviceName: "killed-swift-run", processID: .max,
+            writerHostID: "another-host", processStartedAt: "1:0", duration: -1
         ))
     }
 

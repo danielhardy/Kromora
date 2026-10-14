@@ -628,7 +628,8 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         try session.lease.release()
 
         let stale = try PortablePackageLease.acquire(
-            at: packageURL, deviceName: "killed-swift-run", duration: -1
+            at: packageURL, deviceName: "killed-swift-run", processID: .max,
+            writerHostID: "another-host", processStartedAt: "1:0", duration: -1
         )
         XCTAssertThrowsError(
             try PortableLibrarySession(at: packageURL, indexURL: indexURL)

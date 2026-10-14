@@ -288,7 +288,7 @@ final class PortablePackageLease: Sendable {
     }
 
     /// Takes exclusive ownership of an expired writer lock, then rolls back its interrupted
-    /// transactions. Live (unexpired) leases are still reported as contended; this never steals one.
+    /// transactions. A writer process still alive on this Mac remains contended even after expiry.
     ///
     /// Ownership is established before anything is mutated: the lock file is renamed to a private
     /// claim name (atomic, so exactly one recoverer wins) and the claimed lease is re-read. If it is
@@ -320,6 +320,10 @@ final class PortablePackageLease: Sendable {
             throw PortablePackageLeaseError.invalid
         }
         guard claimed.expiresAt <= now else {
+            try restoreClaim(claimURL, to: lockURL)
+            throw PortablePackageLeaseError.contended(claimed)
+        }
+        guard claimed.localWriterState != .live else {
             try restoreClaim(claimURL, to: lockURL)
             throw PortablePackageLeaseError.contended(claimed)
         }

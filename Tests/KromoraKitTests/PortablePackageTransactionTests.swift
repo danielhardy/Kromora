@@ -124,9 +124,7 @@ final class PortablePackageTransactionTests: TempDirectoryTestCase {
             at: stateURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("old".utf8).write(to: stateURL)
 
-        let stale = try PortablePackageLease.acquire(
-            at: packageURL, now: now, duration: 10
-        )
+        let stale = try acquireRemoteLease(at: packageURL, duration: 10)
         let injector = PortablePackageFaultInjector(failingAt: .publish)
         var transaction = try PortablePackageTransaction.begin(
             at: packageURL, lease: stale, now: now, faultInjector: injector
@@ -164,6 +162,21 @@ final class PortablePackageTransactionTests: TempDirectoryTestCase {
         return urls.filter { $0.pathExtension == "json" }.count
     }
 
+    /// Simulates a writer on another host so expiry recovery tests do not classify this still-live
+    /// test process as the package writer.
+    private func acquireRemoteLease(
+        at packageURL: URL, duration: TimeInterval = PortablePackageLease.defaultDuration
+    ) throws -> PortablePackageLease {
+        try PortablePackageLease.acquire(
+            at: packageURL,
+            processID: .max,
+            writerHostID: "another-host",
+            processStartedAt: "1:0",
+            now: now,
+            duration: duration
+        )
+    }
+
     func testRecoverExpiredWriterRejectsUnexpiredLeaseWithoutTouchingJournal() throws {
         let packageURL = try makePackage()
         let lease = try PortablePackageLease.acquire(at: packageURL, now: now, duration: 10)
@@ -180,11 +193,30 @@ final class PortablePackageTransactionTests: TempDirectoryTestCase {
         XCTAssertNoThrow(try lease.assertOwnership(at: now))
     }
 
+    func testRecoverExpiredWriterDoesNotRollbackALiveLocalWriterAfterExpiry() throws {
+        let packageURL = try makePackage()
+        let lease = try PortablePackageLease.acquire(at: packageURL, now: now, duration: 10)
+        XCTAssertEqual(lease.info.localWriterState, .live)
+        let watched = try stageInterruptedTransaction(lease: lease, packageURL: packageURL)
+        let lockBefore = try watched.lockBytes()
+        let later = now.addingTimeInterval(11)
+
+        XCTAssertThrowsError(
+            try PortablePackageLease.recoverExpiredWriter(at: packageURL, now: later)
+        ) {
+            guard case .contended = $0 as? PortablePackageLeaseError else {
+                return XCTFail("expected contention with a live local writer, got \($0)")
+            }
+        }
+        XCTAssertEqual(journalCount(watched.journalDirectory), 1)
+        XCTAssertEqual(try watched.lockBytes(), lockBefore)
+    }
+
     /// Same-process, real package and lock files. The first read saw an expired lease; the owner
     /// then renewed, so the recoverer's own exclusive re-read must reject the takeover.
     func testRecoverExpiredWriterSparesOwnerThatRenewedAfterExpiryWasObserved() throws {
         let packageURL = try makePackage()
-        let lease = try PortablePackageLease.acquire(at: packageURL, now: now, duration: 10)
+        let lease = try acquireRemoteLease(at: packageURL, duration: 10)
         let watched = try stageInterruptedTransaction(lease: lease, packageURL: packageURL)
         let later = now.addingTimeInterval(11)
         XCTAssertThrowsError(try PortablePackageLease.acquire(at: packageURL, now: later)) {
@@ -207,7 +239,7 @@ final class PortablePackageTransactionTests: TempDirectoryTestCase {
 
     func testRecoverExpiredWriterFencesTheFormerOwnerDuringRollback() throws {
         let packageURL = try makePackage()
-        let lease = try PortablePackageLease.acquire(at: packageURL, now: now, duration: 10)
+        let lease = try acquireRemoteLease(at: packageURL, duration: 10)
         _ = try stageInterruptedTransaction(lease: lease, packageURL: packageURL)
         let later = now.addingTimeInterval(11)
 
@@ -227,7 +259,7 @@ final class PortablePackageTransactionTests: TempDirectoryTestCase {
 
     func testOnlyOneConcurrentRecovererRollsBackAnExpiredWriter() throws {
         let packageURL = try makePackage()
-        let lease = try PortablePackageLease.acquire(at: packageURL, now: now, duration: 10)
+        let lease = try acquireRemoteLease(at: packageURL, duration: 10)
         let watched = try stageInterruptedTransaction(lease: lease, packageURL: packageURL)
         let later = now.addingTimeInterval(11)
         let successes = OSAllocatedUnfairLock(initialState: 0)
@@ -249,7 +281,7 @@ final class PortablePackageTransactionTests: TempDirectoryTestCase {
         try FileManager.default.createDirectory(
             at: stateURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("old".utf8).write(to: stateURL)
-        let lease = try PortablePackageLease.acquire(at: packageURL, now: now, duration: 10)
+        let lease = try acquireRemoteLease(at: packageURL, duration: 10)
         let watched = try stageInterruptedTransaction(lease: lease, packageURL: packageURL)
         let later = now.addingTimeInterval(11)
 
