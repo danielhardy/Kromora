@@ -696,15 +696,21 @@ window the presentation session never confirms; the capture's zero-render result
 authority. Edit → Library admitted 0. Body evaluations per sample: about 10.5 (Edit) and 4.0 (grid).
 `AppViewModel.document` published **0** Observation invalidations per sample in both directions.
 
+The unattached hosting view has no SwiftUI App/Scene lifecycle. A counterpoint rerun on 2026-10-14
+at `1633ec3f` emitted SwiftUI `SceneStorage` warnings from `LibraryGridView` and used the default
+constant binding for `libraryFacetSidebarPresented`; the benchmark does not manipulate this
+control. Treat this as a no-scene harness limitation when interpreting layout timings.
+
 What this shows. On this machine the whole main-actor chain up to a hydrated frame is about 47-58 ms
 for Edit and about 30 ms for the grid, and state publication is under 0.4 ms. Mounting and laying
 out the hierarchy is a single synchronous pass of 25-29 ms and is the largest window-independent
-piece. The recorded 187-197 ms (M4 Pro) and 286 ms (M1 Pro) capture p95s therefore leave roughly
-130+ ms for drawable acquisition, Core Image presentation encoding, compositor scheduling, and
-window-attached layout, which this harness cannot see. Some capture timestamps are callback-handler
-fallbacks, so that remainder also includes handler timing. The profile does **not** show `document`
-invalidation rebuilding Light, Color, Effects, and the preview together on this path (document never
-published), so no Observation-splitting ticket was filed.
+piece. This breakdown does not attribute the remaining display-bound interval: the M4 window-free
+profile and the 2026-10-11 M4 capture used different methods and commits, while the 2026-10-14 M1
+capture is a different machine. Do not subtract these measurements to estimate a drawable,
+compositor, or window-layout remainder. Some capture timestamps are callback-handler fallbacks,
+which also limits attribution. The profile does **not** show `document` invalidation rebuilding
+Light, Color, Effects, and the preview together on this path (document never published), so no
+Observation-splitting ticket was filed.
 
 Proposed targets (proposals only; nothing is adopted in code, and KRMA-952 decides):
 
