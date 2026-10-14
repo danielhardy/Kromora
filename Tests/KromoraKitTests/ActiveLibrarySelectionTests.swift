@@ -253,6 +253,40 @@ final class ActiveLibrarySelectionTests: XCTestCase {
         XCTAssertEqual(chooser.errorMessage, "")
     }
 
+    func testFailedFlushQuitWithoutSavingDoesNotLaunch() async throws {
+        let url = try await makePackage("Chosen.kromoralibrary")
+        let dialog = StubDialog(); dialog.folder = url
+        let sheets = FakeSheets(); sheets.confirmResult = true
+        var flushCount = 0
+        var discarded = false
+        var shutDown = false
+        let releaseOutcome = await LibraryReleaseFlow.flushAndRelease(
+            flush: {
+                flushCount += 1
+                return .failure("disk full")
+            },
+            chooseAfterFailure: { result in
+                XCTAssertEqual(result, .failure("disk full"))
+                return .discard
+            },
+            discard: { discarded = true },
+            shutdown: { shutDown = true }
+        )
+        let relauncher = SpyRelauncher()
+        let chooser = ActiveLibraryChooser(
+            selection: selection, fileDialog: dialog, sheets: sheets, relauncher: relauncher,
+            releaseLibrary: { releaseOutcome })
+
+        await chooser.choose()
+
+        XCTAssertEqual(flushCount, 1)
+        XCTAssertTrue(discarded)
+        XCTAssertTrue(shutDown)
+        XCTAssertEqual(releaseOutcome, .releasedWithoutSaving)
+        XCTAssertEqual(relauncher.count, 0)
+        XCTAssertTrue(chooser.statusMessage.contains("unsaved edits were discarded"))
+    }
+
     func testDeclinedReleaseDoesNotLaunch() async throws {
         let url = try await makePackage("Chosen.kromoralibrary")
         let dialog = StubDialog(); dialog.folder = url

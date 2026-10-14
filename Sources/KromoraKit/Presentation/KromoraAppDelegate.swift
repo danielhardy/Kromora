@@ -1,5 +1,41 @@
 import AppKit
 
+enum SaveFailureChoice {
+    case retry
+    case discard
+    case cancel
+}
+
+/// Flushes and releases a library after a relaunch confirmation. The injected operations keep the
+/// failed-save decision path testable without presenting a real AppKit alert.
+@MainActor
+enum LibraryReleaseFlow {
+    static func flushAndRelease(
+        flush: @MainActor () async -> PersistenceFlushResult,
+        chooseAfterFailure: @MainActor (PersistenceFlushResult) -> SaveFailureChoice,
+        discard: @MainActor () async -> Void,
+        shutdown: @MainActor () async -> Void
+    ) async -> LibraryReleaseOutcome {
+        var outcome = LibraryReleaseOutcome.released
+        while true {
+            let result = await flush()
+            if case .success = result { break }
+            switch chooseAfterFailure(result) {
+            case .retry:
+                continue
+            case .discard:
+                await discard()
+                outcome = .releasedWithoutSaving
+            case .cancel:
+                return .declined
+            }
+            break
+        }
+        await shutdown()
+        return outcome
+    }
+}
+
 /// Shared application lifecycle behavior for each Kromora launcher.
 @MainActor
 public final class KromoraAppDelegate: NSObject, NSApplicationDelegate {
@@ -92,8 +128,6 @@ public final class KromoraAppDelegate: NSObject, NSApplicationDelegate {
         sender.reply(toApplicationShouldTerminate: true)
     }
 
-    private enum SaveFailureChoice { case retry, discard, cancel }
-
     /// App-modal on purpose: this runs while the app is quitting or relaunching, when the window may
     /// already be gone, and the answer decides whether the process goes on.
     private func askSaveFailure(for result: PersistenceFlushResult) -> SaveFailureChoice {
@@ -126,21 +160,13 @@ public final class KromoraAppDelegate: NSObject, NSApplicationDelegate {
         terminationFlushInProgress = true
         defer { terminationFlushInProgress = false }
         guard await viewModel.terminationGuard.shouldQuit(presenter: quitConfirmation) else { return .declined }
-        var outcome = LibraryReleaseOutcome.released
-        while true {
-            let result = await viewModel.flushPendingWrites()
-            if case .success = result { break }
-            switch askSaveFailure(for: result) {
-            case .retry: continue
-            case .discard:
-                await viewModel.discardPendingWrites()
-                outcome = .releasedWithoutSaving
-            case .cancel: return .declined
-            }
-            break
-        }
-        await viewModel.shutdown()
-        libraryReleased = true
+        let outcome = await LibraryReleaseFlow.flushAndRelease(
+            flush: { await viewModel.flushPendingWrites() },
+            chooseAfterFailure: { self.askSaveFailure(for: $0) },
+            discard: { await viewModel.discardPendingWrites() },
+            shutdown: { await viewModel.shutdown() }
+        )
+        if outcome != .declined { libraryReleased = true }
         return outcome
     }
 
