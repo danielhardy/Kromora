@@ -477,7 +477,7 @@ struct PortablePackageImporter: Sendable {
                     ))
                     progressValue.duplicates += 1
                     if !importAnyway {
-                        try abort(&transaction)
+                        try abort(&transaction, now: now())
                         progressValue.processed += 1
                         progress(progressValue)
                         continue
@@ -559,7 +559,7 @@ struct PortablePackageImporter: Sendable {
                 progressValue.processed += 1
                 progress(progressValue)
             } catch {
-                try abort(&transaction)
+                try abort(&transaction, now: now())
                 if error is CancellationError || isCancelled() {
                     cancelled = true
                     break
@@ -638,13 +638,17 @@ struct PortablePackageImporter: Sendable {
         return shard
     }
 
-    private func abort(_ transaction: inout PortablePackageTransaction) throws {
+    private func abort(_ transaction: inout PortablePackageTransaction, now: Date) throws {
         do {
-            try transaction.abort()
+            try transaction.abort(now: now)
+        } catch let leaseError as PortablePackageLeaseError {
+            // A takeover owns recovery now. The next opener will retry if the current owner
+            // cannot finish its rollback; this former writer must not run recovery itself.
+            throw leaseError
         } catch {
             let abortError = error
             do {
-                _ = try PortablePackageTransaction.recover(at: package.rootURL)
+                try transaction.recoverWhileOwner(now: now)
             } catch {
                 throw abortError
             }

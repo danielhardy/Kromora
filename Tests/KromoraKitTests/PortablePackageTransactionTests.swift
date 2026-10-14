@@ -508,6 +508,31 @@ final class PortablePackageTransactionTests: TempDirectoryTestCase {
             atPath: packageURL.appendingPathComponent("manifest.lock").path))
     }
 
+    func testStaleAbortCannotUndoRecoveryRollback() throws {
+        let packageURL = try makePackage()
+        let stateURL = packageURL.appendingPathComponent("State/value.txt")
+        try FileManager.default.createDirectory(
+            at: stateURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("old".utf8).write(to: stateURL)
+
+        let lease = try acquireRemoteLease(at: packageURL, duration: 10)
+        let injector = PortablePackageFaultInjector(failingAt: .publish)
+        var transaction = try PortablePackageTransaction.begin(
+            at: packageURL, lease: lease, now: now, faultInjector: injector)
+        try transaction.stage(data: Data("new".utf8), at: "State/value.txt")
+        XCTAssertThrowsError(try transaction.commit(now: now))
+        XCTAssertEqual(try String(contentsOf: stateURL, encoding: .utf8), "new")
+
+        try PortablePackageLease.recoverExpiredWriter(
+            at: packageURL, now: now.addingTimeInterval(11))
+        XCTAssertEqual(try String(contentsOf: stateURL, encoding: .utf8), "old")
+
+        XCTAssertThrowsError(try transaction.abort(now: now.addingTimeInterval(11)))
+        XCTAssertEqual(try String(contentsOf: stateURL, encoding: .utf8), "old")
+        XCTAssertEqual(Self.journalCount(packageURL.appendingPathComponent("Recovery/Transactions")), 0)
+        XCTAssertEqual(Self.stagingCount(packageURL), 0)
+    }
+
     func testRecoveryFailureRestoresLockJournalAndStagingThenRetrySucceeds() throws {
         let packageURL = try makePackage()
         let lease = try acquireRemoteLease(at: packageURL, duration: 10)
@@ -642,7 +667,7 @@ final class PortablePackageTransactionTests: TempDirectoryTestCase {
                 return XCTFail("expected checksum mismatch, got \(error)")
             }
         }
-        try transaction.abort()
+        try transaction.abort(now: now)
         XCTAssertFalse(FileManager.default.fileExists(atPath: packageURL.appendingPathComponent(path).path))
     }
 
@@ -661,7 +686,7 @@ final class PortablePackageTransactionTests: TempDirectoryTestCase {
             return cancellation.isCancelled
         })) { XCTAssertTrue($0 is CancellationError) }
         XCTAssertEqual(checks.withLock { $0 }, 6)
-        try transaction.abort()
+        try transaction.abort(now: now)
         XCTAssertFalse(FileManager.default.fileExists(atPath: packageURL.appendingPathComponent(path).path))
     }
 

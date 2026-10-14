@@ -976,12 +976,24 @@ struct PortablePackageTransaction {
             byteCount: byteCount, checksum: file.stagedChecksum, usedClonefile: false)
     }
 
-    mutating func abort() throws {
+    mutating func abort(now: Date = Date()) throws {
         guard journal.state != .committed else {
             throw PortablePackageTransactionError.transactionAlreadyCommitted
         }
-        try Self.rollback(journal, packageRoot: packageRoot)
-        cleanupCommittedArtifacts()
+        // Cleanup after a failed commit is still a package mutation. Recovery may have taken
+        // over and already replayed this transaction, so serialize the rollback and verify that
+        // this lease still owns the lock before applying the cached journal a second time.
+        try lease.withOwnershipFence(at: now) {
+            try Self.rollback(journal, packageRoot: packageRoot)
+            cleanupCommittedArtifacts()
+        }
+    }
+
+    /// Retries journal recovery after an abort I/O error without racing an expired takeover.
+    func recoverWhileOwner(now: Date = Date()) throws {
+        try lease.withOwnershipFence(at: now) {
+            _ = try Self.recover(at: packageRoot)
+        }
     }
 
     /// Every journal write and publication move below runs inside `lease.withOwnershipFence`, so
