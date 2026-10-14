@@ -90,10 +90,18 @@ final class ExportWorkflowCoordinator {
 
     // MARK: - Entry points
 
+    /// Refuses a new export, Share, or bundle command while one is running. The running job is
+    /// left alone and the user sees why nothing happened.
+    private func refusedWhileBusy() -> Bool {
+        guard export.isExporting else { return false }
+        destination?.setExportStatus("Another export is already running. Wait for it to finish.")
+        return true
+    }
+
     /// Share the active photo, or every selected photo when the selection has more than one item.
     /// File ▸ Export remains the single-photo save-panel command.
     func shareDialog() {
-        guard let destination else { return }
+        guard let destination, !refusedWhileBusy() else { return }
         switch Self.shareDialogMode(for: destination.exportSelectionCount) {
         case .singlePhoto: shareCurrentExport()
         case .selectedPhotos: shareSelectedExports()
@@ -103,6 +111,7 @@ final class ExportWorkflowCoordinator {
     /// Export the open image at full resolution. It exports `document`, not the display request —
     /// holding Space to compare must not change what ⌘S writes.
     func exportDialog() {
+        guard !refusedWhileBusy() else { return }
         guard let destination, let request = destination.exportSingleRequest else {
             self.destination?.setExportStatus("Open an image first")
             return
@@ -121,7 +130,7 @@ final class ExportWorkflowCoordinator {
     @discardableResult
     func editInExternalEditor() -> Task<Void, Never> {
         Task { [weak self] in
-            guard let self else { return }
+            guard let self, !self.refusedWhileBusy() else { return }
             guard let destination = self.destination,
                   let request = destination.exportSingleRequest else {
                 self.destination?.setExportStatus("Open an image first")
@@ -161,6 +170,7 @@ final class ExportWorkflowCoordinator {
     }
 
     private func runExportOriginalWithSettings() async {
+        guard !refusedWhileBusy() else { return }
         guard let destination, let request = destination.exportSingleRequest else {
             self.destination?.setExportStatus("Open an image first")
             return
@@ -184,6 +194,8 @@ final class ExportWorkflowCoordinator {
         })?.first else { return }
         // The sheet suspended this method, so the open photo may have changed. The snapshot taken
         // before the prompts is what the user confirmed and is what gets bundled.
+        // Another export may have started while the prompts were up.
+        guard !refusedWhileBusy() else { return }
         let access = SecurityScopedResourceAccess.systemGranted(for: parent)
         let stem = URL(fileURLWithPath: sourceName).deletingPathExtension().lastPathComponent
         let name = stem.isEmpty ? "Photo" : stem
@@ -191,35 +203,42 @@ final class ExportWorkflowCoordinator {
             "\(name).\(OriginalSettingsBundle.fileExtension)", isDirectory: true
         )
         destination.setExportStatus("Preparing original + settings bundle…")
-        Task { @MainActor [weak self, access] in
-            defer { access.release() }
-            do {
+        // Registered with the export coordinator so quit and shutdown see and cancel it.
+        let source = request.source
+        let document = request.document
+        do {
+            try await export.runJob(.originalBundle) {
+                defer { access.release() }
                 try await OriginalSettingsBundle.create(
-                    source: request.source,
+                    source: source,
                     sourceName: sourceName,
-                    document: request.document,
+                    document: document,
                     destination: bundleURL,
                     locationMetadataIncluded: true
                 )
-                self?.destination?.setExportStatus(
-                    "Original + settings bundle exported; the original remains read-only."
-                )
-            } catch {
-                self?.destination?.presentExportError("Bundle export failed: \(error.localizedDescription)")
             }
+            self.destination?.setExportStatus(
+                "Original + settings bundle exported; the original remains read-only."
+            )
+        } catch is ExportJobBusyError {
+            access.release()
+        } catch is CancellationError {
+            return
+        } catch {
+            self.destination?.presentExportError("Bundle export failed: \(error.localizedDescription)")
         }
     }
 
     /// Apply the current look to every imported image and export them all to a chosen folder.
     func batchExportDialog() {
-        guard let destination else { return }
+        guard let destination, !refusedWhileBusy() else { return }
         let request = destination.exportBatchRequest(selectedOnly: false)
         export.batchExportDialog(items: request.items, document: request.document, lut: request.lut)
     }
 
     /// Export exactly the library selection. Selection and edit focus are separate in the grid model.
     func exportSelectedDialog() {
-        guard let destination else { return }
+        guard let destination, !refusedWhileBusy() else { return }
         let request = destination.exportBatchRequest(selectedOnly: true)
         guard !request.items.isEmpty else {
             destination.setExportStatus("Select at least one photo to export")
@@ -302,30 +321,39 @@ final class ExportWorkflowCoordinator {
                 fileOptions: [],
                 visibility: .all
             ) { [weak self] completion in
-                Task { @MainActor in
+                let task = Task { @MainActor in
                     guard let self else {
                         completion(nil, false, CocoaError(.userCancelled))
                         return
                     }
                     do {
-                        let url = try await self.renderShareFile(
-                            name: name, into: directory
-                        ) { options in
-                            try await self.export.renderEncodedData(
-                                for: item, document: request.document, lut: request.lut,
-                                options: options
-                            )
+                        let url = try await self.export.runJob(.share) {
+                            try await self.renderShareFile(
+                                name: name, into: directory
+                            ) { options in
+                                try await self.export.renderEncodedData(
+                                    for: item, document: request.document, lut: request.lut,
+                                    options: options
+                                )
+                            }
                         }
                         completion(url, false, nil)
                     } catch {
                         completion(nil, false, error)
                     }
                 }
-                return nil
+                return Self.cancellationProgress(for: task)
             }
             return provider
         }
         presentSharePicker(for: providers, in: directory)
+    }
+
+    /// The handle a sharing service uses to cancel a lazy render it no longer wants.
+    nonisolated private static func cancellationProgress(for task: Task<Void, Never>) -> Progress {
+        let progress = Progress(totalUnitCount: 1)
+        progress.cancellationHandler = { task.cancel() }
+        return progress
     }
 
     private static func shareFilenameCollisionKey(_ name: String) -> String {
@@ -356,21 +384,23 @@ final class ExportWorkflowCoordinator {
             fileOptions: [],
             visibility: .all
         ) { [weak self] completion in
-            Task { @MainActor in
+            let task = Task { @MainActor in
                 guard let self else {
                     completion(nil, false, CocoaError(.userCancelled))
                     return
                 }
                 do {
-                    let url = try await self.renderShareFile(
-                        request, assetID: assetID, into: directory
-                    )
+                    let url = try await self.export.runJob(.share) {
+                        try await self.renderShareFile(
+                            request, assetID: assetID, into: directory
+                        )
+                    }
                     completion(url, false, nil)
                 } catch {
                     completion(nil, false, error)
                 }
             }
-            return nil
+            return Self.cancellationProgress(for: task)
         }
         presentSharePicker(for: [provider], in: directory)
     }

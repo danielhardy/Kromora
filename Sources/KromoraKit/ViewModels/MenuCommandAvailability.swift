@@ -28,6 +28,9 @@ struct MenuCommandAvailability: Equatable, Sendable {
     /// False while the library package is opening or failed to open; every library-dependent
     /// command (import, open, export, delete) is disabled until it is true.
     var isLibraryReady = true
+    /// True while a single export, batch, Share render, or original bundle is running; starting
+    /// another is refused rather than queued.
+    var isExportBusy = false
     var undoActionName: String?
     var redoActionName: String?
 
@@ -39,6 +42,7 @@ struct MenuCommandAvailability: Equatable, Sendable {
         canUndo: Bool = false,
         canRedo: Bool = false,
         isLibraryReady: Bool = true,
+        isExportBusy: Bool = false,
         undoActionName: String? = nil,
         redoActionName: String? = nil
     ) {
@@ -49,6 +53,7 @@ struct MenuCommandAvailability: Equatable, Sendable {
         self.canUndo = canUndo
         self.canRedo = canRedo
         self.isLibraryReady = isLibraryReady
+        self.isExportBusy = isExportBusy
         self.undoActionName = undoActionName
         self.redoActionName = redoActionName
     }
@@ -65,6 +70,7 @@ struct MenuCommandAvailability: Equatable, Sendable {
             canUndo: vm.canUndo,
             canRedo: vm.canRedo,
             isLibraryReady: vm.canImportIntoPortableLibrary,
+            isExportBusy: vm.isExporting,
             undoActionName: vm.undoActionName,
             redoActionName: vm.redoActionName
         )
@@ -78,13 +84,14 @@ struct MenuCommandAvailability: Equatable, Sendable {
     func isEnabled(_ command: MenuCommand) -> Bool {
         guard isLibraryReady else { return false }
         return switch command {
-        case .export, .editInExternalEditor, .exportOriginalWithSettings,
-             .resetPhoto, .selectiveCopy, .copyAllEdits, .saveLook:
+        case .export, .editInExternalEditor, .exportOriginalWithSettings:
+            hasPhoto && !isExportBusy
+        case .resetPhoto, .selectiveCopy, .copyAllEdits, .saveLook:
             hasPhoto
         case .pasteEdits:
             canPaste && (hasPhoto || selectionCount > 0)
         case .exportSelected:
-            selectionCount > 0 || hasPhoto
+            (selectionCount > 0 || hasPhoto) && !isExportBusy
         case .deleteSelectedPhotos:
             isGrid && selectionCount > 0
         }

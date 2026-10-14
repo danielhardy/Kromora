@@ -773,7 +773,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
     // Convenience passthroughs so views and the menu don't have to know which
     // collaborator owns a given piece of state.
     var isExporting: Bool { export.isExporting }
-    var isBatchExporting: Bool { export.isExporting && export.batchTotal > 0 }
+    var isBatchExporting: Bool { export.activeJobCount(of: .batch) > 0 && export.batchTotal > 0 }
     var batchProgress: Double { export.batchProgress }
 
     /// Long-running work that quitting would cancel.
@@ -781,7 +781,10 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         TerminationGuard(
             batchExportTotal: isBatchExporting ? export.batchTotal : nil,
             photosImportTotal: photosImportProgress?.total,
-            packageImportTotal: portableImportProgress.flatMap { $0.phase == .finished ? nil : $0.total }
+            packageImportTotal: portableImportProgress.flatMap { $0.phase == .finished ? nil : $0.total },
+            singleExportActive: export.activeJobCount(of: .single) > 0,
+            shareRenderCount: export.activeJobCount(of: .share),
+            originalBundleActive: export.activeJobCount(of: .originalBundle) > 0
         )
     }
     var batchCompleted: Int { export.batchCompleted }

@@ -18,11 +18,26 @@ struct TerminationGuard: Equatable, Sendable {
     var photosImportTotal: Int?
     /// Total of an in-flight package import (folder, removable media, Photos drop).
     var packageImportTotal: Int?
+    /// A single-photo export is writing a file.
+    var singleExportActive = false
+    /// Lazy Share renders in flight.
+    var shareRenderCount = 0
+    /// An original + settings bundle is being created.
+    var originalBundleActive = false
 
     var activities: [TerminationActivity] {
         var result: [TerminationActivity] = []
         if let total = batchExportTotal, total > 0 {
             result.append(TerminationActivity(kind: .export, description: "export of \(Self.photos(total))"))
+        }
+        if singleExportActive {
+            result.append(TerminationActivity(kind: .export, description: "export of 1 photo"))
+        }
+        if shareRenderCount > 0 {
+            result.append(TerminationActivity(kind: .export, description: "Share export"))
+        }
+        if originalBundleActive {
+            result.append(TerminationActivity(kind: .export, description: "original + settings bundle export"))
         }
         if let total = photosImportTotal {
             result.append(TerminationActivity(kind: .importing, description: "Photos import of \(Self.photos(total))"))

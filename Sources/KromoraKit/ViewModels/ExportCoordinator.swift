@@ -33,11 +33,17 @@ import Darwin
 @Observable
 final class ExportCoordinator {
 
-    private(set) var isExporting: Bool = false {
+    /// Every accepted single export, batch, Share render, and original bundle, by id. A job's
+    /// completion removes only its own entry, so `isExporting` is "a job exists", never a flag an
+    /// older job can clear under a newer one.
+    private(set) var jobs: [ExportJobID: ExportJob] = [:] {
         didSet {
-            if oldValue != isExporting { onActivityChanged?(isExporting) }
+            if oldValue.isEmpty != jobs.isEmpty { onActivityChanged?(!jobs.isEmpty) }
         }
     }
+    /// The most recent job to reach a terminal state.
+    private(set) var lastFinishedJob: ExportJobRecord?
+    var isExporting: Bool { !jobs.isEmpty }
     /// Progress (0...1) during a multi-image "Export All" run.
     private(set) var batchProgress: Double = 0
     /// Number of items that have reached a terminal state in the current batch.
@@ -71,11 +77,6 @@ final class ExportCoordinator {
     private let sheets: any SheetPresenting
     /// True while a save/open sheet is up, so a repeated command cannot stack a second sheet.
     private var isPresentingSheet = false
-    private var singleTask: Task<Void, Never>?
-    private var batchTask: Task<BatchOutcome, Never>?
-    /// This flag also makes the panel-free API cancellable: its caller may not own a task that the
-    /// coordinator can cancel, but the UI still needs a reliable boundary before the next item.
-    private var batchCancellationRequested = false
 
     /// The edit store is used for batch items that have not been opened in the current session.
     /// `lutResolver` is deliberately a value-returning main-actor seam: the store owns edit values,
@@ -104,6 +105,79 @@ final class ExportCoordinator {
     }
 
     private static let defaultFormat: ExportFormat = .jpeg
+
+    // MARK: - Jobs
+
+    func activeJobCount(of kind: ExportJobKind) -> Int {
+        jobs.values.reduce(0) { $0 + ($1.kind == kind ? 1 : 0) }
+    }
+
+    /// Accepts a job unless one is already running. Another command is refused with a visible
+    /// status and the running job is left alone; Share renders of one picker may overlap each
+    /// other, but not a running export.
+    func admitJob(_ kind: ExportJobKind, itemCount: Int = 1, announce: Bool = true) -> ExportJobID? {
+        let conflicts = jobs.values.contains { !(kind == .share && $0.kind == .share) }
+        guard !conflicts else {
+            if announce { onStatus?(ExportJobBusyError().localizedDescription + " Wait for it to finish.") }
+            return nil
+        }
+        let id = ExportJobID()
+        jobs[id] = ExportJob(id: id, kind: kind, itemCount: itemCount)
+        return id
+    }
+
+    /// Hands the job's task to the registry so cancellation and shutdown reach it.
+    func attach<Success: Sendable, Failure: Error>(
+        _ task: Task<Success, Failure>, to id: ExportJobID
+    ) {
+        jobs[id]?.cancel = { task.cancel() }
+        jobs[id]?.settled = { _ = await task.result }
+    }
+
+    /// Removes exactly this job. Calling it again, or for a job shutdown already cleared, is a no-op.
+    func finishJob(_ id: ExportJobID, outcome: ExportJobOutcome = .completed) {
+        guard let job = jobs.removeValue(forKey: id) else { return }
+        lastFinishedJob = ExportJobRecord(id: id, kind: job.kind, outcome: outcome)
+    }
+
+    /// A job missing from the registry (cleared by shutdown) counts as cancelled.
+    private func isCancellationRequested(_ id: ExportJobID) -> Bool {
+        jobs[id]?.cancellationRequested ?? true
+    }
+
+    private func requestCancellation(of id: ExportJobID) {
+        jobs[id]?.cancellationRequested = true
+        jobs[id]?.cancel?()
+    }
+
+    /// Runs `operation` as a registered job and returns its result. Cancelling the caller cancels
+    /// the job, and shutdown cancels and awaits it. Throws `ExportJobBusyError` when refused.
+    func runJob<Result: Sendable>(
+        _ kind: ExportJobKind,
+        itemCount: Int = 1,
+        operation: @escaping @MainActor @Sendable () async throws -> Result
+    ) async throws -> Result {
+        guard let id = admitJob(kind, itemCount: itemCount, announce: false) else {
+            onStatus?(ExportJobBusyError().localizedDescription + " Wait for it to finish.")
+            throw ExportJobBusyError()
+        }
+        let work = Task { @MainActor [weak self] in
+            do {
+                let value = try await operation()
+                self?.finishJob(id)
+                return value
+            } catch {
+                self?.finishJob(id, outcome: error is CancellationError ? .cancelled : .failed)
+                throw error
+            }
+        }
+        attach(work, to: id)
+        return try await withTaskCancellationHandler {
+            try await work.value
+        } onCancel: {
+            work.cancel()
+        }
+    }
 
     // MARK: - Types
 
@@ -211,6 +285,10 @@ final class ExportCoordinator {
         suggestedBaseName: String
     ) {
         guard !isPresentingSheet else { return }
+        guard !isExporting else {
+            onStatus?(ExportJobBusyError().localizedDescription + " Wait for it to finish.")
+            return
+        }
         isPresentingSheet = true
         let formatPicker = ExportFormatAccessoryView(selectedFormat: lastUsedFormat)
         let directoryURL = defaultFolderURL?()
@@ -296,12 +374,16 @@ final class ExportCoordinator {
             onError?("Export failed: \(error.localizedDescription)")
             return
         }
+        guard let jobID = admitJob(.single) else {
+            access?.release()
+            return
+        }
         lastUsedFormat = options.format
-        isExporting = true
         onStatus?("Exporting...")
 
-        singleTask = Task { [weak self, exportEngine, options, access] in
-            defer { self?.singleTask = nil }
+        let task = Task { [weak self, exportEngine, options, access] in
+            var outcome = ExportJobOutcome.completed
+            defer { self?.finishJob(jobID, outcome: outcome) }
             let destinationAccess = access ?? SecurityScopedResourceAccess.startAccessing(url)
             defer { destinationAccess?.release() }
             var interval = KromoraObservability.begin(.export, source: source, quality: .export)
@@ -336,12 +418,12 @@ final class ExportCoordinator {
                 } else {
                     self?.onStatus?("Exported: \(url.lastPathComponent)")
                 }
-                self?.isExporting = false
             } catch {
-                self?.isExporting = false
+                outcome = error is CancellationError ? .cancelled : .failed
                 self?.onError?("Export failed: \(error.localizedDescription)")
             }
         }
+        attach(task, to: jobID)
     }
 
     /// Render and encode one image without writing it or touching export status. Share uses this to
@@ -413,6 +495,10 @@ final class ExportCoordinator {
         }
 
         guard !isPresentingSheet else { return }
+        guard !isExporting else {
+            onStatus?(ExportJobBusyError().localizedDescription + " Wait for it to finish.")
+            return
+        }
         isPresentingSheet = true
         let formatPicker = ExportFormatAccessoryView(selectedFormat: lastUsedFormat)
         let directoryURL = defaultFolderURL?()
@@ -442,6 +528,12 @@ final class ExportCoordinator {
         formatPicker: ExportFormatAccessoryView
     ) {
         let format = formatPicker.selectedFormat
+        let access = SecurityScopedResourceAccess.systemGranted(for: folder)
+        // A job may have started while the sheet was up.
+        guard let jobID = admitJob(.batch, itemCount: items.count) else {
+            access.release()
+            return
+        }
         // Record the choice as soon as the dialog completes, before the async batch starts.
         lastUsedFormat = format
         let options = ExportOptions(
@@ -451,45 +543,40 @@ final class ExportCoordinator {
             location: formatPicker.locationPolicy,
             photos: formatPicker.photosOptions
         )
-        let access = SecurityScopedResourceAccess.systemGranted(for: folder)
-        batchTask = Task { [weak self, access] in
+        let task = Task { [weak self, access] in
             guard let self else {
+                access.release()
                 return BatchOutcome(exported: 0, failed: items.count, total: items.count)
             }
             return await self.performBatchExport(
                 items, document: document, lut: lut, options: options, to: folder,
-                access: access
+                access: access, jobID: jobID
             )
         }
+        attach(task, to: jobID)
     }
 
     /// Stop starting new items. If the renderer is at a cooperative cancellation point it also
     /// stops the current render; otherwise the current item finishes without being committed and
     /// the loop exits before another source is touched.
     func cancelBatchExport() {
-        guard batchTotal > 0, isExporting else { return }
-        batchCancellationRequested = true
-        batchTask?.cancel()
+        guard batchTotal > 0,
+              let id = jobs.values.first(where: { $0.kind == .batch })?.id else { return }
+        requestCancellation(of: id)
         onStatus?("Cancelling export…")
     }
 
     /// Cancel single and batch export work and wait for any renderer or disk operation to finish.
     /// This is intentionally separate from the user-facing batch cancellation status flow.
     func shutdown() async {
-        let single = singleTask
-        let batch = batchTask
-        single?.cancel()
-        batch?.cancel()
-        if let single { await single.value }
-        if let batch { _ = await batch.value }
-        singleTask = nil
-        batchTask = nil
-        isExporting = false
+        let active = Array(jobs.keys)
+        for id in active { requestCancellation(of: id) }
+        for id in active { await jobs[id]?.settled?() }
+        for id in active { finishJob(id, outcome: .cancelled) }
         batchProgress = 0
         batchCompleted = 0
         batchTotal = 0
         batchCurrentItem = nil
-        batchCancellationRequested = false
     }
 
     /// The batch core. Renders each item through the engine with progress; an
@@ -542,23 +629,27 @@ final class ExportCoordinator {
         lut: CubeLUT?,
         options: ExportOptions,
         to folder: URL,
-        access: SecurityScopedResourceAccess? = nil
+        access: SecurityScopedResourceAccess? = nil,
+        jobID admittedJob: ExportJobID? = nil
     ) async -> BatchOutcome {
         defer { access?.release() }
         do {
             try options.validate()
         } catch {
+            if let admittedJob { finishJob(admittedJob, outcome: .failed) }
             onError?("Export failed: \(error.localizedDescription)")
             return BatchOutcome(exported: 0, failed: items.count, total: items.count)
         }
 
+        // The panel path admits the job before its task starts; a direct caller is admitted here.
+        guard let jobID = admittedJob ?? admitJob(.batch, itemCount: items.count) else {
+            return BatchOutcome(exported: 0, failed: items.count, total: items.count)
+        }
         lastUsedFormat = options.format
-        isExporting = true
         batchProgress = 0
         batchCompleted = 0
         batchTotal = items.count
         batchCurrentItem = nil
-        batchCancellationRequested = false
         // Copy the value-only work list before any async suspension. The caller may continue
         // changing its live library selection while the panel-free operation is running, but that
         // must never add, remove, or reorder work in this batch.
@@ -582,7 +673,7 @@ final class ExportCoordinator {
         }
 
         for item in operationItems {
-            guard !Task.isCancelled, !batchCancellationRequested else {
+            guard !Task.isCancelled, !isCancellationRequested(jobID) else {
                 cancelled = true
                 break
             }
@@ -608,7 +699,7 @@ final class ExportCoordinator {
                     batchProgress = Double(done) / Double(total)
                     continue
                 }
-                guard !Task.isCancelled, !batchCancellationRequested else {
+                guard !Task.isCancelled, !isCancellationRequested(jobID) else {
                     cancelled = true
                     break
                 }
@@ -628,7 +719,7 @@ final class ExportCoordinator {
                 reservedPaths.insert(dest.standardizedFileURL.path)
                 do {
                     try Task.checkCancellation()
-                    guard !batchCancellationRequested else { throw CancellationError() }
+                    guard !isCancellationRequested(jobID) else { throw CancellationError() }
                     let hasSourceScope = sourceAccess.url?.startAccessingSecurityScopedResource() ?? false
                     defer {
                         if hasSourceScope { sourceAccess.url?.stopAccessingSecurityScopedResource() }
@@ -645,10 +736,10 @@ final class ExportCoordinator {
                         exportOptions: options
                     )).data
                     try Task.checkCancellation()
-                    guard !batchCancellationRequested else { throw CancellationError() }
+                    guard !isCancellationRequested(jobID) else { throw CancellationError() }
                     try await Self.write(data, to: dest)
                     try Task.checkCancellation()
-                    guard !batchCancellationRequested else { throw CancellationError() }
+                    guard !isCancellationRequested(jobID) else { throw CancellationError() }
                     exported += 1
                     if let photos = options.photos, let delivery = photosDelivery {
                         do {
@@ -685,7 +776,7 @@ final class ExportCoordinator {
             onStatus?("Exporting \(done) of \(total)…")
         }
 
-        cancelled = cancelled || Task.isCancelled || batchCancellationRequested
+        cancelled = cancelled || Task.isCancelled || isCancellationRequested(jobID)
         let outcome = BatchOutcome(
             exported: exported,
             failed: failed,
@@ -693,13 +784,12 @@ final class ExportCoordinator {
             cancelled: cancelled,
             photosFailed: photosFailed
         )
-        isExporting = false
         batchProgress = 0
         batchCompleted = 0
         batchTotal = 0
         batchCurrentItem = nil
+        finishJob(jobID, outcome: cancelled ? .cancelled : .completed)
         onStatus?(Self.summary(for: outcome, folder: folder))
-        batchTask = nil
         return outcome
     }
 
