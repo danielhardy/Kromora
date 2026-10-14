@@ -118,37 +118,39 @@ struct PhotosImportReviewView: View {
 
 private struct PhotosReviewThumbnail: View {
     let localIdentifier: String?
-    @State private var image: NSImage?
+    @State private var state = PhotosThumbnailState.loading
+    @State private var attempt = 0
+
+    private let loader = PhotosThumbnailLoader(provider: PhotoKitThumbnailProvider())
 
     var body: some View {
         Group {
-            if let image {
+            switch state {
+            case .loaded(let image):
                 Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
-            } else {
-                Rectangle()
-                    .fill(Color.secondary.opacity(0.12))
-                    .overlay { Image(systemName: "photo").foregroundStyle(.secondary) }
+            case .loading:
+                placeholder { ProgressView().controlSize(.small) }
+            case .failed:
+                placeholder {
+                    Image(systemName: "exclamationmark.triangle").foregroundStyle(.secondary)
+                }
+                .help("Thumbnail unavailable")
+                .onTapGesture(count: 2) { retry() }
             }
         }
         .frame(width: 128, height: 96)
         .clipShape(RoundedRectangle(cornerRadius: 6))
-        .task(id: localIdentifier) { image = await Self.load(localIdentifier) }
-    }
-
-    private static func load(_ identifier: String?) async -> NSImage? {
-        guard let identifier,
-              let asset = PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil).firstObject
-        else { return nil }
-        let options = PHImageRequestOptions()
-        options.deliveryMode = .highQualityFormat
-        options.isNetworkAccessAllowed = false
-        return await withCheckedContinuation { continuation in
-            PHImageManager.default().requestImage(
-                for: asset, targetSize: CGSize(width: 256, height: 192),
-                contentMode: .aspectFill, options: options
-            ) { image, _ in
-                continuation.resume(returning: image)
-            }
+        .task(id: "\(localIdentifier ?? "")#\(attempt)") {
+            state = .loading
+            let result = await loader.load(localIdentifier)
+            if case .failed(.cancelled) = result { return }
+            state = result
         }
     }
+
+    private func placeholder<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        Rectangle().fill(Color.secondary.opacity(0.12)).overlay { content() }
+    }
+
+    private func retry() { attempt += 1 }
 }

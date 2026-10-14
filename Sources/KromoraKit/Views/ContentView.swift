@@ -70,7 +70,8 @@ public struct ContentView: View {
                 isPresented: $chrome.isPhotosPickerPresented,
                 selection: $photosSelection,
                 maxSelectionCount: 50,
-                matching: .images
+                matching: .images,
+                photoLibrary: .shared()
             )
             .onChange(of: photosSelection) { _, newSelection in
                 handlePhotosSelection(newSelection)
