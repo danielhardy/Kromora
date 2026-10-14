@@ -344,12 +344,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         didSet { virtualCopyMetadata?.activeAssetChanged(to: activeSourceReference?.portableAssetID) }
     }
     /// Cached copy-relationship snapshot for the inspector; nil without a portable library.
-    private lazy var virtualCopyMetadata: VirtualCopyMetadataCoordinator? = portableLibrary.map {
-        VirtualCopyMetadataCoordinator(
-            reader: VirtualCopyMetadataCoordinator.packageReader($0.package),
-            willChange: { [weak self] in self?.objectWillChange.send() }
-        )
-    }
+    private var virtualCopyMetadata: VirtualCopyMetadataCoordinator?
     /// Source generation prevents delayed work from a previous navigation selection from publishing
     /// into the new image, even if the source values happen to compare equal.
     var sourceRevision: UInt64 { sourceSession.sourceRevision }
@@ -781,7 +776,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     let persistence: EditPersistenceCoordinator
     /// The production library boundary. Package membership and originals are canonical; the
     /// collection is only the bounded presentation bridge.
-    let portableLibrary: PortableLibrarySession?
+    private(set) var portableLibrary: PortableLibrarySession?
     /// The single portable filter/sort/search authority (KRMA-519 scope item 3). The collection is
     /// only a bounded presentation bridge; filtering runs in the query controller.
     @Published var portableQuery = LibraryQuery.all
@@ -980,7 +975,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private var pendingPersistenceFlush: Task<PersistenceFlushResult, Never>?
     private(set) var isShuttingDown = false
     private var cancellables: [AnyCancellable] = []
-    private let portableLibraryOpenError: String?
+    private(set) var portableLibraryOpenError: String?
+    private let portablePackageURL: URL
 
     var canImportIntoPortableLibrary: Bool { portableLibrary != nil }
 
@@ -1058,7 +1054,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         leaseRecoveryConfirmer: (any PortablePackageLeaseRecoveryConfirming)? = nil,
         settings injectedSettings: KromoraSettings? = nil,
         portableLibrarySession injectedPortableLibrarySession: PortableLibrarySession? = nil,
-        asynchronousPortableLibraryIndexLoading: Bool = false
+        asynchronousPortableLibraryIndexLoading: Bool = false,
+        defersLibraryOpen: Bool = false
     ) {
         var interval = KromoraSignpostInterval(.launch, context: .unknown)
         defer { interval.end() }
@@ -1071,6 +1068,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         self.preferences = preferences
         self.usesInjectedEditStore = editStore != nil
         let normalizedPortablePackageURL = portablePackageURL.standardizedFileURL
+        self.portablePackageURL = normalizedPortablePackageURL
         // Create the shared package-I/O scheduler before opening the session so its lease
         // heartbeat is admitted on the same lane as imports and maintenance.
         let packageIOScheduler = ImageWorkScheduler()
@@ -1078,7 +1076,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let portableOpenError: String?
         let effectiveEditStore: EditDocumentStore
         var recoveredPreviousWriter = false
-        do {
+        if defersLibraryOpen, injectedPortableLibrarySession == nil {
+            // Late-bound: `openLibrary(confirmer:)` opens the package and binds it later. Until
+            // then the store reports `.opening` and nothing is written under the package URL.
+            openedPortableLibrary = nil
+            portableOpenError = nil
+            effectiveEditStore = editStore ?? EditDocumentStore.makeUnboundStore()
+        } else {
+          do {
             let session: PortableLibrarySession
             if let injectedPortableLibrarySession {
                 session = injectedPortableLibrarySession
@@ -1113,8 +1118,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             // the old standalone edit database. Keep the composition root fail-closed and
             // use only an in-memory projection until the user repairs the package.
             effectiveEditStore = editStore ?? EditDocumentStore.makeInMemoryProjectionStore()
+          }
         }
-        self.portableLibrary = openedPortableLibrary
         self.portableLibraryOpenError = portableOpenError
         self.editStore = effectiveEditStore
         self.editorDocument = EditorDocumentCoordinator()
@@ -1184,7 +1189,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             scheduler: workScheduler,
             maintenance: PortablePackageMaintenance(scheduler: workScheduler),
             packageURL: normalizedPortablePackageURL,
-            packageLease: openedPortableLibrary?.lease,
+            packageLease: nil,
             idleDelay: portableMaintenanceIdleDelay
         )
         let deletionCollection = self.collection
@@ -1193,7 +1198,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             persistence: self.persistence,
             editStore: self.editStore,
             photoAnalysis: self.photoAnalysisCoordinator,
-            portableLibrary: self.portableLibrary,
+            portableLibrary: nil,
             persistenceIdentity: { item in
                 guard deletionCollection.sourceKind(for: item) == .managed else { return nil }
                 return item.asset.source.portableIdentity
@@ -1223,16 +1228,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             self.updatePinnedFrameAssets(visible: ids)
             self.scheduleIdlePreviewBuild()
         }
-        // An edit commits its presented geometry to the membership summary in the same package
-        // transaction; mirror that committed entry into the disposable index.
-        if let session = openedPortableLibrary {
-            Task { [weak session] in
-                await effectiveEditStore.setMembershipObserver { entry in
-                    Task { @MainActor in session?.applyCommittedMembership(entry) }
-                }
-            }
-        }
-
         if let renderEngine = engine as? RenderEngine {
             semanticCoordinatorInstallTask = Task {
                 await renderEngine.installSemanticMaskCoordinator(analysisCoordinator)
@@ -1257,13 +1252,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             self?.refreshDurableEditHistory()
         }
 
-        if let package = portableLibrary?.package {
-            let loader: @Sendable () async throws -> LibraryMembershipMatcher = {
-                try await LibraryMembershipMatcher.load(from: package)
-            }
-            libraryMediaWorkflow.libraryMatcherLoader = loader
-            photosImportReview.libraryMatcherLoader = loader
-        }
         libraryMediaWorkflow.onStatus = { [weak self] message in
             self?.statusMessage = message
         }
@@ -1448,72 +1436,84 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
 
         wireCoordinators()
-        portableLibrary?.onIndexWriteFailure = { [weak self] message in
+        if let openedPortableLibrary {
+            bindPortableLibrary(openedPortableLibrary, recoveredPreviousWriter: recoveredPreviousWriter)
+        } else if !defersLibraryOpen {
+            reportPortableLibraryUnavailable()
+        }
+        configureEmbeddedLooks()
+    }
+
+    /// Opens the package for a `defersLibraryOpen` model, binds the store, then the session wiring.
+    func openLibrary(confirmer: (any PortablePackageLeaseRecoveryConfirming)? = nil) async {
+        guard portableLibrary == nil else { return }
+        do {
+            let opened = try Self.openPortableLibrarySession(
+                at: portablePackageURL, confirmer: confirmer, scheduler: workScheduler,
+                asynchronousIndexLoading: true
+            )
+            await editStore.bind(package: opened.session.package, lease: opened.session.lease)
+            portableLibraryOpenError = nil
+            bindPortableLibrary(opened.session, recoveredPreviousWriter: opened.recoveredPreviousWriter)
+        } catch {
+            portableLibraryOpenError =
+                "Kromora could not open its library package at \(portablePackageURL.path): "
+                + error.localizedDescription
+            reportPortableLibraryUnavailable()
+        }
+    }
+
+    /// The single place that threads an opened session into the model and its coordinators.
+    private func bindPortableLibrary(
+        _ session: PortableLibrarySession, recoveredPreviousWriter: Bool
+    ) {
+        objectWillChange.send()
+        portableLibrary = session
+        virtualCopyMetadata = VirtualCopyMetadataCoordinator(
+            reader: VirtualCopyMetadataCoordinator.packageReader(session.package),
+            willChange: { [weak self] in self?.objectWillChange.send() }
+        )
+        libraryImportCoordinator.bind(package: session)
+        libraryBrowsingCoordinator.bind(library: session)
+        libraryDeletionCoordinator.bind(portableLibrary: session)
+        applicationShell.bind(packageLease: session.lease)
+        let store = editStore
+        Task { [weak session] in await session?.mirrorCommittedMemberships(from: store) }
+        let loader = LibraryMembershipMatcher.loader(for: session.package)
+        libraryMediaWorkflow.libraryMatcherLoader = loader
+        photosImportReview.libraryMatcherLoader = loader
+
+        session.onIndexWriteFailure = { [weak self] message in
             guard let self, !self.isShuttingDown else { return }
             self.statusMessage = "Could not save the library index: \(message)"
         }
-        portableLibrary?.onPresentedAspectRatioUpdates = { [weak self] updates in
+        session.onPresentedAspectRatioUpdates = { [weak self] updates in
             self?.libraryBrowsingCoordinator.applyPresentedAspectRatioUpdates(updates)
         }
         libraryBrowsingCoordinator.prepareLaunchHints()
-        if let portableLibrary, portableLibrary.isLoadingIndex {
+        if session.isLoadingIndex {
             statusMessage = "Opening library index…"
         }
-        portableLibrary?.onIndexLoadingStateChange = { [weak self] state in
-            guard let self, !self.isShuttingDown else { return }
-            if let error = state.errorMessage {
-                self.presentError("Could not open the library index: \(error)")
-                return
-            }
-            if state.isComplete {
-                if self.statusMessage.hasPrefix("Opening library index")
-                    || self.statusMessage.hasPrefix("Rebuilding library index") {
-                    self.statusMessage = ""
-                }
-                if self.portableLibrary?.didRepairIndexOnOpen == true {
-                    self.statusMessage = "Rebuilt the library index from package membership."
-                }
-            } else {
-                self.statusMessage =
-                    "Rebuilding library index… \(state.shardsRead) of \(state.totalShards) sections"
-            }
-            do {
-                try self.reloadPortableWindow(pageIndex: 0)
-            } catch {
-                self.presentError("Could not read the library package: \(error.localizedDescription)")
-            }
+        session.onIndexLoadingStateChange = { [weak self] state in self?.handlePortableIndexLoadingState(state) }
+        if let state = session.indexLoadingState {
+            session.onIndexLoadingStateChange?(state)
         }
-        if let state = portableLibrary?.indexLoadingState {
-            portableLibrary?.onIndexLoadingStateChange?(state)
-        }
-        if portableLibrary?.didRepairIndexOnOpen == true,
-           portableLibrary?.isLoadingIndex == false {
+        if session.didRepairIndexOnOpen, !session.isLoadingIndex {
             statusMessage = "Rebuilt the library index from package membership."
         }
         if recoveredPreviousWriter {
             statusMessage = "Recovered interrupted writes from the previous library session."
         }
-        guard case .some = portableLibrary else {
-            reportPortableLibraryUnavailable()
-            configureEmbeddedLooks()
-            return
-        }
+        // Launch paints the first query page from index summaries only; further pages fault in on
+        // scroll/selection with stable identity.
         do {
-                // Launch paints the first query page from index summaries only: no asset record
-                // is opened, no original is fingerprinted, and retained Items stay bounded by
-                // the page size. Further pages fault in on scroll/selection with stable identity.
-                try reloadPortableWindow(pageIndex: 0)
-                if collection.isActive {
-                    navigation.move(to: .grid)
-                }
-                collection.beginThumbnailDemand()
-            } catch {
-                presentError(
-                    "Kromora could not read the library package: \(error.localizedDescription)"
-                )
-            }
-            configureEmbeddedLooks()
+            try reloadPortableWindow(pageIndex: 0)
+            if collection.isActive { navigation.move(to: .grid) }
+            collection.beginThumbnailDemand()
+        } catch {
+            presentError("Kromora could not read the library package: \(error.localizedDescription)")
         }
+    }
 
     private static let comparisonModeKey = "Kromora.editor.comparisonMode.sideBySide"
 

@@ -8,7 +8,7 @@ private enum LibraryImportCoordinatorError: Error {
 /// media entry points. Presentation and collection mutations stay with the application root.
 @MainActor
 final class LibraryImportCoordinator {
-    private let package: PortableLibrarySession?
+    private var package: PortableLibrarySession?
     private let isShuttingDown: @MainActor () -> Bool
     private let publishProgress: @MainActor (PortablePackageImportProgress?) -> Void
     private let publishStatus: @MainActor (String) -> Void
@@ -31,6 +31,9 @@ final class LibraryImportCoordinator {
         self.publishProgress = publishProgress
         self.publishStatus = publishStatus
     }
+
+    /// Supplies the opened session to a coordinator composed before the package was open.
+    func bind(package: PortableLibrarySession) { self.package = package }
 
     /// Package import entry points stay behind this owner so source-specific workflows share one
     /// package boundary and one cancellation/progress lifecycle.

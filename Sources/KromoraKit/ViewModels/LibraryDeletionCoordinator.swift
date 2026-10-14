@@ -43,7 +43,7 @@ final class LibraryDeletionCoordinator {
     private let persistence: EditPersistenceCoordinator
     private let editStore: EditDocumentStore
     private let photoAnalysis: PhotoAnalysisCoordinator
-    private let portableLibrary: PortableLibrarySession?
+    private var portableLibrary: PortableLibrarySession?
     private let persistenceIdentity: (ImageCollection.Item) -> PortablePhotoIdentity?
     private let allowsUnregisteredSourceDeletion: Bool
     private var inFlightIDs: Set<PhotoAssetID> = []
@@ -68,6 +68,9 @@ final class LibraryDeletionCoordinator {
         self.persistenceIdentity = persistenceIdentity
         self.allowsUnregisteredSourceDeletion = allowsUnregisteredSourceDeletion
     }
+
+    /// Supplies the opened session to a coordinator composed before the package was open.
+    func bind(portableLibrary: PortableLibrarySession) { self.portableLibrary = portableLibrary }
 
     /// Delete, then clean up dependent state in a fixed order: per-asset stores and sessions,
     /// collection removal, then awaited preview/render cache invalidation before the caller

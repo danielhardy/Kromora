@@ -26,6 +26,10 @@ struct LibraryMembershipMatcher: Sendable {
     /// Loads the catalog on a detached task that is cancelled with the caller. The catalog read
     /// itself is synchronous, so cancellation is honored before it starts and the caller is
     /// released immediately rather than waiting for the read to finish.
+    static func loader(for package: PortableLibraryPackage) -> @Sendable () async throws -> LibraryMembershipMatcher {
+        { try await load(from: package) }
+    }
+
     static func load(from package: PortableLibraryPackage) async throws -> LibraryMembershipMatcher {
         let work = Task.detached(priority: .utility) {
             try Task.checkCancellation()

@@ -783,6 +783,7 @@ class TempDirectoryTestCase: XCTestCase {
         portablePackageURL: URL? = nil,
         portableLibrarySession: PortableLibrarySession? = nil,
         asynchronousPortableLibraryIndexLoading: Bool = false,
+        defersLibraryOpen: Bool = false,
         portableMaintenanceIdleDelay: Duration = .seconds(2),
         originalThumbnailProvider: @escaping ImageCollection.OriginalThumbnailProvider = { url, data, fingerprint, identity, store, ledger, surface in
             await OriginalThumbnailLoader.load(
@@ -831,7 +832,8 @@ class TempDirectoryTestCase: XCTestCase {
             fileDropActionPolicy: fileDropActionPolicy,
             leaseRecoveryConfirmer: leaseRecoveryConfirmer,
             portableLibrarySession: portableLibrarySession,
-            asynchronousPortableLibraryIndexLoading: asynchronousPortableLibraryIndexLoading
+            asynchronousPortableLibraryIndexLoading: asynchronousPortableLibraryIndexLoading,
+            defersLibraryOpen: defersLibraryOpen
         )
         appViewModels.append(viewModel)
         return viewModel

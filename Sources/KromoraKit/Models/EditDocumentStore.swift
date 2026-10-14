@@ -93,6 +93,9 @@ actor EditDocumentStore {
 
     enum Status: Sendable, Equatable {
         case ready
+        /// The store has not been bound to a package yet. Operations fail closed, but this is a
+        /// transient startup state, not an actionable package failure.
+        case opening
         case relinked
         case corrupt(String)
         case packageFailure(String)
@@ -102,6 +105,8 @@ actor EditDocumentStore {
             switch self {
             case .ready:
                 return nil
+            case .opening:
+                return "Opening the library…"
             case .relinked:
                 return "Restored edits after the source photo moved."
             case .corrupt(let detail):
@@ -115,14 +120,14 @@ actor EditDocumentStore {
 
         var isActionable: Bool {
             switch self {
-            case .ready: return false
+            case .ready, .opening: return false
             case .relinked, .corrupt, .packageFailure, .writeFailure: return true
             }
         }
 
         var severity: Int {
             switch self {
-            case .ready: return 0
+            case .ready, .opening: return 0
             case .relinked: return 1
             case .corrupt: return 2
             case .packageFailure: return 3
@@ -159,8 +164,10 @@ actor EditDocumentStore {
     private var cache: [PortablePhotoAssetID: CacheEntry] = [:]
     private var lru: [PortablePhotoAssetID] = []
 
-    private let packageRoot: URL?
-    private let packageLease: PortablePackageLease?
+    private var packageRoot: URL?
+    private var packageLease: PortablePackageLease?
+    /// True for a store created by `makeUnboundStore()` until `bind(package:lease:)` runs.
+    private var awaitsBinding = false
     private var embeddedLookBytes: [String: Data] = [:]
     private var embeddedLookTask: Task<Void, Never>?
     private var embeddedLookGeneration: UInt64 = 0
@@ -170,7 +177,8 @@ actor EditDocumentStore {
     private var artificialWriteDelay: Duration
     private var failuresRemaining: Int
 
-    private init() {
+    private init(awaitsBinding: Bool = false) {
+        self.awaitsBinding = awaitsBinding
         packageRoot = nil
         packageLease = nil
         cacheCapacity = Self.defaultCacheCapacity
@@ -219,6 +227,33 @@ actor EditDocumentStore {
     /// authority and reports the same actionable package failure as a failed package open.
     static func makeInMemoryProjectionStore() -> EditDocumentStore {
         EditDocumentStore()
+    }
+
+    /// Store whose package is not open yet. Reads and writes fail closed with `Status.opening`
+    /// (not an actionable package failure) until `bind(package:lease:)` supplies the package.
+    static func makeUnboundStore() -> EditDocumentStore {
+        EditDocumentStore(awaitsBinding: true)
+    }
+
+    /// Binds an unbound store to its opened package. Allowed exactly once; a second call, or a call
+    /// on a store that was constructed bound, is rejected and leaves the store unchanged.
+    @discardableResult
+    func bind(package: PortableLibraryPackage, lease: PortablePackageLease) -> Bool {
+        guard awaitsBinding, packageRoot == nil else { return false }
+        packageRoot = package.rootURL
+        packageLease = lease
+        awaitsBinding = false
+        status = .ready
+        return true
+    }
+
+    private var unavailableStatus: Status {
+        awaitsBinding
+            ? .opening : .packageFailure("the canonical edit package is unavailable")
+    }
+
+    private var unavailableDetail: String {
+        awaitsBinding ? "the library is still opening" : "the canonical edit package is unavailable"
     }
 
     func setEmbeddedLookBytes(_ values: [String: Data]) {
@@ -275,9 +310,7 @@ actor EditDocumentStore {
     func load(for source: EditSourceReference) async -> EditDocumentLoadResult {
         markIO()
         guard let packageRoot else {
-            return finishLoad(document: EditDocument(), found: false, status: .packageFailure(
-                "the canonical edit package is unavailable"
-            ))
+            return finishLoad(document: EditDocument(), found: false, status: unavailableStatus)
         }
 
         do {
@@ -338,7 +371,7 @@ actor EditDocumentStore {
     /// Loads immutable package edit revisions for the editor's history browser.
     func history(for source: EditSourceReference) async throws -> [PortablePackageEditRevision] {
         guard let packageRoot else {
-            throw StoreError.cannotWrite("the canonical edit package is unavailable")
+            throw StoreError.cannotWrite(unavailableDetail)
         }
         let package = try PortableLibraryPackage.openForQuery(at: packageRoot)
         return try package.readEditHistory(for: source.portableAssetID)
@@ -346,7 +379,7 @@ actor EditDocumentStore {
 
     func currentRevision(for source: EditSourceReference) async throws -> UInt64 {
         guard let packageRoot else {
-            throw StoreError.cannotWrite("the canonical edit package is unavailable")
+            throw StoreError.cannotWrite(unavailableDetail)
         }
         let package = try PortableLibraryPackage.openForQuery(at: packageRoot)
         return try package.readAssetRecord(for: source.portableAssetID).editHistory.currentRevision
@@ -354,7 +387,7 @@ actor EditDocumentStore {
 
     func selectRevision(_ revision: UInt64, for source: EditSourceReference) async throws {
         guard let packageRoot, let packageLease else {
-            throw StoreError.cannotWrite("the canonical edit package is unavailable")
+            throw StoreError.cannotWrite(unavailableDetail)
         }
         let package = try PortableLibraryPackage.openForQuery(at: packageRoot)
         if let membership = try package.selectEditRevision(
@@ -383,8 +416,8 @@ actor EditDocumentStore {
         // not make a failed save look like a dirty durable revision.
         _ = try JSONEncoder().encode(document)
         guard let packageRoot, let packageLease else {
-            let failure = StoreError.cannotWrite("the canonical edit package is unavailable")
-            status = .writeFailure(failure.localizedDescription)
+            let failure = StoreError.cannotWrite(unavailableDetail)
+            status = awaitsBinding ? .opening : .writeFailure(failure.localizedDescription)
             throw failure
         }
 

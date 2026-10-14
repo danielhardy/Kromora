@@ -10,7 +10,7 @@ final class ApplicationShellCoordinator {
     private let scheduler: ImageWorkScheduler
     let maintenance: PortablePackageMaintenance
     private let packageURL: URL?
-    private let packageLease: PortablePackageLease?
+    private var packageLease: PortablePackageLease?
     private let idleDelay: Duration
     private let maintenanceJobID = ImageWorkScheduler.JobID("portable-package-maintenance")
     private var mediaObservers: [NSObjectProtocol] = []
@@ -40,6 +40,9 @@ final class ApplicationShellCoordinator {
         self.packageLease = packageLease
         self.idleDelay = idleDelay
     }
+
+    /// Supplies the package lease to a shell composed before the package was open.
+    func bind(packageLease: PortablePackageLease) { self.packageLease = packageLease }
 
     func start() {
         guard mediaObservers.isEmpty, !isShuttingDown else { return }

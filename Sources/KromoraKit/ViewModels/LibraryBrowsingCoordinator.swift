@@ -60,7 +60,7 @@ protocol LibraryBrowsingDestination: AnyObject {
 @MainActor
 final class LibraryBrowsingCoordinator {
     private let collection: ImageCollection
-    private let library: (any LibraryBrowsingProviding)?
+    private var library: (any LibraryBrowsingProviding)?
     private let scheduler: ImageWorkScheduler?
     private let frameStore: (any LaunchHintFrameReading)?
     private let hintsStore: LaunchHintsStore?
@@ -172,6 +172,9 @@ final class LibraryBrowsingCoordinator {
         syncPortableSelection()
         destination.showLibraryGridIfActive()
     }
+
+    /// Supplies the opened library to a coordinator composed before the package was open.
+    func bind(library: any LibraryBrowsingProviding) { self.library = library }
 
     func prepareLaunchHints() { loadLaunchHints() }
 
