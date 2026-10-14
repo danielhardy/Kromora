@@ -117,6 +117,18 @@ final class ObservationBodyBaselineTests: TempDirectoryTestCase {
         XCTAssertGreaterThan(delta(.light, .document), 0)
     }
 
+    /// KRMA-981: `document` is one observed property, so a document mutation re-evaluates each
+    /// view that reads any part of it exactly once, and the shell and status bar not at all. This
+    /// pins that contract so a new `document` read in the shell shows up as a count change.
+    func testDocumentMutationEvaluatesEachDocumentReaderOnce() {
+        for subject in [Subject.light, .color, .effects, .preview] {
+            XCTAssertEqual(delta(subject, .document), 1, subject.rawValue)
+        }
+        for subject in [Subject.statusBar, .info] {
+            XCTAssertEqual(delta(subject, .document), 0, subject.rawValue)
+        }
+    }
+
     func testStatusBarReEvaluatesWhenStatusMessageChanges() {
         XCTAssertGreaterThan(delta(.statusBar, .statusMessage), 0)
     }
