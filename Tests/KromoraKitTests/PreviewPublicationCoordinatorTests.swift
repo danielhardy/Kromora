@@ -26,22 +26,68 @@ final class PreviewPublicationCoordinatorTests: XCTestCase {
         XCTAssertEqual(destination.presentCount, 0)
     }
 
-    func testInteractiveFramePresentsWithoutHistogramOrIdleAdmission() throws {
+    func testInteractiveFrameAdmitsHistogramWithoutConfirmationOrIdleAdmission() throws {
         let destination = FakeDestination()
+        destination.storedEditsResolvedSourceRevision = destination.sourceRevision
         let coordinator = PreviewPublicationCoordinator(destination: destination)
         let settled = try makePublication(destination: destination)
-        let interactive = PreviewCoordinator.Publication(
-            request: settled.request, image: settled.image, gpuImage: nil,
-            revision: settled.revision, assetID: settled.assetID,
-            sourceRevision: settled.sourceRevision,
-            displayRevision: settled.displayRevision, phase: .interactive
-        )
+        let interactive = interactiveCopy(of: settled)
 
         coordinator.publish(interactive)
 
         XCTAssertEqual(destination.presentCount, 1)
-        XCTAssertEqual(destination.histogramCount, 0)
+        XCTAssertEqual(destination.histogramCount, 1)
         XCTAssertEqual(destination.idleCount, 0)
+        XCTAssertEqual(destination.canonicalWriteCount, 0)
+        XCTAssertNil(coordinator.lastPresentedVisibleRequest)
+        XCTAssertFalse(coordinator.hasPublishedFrame)
+    }
+
+    func testInteractiveFrameBeforeStoredEditsResolveDoesNotAdmitHistogram() throws {
+        let destination = FakeDestination()
+        let coordinator = PreviewPublicationCoordinator(destination: destination)
+        let settled = try makePublication(destination: destination)
+
+        coordinator.publish(interactiveCopy(of: settled))
+
+        XCTAssertEqual(destination.presentCount, 1)
+        XCTAssertEqual(destination.histogramCount, 0)
+    }
+
+    func testEveryInteractiveFrameAdmitsHistogramUntilTheSettledFrameReplacesIt() throws {
+        let destination = FakeDestination()
+        destination.storedEditsResolvedSourceRevision = destination.sourceRevision
+        let coordinator = PreviewPublicationCoordinator(destination: destination)
+        let settled = try makePublication(destination: destination)
+
+        coordinator.publish(interactiveCopy(of: settled))
+        coordinator.publish(interactiveCopy(of: settled))
+        XCTAssertEqual(destination.histogramCount, 2)
+
+        coordinator.publish(settled)
+        XCTAssertEqual(destination.histogramCount, 3)
+    }
+
+    func testInteractiveFrameSupersededBeforePresentationDoesNotAdmitHistogram() throws {
+        let destination = FakeDestination()
+        destination.storedEditsResolvedSourceRevision = destination.sourceRevision
+        destination.deferPresentation = true
+        let coordinator = PreviewPublicationCoordinator(destination: destination)
+        let settled = try makePublication(destination: destination)
+
+        coordinator.publish(interactiveCopy(of: settled))
+        XCTAssertEqual(destination.histogramCount, 0)
+    }
+
+    private func interactiveCopy(
+        of publication: PreviewCoordinator.Publication
+    ) -> PreviewCoordinator.Publication {
+        PreviewCoordinator.Publication(
+            request: publication.request, image: publication.image, gpuImage: nil,
+            revision: publication.revision, assetID: publication.assetID,
+            sourceRevision: publication.sourceRevision,
+            displayRevision: publication.displayRevision, phase: .interactive
+        )
     }
 
     func testSettledCompleteFrameAdmitsSupportingWorkAndCanonicalCache() throws {

@@ -98,8 +98,19 @@ final class PreviewPublicationCoordinator {
                 surfaceRevision: publication.revision
             )
         } else if let image {
+            // Interactive frames skip the settled confirmation tail, but the chart still has to
+            // follow the frame on screen while the slider is held. Only histogram admission runs.
+            let assetID = publication.assetID
+            let sourceRevision = publication.sourceRevision
+            let displayRevision = publication.displayRevision
             _ = destination.presentAdjustedFrame(
-                image, request: request, revision: publication.revision, onPresented: nil
+                image, request: request, revision: publication.revision,
+                onPresented: { [weak self] in
+                    self?.admitHistogramForInteractiveFrame(
+                        image, request: request, assetID: assetID,
+                        sourceRevision: sourceRevision, displayRevision: displayRevision
+                    )
+                }
             )
         }
 
@@ -204,6 +215,28 @@ final class PreviewPublicationCoordinator {
         lastPresentedVisibleRequest = request
         lastPresentedVisibleImage = image
         guard destination.publicationStoredEditsResolvedSourceRevision == sourceRevision else { return }
+        destination.publicationUpdateHistogram(for: request, presentedImage: image)
+    }
+
+    /// Feeds an interactive frame's presentation sample to Info while the drag is still active.
+    /// It does not confirm the frame, persist it, or change the last settled request; the settled
+    /// frame replaces this sample when the drag ends.
+    private func admitHistogramForInteractiveFrame(
+        _ image: CIImage, request: RenderRequest, assetID: PhotoAssetID?,
+        sourceRevision: UInt64, displayRevision: UInt64
+    ) {
+        guard let destination,
+            assetID == destination.publicationActiveAssetID,
+            sourceRevision == destination.publicationSourceRevision,
+            displayRevision == destination.publicationDisplayRevision,
+            request.source == destination.publicationImageSource,
+            request.document == destination.publicationDisplayDocument,
+            destination.publicationAcceptsFrame(
+                assetID: assetID, identity: request.source.portableIdentity,
+                generation: sourceRevision
+            ),
+            destination.publicationStoredEditsResolvedSourceRevision == sourceRevision
+        else { return }
         destination.publicationUpdateHistogram(for: request, presentedImage: image)
     }
 
