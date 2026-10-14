@@ -2,7 +2,7 @@
 id: KRMA-936
 title: "DECISION: wire Backup/Restore and Open Library into the app, or drop the claims"
 type: task
-status: backlog
+status: done
 priority: urgent
 human_review_required: true
 creation_provenance:
@@ -15,7 +15,7 @@ labels:
   - decision
   - library
 created: 2026-10-13T14:47:46.406Z
-updated: 2026-10-13T19:26:20.765Z
+updated: 2026-10-13T23:12:13.783Z
 parent: KRMA-922
 blockers: []
 order: zzzz
@@ -58,3 +58,7 @@ drop the claim; build Open Library (KRMA-938) or drop the document type (KRMA-93
 to the human: wire Backup/Restore (it is already built and tested and the docs promise it); and for
 Open Library, ship only the Finder double-click handler plus Open Library… if scope allows, otherwise
 remove the document type. Do not start KRMA-937/KRMA-938/KRMA-939 before the decision.
+
+## Agent log
+
+- 2026-10-13T23:12:13.780Z: Decided and recorded in ADR-936: drop verified backup/restore and Open Library from the MVP (KRMA-937, KRMA-938 closed unbuilt); remove claims and document manual copy (KRMA-939); add relaunch-based Settings Choose Library… (KRMA-988).

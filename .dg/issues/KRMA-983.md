@@ -2,9 +2,49 @@
 id: KRMA-983
 title: "KRMA-944a: Late-bind EditDocumentStore and PortableLibrarySession so AppViewModel.init needs no open package"
 type: task
-status: ready
+status: done
 priority: high
 human_review_required: false
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: AppViewModel.init supports deferred startup without opening a package or acquiring a lease, and the unbound edit store reports opening rather than packageFailure.
+      result: pass
+      notes: LateBoundLibraryTests covers deferred construction, no package creation, opening status, flush, and shutdown.
+    - criterion: Session-dependent wiring is centralized in the bind path.
+      result: pass
+      notes: bindPortableLibrary owns session setup and index callbacks; init-time reads are limited to dynamic callbacks and the shared eager bind path.
+    - criterion: EditDocumentStore binding is actor-isolated and once-only; unbound read and write behavior fails closed.
+      result: pass
+      notes: Tests cover first and rejected second bind, construction already bound, unbound read and write, and non-actionable status.
+    - criterion: Existing initializer and fixture call sites remain compatible; touched test-file count is recorded.
+      result: pass
+      notes: "Existing call sites compile unchanged. Issue implementation touched two test paths: Fixtures.swift and new LateBoundLibraryTests.swift; verification extended LateBoundLibraryTests.swift."
+    - criterion: Eager package binding preserves behavior and the AppViewModel line ceiling is respected.
+      result: pass
+      notes: Fast and serial suites pass; AppViewModel.swift is 5106 lines, below the 5120 ceiling.
+    - criterion: Build is warning-free and Swift concurrency escape hatches or availability branches are absent from changed implementation files.
+      result: pass
+      notes: "swift build completed with no diagnostics; structural search found no @unchecked Sendable, nonisolated(unsafe), @preconcurrency, or #available."
+    - criterion: Required fast and serial test lanes pass.
+      result: pass
+      notes: fast passed 1874 tests; serial passed 543 tests.
+  checks_run:
+    - swift build (exit 0; no warnings)
+    - scripts/ci-tests.sh fast (1874 tests; exit 0)
+    - scripts/ci-tests.sh serial (543 tests; exit 0)
+    - git diff --check HEAD^ HEAD (exit 0)
+    - Structural search for prohibited concurrency opt-outs and availability branches (no matches)
+  findings:
+    - openLibrary ignored a false result from EditDocumentStore.bind, which could expose an opened session while the injected store remained bound elsewhere.
+  fixes:
+    - "openLibrary now rejects failed binding, closes the newly opened session to release its lease, and reports the failure. Regression coverage verifies the lease can be reacquired. Verification commit: 94b2e895."
+  verification_commits:
+    - 94b2e895
+  actor: codex
+  resolved_model: gpt-6-luna
+  completed_at: 2026-10-14T00:25:55.655Z
+  session: 01MV7D26H0CP2JVWGE
 creation_provenance:
   runner: claude
   model: sonnet
@@ -15,10 +55,19 @@ labels:
   - package
   - needs-decomposition
 created: 2026-10-13T20:38:44.684Z
-updated: 2026-10-13T22:12:25.361Z
+updated: 2026-10-14T00:25:55.659Z
 blockers: []
-order: zr
+order: t
 board: product
+footprint:
+  source: observed
+  paths: []
+  observed:
+    paths: []
+    captured_at: 2026-10-14T00:02:49.934Z
+    unavailable_reason: "missing_commits: no implementation commits are recorded"
+commits:
+  - 94b2e895
 ---
 
 ## Objective
@@ -71,6 +120,37 @@ scripts/ci-tests.sh serial
 - Ordering of the init-tail wiring matters (callbacks before `prepareLaunchHints`, observers before index load). Preserve it exactly; this ticket moves code, it must not reorder it.
 - If sequencing proves larger than described, stop, record what you found as child tickets, and do not land a half-migration.
 
+### Comment — claude @ 2026-10-14T00:02:46.411Z
+
+Implemented per the recommended design. EditDocumentStore: makeUnboundStore(), once-only actor-isolated bind(package:lease:) (returns false on a second call or a store built bound), new non-actionable Status.opening; failed-open projection store still reports packageFailure. AppViewModel: portableLibrary is now private(set) var, new init flag defersLibraryOpen (default false, so all existing init parameters and call sites are unchanged), single bindPortableLibrary (shared by eager init and openLibrary(confirmer:), same order as before; index-state handler lives in AppViewModel+Library.swift). LibraryBrowsing/Import/Deletion coordinators and ApplicationShell gained bind(...) instead of taking the session at construction. Test churn: 1 existing file touched (Fixtures.swift: one defaulted makeAppViewModel parameter), 1 new file (LateBoundLibraryTests, 6 tests). AppViewModel.swift 5101 lines (unchanged). swift build warning-free; scripts/ci-tests.sh fast and serial both exit 0. Not exercised: openLibrary is unused in production until KRMA-984.
+
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-10-14T00:25:55.655Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] AppViewModel.init supports deferred startup without opening a package or acquiring a lease, and the unbound edit store reports opening rather than packageFailure. (pass) — LateBoundLibraryTests covers deferred construction, no package creation, opening status, flush, and shutdown.
+- [x] Session-dependent wiring is centralized in the bind path. (pass) — bindPortableLibrary owns session setup and index callbacks; init-time reads are limited to dynamic callbacks and the shared eager bind path.
+- [x] EditDocumentStore binding is actor-isolated and once-only; unbound read and write behavior fails closed. (pass) — Tests cover first and rejected second bind, construction already bound, unbound read and write, and non-actionable status.
+- [x] Existing initializer and fixture call sites remain compatible; touched test-file count is recorded. (pass) — Existing call sites compile unchanged. Issue implementation touched two test paths: Fixtures.swift and new LateBoundLibraryTests.swift; verification extended LateBoundLibraryTests.swift.
+- [x] Eager package binding preserves behavior and the AppViewModel line ceiling is respected. (pass) — Fast and serial suites pass; AppViewModel.swift is 5106 lines, below the 5120 ceiling.
+- [x] Build is warning-free and Swift concurrency escape hatches or availability branches are absent from changed implementation files. (pass) — swift build completed with no diagnostics; structural search found no @unchecked Sendable, nonisolated(unsafe), @preconcurrency, or #available.
+- [x] Required fast and serial test lanes pass. (pass) — fast passed 1874 tests; serial passed 543 tests.
+Checks run:
+- swift build (exit 0; no warnings)
+- scripts/ci-tests.sh fast (1874 tests; exit 0)
+- scripts/ci-tests.sh serial (543 tests; exit 0)
+- git diff --check HEAD^ HEAD (exit 0)
+- Structural search for prohibited concurrency opt-outs and availability branches (no matches)
+Findings:
+- openLibrary ignored a false result from EditDocumentStore.bind, which could expose an opened session while the injected store remained bound elsewhere.
+Fixes:
+- openLibrary now rejects failed binding, closes the newly opened session to release its lease, and reports the failure. Regression coverage verifies the lease can be reacquired. Verification commit: 94b2e895.
+Verification commits:
+- 94b2e895
+Actor: codex
+Resolved model: gpt-6-luna
+Pickup session: 01MV7D26H0CP2JVWGE
+Summary: Verified deferred library binding; required checks pass, with one localized binding fix.

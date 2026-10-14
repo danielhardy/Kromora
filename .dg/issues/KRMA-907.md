@@ -2,9 +2,43 @@
 id: KRMA-907
 title: Observe derive, Look-save and removable-media state at their feature surfaces
 type: task
-status: ready
+status: done
 priority: low
 human_review_required: false
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: Child-only presentation/progress changes from each migrated child cause no root.objectWillChange event and still update their owning feature surface.
+      result: pass
+      notes: The direct observers are FeatureSheetsModifier, RemovableMediaMenu, and RemovableMediaSelectorView. ObservationInvalidationTests verifies each child publisher emits synchronously while root event count stays zero.
+    - criterion: Derive and Look-save sheets open, close, cancel, and report results; removable-media menus, selector counts, scan/progress and cancellation remain live.
+      result: pass
+      notes: Presentation bindings and callbacks are preserved; feature views read the same coordinator instances directly. RecipeExtractorTests, PackageSourceImportCoordinatorTests, and MediaVolumeTests pass.
+    - criterion: Both ContentView initializers inject the same existing instances and do not create duplicate coordinators.
+      result: pass
+      notes: Both initializers retain the supplied AppViewModel; FeatureSheetsModifier and RemovableMediaMenu reference its existing coordinators.
+    - criterion: Existing keyboard sheet guards continue to read current state; legitimate root status/document notifications are preserved.
+      result: pass
+      notes: KeyboardCommandRouter still reads current derive/look-save state. Status/error callbacks and unrelated root forwarding entries remain intact.
+    - criterion: ObservationInvalidationTests accurately distinguish migrated children from still-forwarded children; existing high-frequency isolation tests stay green.
+      result: pass
+      notes: The tests split migrated child publisher isolation from synchronous forwarding assertions for remaining children; all 14 ObservationInvalidationTests pass.
+    - criterion: No blanket root @Observable conversion, detached notification task, changed workflow ownership or new dependencies.
+      result: pass
+      notes: Review of the implementation diff confirms only the three requested forwarding entries and their view consumers changed.
+  checks_run:
+    - swift build — exit 0
+    - swift test --no-parallel --filter 'ObservationInvalidationTests|PackageSourceImportCoordinatorTests|MediaVolumeTests|RecipeExtractorTests|PackageSettingsTests' — 39 tests passed, 0 failures
+    - dg validate — exit 0; existing model-name warnings only
+    - git diff --check — clean
+    - git diff --check 02e70997^ 02e70997 — clean
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: codex
+  resolved_model: gpt-6-luna
+  completed_at: 2026-10-14T01:25:37.853Z
+  session: 01MV7FEUAVHZJZNZAM
 creation_provenance:
   runner: codex
   model: unknown
@@ -15,9 +49,9 @@ labels:
   - maintainability
   - observation
 created: 2026-10-12T17:11:42.743Z
-updated: 2026-10-13T22:20:41.071Z
+updated: 2026-10-14T01:25:37.857Z
 blockers: []
-order: zzh
+order: zq
 board: product
 context:
   files:
@@ -60,6 +94,10 @@ footprint:
     - path: docs/APP_ARCHITECTURE.md
       access: write
       confidence: 1
+  observed:
+    paths: []
+    captured_at: 2026-10-14T01:15:54.240Z
+    unavailable_reason: "missing_commits: no implementation commits are recorded"
 ---
 
 ## Objective
@@ -126,3 +164,36 @@ Run any newly added collaborator suite as well. These are targeted regression ch
 - Use generated temporary fixtures and deterministic continuation/event gates. Put package/index/cache paths under test-owned temporary directories. Do not run display-bound release capture scripts or use arbitrary sleeps as proof of cancellation correctness.
 - Run the focused checks below plus `dg validate` and `git diff --check`. Record commands, outcomes and any environmental limitation. Existing green tests do not replace new regression coverage for this issue.
 - Commit coherent issue work with this issue ID followed by a colon in the subject. Follow the implementation handoff to `review`; do not mark done or bypass independent verification. Update architecture guidance only for the final ownership/behavior.
+
+
+### Comment — claude @ 2026-10-14T01:15:51.006Z
+
+Added FeatureSheetsModifier/RemovableMediaMenu observing derive, lookSave and libraryMediaWorkflow directly; removed those three from the root forwarding list; selector observes the media coordinator. Test split into forwarded vs migrated children. swift build and the focused test filter pass (39 tests); dg validate shows only pre-existing model warnings; git diff --check clean.
+
+## Agent log
+
+- 2026-10-14T01:25:37.853Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Child-only presentation/progress changes from each migrated child cause no root.objectWillChange event and still update their owning feature surface. (pass) — The direct observers are FeatureSheetsModifier, RemovableMediaMenu, and RemovableMediaSelectorView. ObservationInvalidationTests verifies each child publisher emits synchronously while root event count stays zero.
+- [x] Derive and Look-save sheets open, close, cancel, and report results; removable-media menus, selector counts, scan/progress and cancellation remain live. (pass) — Presentation bindings and callbacks are preserved; feature views read the same coordinator instances directly. RecipeExtractorTests, PackageSourceImportCoordinatorTests, and MediaVolumeTests pass.
+- [x] Both ContentView initializers inject the same existing instances and do not create duplicate coordinators. (pass) — Both initializers retain the supplied AppViewModel; FeatureSheetsModifier and RemovableMediaMenu reference its existing coordinators.
+- [x] Existing keyboard sheet guards continue to read current state; legitimate root status/document notifications are preserved. (pass) — KeyboardCommandRouter still reads current derive/look-save state. Status/error callbacks and unrelated root forwarding entries remain intact.
+- [x] ObservationInvalidationTests accurately distinguish migrated children from still-forwarded children; existing high-frequency isolation tests stay green. (pass) — The tests split migrated child publisher isolation from synchronous forwarding assertions for remaining children; all 14 ObservationInvalidationTests pass.
+- [x] No blanket root @Observable conversion, detached notification task, changed workflow ownership or new dependencies. (pass) — Review of the implementation diff confirms only the three requested forwarding entries and their view consumers changed.
+Checks run:
+- swift build — exit 0
+- swift test --no-parallel --filter 'ObservationInvalidationTests|PackageSourceImportCoordinatorTests|MediaVolumeTests|RecipeExtractorTests|PackageSettingsTests' — 39 tests passed, 0 failures
+- dg validate — exit 0; existing model-name warnings only
+- git diff --check — clean
+- git diff --check 02e70997^ 02e70997 — clean
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: codex
+Resolved model: gpt-6-luna
+Pickup session: 01MV7FEUAVHZJZNZAM
+Summary: Independent verification passed: required build and focused checks are green; no defects or follow-up findings.

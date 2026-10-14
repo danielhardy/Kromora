@@ -2,7 +2,7 @@
 id: KRMA-938
 title: Handle opening .kromoralibrary packages (Finder double-click) and add Open Library…
 type: task
-status: backlog
+status: done
 priority: high
 human_review_required: false
 creation_provenance:
@@ -14,12 +14,12 @@ labels:
   - must-fix
   - library
 created: 2026-10-13T14:47:48.238Z
-updated: 2026-10-13T14:48:31.968Z
+updated: 2026-10-13T23:12:13.357Z
 parent: KRMA-922
 depends_on:
   - KRMA-936
 blockers: []
-order: mqiy3seo
+order: zzzzzz
 board: product
 ---
 
@@ -62,3 +62,8 @@ path, then open the new one with a writer lease; lease-conflict alerts exist alr
 
 Out of scope: New Library…, Move Library…, multiple open libraries. File them as separate backlog
 tickets if you think they are needed.
+
+
+### Comment — claude @ 2026-10-13T23:12:12.178Z
+
+Closed unbuilt per ADR-936: no runtime Open Library or Finder handler; relaunch-based Settings > Choose Library… is KRMA-988.

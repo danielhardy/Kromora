@@ -2,9 +2,46 @@
 id: KRMA-909
 title: Isolate clipboard presentation updates and remove dormant editor notification forwarding
 type: task
-status: ready
+status: done
 priority: low
 human_review_required: false
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: Clipboard-only payload, category, and dialog changes avoid root fan-in while presentation and paste availability observe the existing clipboard coordinator directly.
+      result: pass
+      notes: Clipboard isolation observed two child events and zero root events. SelectiveCopySheetModifier and KeyboardSurface directly observe the same coordinator owned by AppViewModel.
+    - criterion: Copy, selective copy, single and batch paste, remembered categories, and cancellation preserve behavior.
+      result: pass
+      notes: EditClipboardCoordinatorTests (5) and EditClipboardTests (7) passed, covering category memory, cancellation, active and batch paste, and per-photo history.
+    - criterion: Undo and redo availability and gesture grouping update across document and history transitions.
+      result: pass
+      notes: Existing edit, reset, source-switch, and per-photo history coverage passed. The history-only group-close test confirms root publication when a changed gesture group makes canUndo available.
+    - criterion: The dormant editor notification subscription is removed without an unused observation wrapper.
+      result: pass
+      notes: EditorDocumentCoordinator no longer conforms to ObservableObject, and AppViewModel has no child notification forwarding loop. The coordinator remains value-state only.
+    - criterion: The former seven-child fan-in is removed while legitimate root document and status updates remain observable.
+      result: pass
+      notes: The final forwarding loop is removed. AppViewModel remains the active EditDocument publisher, with workflow sinks and callbacks intact.
+    - criterion: Per-photo history, revisions, persistence, and rendering retain one document owner without a broad framework migration.
+      result: pass
+      notes: AppViewModel remains the published document owner and EditorDocumentCoordinator owns per-photo value history and revisions; the targeted regression suite passed.
+  checks_run:
+    - swift build — exit 0
+    - swift test --no-parallel --filter ObservationInvalidationTests|EditClipboardCoordinatorTests|EditClipboardTests|AppViewModelTests|MenuCommandTests|PackageSettingsTests — 97 tests passed, exit 0
+    - swift test --no-parallel --filter ObservationInvalidationTests — 16 tests passed after the verification comment fix, exit 0
+    - dg validate — exit 0; existing model-name warnings only
+    - git diff --check — exit 2 on pre-existing trailing whitespace in unrelated .dg/issues/KRMA-914.md; both KRMA-909 commit diffs passed git diff --check
+    - git diff --check -- Tests/KromoraKitTests/ObservationInvalidationTests.swift — exit 0
+  findings: []
+  fixes:
+    - Updated the stale observation-boundary comment in ObservationInvalidationTests.swift; committed as ce8910d3.
+  verification_commits:
+    - ce8910d3
+  actor: codex
+  resolved_model: gpt-6-luna
+  completed_at: 2026-10-14T01:55:22.283Z
+  session: 01MV7GG185L6WB6HCM
 creation_provenance:
   runner: codex
   model: unknown
@@ -15,7 +52,7 @@ labels:
   - maintainability
   - observation
 created: 2026-10-12T17:11:44.129Z
-updated: 2026-10-13T22:11:44.838Z
+updated: 2026-10-14T01:55:22.286Z
 depends_on:
   - KRMA-908
 blockers: []
@@ -70,6 +107,12 @@ footprint:
     - path: docs/APP_ARCHITECTURE.md
       access: write
       confidence: 1
+  observed:
+    paths: []
+    captured_at: 2026-10-14T01:44:34.415Z
+    unavailable_reason: "missing_commits: no implementation commits are recorded"
+commits:
+  - ce8910d3
 ---
 
 ## Objective
@@ -138,3 +181,37 @@ Run any newly added collaborator suite as well. These are targeted regression ch
 - Use generated temporary fixtures and deterministic continuation/event gates. Put package/index/cache paths under test-owned temporary directories. Do not run display-bound release capture scripts or use arbitrary sleeps as proof of cancellation correctness.
 - Run the focused checks below plus `dg validate` and `git diff --check`. Record commands, outcomes and any environmental limitation. Existing green tests do not replace new regression coverage for this issue.
 - Commit coherent issue work with this issue ID followed by a colon in the subject. Follow the implementation handoff to `review`; do not mark done or bypass independent verification. Update architecture guidance only for the final ownership/behavior.
+
+
+### Comment — claude @ 2026-10-14T01:44:30.953Z
+
+Clipboard now observed directly by SelectiveCopySheetModifier and KeyboardSurface; root fan-in loop removed; EditorDocumentCoordinator no longer ObservableObject (it had no publishers); endUndoGrouping publishes explicitly. Tests added (clipboard child 2 events/root 0; group close publishes). swift build and focused filter (122 tests) pass; dg validate only pre-existing model warnings.
+
+## Agent log
+
+- 2026-10-14T01:55:22.283Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Clipboard-only payload, category, and dialog changes avoid root fan-in while presentation and paste availability observe the existing clipboard coordinator directly. (pass) — Clipboard isolation observed two child events and zero root events. SelectiveCopySheetModifier and KeyboardSurface directly observe the same coordinator owned by AppViewModel.
+- [x] Copy, selective copy, single and batch paste, remembered categories, and cancellation preserve behavior. (pass) — EditClipboardCoordinatorTests (5) and EditClipboardTests (7) passed, covering category memory, cancellation, active and batch paste, and per-photo history.
+- [x] Undo and redo availability and gesture grouping update across document and history transitions. (pass) — Existing edit, reset, source-switch, and per-photo history coverage passed. The history-only group-close test confirms root publication when a changed gesture group makes canUndo available.
+- [x] The dormant editor notification subscription is removed without an unused observation wrapper. (pass) — EditorDocumentCoordinator no longer conforms to ObservableObject, and AppViewModel has no child notification forwarding loop. The coordinator remains value-state only.
+- [x] The former seven-child fan-in is removed while legitimate root document and status updates remain observable. (pass) — The final forwarding loop is removed. AppViewModel remains the active EditDocument publisher, with workflow sinks and callbacks intact.
+- [x] Per-photo history, revisions, persistence, and rendering retain one document owner without a broad framework migration. (pass) — AppViewModel remains the published document owner and EditorDocumentCoordinator owns per-photo value history and revisions; the targeted regression suite passed.
+Checks run:
+- swift build — exit 0
+- swift test --no-parallel --filter ObservationInvalidationTests|EditClipboardCoordinatorTests|EditClipboardTests|AppViewModelTests|MenuCommandTests|PackageSettingsTests — 97 tests passed, exit 0
+- swift test --no-parallel --filter ObservationInvalidationTests — 16 tests passed after the verification comment fix, exit 0
+- dg validate — exit 0; existing model-name warnings only
+- git diff --check — exit 2 on pre-existing trailing whitespace in unrelated .dg/issues/KRMA-914.md; both KRMA-909 commit diffs passed git diff --check
+- git diff --check -- Tests/KromoraKitTests/ObservationInvalidationTests.swift — exit 0
+Findings:
+- None
+Fixes:
+- Updated the stale observation-boundary comment in ObservationInvalidationTests.swift; committed as ce8910d3.
+Verification commits:
+- ce8910d3
+Actor: codex
+Resolved model: gpt-6-luna
+Pickup session: 01MV7GG185L6WB6HCM
+Summary: Independent verification passed with focused checks green; corrected a stale test comment in ce8910d3.

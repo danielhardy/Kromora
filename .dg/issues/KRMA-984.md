@@ -2,9 +2,57 @@
 id: KRMA-984
 title: "KRMA-944b: Add shell-owned async package opener (gated fake in tests) with Opening library state, command gating, error-once and ordered shutdown"
 type: task
-status: ready
+status: done
 priority: high
 human_review_required: false
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: AppViewModel.init returns without calling the package opener.
+      result: pass
+      notes: LibraryOpenTests.testInitDoesNotCallOpener uses a gated fake and confirms the opener call count remains zero.
+    - criterion: A successful open binds the library, loads the collection, reaches ready, and clears the opening status.
+      result: pass
+      notes: LibraryOpenTests.testCompletedOpenBindsLibraryAndClearsOpeningStatus passes; bindPortableLibrary wires and reloads the collection before the coordinator publishes ready.
+    - criterion: An open failure presents exactly one error, reaches failed, and leaves imports unavailable.
+      result: pass
+      notes: LibraryOpenTests.testFailedOpenPresentsExactlyOneError and testFailedLibraryKeepsCommandsGatedAndImportsUnavailable pass.
+    - criterion: Shutdown during open cancels and waits for the open to unwind, releases an unbound lease, and returns.
+      result: pass
+      notes: LibraryOpenTests.testShutdownMidOpenCancelsAndReleasesLease gates the real opener after lease acquisition and verifies the lease file is gone after shutdown.
+    - criterion: Library-dependent commands are gated while opening or failed and enabled once ready.
+      result: pass
+      notes: Audited File-menu Open Image, Photos, source folder, removable media; export, export selected, external editor, export original settings, reset, copy/paste edits, save look, delete selected; virtual-copy creation; and toolbar, grid, preview, and Welcome import actions. MenuCommandAvailability and canImportIntoPortableLibrary drive these gates. Verification fixed the direct File-menu actions to fail closed when focused-scene availability is nil.
+    - criterion: Lease contention and expired-lease recovery use the existing prompt once without blocking the first frame.
+      result: pass
+      notes: AppLaunchTests verify opening state is returned synchronously, the takeover decision is asked exactly once, acceptance opens the package, and decline leaves it closed.
+    - criterion: Swift 6 build is clean with no concurrency escape hatches; non-Sendable session construction remains main-actor isolated.
+      result: pass
+      notes: "swift build completed without diagnostics. Structural search found no @unchecked Sendable, nonisolated(unsafe), @preconcurrency, or #available in the opener and gating implementation files; only the Sendable package and lease cross to the main-actor session constructor."
+    - criterion: AppViewModel.swift is no longer than before the migration.
+      result: pass
+      notes: Current file is 5064 lines; the parent implementation baseline is 5106 lines.
+    - criterion: Required build, fast, and serial checks pass.
+      result: pass
+      notes: Build passed; final fast lane passed 1881 tests; serial lane passed 544 tests.
+  checks_run:
+    - swift build (exit 0, no diagnostics)
+    - swift test --filter 'LibraryOpenTests|AppLaunchTests|MenuCommandTests' (29 tests passed)
+    - scripts/ci-tests.sh fast (final run exit 0, 1881 tests); the first attempt had one unrelated parallel timeout in EditedThumbnailCoordinatorTests.testFailedEditedThumbnailDoesNotSettleFallbackAndVisibleDemandRetries; that test passed in isolation before the successful full rerun
+    - scripts/ci-tests.sh serial (exit 0, 544 tests)
+    - git diff --check (exit 0)
+    - Structural scan for prohibited Swift concurrency escape hatches and availability branches (no matches); AppViewModel.swift line count compared to parent baseline
+    - Manual swift run smoke was not performed because it would open the existing user library at ~/Pictures/Kromora Library.kromoralibrary and the launcher has no temporary-package override; temporary-package launch, takeover, failure, and shutdown behavior was covered by automated tests
+  findings:
+    - Four direct File-menu open/import actions treated missing focused-scene availability as ready; the Welcome sheet import actions were also interactive before library readiness.
+  fixes:
+    - "Changed direct File-menu gating to fail closed when scene availability is absent and disabled Welcome import, Photos, and sample actions until library readiness. Added a unit test for nil and explicit readiness values. Verification commit: 75128dbb."
+  verification_commits:
+    - 75128dbb
+  actor: codex
+  resolved_model: gpt-6-luna
+  completed_at: 2026-10-14T01:07:03.317Z
+  session: 01MV7EER27RZ37G8KU
 creation_provenance:
   runner: claude
   model: sonnet
@@ -15,12 +63,21 @@ labels:
   - package
   - needs-decomposition
 created: 2026-10-13T20:38:45.433Z
-updated: 2026-10-13T22:12:28.254Z
+updated: 2026-10-14T01:07:03.320Z
 depends_on:
   - KRMA-983
 blockers: []
-order: zrh
+order: y
 board: product
+footprint:
+  source: observed
+  paths: []
+  observed:
+    paths: []
+    captured_at: 2026-10-14T00:42:35.647Z
+    unavailable_reason: "missing_commits: no implementation commits are recorded"
+commits:
+  - 75128dbb
 ---
 
 ## Objective
@@ -72,6 +129,45 @@ Manual smoke with `swift run`: launch against a normal library (window appears, 
 
 Package format or lease semantics, the lease prompt copy (KRMA-945/S6 territory), and the index-load path (KRMA-557). Do not land a half-migration: if gating cannot be completed for every command, stop and decompose.
 
+### Comment — claude @ 2026-10-14T00:42:31.546Z
+
+Implemented in bbe7e94e. New: PackageOpening/OpenedPackage (Models/PackageOpening.swift), LibraryOpenCoordinator (idle/opening/ready/failed). PortableLibrarySession split into nonisolated static acquire(...) + init(opened:), so only Sendable package+lease cross actors (no sending needed). AppLaunch.open() is now synchronous: builds the model (defersLibraryOpen) and starts the open; takeover prompt runs inside the open task. beginOpeningLibrary/openLibrary(takeOver:) live in AppViewModel+Library.swift; AppViewModel.swift is 5064 lines (was 5106). shutdown() cancels and awaits the open first; a cancelled open releases its unbound lease (blocking recover cannot be interrupted); quit during the takeover sheet does not wait on the sheet. Gated commands: all MenuCommand cases via MenuCommandAvailability.isLibraryReady; menu items Open Image, Import from Photos, Open Source Folder, Import from Removable Media; toolbar/grid/preview import buttons (canImportIntoPortableLibrary); AppViewModel entry points guarded on portableLibrary (openImageDialog, openImage(data:), importFromPhotos, removable media import/open, chooseSourceFolder, handleDrop, virtual copy) report 'still opening' as status only while opening. Tests: LibraryOpenTests (gated fake, failure once, shutdown mid-open with real opener + lease file check, gating), extended AppLaunchTests. fast and serial lanes pass. Not done: manual swift run smoke (needs display).
+
+### Comment — codex @ 2026-10-14T01:06:31.861Z
+
+Verification command audit: File-menu Open Image, Import from Photos, Open Source Folder, and Import from Removable Media; export, export selected, external-editor export, export original with settings, reset photo, selective/all edit copy, paste edits, save look, and delete selected through MenuCommandAvailability and KeyboardCommandRouter; virtual-copy creation through availability/metadata and the AppViewModel guard; and toolbar, grid, preview, and Welcome import/Photos/sample actions through library readiness. Review found the four direct File-menu actions treated missing focused-scene availability as ready; verification commit 75128dbb makes them fail closed and gates Welcome actions until readiness. The first fast-lane attempt hit an unrelated parallel thumbnail retry timeout; the isolated test and second full fast lane passed. Manual swift run was skipped because the launcher targets the existing default package under ~/Pictures and has no temporary-package override; equivalent launch, recovery prompt, failure, and shutdown paths passed automated tests using temporary packages.
+
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-10-14T01:07:03.317Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] AppViewModel.init returns without calling the package opener. (pass) — LibraryOpenTests.testInitDoesNotCallOpener uses a gated fake and confirms the opener call count remains zero.
+- [x] A successful open binds the library, loads the collection, reaches ready, and clears the opening status. (pass) — LibraryOpenTests.testCompletedOpenBindsLibraryAndClearsOpeningStatus passes; bindPortableLibrary wires and reloads the collection before the coordinator publishes ready.
+- [x] An open failure presents exactly one error, reaches failed, and leaves imports unavailable. (pass) — LibraryOpenTests.testFailedOpenPresentsExactlyOneError and testFailedLibraryKeepsCommandsGatedAndImportsUnavailable pass.
+- [x] Shutdown during open cancels and waits for the open to unwind, releases an unbound lease, and returns. (pass) — LibraryOpenTests.testShutdownMidOpenCancelsAndReleasesLease gates the real opener after lease acquisition and verifies the lease file is gone after shutdown.
+- [x] Library-dependent commands are gated while opening or failed and enabled once ready. (pass) — Audited File-menu Open Image, Photos, source folder, removable media; export, export selected, external editor, export original settings, reset, copy/paste edits, save look, delete selected; virtual-copy creation; and toolbar, grid, preview, and Welcome import actions. MenuCommandAvailability and canImportIntoPortableLibrary drive these gates. Verification fixed the direct File-menu actions to fail closed when focused-scene availability is nil.
+- [x] Lease contention and expired-lease recovery use the existing prompt once without blocking the first frame. (pass) — AppLaunchTests verify opening state is returned synchronously, the takeover decision is asked exactly once, acceptance opens the package, and decline leaves it closed.
+- [x] Swift 6 build is clean with no concurrency escape hatches; non-Sendable session construction remains main-actor isolated. (pass) — swift build completed without diagnostics. Structural search found no @unchecked Sendable, nonisolated(unsafe), @preconcurrency, or #available in the opener and gating implementation files; only the Sendable package and lease cross to the main-actor session constructor.
+- [x] AppViewModel.swift is no longer than before the migration. (pass) — Current file is 5064 lines; the parent implementation baseline is 5106 lines.
+- [x] Required build, fast, and serial checks pass. (pass) — Build passed; final fast lane passed 1881 tests; serial lane passed 544 tests.
+Checks run:
+- swift build (exit 0, no diagnostics)
+- swift test --filter 'LibraryOpenTests|AppLaunchTests|MenuCommandTests' (29 tests passed)
+- scripts/ci-tests.sh fast (final run exit 0, 1881 tests); the first attempt had one unrelated parallel timeout in EditedThumbnailCoordinatorTests.testFailedEditedThumbnailDoesNotSettleFallbackAndVisibleDemandRetries; that test passed in isolation before the successful full rerun
+- scripts/ci-tests.sh serial (exit 0, 544 tests)
+- git diff --check (exit 0)
+- Structural scan for prohibited Swift concurrency escape hatches and availability branches (no matches); AppViewModel.swift line count compared to parent baseline
+- Manual swift run smoke was not performed because it would open the existing user library at ~/Pictures/Kromora Library.kromoralibrary and the launcher has no temporary-package override; temporary-package launch, takeover, failure, and shutdown behavior was covered by automated tests
+Findings:
+- Four direct File-menu open/import actions treated missing focused-scene availability as ready; the Welcome sheet import actions were also interactive before library readiness.
+Fixes:
+- Changed direct File-menu gating to fail closed when scene availability is absent and disabled Welcome import, Photos, and sample actions until library readiness. Added a unit test for nil and explicit readiness values. Verification commit: 75128dbb.
+Verification commits:
+- 75128dbb
+Actor: codex
+Resolved model: gpt-6-luna
+Pickup session: 01MV7EER27RZ37G8KU
+Summary: Passed independent verification; fixed fail-open menu gating and recorded all required checks.

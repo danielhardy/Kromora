@@ -2,7 +2,7 @@
 id: KRMA-937
 title: Wire Backup Library… and Restore Library… into the app
 type: task
-status: backlog
+status: done
 priority: high
 human_review_required: false
 creation_provenance:
@@ -15,12 +15,12 @@ labels:
   - library
   - backup
 created: 2026-10-13T14:47:47.314Z
-updated: 2026-10-13T14:48:31.432Z
+updated: 2026-10-13T23:12:12.650Z
 parent: KRMA-922
 depends_on:
   - KRMA-936
 blockers: []
-order: lsf5omq2
+order: zzzzzy
 board: product
 ---
 
@@ -66,3 +66,8 @@ grow `AppViewModel`, it is at its 5,120-line guard).
 
 Keep sandbox constraints in mind (App Sandbox, user-selected folder grants; see KRMA-818 for the
 security-scope lifetime pitfalls) and test only with fakes; do not require the signed app.
+
+
+### Comment — claude @ 2026-10-13T23:12:11.962Z
+
+Closed unbuilt per ADR-936: backup/restore is post-MVP; manual quit-and-copy is the supported path.

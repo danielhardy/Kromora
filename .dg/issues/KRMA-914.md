@@ -16,7 +16,7 @@ labels:
   - design
   - performance
 created: 2026-10-12T21:56:49.211Z
-updated: 2026-10-13T16:51:38.321Z
+updated: 2026-10-14T01:26:18.106Z
 blockers:
   - id: evt_mv6x4j4h_ul6zvn
     type: human
@@ -241,3 +241,10 @@ Test change to note: testDiscoveryShaderUsesActualCoverageAndLeavesPhotoPerimete
 Verification: strict swift build passes; 70 focused tests pass (MaskDiscovery, MetalKernelParity, MaskingWorkflowCoordinator, PackageSettings, GeometryPointMapping, CanvasNavigation, XcodeProjectInvariant); git diff --check clean. scripts/app-store-build.sh not re-run for this iteration. No contention measurement.
 
 Not built yet (ideas from the brief): cursor-as-safelight interaction, trackpad haptic at fixer-edge lock-in, optional sound, long-wait choreography beyond the existing 8-20s settle.
+
+
+### Comment - human
+
+The current implementation works well but is missing two critical features. 
+1. When the animation is resolved the mask should alwasy be shown (even if the masks setting is hidden (o key)) -- this is critical in showign the results so it should switch the masks back on
+2. When it is in the "discovering" phase, it would be more ideal if the entire image had a similar animation as it does right before it resolves. It would feel like a more natural transition from "discovering people" to "found someone" or discovering background to found background

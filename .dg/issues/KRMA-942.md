@@ -15,11 +15,11 @@ labels:
   - performance
   - export
   - memory
-parent: KRMA-922
 created: 2026-10-13T14:47:51.998Z
-updated: 2026-10-13T14:48:19.732Z
+updated: 2026-10-14T01:22:37.170Z
+parent: KRMA-922
 blockers: []
-order: qiy3sf54
+order: r
 board: product
 ---
 
