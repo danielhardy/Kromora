@@ -65,4 +65,63 @@ final class LibrarySelectAllTests: TempDirectoryTestCase {
         XCTAssertNotNil(unloaded.first?.url)
         XCTAssertEqual(Set(request.items.compactMap(\.portableIdentity?.assetID)), session.portableSelectedIDs)
     }
+
+    // MARK: - KRMA-1018: culling, paste and deletion use the authoritative selection
+
+    private func unloadedID(_ viewModel: AppViewModel) throws -> PortablePhotoAssetID {
+        let loaded = Set(viewModel.collection.items.map(\.id))
+        let id = try XCTUnwrap(viewModel.collection.selection.selectedIDs.subtracting(loaded).first)
+        return try XCTUnwrap(ImageCollection.portableID(for: id))
+    }
+
+    func testCullingAfterSelectAllReachesUnloadedID() async throws {
+        let (viewModel, session) = try makeViewModel()
+        viewModel.selectAllInGrid()
+        let unloaded = try unloadedID(viewModel)
+        XCTAssertEqual(viewModel.collection.cullingTargetIDs.count, 2, "only loaded rows have ids here")
+
+        _ = viewModel.setFocusedRating(4)
+        _ = viewModel.setFocusedFlag(.pick)
+        let flushed = await session.flushPendingLibraryState()
+        XCTAssertEqual(flushed, .success)
+
+        let asset = try XCTUnwrap(session.browsingAssets(forIDs: [unloaded]).first)
+        XCTAssertEqual(asset.rating, 4)
+        XCTAssertEqual(asset.flag, .pick)
+        for item in viewModel.collection.items {
+            XCTAssertEqual(item.asset.rating, 4)
+            XCTAssertEqual(item.asset.flag, .pick)
+        }
+    }
+
+    func testPasteTargetsIncludeUnloadedIDWithoutPixelData() throws {
+        let (viewModel, session) = try makeViewModel()
+        viewModel.selectAllInGrid()
+
+        let targets = viewModel.clipboardSelectedTargets
+        XCTAssertEqual(targets.count, 3)
+        XCTAssertEqual(
+            Set(targets.map(\.sourceReference.portableAssetID)),
+            session.portableSelectedIDs)
+        let unloaded = try unloadedID(viewModel)
+        let target = try XCTUnwrap(targets.first { $0.sourceReference.portableAssetID == unloaded })
+        XCTAssertNotNil(target.sourceReference.url)
+        XCTAssertFalse(target.isRAW)
+    }
+
+    func testDeletionAfterSelectAllIncludesUnloadedID() async throws {
+        let (viewModel, session) = try makeViewModel()
+        viewModel.selectAllInGrid()
+        let unloaded = try unloadedID(viewModel)
+
+        viewModel.requestDeleteSelectedLibraryItems()
+        let confirmation = try XCTUnwrap(viewModel.libraryDeletionConfirmation)
+        XCTAssertEqual(confirmation.candidates.count, 3)
+
+        let result = await viewModel.deleteLibraryItems(confirmation.candidates)
+        XCTAssertEqual(result.deletedIDs.count, 3)
+        XCTAssertTrue(result.failures.isEmpty, "\(result.failures)")
+        XCTAssertEqual(session.assetCount, 0)
+        XCTAssertTrue(try session.browsingAssets(forIDs: [unloaded]).isEmpty)
+    }
 }

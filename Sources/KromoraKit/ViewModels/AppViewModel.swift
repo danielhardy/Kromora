@@ -3025,7 +3025,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
     /// edit records, then commit the collection state. A per-item failure leaves that item alone.
     @discardableResult
     func deleteSelectedLibraryItems() async -> LibraryDeletionResult {
-        await deleteLibraryItems(collection.deletionCandidates)
+        await deleteLibraryItems(libraryBrowsingCoordinator.deletionCandidates())
     }
 
     @discardableResult
@@ -4089,19 +4089,12 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
     /// bounded chunks so a library-wide selection never materializes every asset in one call.
     private func unloadedSelectedAssets() -> [PhotoAsset] {
         guard let portableLibrary else { return [] }
-        let loaded = Set(collection.items.map(\.id))
-        let ids = collection.selection.selectedIDs.subtracting(loaded)
-            .compactMap { ImageCollection.portableID(for: $0) }
         var assets: [PhotoAsset] = []
-        assets.reserveCapacity(ids.count)
-        for start in stride(from: 0, to: ids.count, by: Self.bulkSelectionChunkSize) {
-            let chunk = Array(ids[start..<min(ids.count, start + Self.bulkSelectionChunkSize)])
-            assets += (try? portableLibrary.browsingAssets(forIDs: chunk)) ?? []
+        portableLibrary.forEachBrowsingAssetChunk(forIDs: collection.unloadedSelectedPortableIDs) {
+            assets += $0
         }
         return assets
     }
-
-    private static let bulkSelectionChunkSize = 500
 
     /// The Select All command for the grid; see `LibraryBrowsingCoordinator.selectAllInGrid`.
     func selectAllInGrid() { libraryBrowsingCoordinator.selectAllInGrid() }
@@ -4957,7 +4950,7 @@ extension AppViewModel: EditClipboardDestination {
         return imageSource.kind == .raw
     }
     var clipboardSelectedTargets: [EditClipboardTarget] {
-        collection.selectedItems.map { item in
+        var targets = collection.selectedItems.map { item in
             let isRAW: Bool
             if let url = item.url {
                 isRAW = ImageSource.kind(forExtension: url.pathExtension) == .raw
@@ -4974,6 +4967,16 @@ extension AppViewModel: EditClipboardDestination {
                 isRAW: isRAW
             )
         }
+        // Package-selected photos outside the loaded window paste by file URL; none is decoded.
+        for asset in unloadedSelectedAssets() {
+            let isRAW = asset.url.map { ImageSource.kind(forExtension: $0.pathExtension) == .raw } ?? false
+            targets.append(EditClipboardTarget(
+                sourceReference: EditSourceReference(
+                    assetID: asset.id, portableIdentity: asset.source.portableIdentity, url: asset.url),
+                isRAW: isRAW
+            ))
+        }
+        return targets
     }
 
     func activateClipboardAsset(_ assetID: PhotoAssetID) { activeAssetID = assetID }

@@ -80,10 +80,8 @@ final class LibraryDeletionCoordinator {
     ) async -> LibraryDeletionOutcome {
         let identitiesByID: [PhotoAssetID: PortablePhotoIdentity] = Dictionary(
             uniqueKeysWithValues: candidates.compactMap { candidate in
-                guard let item = collection.items.first(where: { $0.id == candidate.id }) else {
-                    return nil
-                }
-                return (candidate.id, item.asset.source.portableIdentity)
+                guard let identity = identity(of: candidate) else { return nil }
+                return (candidate.id, identity)
             }
         )
         let result = await delete(candidates)
@@ -175,11 +173,9 @@ final class LibraryDeletionCoordinator {
             )
         }
         for candidate in candidates {
-            guard let item = collection.items.first(where: { $0.id == candidate.id }) else {
-                continue
-            }
+            guard let identity = identity(of: candidate) else { continue }
             do {
-                try await photoAnalysis.removeCaches(for: item.asset.source.portableIdentity.assetID)
+                try await photoAnalysis.removeCaches(for: identity.assetID)
             } catch {
                 failures.append(
                     "Could not clear cached analysis for \(candidate.displayName): "
@@ -190,7 +186,7 @@ final class LibraryDeletionCoordinator {
 
             do {
                 do {
-                    try await portableLibrary.removeFromLibraryOffMain(item.asset.source.portableIdentity.assetID)
+                    try await portableLibrary.removeFromLibraryOffMain(identity.assetID)
                 } catch PortablePackageTrashError.alreadyRemoved {
                     // Membership is already tombstoned by an earlier, partially completed removal.
                     // Removal is idempotent: fall through to finish the edit-record cleanup so the
@@ -206,7 +202,7 @@ final class LibraryDeletionCoordinator {
                 try await editStore.delete(
                     for: EditSourceReference(
                         assetID: candidate.id,
-                        portableIdentity: persistenceIdentity(item),
+                        portableIdentity: identity,
                         url: candidate.url
                     )
                 )
@@ -220,6 +216,14 @@ final class LibraryDeletionCoordinator {
             }
         }
         return LibraryDeletionResult(deletedIDs: deletedIDs, failures: failures)
+    }
+
+    /// A loaded row's identity, or the one the candidate carries when its row is not loaded.
+    private func identity(of candidate: ImageCollection.DeletionCandidate) -> PortablePhotoIdentity? {
+        if let item = collection.items.first(where: { $0.id == candidate.id }) {
+            return persistenceIdentity(item)
+        }
+        return candidate.portableIdentity
     }
 
     private func isAssetNotFound(_ error: PortablePackageTrashError) -> Bool {

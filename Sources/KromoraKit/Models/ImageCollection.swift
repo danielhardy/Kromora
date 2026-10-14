@@ -26,6 +26,8 @@ final class ImageCollectionPresentationModel {
         let displayName: String
         let url: URL?
         let sourceKind: LibrarySourceKind
+        /// Carried so a candidate without a loaded row (an unloaded package selection) can be removed.
+        var portableIdentity: PortablePhotoIdentity?
         var isManaged: Bool { true }
     }
 
@@ -467,7 +469,9 @@ final class ImageCollectionPresentationModel {
         // keep the library update from finishing.
         guard !ids.isEmpty else { return [] }
         return items.filter { ids.contains($0.id) }.map {
-            DeletionCandidate(id: $0.id, displayName: $0.displayName, url: $0.url, sourceKind: .managed)
+            DeletionCandidate(
+                id: $0.id, displayName: $0.displayName, url: $0.url, sourceKind: .managed,
+                portableIdentity: $0.asset.source.portableIdentity)
         }
     }
 
@@ -489,16 +493,29 @@ final class ImageCollectionPresentationModel {
     /// grid or the filmstrip), or the active photo when nothing else is selected.
     var cullingTargetIDs: [PhotoAssetID] {
         let selected = selection.orderedIDs(from: items.map(\.id))
-        if selected.count > 1 { return selected }
+        if selected.count > 1 || hasBatchSelection { return selected }
         return selectedItem.map { [$0.id] } ?? []
+    }
+
+    /// True when the authoritative selection holds more than one photo, whether or not their
+    /// rows are loaded. A package-backed Select All can select photos outside the loaded window.
+    var hasBatchSelection: Bool { selection.selectedIDs.count > 1 }
+
+    /// Selected package ids that have no row in the loaded window. Empty without a package window.
+    var unloadedSelectedPortableIDs: [PortablePhotoAssetID] {
+        guard isPortableWindowed else { return [] }
+        let loaded = Set(items.map(\.id))
+        return selection.selectedIDs.subtracting(loaded).compactMap { Self.portableID(for: $0) }
     }
 
     /// Flag the whole selection. A single photo keeps the one-photo behavior, including advancing
     /// to the next photo; a batch stays on its selection so the next key still applies to it.
     @discardableResult
     func setFlagForSelection(_ flag: PhotoFlag, advance shouldAdvance: Bool = false) -> Bool {
+        guard hasBatchSelection || cullingTargetIDs.count > 1 else {
+            return setFlag(flag, advance: shouldAdvance)
+        }
         let ids = cullingTargetIDs
-        guard ids.count > 1 else { return setFlag(flag, advance: shouldAdvance) }
         var group: [CullingChange] = []
         for id in ids {
             guard let index = itemIndex(for: id), items[index].asset.flag != flag else { continue }
@@ -514,8 +531,8 @@ final class ImageCollectionPresentationModel {
     /// Rate the whole selection (see `setFlagForSelection`).
     @discardableResult
     func setRatingForSelection(_ rating: Int) -> Bool {
+        guard hasBatchSelection || cullingTargetIDs.count > 1 else { return setRating(rating) }
         let ids = cullingTargetIDs
-        guard ids.count > 1 else { return setRating(rating) }
         let clamped = min(max(rating, 0), 5)
         var group: [CullingChange] = []
         for id in ids {

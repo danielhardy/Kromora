@@ -97,6 +97,9 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
             )
         }
 
+        func browsingAssets(forIDs ids: [PortablePhotoAssetID]) throws -> [PhotoAsset] {
+            ids.compactMap { id in assets.first { $0.source.portableIdentity.assetID == id } }
+        }
         func browsingAssets(for items: [LibraryQueryItem]) throws -> [PhotoAsset] {
             items.compactMap { item in
                 assets.first { $0.source.portableIdentity.assetID == item.assetID }

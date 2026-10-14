@@ -15,6 +15,7 @@ protocol LibraryBrowsingProviding: AnyObject {
     func page(at pageIndex: Int, query: LibraryQuery) -> LibraryQueryPage
     func facetCounts(query: LibraryQuery) async -> LibraryFacetCounts
     func browsingAssets(for items: [LibraryQueryItem]) throws -> [PhotoAsset]
+    func browsingAssets(forIDs ids: [PortablePhotoAssetID]) throws -> [PhotoAsset]
     func select(_ assetID: PortablePhotoAssetID, additive: Bool)
     func setPortableSelection(_ assetIDs: [PortablePhotoAssetID], activeID: PortablePhotoAssetID?)
     /// Select every id matching `query`, loaded or not.
@@ -32,6 +33,22 @@ protocol LibraryBrowsingProviding: AnyObject {
     )
     /// Rebuild the disposable index from package membership (the package is canonical).
     func rebuildIndex() throws
+}
+
+extension LibraryBrowsingProviding {
+    /// Ids per index lookup when a bulk action resolves the metadata of an authoritative selection.
+    static var bulkSelectionChunkSize: Int { 500 }
+
+    /// Resolve `ids` to browsing assets one bounded chunk at a time, so a library-wide selection
+    /// never materializes every asset in one call. Nothing is read or decoded from an original.
+    func forEachBrowsingAssetChunk(
+        forIDs ids: [PortablePhotoAssetID], _ body: ([PhotoAsset]) -> Void
+    ) {
+        let size = Self.bulkSelectionChunkSize
+        for start in stride(from: 0, to: ids.count, by: size) {
+            body((try? browsingAssets(forIDs: Array(ids[start..<min(ids.count, start + size)]))) ?? [])
+        }
+    }
 }
 
 extension PortableLibrarySession: LibraryBrowsingProviding {
@@ -520,12 +537,28 @@ final class LibraryBrowsingCoordinator {
 
     func requestDeleteSelectedLibraryItems() {
         guard let destination, destination.isLibraryGridShowing else { return }
-        let candidates = collection.deletionCandidates
+        let candidates = deletionCandidates()
         guard !candidates.isEmpty else {
             destination.setLibraryStatusMessage("Select at least one photo to remove")
             return
         }
         destination.libraryDeletionConfirmation = LibraryDeletionConfirmation(candidates: candidates)
+    }
+
+    /// The deletion targets: loaded selected rows plus package-selected photos outside the loaded
+    /// window, resolved from the index in bounded chunks without reading any original.
+    func deletionCandidates() -> [ImageCollection.DeletionCandidate] {
+        var candidates = collection.deletionCandidates
+        let unloadedIDs = collection.unloadedSelectedPortableIDs
+        guard let library, !unloadedIDs.isEmpty else { return candidates }
+        library.forEachBrowsingAssetChunk(forIDs: unloadedIDs) { assets in
+            candidates += assets.map {
+                ImageCollection.DeletionCandidate(
+                    id: $0.id, displayName: $0.displayName, url: $0.url, sourceKind: .managed,
+                    portableIdentity: $0.source.portableIdentity)
+            }
+        }
+        return candidates
     }
 
     func confirmDeleteSelectedLibraryItems() {
@@ -548,15 +581,18 @@ final class LibraryBrowsingCoordinator {
 
     @discardableResult
     func setFocusedFlag(_ flag: PhotoFlag, advance: Bool = false) -> Bool {
-        let targets = collection.cullingTargetIDs
+        let unloaded = collection.unloadedSelectedPortableIDs
+        let targetCount = collection.cullingTargetIDs.count + unloaded.count
         let name = collection.selectedItem?.displayName
         let previousIndex = collection.selectedIndex
-        let changed = collection.setFlagForSelection(flag, advance: advance)
-        if changed { persistPortableLibraryStateIfNeeded() }
+        let loadedChanged = collection.setFlagForSelection(flag, advance: advance)
+        let unloadedChanged = persistUnloadedLibraryState(unloaded) { _ in (nil, flag) }
+        let changed = loadedChanged || unloadedChanged
+        if loadedChanged { persistPortableLibraryStateIfNeeded() }
         if changed {
             let outcome = flag == .pick ? "Picked" : flag == .reject ? "Rejected" : "Flag cleared"
-            if targets.count > 1 {
-                destination?.setLibraryStatusMessage("\(targets.count) photos: \(outcome)")
+            if targetCount > 1 {
+                destination?.setLibraryStatusMessage("\(targetCount) photos: \(outcome)")
             } else if let name {
                 destination?.setLibraryStatusMessage("\(name): \(outcome)")
             }
@@ -570,13 +606,17 @@ final class LibraryBrowsingCoordinator {
 
     @discardableResult
     func setFocusedRating(_ rating: Int) -> Bool {
-        let targets = collection.cullingTargetIDs
-        let changed = collection.setRatingForSelection(rating)
-        if changed { persistPortableLibraryStateIfNeeded() }
+        let unloaded = collection.unloadedSelectedPortableIDs
+        let targetCount = collection.cullingTargetIDs.count + unloaded.count
+        let loadedChanged = collection.setRatingForSelection(rating)
+        let clamped = min(max(rating, 0), 5)
+        let unloadedChanged = persistUnloadedLibraryState(unloaded) { _ in (clamped, nil) }
+        let changed = loadedChanged || unloadedChanged
+        if loadedChanged { persistPortableLibraryStateIfNeeded() }
         if changed {
             let outcome = rating == 0 ? "Rating cleared" : "Rated \(rating) stars"
-            if targets.count > 1 {
-                destination?.setLibraryStatusMessage("\(targets.count) photos: \(outcome)")
+            if targetCount > 1 {
+                destination?.setLibraryStatusMessage("\(targetCount) photos: \(outcome)")
             } else if let item = collection.selectedItem {
                 destination?.setLibraryStatusMessage("\(item.displayName): \(outcome)")
             }
@@ -588,6 +628,35 @@ final class LibraryBrowsingCoordinator {
     func undoCullingChange() -> Bool {
         let changed = collection.undoLastCullingChange()
         if changed { persistPortableLibraryStateIfNeeded() }
+        return changed
+    }
+
+    /// Apply a culling change to selected photos that have no loaded row. Their current rating and
+    /// flag come from the index summary, one bounded chunk at a time; only photos whose value
+    /// changes are queued. They go through the same coalesced, off-main write and failure handler
+    /// as loaded rows. Unloaded rows have no in-memory state, so the session undo covers the
+    /// loaded rows only.
+    private func persistUnloadedLibraryState(
+        _ ids: [PortablePhotoAssetID], newValue: (PhotoAsset) -> (rating: Int?, flag: PhotoFlag?)
+    ) -> Bool {
+        guard let library, !ids.isEmpty else { return false }
+        var changed = false
+        library.forEachBrowsingAssetChunk(forIDs: ids) { assets in
+            let updates = assets.compactMap { asset -> PortableLibrarySession.LibraryStateUpdate? in
+                let value = newValue(asset)
+                let rating = value.rating ?? asset.rating
+                let flag = value.flag ?? asset.flag
+                guard rating != asset.rating || flag != asset.flag else { return nil }
+                return .init(assetID: asset.source.portableIdentity.assetID, rating: rating, flag: flag)
+            }
+            guard !updates.isEmpty else { return }
+            changed = true
+            library.enqueueLibraryStateUpdates(updates) { [weak self] error in
+                self?.destination?.presentLibraryError(
+                    "Kromora could not update the library catalog: \(error.localizedDescription)"
+                )
+            }
+        }
         return changed
     }
 
