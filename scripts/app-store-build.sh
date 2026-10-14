@@ -16,14 +16,19 @@ if [[ "$mode" != "verify" && "$mode" != "archive" ]]; then
 fi
 
 project="Xcode/Kromora.xcodeproj"
-# The Swift package exports a product with the same name, so xcodebuild requires
-# the project-qualified name shown by `xcodebuild -list` to select the app scheme.
-scheme="Kromora (Kromora project)"
 configuration="Release"
 destination="platform=macOS,arch=arm64"
 derived_data_path=".build/xcode"
 
 [[ -d "$project" ]] || { print -u2 "missing Xcode project: $project"; exit 1; }
+
+# The Swift package exports a product with the same name. Once Xcode has resolved the package it
+# lists the app scheme as "Kromora (Kromora project)"; a fresh checkout, such as CI, lists plain
+# "Kromora". Select whichever name this checkout actually exposes.
+scheme="Kromora"
+if xcodebuild -project "$project" -list 2>/dev/null | grep -qx '[[:space:]]*Kromora (Kromora project)'; then
+  scheme="Kromora (Kromora project)"
+fi
 
 signing_args=()
 if [[ "$mode" == "archive" ]]; then
