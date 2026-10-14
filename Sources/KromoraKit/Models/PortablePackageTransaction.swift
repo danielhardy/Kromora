@@ -193,6 +193,9 @@ final class PortablePackageLease: Sendable {
     let ownerID: UUID
     private let duration: TimeInterval
     private let state: OSAllocatedUnfairLock<State>
+    /// Serializes this lease's own fence holds (renew, release) so two threads sharing the lease
+    /// never contend with each other for the package fence and mistake it for a takeover.
+    private let fenceGate = NSLock()
     private let writerMutationQueue = DispatchQueue(
         label: "com.kromora.package-writer-mutation", qos: .utility
     )
@@ -234,6 +237,51 @@ final class PortablePackageLease: Sendable {
         try? release()
     }
 
+    /// Raised internally when a non-blocking fence attempt finds another party inside the fence.
+    private struct FenceBusy: Error {}
+
+    /// The continuous ownership fence: an advisory `flock` on the package directory.
+    ///
+    /// Acquisition (when it must create the lock), renewal, release, `breakExpired`,
+    /// `recoverDeadWriter` and `recoverExpiredWriter` each run their whole check-then-mutate
+    /// sequence inside it, so none can interleave with another. The kernel scopes the lock to the
+    /// open file description, so separate lease callers in one process and separate processes are
+    /// serialized alike, and it is released if the holder dies. `blocking` callers wait their turn;
+    /// the rest throw `FenceBusy` immediately.
+    private static func withFence<T>(
+        at packageRoot: URL, blocking: Bool, _ body: () throws -> T
+    ) throws -> T {
+        let descriptor = open(packageRoot.path, O_RDONLY | O_DIRECTORY)
+        guard descriptor >= 0 else { throw PortablePackageLeaseError.invalid }
+        defer { close(descriptor) }
+        while flock(descriptor, blocking ? LOCK_EX : LOCK_EX | LOCK_NB) != 0 {
+            if errno == EINTR { continue }
+            throw errno == EWOULDBLOCK ? FenceBusy() : PortablePackageLeaseError.invalid
+        }
+        defer { flock(descriptor, LOCK_UN) }
+        return try body()
+    }
+
+    /// Maps a busy fence to the lease error that describes whoever holds the lock right now.
+    private static func contention(at packageRoot: URL) -> PortablePackageLeaseError {
+        guard let holder = existingInfo(at: packageRoot) else { return .invalid }
+        return .contended(holder)
+    }
+
+    private static func makeInfo(
+        ownerID: UUID, deviceName: String, processID: Int32, writerHostID: String?,
+        processStartedAt: String?, now: Date, duration: TimeInterval
+    ) -> PortablePackageLeaseInfo {
+        let currentIdentity = PortablePackageLeaseInfo.currentProcessIdentity
+        return PortablePackageLeaseInfo(
+            ownerID: ownerID, deviceName: deviceName, processID: processID,
+            hostID: writerHostID ?? currentIdentity.hostID,
+            processStartedAt: processStartedAt ?? (processID == ProcessInfo.processInfo.processIdentifier
+                ? currentIdentity.startedAt : nil),
+            acquiredAt: now, heartbeatAt: now, expiresAt: now.addingTimeInterval(duration)
+        )
+    }
+
     static func acquire(
         at packageRoot: URL,
         ownerID: UUID = UUID(),
@@ -247,58 +295,77 @@ final class PortablePackageLease: Sendable {
         let fm = FileManager.default
         try fm.createDirectory(at: packageRoot, withIntermediateDirectories: true)
         let lockURL = packageRoot.appendingPathComponent("manifest.lock")
-        let currentIdentity = PortablePackageLeaseInfo.currentProcessIdentity
-        let info = PortablePackageLeaseInfo(
+        let info = makeInfo(
             ownerID: ownerID, deviceName: deviceName, processID: processID,
-            hostID: writerHostID ?? currentIdentity.hostID,
-            processStartedAt: processStartedAt ?? (processID == ProcessInfo.processInfo.processIdentifier
-                ? currentIdentity.startedAt : nil),
-            acquiredAt: now, heartbeatAt: now, expiresAt: now.addingTimeInterval(duration)
-        )
+            writerHostID: writerHostID, processStartedAt: processStartedAt, now: now,
+            duration: duration)
         let data = try Self.encode(info)
-        let descriptor = open(lockURL.path, O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR)
-        guard descriptor >= 0 else {
-            if errno != EEXIST { throw PortablePackageLeaseError.invalid }
+
+        func rejection(for existing: PortablePackageLeaseInfo) -> PortablePackageLeaseError {
+            existing.expiresAt > now ? .contended(existing) : .expired(existing)
+        }
+        // An existing lock is never replaced by acquisition, so reporting it needs no fence.
+        // Recovery keeps a lock file in place for its whole run, which is what keeps an ordinary
+        // writer from starting while an interrupted journal is pending.
+        if fm.fileExists(atPath: lockURL.path) {
             guard let existing = try? Self.readInfo(at: lockURL) else {
                 throw PortablePackageLeaseError.invalid
             }
-            if existing.expiresAt > now { throw PortablePackageLeaseError.contended(existing) }
-            throw PortablePackageLeaseError.expired(existing)
+            throw rejection(for: existing)
         }
-        do {
-            try Self.write(data, to: descriptor)
-            try fullSyncDirectory(packageRoot)
-        } catch {
-            try? fm.removeItem(at: lockURL)
-            throw error
+        return try withFence(at: packageRoot, blocking: true) {
+            let descriptor = open(lockURL.path, O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR)
+            guard descriptor >= 0 else {
+                if errno != EEXIST { throw PortablePackageLeaseError.invalid }
+                guard let existing = try? Self.readInfo(at: lockURL) else {
+                    throw PortablePackageLeaseError.invalid
+                }
+                throw rejection(for: existing)
+            }
+            do {
+                try Self.write(data, to: descriptor)
+                try fullSyncDirectory(packageRoot)
+            } catch {
+                try? fm.removeItem(at: lockURL)
+                throw error
+            }
+            return Self(packageRoot: packageRoot, info: info, duration: duration)
         }
-        return Self(packageRoot: packageRoot, info: info, duration: duration)
     }
 
     static func breakExpired(at packageRoot: URL, now: Date = Date()) throws {
         let fm = FileManager.default
         let lockURL = packageRoot.appendingPathComponent("manifest.lock")
-        guard fm.fileExists(atPath: lockURL.path) else { throw PortablePackageLeaseError.missing }
-        let existing = try readInfo(at: lockURL)
-        guard existing.expiresAt <= now else { throw PortablePackageLeaseError.contended(existing) }
-        let quarantine = packageRoot.appendingPathComponent(
-            "manifest.lock.expired-\(UUID().uuidString)")
-        try fm.moveItem(at: lockURL, to: quarantine)
-        try? fm.removeItem(at: quarantine)
+        do {
+            try withFence(at: packageRoot, blocking: false) {
+                guard fm.fileExists(atPath: lockURL.path) else { throw PortablePackageLeaseError.missing }
+                let existing = try readInfo(at: lockURL)
+                guard existing.expiresAt <= now else { throw PortablePackageLeaseError.contended(existing) }
+                let quarantine = packageRoot.appendingPathComponent(
+                    "manifest.lock.expired-\(UUID().uuidString)")
+                try fm.moveItem(at: lockURL, to: quarantine)
+                try? fm.removeItem(at: quarantine)
+            }
+        } catch is FenceBusy {
+            throw contention(at: packageRoot)
+        }
     }
 
     /// Takes exclusive ownership of an expired writer lock, then rolls back its interrupted
     /// transactions. A writer process still alive on this Mac remains contended even after expiry.
     ///
-    /// Ownership is established before anything is mutated: the lock file is renamed to a private
-    /// claim name (atomic, so exactly one recoverer wins) and the claimed lease is re-read. If it is
-    /// not expired at `now` it is put back untouched and the journal and staging are never opened.
-    /// While the rollback runs, this process holds a fresh lease on `manifest.lock`, so a concurrent
-    /// opener sees contention rather than starting a transaction that recovery would roll back, and
-    /// a former owner's `assertOwnership` fails instead of publishing. If the rollback fails, the
-    /// original expired lock is restored so the next opener still sees the journal and recovers it.
+    /// The whole sequence runs inside the ownership fence, so renewal, release, ordinary
+    /// acquisition and other recoverers cannot interleave with it; a renewal already past its
+    /// ownership check holds the fence and makes recovery back off with contention instead.
+    /// Nothing is mutated until the lock, re-read under the fence, is expired and not owned by a
+    /// live local process; a rejected takeover leaves the lock, journal and staging untouched.
+    /// The lock file is never absent: it is atomically replaced by this process's recovery lease
+    /// for the duration of the rollback, so an opener sees contention rather than starting a
+    /// transaction that recovery would roll back, and a former owner's `assertOwnership` fails
+    /// instead of publishing. If the rollback fails, the original expired lock is restored so the
+    /// next opener still sees the journal and recovers it.
     ///
-    /// `afterClaim` is a test seam that runs after the expiry check and before the rollback.
+    /// `afterClaim` is a test seam that runs after the takeover and before the rollback.
     static func recoverExpiredWriter(
         at packageRoot: URL,
         now: Date = Date(),
@@ -306,50 +373,36 @@ final class PortablePackageLease: Sendable {
     ) throws {
         let fm = FileManager.default
         let lockURL = packageRoot.appendingPathComponent("manifest.lock")
-        let claimURL = packageRoot.appendingPathComponent("manifest.lock.claim-\(UUID().uuidString)")
-        guard fm.fileExists(atPath: lockURL.path) else { throw PortablePackageLeaseError.missing }
-        guard rename(lockURL.path, claimURL.path) == 0 else {
-            // Another recoverer or releaser took the lock between the check and the claim.
-            throw errno == ENOENT ? PortablePackageLeaseError.missing : PortablePackageLeaseError.invalid
-        }
-        let claimed: PortablePackageLeaseInfo
         do {
-            claimed = try readInfo(at: claimURL)
-        } catch {
-            try restoreClaim(claimURL, to: lockURL)
-            throw PortablePackageLeaseError.invalid
-        }
-        guard claimed.expiresAt <= now else {
-            try restoreClaim(claimURL, to: lockURL)
-            throw PortablePackageLeaseError.contended(claimed)
-        }
-        guard claimed.localWriterState != .live else {
-            try restoreClaim(claimURL, to: lockURL)
-            throw PortablePackageLeaseError.contended(claimed)
-        }
-        let recoveryLease: PortablePackageLease
-        do {
-            recoveryLease = try acquire(at: packageRoot, now: now)
-        } catch let error as PortablePackageLeaseError {
-            if case .invalid = error { try? restoreClaim(claimURL, to: lockURL) }
-            else { try? fm.removeItem(at: claimURL) }  // someone else already replaced the expired lock
-            throw error
-        }
-        do {
-            try afterClaim()
-            _ = try PortablePackageTransaction.recover(at: packageRoot)
-        } catch {
-            try? recoveryLease.release()
-            try? restoreClaim(claimURL, to: lockURL)
-            throw error
-        }
-        try recoveryLease.release()
-        try? fm.removeItem(at: claimURL)
-    }
-
-    private static func restoreClaim(_ claimURL: URL, to lockURL: URL) throws {
-        guard renamex_np(claimURL.path, lockURL.path, UInt32(RENAME_EXCL)) == 0 else {
-            throw PortablePackageLeaseError.invalid
+            try withFence(at: packageRoot, blocking: false) {
+                guard fm.fileExists(atPath: lockURL.path) else { throw PortablePackageLeaseError.missing }
+                let originalData: Data
+                let claimed: PortablePackageLeaseInfo
+                do {
+                    originalData = try Data(contentsOf: lockURL)
+                    claimed = try PackageJSONCoder.decode(PortablePackageLeaseInfo.self, from: originalData)
+                } catch {
+                    throw PortablePackageLeaseError.invalid
+                }
+                guard claimed.expiresAt <= now, claimed.localWriterState != .live else {
+                    throw PortablePackageLeaseError.contended(claimed)
+                }
+                let recoveryInfo = makeInfo(
+                    ownerID: UUID(), deviceName: DeviceName.current(),
+                    processID: ProcessInfo.processInfo.processIdentifier, writerHostID: nil,
+                    processStartedAt: nil, now: now, duration: defaultDuration)
+                try writeDurably(try encode(recoveryInfo), to: lockURL)
+                do {
+                    try afterClaim()
+                    _ = try PortablePackageTransaction.recover(at: packageRoot)
+                } catch {
+                    try? writeDurably(originalData, to: lockURL)
+                    throw error
+                }
+                try fm.removeItem(at: lockURL)
+            }
+        } catch is FenceBusy {
+            throw contention(at: packageRoot)
         }
     }
 
@@ -358,39 +411,59 @@ final class PortablePackageLease: Sendable {
     /// acquisition continues to report contention until recovery has finished.
     static func recoverDeadWriter(at packageRoot: URL) throws {
         let lockURL = packageRoot.appendingPathComponent("manifest.lock")
-        guard let initial = try? readInfo(at: lockURL), initial.localWriterState == .dead else {
-            throw PortablePackageLeaseError.invalid
+        do {
+            try withFence(at: packageRoot, blocking: false) {
+                guard let initial = try? readInfo(at: lockURL), initial.localWriterState == .dead else {
+                    throw PortablePackageLeaseError.invalid
+                }
+                _ = try PortablePackageTransaction.recover(at: packageRoot)
+                guard let current = try? readInfo(at: lockURL),
+                      current.ownerID == initial.ownerID,
+                      current.localWriterState == .dead
+                else { throw PortablePackageLeaseError.contended(initial) }
+                let quarantine = packageRoot.appendingPathComponent(
+                    "manifest.lock.recovered-\(UUID().uuidString)")
+                try FileManager.default.moveItem(at: lockURL, to: quarantine)
+                try? FileManager.default.removeItem(at: quarantine)
+            }
+        } catch is FenceBusy {
+            throw contention(at: packageRoot)
         }
-        _ = try PortablePackageTransaction.recover(at: packageRoot)
-        guard let current = try? readInfo(at: lockURL),
-              current.ownerID == initial.ownerID,
-              current.localWriterState == .dead
-        else { throw PortablePackageLeaseError.contended(initial) }
-        let quarantine = packageRoot.appendingPathComponent(
-            "manifest.lock.recovered-\(UUID().uuidString)")
-        try FileManager.default.moveItem(at: lockURL, to: quarantine)
-        try? FileManager.default.removeItem(at: quarantine)
     }
 
     var isExpired: Bool { isExpired(at: Date()) }
 
     func isExpired(at date: Date) -> Bool { info.expiresAt <= date }
 
+    /// Renews the lease. The ownership check and the lock publication run inside one hold of the
+    /// ownership fence, so recovery cannot install its lease between them and have it overwritten.
+    /// A renewal that finds the fence held by recovery or another takeover fails rather than waits.
+    /// `afterOwnershipCheck` is a test seam that runs between validation and publication.
     func renew(
         now: Date = Date(),
-        faultInjector: PortablePackageFaultInjector? = nil
+        faultInjector: PortablePackageFaultInjector? = nil,
+        afterOwnershipCheck: @Sendable () throws -> Void = {}
     ) throws {
         try faultInjector?.check(.leaseRenewal)
-        try assertOwnership(at: now)
-        let data = try state.withLock { state -> Data in
-            state.info.heartbeatAt = now
-            state.info.expiresAt = now.addingTimeInterval(duration)
-            return try Self.encode(state.info)
+        try fenceGate.withLock {
+            do {
+                try Self.withFence(at: packageRoot, blocking: false) {
+                    try assertOwnership(at: now)
+                    try afterOwnershipCheck()
+                    let data = try state.withLock { state -> Data in
+                        state.info.heartbeatAt = now
+                        state.info.expiresAt = now.addingTimeInterval(duration)
+                        return try Self.encode(state.info)
+                    }
+                    guard FileManager.default.fileExists(atPath: lockURL.path) else {
+                        throw PortablePackageLeaseError.missing
+                    }
+                    try writeDurably(data, to: lockURL)
+                }
+            } catch is FenceBusy {
+                throw Self.contention(at: packageRoot)
+            }
         }
-        guard FileManager.default.fileExists(atPath: lockURL.path) else {
-            throw PortablePackageLeaseError.missing
-        }
-        try writeDurably(data, to: lockURL)
     }
 
     func assertOwnership(
@@ -432,14 +505,23 @@ final class PortablePackageLease: Sendable {
     }
 
     private func release(at lockURL: URL) throws {
-        guard !state.withLock({ $0.released }) else { return }
-        guard let current = try? Self.readInfo(at: lockURL) else {
-            state.withLock { $0.released = true }
-            return
+        try fenceGate.withLock {
+            guard !state.withLock({ $0.released }) else { return }
+            let root = lockURL.deletingLastPathComponent()
+            guard FileManager.default.fileExists(atPath: root.path) else {
+                state.withLock { $0.released = true }
+                return
+            }
+            try Self.withFence(at: root, blocking: true) {
+                guard let current = try? Self.readInfo(at: lockURL) else {
+                    state.withLock { $0.released = true }
+                    return
+                }
+                guard current.ownerID == ownerID else { throw PortablePackageLeaseError.notOwner }
+                try FileManager.default.removeItem(at: lockURL)
+                state.withLock { $0.released = true }
+            }
         }
-        guard current.ownerID == ownerID else { throw PortablePackageLeaseError.notOwner }
-        try FileManager.default.removeItem(at: lockURL)
-        state.withLock { $0.released = true }
     }
 
     private var lockURL: URL { packageRoot.appendingPathComponent("manifest.lock") }
