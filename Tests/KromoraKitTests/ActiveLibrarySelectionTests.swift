@@ -138,7 +138,19 @@ final class ActiveLibrarySelectionTests: XCTestCase {
 
     private final class SpyRelauncher: AppRelaunching {
         var count = 0
-        func relaunch() { count += 1 }
+        var error: (any Error)?
+        /// Records what happened before the launch was requested.
+        var events: EventLog?
+        func relaunch() async throws {
+            events?.append("launch")
+            count += 1
+            if let error { throw error }
+        }
+    }
+
+    private final class EventLog {
+        private(set) var values: [String] = []
+        func append(_ value: String) { values.append(value) }
     }
 
     func testChooserPromptsRelaunchAfterValidChoice() async throws {
@@ -180,5 +192,61 @@ final class ActiveLibrarySelectionTests: XCTestCase {
         await chooser.useDefault()
         XCTAssertTrue(chooser.isUsingDefault)
         XCTAssertFalse(selection.hasChoice)
+    }
+
+    func testRelaunchRequestsLaunchOnlyAfterLibraryReleased() async throws {
+        let url = try await makePackage("Chosen.kromoralibrary")
+        let dialog = StubDialog(); dialog.folder = url
+        let sheets = FakeSheets(); sheets.confirmResult = true
+        let log = EventLog()
+        let relauncher = SpyRelauncher(); relauncher.events = log
+        let chooser = ActiveLibraryChooser(
+            selection: selection, fileDialog: dialog, sheets: sheets, relauncher: relauncher,
+            releaseLibrary: { log.append("release"); return true })
+        await chooser.choose()
+        XCTAssertEqual(log.values, ["release", "launch"])
+    }
+
+    func testDeclinedReleaseDoesNotLaunch() async throws {
+        let url = try await makePackage("Chosen.kromoralibrary")
+        let dialog = StubDialog(); dialog.folder = url
+        let sheets = FakeSheets(); sheets.confirmResult = true
+        let relauncher = SpyRelauncher()
+        let chooser = ActiveLibraryChooser(
+            selection: selection, fileDialog: dialog, sheets: sheets, relauncher: relauncher,
+            releaseLibrary: { false })
+        await chooser.choose()
+        XCTAssertEqual(relauncher.count, 0)
+        XCTAssertFalse(chooser.statusMessage.isEmpty)
+    }
+
+    func testFailedLaunchReportsErrorAfterRelease() async throws {
+        struct LaunchFailure: LocalizedError { var errorDescription: String? { "no launch." } }
+        let url = try await makePackage("Chosen.kromoralibrary")
+        let dialog = StubDialog(); dialog.folder = url
+        let sheets = FakeSheets(); sheets.confirmResult = true
+        let relauncher = SpyRelauncher(); relauncher.error = LaunchFailure()
+        let chooser = ActiveLibraryChooser(
+            selection: selection, fileDialog: dialog, sheets: sheets, relauncher: relauncher,
+            releaseLibrary: { true })
+        await chooser.choose()
+        XCTAssertTrue(chooser.errorMessage.contains("no launch."))
+    }
+
+    func testChoosingTheOpenLibrarySkipsRelaunch() async throws {
+        let url = try await makePackage("Chosen.kromoralibrary")
+        try selection.choose(url, access: .systemGranted(for: url))
+        let dialog = StubDialog(); dialog.folder = url
+        let sheets = FakeSheets(); sheets.confirmResult = true
+        let relauncher = SpyRelauncher()
+        var released = 0
+        let chooser = ActiveLibraryChooser(
+            selection: selection, fileDialog: dialog, sheets: sheets, relauncher: relauncher,
+            releaseLibrary: { released += 1; return true })
+        await chooser.choose()
+        XCTAssertEqual(sheets.confirmCalls, 0)
+        XCTAssertEqual(relauncher.count, 0)
+        XCTAssertEqual(released, 0)
+        XCTAssertFalse(chooser.statusMessage.isEmpty)
     }
 }

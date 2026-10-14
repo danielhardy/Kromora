@@ -27,7 +27,7 @@ public struct KromoraScene: Scene {
         }
 
         Settings {
-            KromoraSettingsScene(launch: delegate.launch)
+            KromoraSettingsScene(launch: delegate.launch, delegate: delegate)
         }
     }
 }
@@ -54,12 +54,14 @@ struct KromoraRootView: View {
 @MainActor
 private struct KromoraSettingsScene: View {
     let launch: AppLaunch
+    let delegate: KromoraAppDelegate
     @State private var editDatabaseURL: URL?
 
     var body: some View {
         KromoraSettingsView(
             settings: launch.settings,
-            editDatabaseURL: editDatabaseURL
+            editDatabaseURL: editDatabaseURL,
+            releaseLibrary: { await delegate.flushAndReleaseLibrary() }
         )
         .task {
             editDatabaseURL = await launch.open().editDatabaseURL

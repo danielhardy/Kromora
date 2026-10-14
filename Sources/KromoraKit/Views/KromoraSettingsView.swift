@@ -16,14 +16,15 @@ public struct KromoraSettingsView: View {
         settings: KromoraSettings,
         editDatabaseURL: URL?,
         fileDialog: any FileDialogProviding = AppKitFileDialog(),
-        workspace: any WorkspaceRevealing = AppKitWorkspaceRevealer()
+        workspace: any WorkspaceRevealing = AppKitWorkspaceRevealer(),
+        releaseLibrary: @escaping @MainActor () async -> Bool = { true }
     ) {
         _settings = Bindable(wrappedValue: settings)
         self.editDatabaseFileURL = editDatabaseURL
         self.fileDialog = fileDialog
         self.workspace = workspace
         _libraryChooser = State(initialValue: ActiveLibraryChooser(
-            selection: settings.activeLibrary, fileDialog: fileDialog))
+            selection: settings.activeLibrary, fileDialog: fileDialog, releaseLibrary: releaseLibrary))
     }
 
     private var maskOverlaySection: some View {
@@ -82,6 +83,11 @@ public struct KromoraSettingsView: View {
                 Text(libraryChooser.errorMessage)
                     .font(.caption)
                     .foregroundStyle(.red)
+            }
+            if !libraryChooser.statusMessage.isEmpty {
+                Text(libraryChooser.statusMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         } header: {
             Text("Library location")

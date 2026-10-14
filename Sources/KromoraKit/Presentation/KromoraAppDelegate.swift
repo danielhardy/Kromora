@@ -6,6 +6,9 @@ public final class KromoraAppDelegate: NSObject, NSApplicationDelegate {
     let launch: AppLaunch
     private let appearanceController: KromoraWindowAppearanceController
     private var terminationFlushInProgress = false
+    /// Set once the library has been flushed and shut down for a relaunch, so the quit that follows
+    /// does not repeat the confirmation and flush against a closed model.
+    private var libraryReleased = false
     var quitConfirmation: any QuitConfirmationPresenting = AppKitQuitConfirmation()
     private var viewModel: AppViewModel? { launch.viewModel }
 
@@ -42,6 +45,7 @@ public final class KromoraAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     public func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if libraryReleased { return .terminateNow }
         guard !terminationFlushInProgress else { return .terminateLater }
         // The model is created by the first frame's `.task`, so a quit before that has nothing to
         // flush and no lease to release. Once it exists, `shutdown()` also cancels an open still in
@@ -68,26 +72,16 @@ public final class KromoraAppDelegate: NSObject, NSApplicationDelegate {
         viewModel: AppViewModel
     ) async {
         guard case .success = result else {
-            let alert = NSAlert()
-            alert.messageText = "Couldn’t save edits before quitting"
-            alert.informativeText = terminationFailureMessage(for: result)
-            alert.alertStyle = .warning
-            alert.addButton(withTitle: "Retry Saving")
-            alert.addButton(withTitle: "Quit Without Saving")
-            alert.addButton(withTitle: "Cancel")
-
-            // App-modal on purpose: this runs while the app is quitting, when the window may already
-            // be gone, and the answer decides whether termination proceeds.
-            switch alert.runModal() {
-            case .alertFirstButtonReturn:
+            switch askSaveFailure(for: result) {
+            case .retry:
                 terminationFlushInProgress = false
                 startTerminationFlush(sender, viewModel: viewModel)
-            case .alertSecondButtonReturn:
+            case .discard:
                 await viewModel.discardPendingWrites()
                 await viewModel.shutdown()
                 terminationFlushInProgress = false
                 sender.reply(toApplicationShouldTerminate: true)
-            default:
+            case .cancel:
                 terminationFlushInProgress = false
                 sender.reply(toApplicationShouldTerminate: false)
             }
@@ -96,6 +90,53 @@ public final class KromoraAppDelegate: NSObject, NSApplicationDelegate {
 
         await viewModel.shutdown()
         sender.reply(toApplicationShouldTerminate: true)
+    }
+
+    private enum SaveFailureChoice { case retry, discard, cancel }
+
+    /// App-modal on purpose: this runs while the app is quitting or relaunching, when the window may
+    /// already be gone, and the answer decides whether the process goes on.
+    private func askSaveFailure(for result: PersistenceFlushResult) -> SaveFailureChoice {
+        let alert = NSAlert()
+        alert.messageText = "Couldn’t save edits before quitting"
+        alert.informativeText = terminationFailureMessage(for: result)
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Retry Saving")
+        alert.addButton(withTitle: "Quit Without Saving")
+        alert.addButton(withTitle: "Cancel")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: return .retry
+        case .alertSecondButtonReturn: return .discard
+        default: return .cancel
+        }
+    }
+
+    /// Confirms, flushes pending edits and culling state, and shuts the model down so the package
+    /// lease is released, for a relaunch. Returns `false`, leaving the app running, when the user
+    /// declines or cancels. After `true` the model is closed and the next quit proceeds directly.
+    func flushAndReleaseLibrary() async -> Bool {
+        if libraryReleased { return true }
+        guard !terminationFlushInProgress else { return false }
+        guard let viewModel else {
+            libraryReleased = true
+            return true
+        }
+        terminationFlushInProgress = true
+        defer { terminationFlushInProgress = false }
+        guard await viewModel.terminationGuard.shouldQuit(presenter: quitConfirmation) else { return false }
+        while true {
+            let result = await viewModel.flushPendingWrites()
+            if case .success = result { break }
+            switch askSaveFailure(for: result) {
+            case .retry: continue
+            case .discard: await viewModel.discardPendingWrites()
+            case .cancel: return false
+            }
+            break
+        }
+        await viewModel.shutdown()
+        libraryReleased = true
+        return true
     }
 
     private func startTerminationFlush(_ sender: NSApplication, viewModel: AppViewModel) {
