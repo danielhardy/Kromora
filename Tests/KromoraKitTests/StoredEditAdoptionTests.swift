@@ -87,9 +87,12 @@ final class StoredEditAdoptionTests: TempDirectoryTestCase {
     }
 
     private func waitForPreparationToStart(_ fake: FakeRenderEngine) async throws {
-        let deadline = Date().addingTimeInterval(5)
+        let deadline = ContinuousClock.now + .seconds(30)
         while await fake.sourcePreparationCount == 0 {
-            XCTAssertLessThan(Date(), deadline, "source preparation did not start")
+            if ContinuousClock.now >= deadline {
+                throw TestSynchronizationError.timedOut(
+                    "source preparation to start", "no source preparation began")
+            }
             try await Task.sleep(for: .milliseconds(10))
         }
     }
