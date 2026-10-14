@@ -57,6 +57,9 @@ struct FilmstripView: View {
                 .padding(.vertical, FilmstripLayout.stripVerticalPadding)
             }
             .background(KromoraTheme.canvasBackground)
+            // The strip owns its settings observation so a caption toggle resizes it without
+            // invalidating the root view model.
+            .frame(height: FilmstripLayout.stripHeight(showPhotoNames: settings.showPhotoNames))
             .onAppear { collection.beginThumbnailDemand() }
             .onChange(of: collection.selectedIndex) { _, newIndex in
                 guard collection.items.indices.contains(newIndex) else { return }

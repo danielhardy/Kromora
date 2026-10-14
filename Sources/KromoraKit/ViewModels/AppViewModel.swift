@@ -1400,17 +1400,16 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         //
         // Derive, look-save and the removable-media workflow are observed directly by
         // `FeatureSheetsModifier`, `RemovableMediaMenu` and `RemovableMediaSelectorView`, so they
-        // are also absent below. Remaining ObservableObject children (settings, library, editor
-        // document, edit clipboard) are still consumed via `viewModel.*`
-        // (LookInspectorView reads `viewModel.library`, clipboard/undo read
+        // are also absent below. Settings and the Look library are observed directly by
+        // `LookInspectorView`, `FilmstripView`, the grid cells, `PreviewView`, `KromoraCommands`
+        // and the settings view. Remaining ObservableObject children (editor document, edit
+        // clipboard) are still consumed via `viewModel.*` (clipboard/undo read
         // `editClipboardWorkflow`/`editorDocument`). Forward synchronously:
         // `send()` in the same turn preserves will-change timing until views hold children directly
         // and the corresponding entry can be removed. Delete this loop only when every entry
         // is gone; removing an entry before its views observe the child directly makes that
         // surface stale (sheets stop presenting, library scans stop refreshing).
         for child in [
-            settings.objectWillChange.eraseToAnyPublisher(),
-            library.objectWillChange.eraseToAnyPublisher(),
             editorDocument.objectWillChange.eraseToAnyPublisher(),
             editClipboardWorkflow.objectWillChange.eraseToAnyPublisher(),
         ] {

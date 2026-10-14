@@ -17,7 +17,7 @@ final class ObservationInvalidationTests: TempDirectoryTestCase {
     func testNoTaskPerChildNotificationRemains() {
         // High-frequency children are @Observable and observed directly via `@Bindable`;
         // they must never pass through AppViewModel fan-in. Low-frequency ObservableObject
-        // children (settings, library, editor document, edit clipboard)
+        // children (editor document, edit clipboard)
         // are still consumed via `viewModel.*` until their views hold them directly, so they
         // forward synchronously with `objectWillChange.send()` in the same turn — never via
         // a Task, which had incorrect will-change timing. Assert the composition root exposes
@@ -38,21 +38,36 @@ final class ObservationInvalidationTests: TempDirectoryTestCase {
         var appChanges = 0
         let subscription = viewModel.objectWillChange.sink { _ in appChanges += 1 }
 
-        let beforeNames = viewModel.settings.showPhotoNames
-        viewModel.settings.showPhotoNames = !beforeNames
-        XCTAssertEqual(appChanges, 1, "settings must forward synchronously")
-
-        viewModel.library.isScanning = true
-        XCTAssertEqual(appChanges, 2, "library must forward synchronously")
-        viewModel.library.isScanning = false
-        XCTAssertEqual(appChanges, 3)
-
         viewModel.editClipboardWorkflow.selectiveCopyCategories = [.light]
         viewModel.editClipboardWorkflow.isSelectiveCopyDialogPresented = true
         // Clipboard presentation forwards two child will-change events synchronously.
-        XCTAssertEqual(appChanges, 5, "clipboard must forward synchronously")
+        XCTAssertEqual(appChanges, 2, "clipboard must forward synchronously")
 
         withExtendedLifetime(subscription) {}
+    }
+
+    func testLibraryAndSettingsAreObservedDirectlyNotThroughRoot() {
+        // KRMA-908: LookInspectorView, FilmstripView and the other settings consumers hold the
+        // children directly, so child-only changes emit on their own publishers (before: one
+        // root event per change; after: zero) without touching the root.
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        var rootChanges = 0
+        var settingsChanges = 0
+        var libraryChanges = 0
+        let subscriptions = [
+            viewModel.objectWillChange.sink { _ in rootChanges += 1 },
+            viewModel.settings.objectWillChange.sink { _ in settingsChanges += 1 },
+            viewModel.library.objectWillChange.sink { _ in libraryChanges += 1 },
+        ]
+
+        viewModel.settings.showPhotoNames.toggle()
+        XCTAssertEqual(settingsChanges, 1)
+        viewModel.library.isScanning = true
+        viewModel.library.isScanning = false
+        XCTAssertEqual(libraryChanges, 2)
+        XCTAssertEqual(rootChanges, 0, "library/settings must not fan in to the root")
+
+        withExtendedLifetime(subscriptions) {}
     }
 
     func testDeriveLookSaveAndMediaStateIsObservedDirectlyNotThroughRoot() {

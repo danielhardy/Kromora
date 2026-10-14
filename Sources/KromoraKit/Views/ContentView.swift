@@ -257,11 +257,6 @@ public struct ContentView: View {
                                     ) { index, modifiers in
                                         viewModel.selectCollectionImage(at: index, modifiers: modifiers)
                                     }
-                                    .frame(
-                                        height: FilmstripLayout.stripHeight(
-                                            showPhotoNames: viewModel.settings.showPhotoNames
-                                        )
-                                    )
                                 }
                             }
                         }

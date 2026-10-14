@@ -76,19 +76,27 @@ enum LookInspectorEmptyState: Equatable, Sendable {
 /// one a prerequisite for ordinary editing.
 struct LookInspectorView: View {
     @ObservedObject var viewModel: AppViewModel
+    /// Observed directly so scan/import/projection changes refresh the browser without
+    /// invalidating the root `AppViewModel` observers.
+    @ObservedObject private var library: LUTLibrary
     @State private var searchText = ""
 
-    private var hasLooks: Bool { !viewModel.library.allLUTs.isEmpty }
+    init(viewModel: AppViewModel) {
+        self.viewModel = viewModel
+        _library = ObservedObject(wrappedValue: viewModel.library)
+    }
+
+    private var hasLooks: Bool { !library.allLUTs.isEmpty }
 
     /// Keep the state exposed by the inspector's accessibility container in sync with the
     /// presentation matrix below. This is also useful to UI tests because it observes the real
     /// rendered view rather than calling the matrix in isolation.
     private var presentationState: LookInspectorEmptyState {
         LookInspectorEmptyState.resolve(
-            isScanning: viewModel.library.isScanning,
-            lookCount: viewModel.library.allLUTs.count,
-            folderConfigured: viewModel.library.folderURL != nil,
-            scanError: viewModel.library.scanError,
+            isScanning: library.isScanning,
+            lookCount: library.allLUTs.count,
+            folderConfigured: library.folderURL != nil,
+            scanError: library.scanError,
             hasMissingReference: viewModel.selectedLookID != nil && viewModel.selectedLook == nil
         )
     }
@@ -98,7 +106,7 @@ struct LookInspectorView: View {
     }
 
     private var filteredStarterLookCategories: [LUTLibrary.Category] {
-        viewModel.library.starterCategories.compactMap { category in
+        library.starterCategories.compactMap { category in
             let looks = filteredLooks(category.luts, collection: .starter)
             guard !looks.isEmpty else { return nil }
             return LUTLibrary.Category(
@@ -111,7 +119,7 @@ struct LookInspectorView: View {
     }
 
     private var filteredMyLooks: [CubeLUT] {
-        filteredLooks(viewModel.library.myLooks, collection: .my)
+        filteredLooks(library.myLooks, collection: .my)
     }
 
     private func filteredLooks(
@@ -124,7 +132,7 @@ struct LookInspectorView: View {
         // Category searches continue to surface the full matching set while category headings
         // remain visible as distinct, non-collapsible groups in the starter picker.
         let categoryLookIDs = Set(
-            viewModel.library.categories
+            library.categories
                 .filter { (collection.isReadOnly ? $0.source == .bundled : $0.source != .bundled)
                     && $0.name.lowercased().contains(query) }
                 .flatMap(\.luts)
@@ -141,10 +149,10 @@ struct LookInspectorView: View {
             if hasLooks {
                 searchField
             }
-            if let scanError = viewModel.library.scanError {
+            if let scanError = library.scanError {
                 folderErrorBanner(scanError)
             }
-            if let importError = viewModel.library.importError {
+            if let importError = library.importError {
                 importErrorBanner(importError)
             }
             Divider()
@@ -249,18 +257,18 @@ struct LookInspectorView: View {
             viewModel.chooseLookFile()
         } label: {
             Label(
-                viewModel.library.isImporting ? "Importing Look…" : "Import Look",
-                systemImage: viewModel.library.isImporting ? "hourglass" : "plus"
+                library.isImporting ? "Importing Look…" : "Import Look",
+                systemImage: library.isImporting ? "hourglass" : "plus"
             )
             .frame(maxWidth: .infinity)
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.large)
-        .disabled(viewModel.library.isImporting)
-        .help(viewModel.library.isImporting ? "Importing Look…" : "Import an external .cube or .look file")
-        .accessibilityLabel(viewModel.library.isImporting ? "Importing Look" : "Import Look")
+        .disabled(library.isImporting)
+        .help(library.isImporting ? "Importing Look…" : "Import an external .cube or .look file")
+        .accessibilityLabel(library.isImporting ? "Importing Look" : "Import Look")
         .accessibilityHint(
-            viewModel.library.isImporting
+            library.isImporting
                 ? "Wait for the current Look import to finish"
                 : "Choose an external cube or look file"
         )
@@ -313,7 +321,7 @@ struct LookInspectorView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Text("\(viewModel.library.allLUTs.count)")
+                    Text("\(library.allLUTs.count)")
                         .font(.caption2)
                         .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
                 }
@@ -326,7 +334,7 @@ struct LookInspectorView: View {
                 if filteredMyLooks.isEmpty {
                     collectionEmptyRow(
                         collection: .my,
-                        hasUnfilteredLooks: !viewModel.library.myLooks.isEmpty
+                        hasUnfilteredLooks: !library.myLooks.isEmpty
                     )
                 } else {
                     lookRows(filteredMyLooks)
@@ -340,7 +348,7 @@ struct LookInspectorView: View {
                 Section {
                     collectionEmptyRow(
                         collection: .starter,
-                        hasUnfilteredLooks: !viewModel.library.starterLooks.isEmpty
+                        hasUnfilteredLooks: !library.starterLooks.isEmpty
                     )
                 } header: {
                     collectionHeader(.starter, count: filteredStarterLooks.count)
@@ -461,8 +469,8 @@ struct LookInspectorView: View {
                 .fixedSize(horizontal: false, vertical: true)
             } else if collection == .my {
                 Label(
-                    viewModel.library.isImporting ? "Importing a Look…" : "No Looks imported yet",
-                    systemImage: viewModel.library.isImporting ? "hourglass" : "plus"
+                    library.isImporting ? "Importing a Look…" : "No Looks imported yet",
+                    systemImage: library.isImporting ? "hourglass" : "plus"
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
