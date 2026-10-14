@@ -71,26 +71,12 @@ public struct ContentView: View {
                     photosSelection = []
                 }
             }
-            .sheet(isPresented: Binding(
-                get: { viewModel.derive.isSheetPresented },
-                set: { viewModel.derive.isSheetPresented = $0 }
-            )) {
-                RecipeExtractorSheet(coordinator: viewModel.derive)
-            }
-            .sheet(isPresented: Binding(
-                get: { viewModel.lookSave.isSheetPresented },
-                set: { if !$0 { viewModel.dismissSaveLook() } }
-            )) {
-                LookSaveSheet(coordinator: viewModel.lookSave)
-            }
+            .modifier(FeatureSheetsModifier(viewModel: viewModel))
             .sheet(isPresented: Binding(
                 get: { viewModel.photosImportReview.isPresented },
                 set: { if !$0 { viewModel.photosImportReview.cancel() } }
             )) {
                 PhotosImportReviewView(review: viewModel.photosImportReview)
-            }
-            .sheet(isPresented: $viewModel.isRemovableMediaSelectorPresented) {
-                RemovableMediaSelectorView(viewModel: viewModel)
             }
             .sheet(isPresented: $viewModel.isSelectiveCopyDialogPresented) {
                 SelectiveCopySheet(
@@ -453,23 +439,7 @@ public struct ContentView: View {
                     viewModel.chooseSourceFolder()
                 }
                 .disabled(!viewModel.canImportIntoPortableLibrary)
-                Menu("Removable Media") {
-                    if viewModel.removableMediaVolumes.isEmpty {
-                        Text("No supported media mounted")
-                    } else {
-                        ForEach(viewModel.removableMediaVolumes) { volume in
-                            Button(volume.menuLabel) {
-                                viewModel.openRemovableMedia(volume)
-                            }
-                            .disabled(!viewModel.canImportIntoPortableLibrary)
-                        }
-                    }
-                    Divider()
-                    Button("Refresh Removable Media") {
-                        viewModel.refreshRemovableMedia()
-                    }
-                }
-                .disabled(!viewModel.canImportIntoPortableLibrary)
+                RemovableMediaMenu(viewModel: viewModel, media: viewModel.libraryMediaWorkflow)
                 if !collection.items.isEmpty {
                     Button("Refresh Library") {
                         viewModel.refreshSource()

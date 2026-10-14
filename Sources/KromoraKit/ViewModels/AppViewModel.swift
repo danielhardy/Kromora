@@ -1398,11 +1398,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // unrelated inspector or toolbar views. A Task per child notification also had incorrect
         // will-change timing, so no forwarding path here may spawn a Task.
         //
-        // Remaining ObservableObject children (settings, library, media workflow, editor
-        // document, edit clipboard, derive, look-save) are still consumed via `viewModel.*`
-        // (LookInspectorView reads `viewModel.library`, ContentView sheets read
-        // `viewModel.derive`/`viewModel.lookSave`, toolbar menus read removable-media state,
-        // clipboard/undo read `editClipboardWorkflow`/`editorDocument`). Forward synchronously:
+        // Derive, look-save and the removable-media workflow are observed directly by
+        // `FeatureSheetsModifier`, `RemovableMediaMenu` and `RemovableMediaSelectorView`, so they
+        // are also absent below. Remaining ObservableObject children (settings, library, editor
+        // document, edit clipboard) are still consumed via `viewModel.*`
+        // (LookInspectorView reads `viewModel.library`, clipboard/undo read
+        // `editClipboardWorkflow`/`editorDocument`). Forward synchronously:
         // `send()` in the same turn preserves will-change timing until views hold children directly
         // and the corresponding entry can be removed. Delete this loop only when every entry
         // is gone; removing an entry before its views observe the child directly makes that
@@ -1410,11 +1411,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         for child in [
             settings.objectWillChange.eraseToAnyPublisher(),
             library.objectWillChange.eraseToAnyPublisher(),
-            libraryMediaWorkflow.objectWillChange.eraseToAnyPublisher(),
             editorDocument.objectWillChange.eraseToAnyPublisher(),
             editClipboardWorkflow.objectWillChange.eraseToAnyPublisher(),
-            derive.objectWillChange.eraseToAnyPublisher(),
-            lookSave.objectWillChange.eraseToAnyPublisher(),
         ] {
             cancellables.append(
                 child.sink { [weak self] _ in

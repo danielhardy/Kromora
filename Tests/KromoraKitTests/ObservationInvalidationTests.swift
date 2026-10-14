@@ -17,7 +17,7 @@ final class ObservationInvalidationTests: TempDirectoryTestCase {
     func testNoTaskPerChildNotificationRemains() {
         // High-frequency children are @Observable and observed directly via `@Bindable`;
         // they must never pass through AppViewModel fan-in. Low-frequency ObservableObject
-        // children (settings, library, media workflow, editor document, derive, look-save)
+        // children (settings, library, editor document, edit clipboard)
         // are still consumed via `viewModel.*` until their views hold them directly, so they
         // forward synchronously with `objectWillChange.send()` in the same turn — never via
         // a Task, which had incorrect will-change timing. Assert the composition root exposes
@@ -47,27 +47,50 @@ final class ObservationInvalidationTests: TempDirectoryTestCase {
         viewModel.library.isScanning = false
         XCTAssertEqual(appChanges, 3)
 
-        viewModel.derive.isSheetPresented = true
-        XCTAssertEqual(appChanges, 4, "derive sheet must forward synchronously")
-        viewModel.derive.isSheetPresented = false
-        XCTAssertEqual(appChanges, 5)
-
-        viewModel.lookSave.isSheetPresented = true
-        XCTAssertEqual(appChanges, 6, "look-save sheet must forward synchronously")
-        viewModel.lookSave.isSheetPresented = false
-        XCTAssertEqual(appChanges, 7)
-
         viewModel.editClipboardWorkflow.selectiveCopyCategories = [.light]
         viewModel.editClipboardWorkflow.isSelectiveCopyDialogPresented = true
         // Clipboard presentation forwards two child will-change events synchronously.
-        XCTAssertEqual(appChanges, 9, "clipboard must forward synchronously")
-
-        viewModel.libraryMediaWorkflow.isRemovableMediaSelectorPresented = true
-        XCTAssertEqual(appChanges, 10, "removable-media chrome must forward synchronously")
-        viewModel.libraryMediaWorkflow.isRemovableMediaSelectorPresented = false
-        XCTAssertEqual(appChanges, 11)
+        XCTAssertEqual(appChanges, 5, "clipboard must forward synchronously")
 
         withExtendedLifetime(subscription) {}
+    }
+
+    func testDeriveLookSaveAndMediaStateIsObservedDirectlyNotThroughRoot() {
+        // KRMA-907: these children are observed by FeatureSheetsModifier, RemovableMediaMenu and
+        // RemovableMediaSelectorView, so child-only changes reach their own publishers without
+        // touching the root. Status/error callbacks are detached because they are legitimate
+        // root effects.
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        viewModel.derive.onStatus = nil
+        viewModel.derive.onError = nil
+        viewModel.lookSave.onStatus = nil
+        viewModel.lookSave.onError = nil
+        viewModel.libraryMediaWorkflow.onStatus = nil
+        viewModel.libraryMediaWorkflow.onError = nil
+        var appChanges = 0
+        var deriveChanges = 0
+        var lookSaveChanges = 0
+        var mediaChanges = 0
+        let subscriptions = [
+            viewModel.objectWillChange.sink { _ in appChanges += 1 },
+            viewModel.derive.objectWillChange.sink { _ in deriveChanges += 1 },
+            viewModel.lookSave.objectWillChange.sink { _ in lookSaveChanges += 1 },
+            viewModel.libraryMediaWorkflow.objectWillChange.sink { _ in mediaChanges += 1 },
+        ]
+
+        viewModel.derive.isSheetPresented = true
+        viewModel.derive.isSheetPresented = false
+        viewModel.lookSave.isSheetPresented = true
+        viewModel.lookSave.isSheetPresented = false
+        viewModel.libraryMediaWorkflow.isRemovableMediaSelectorPresented = true
+        viewModel.libraryMediaWorkflow.isRemovableMediaSelectorPresented = false
+
+        XCTAssertEqual(deriveChanges, 2, "derive sheet still reaches its own observers")
+        XCTAssertEqual(lookSaveChanges, 2, "look-save sheet still reaches its own observers")
+        XCTAssertEqual(mediaChanges, 2, "removable-media chrome still reaches its own observers")
+        XCTAssertEqual(appChanges, 0, "migrated children must not fan into the root")
+
+        withExtendedLifetime(subscriptions) {}
     }
 
     func testViewModelImportCoordinatorProgressStaysIsolated() {

@@ -5,22 +5,23 @@ import AppKit
 /// purpose: the volume has already been selected from the Import menu and this sheet is only for
 /// choosing files and explicitly adding them to the library.
 struct RemovableMediaSelectorView: View {
-    @ObservedObject var viewModel: AppViewModel
+    let viewModel: AppViewModel
+    @ObservedObject var media: LibraryMediaWorkflowCoordinator
 
-    private var isFolder: Bool { viewModel.mediaImportSource == .folder }
+    private var isFolder: Bool { media.importSource == .folder }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
             Divider()
-            if viewModel.isRemovableMediaScanning && viewModel.removableMediaFiles.isEmpty {
+            if media.isRemovableMediaScanning && media.removableMediaFiles.isEmpty {
                 VStack(spacing: 12) {
                     ProgressView()
-                    Text("Scanning \(viewModel.removableMediaVolume?.name ?? "source")…")
+                    Text("Scanning \(media.removableMediaVolume?.name ?? "source")…")
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if viewModel.removableMediaFiles.isEmpty {
+            } else if media.removableMediaFiles.isEmpty {
                 ContentUnavailableView(
                     "No Supported Images",
                     systemImage: isFolder ? "folder" : "externaldrive",
@@ -41,26 +42,26 @@ struct RemovableMediaSelectorView: View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 3) {
                 Label(
-                    viewModel.removableMediaVolume?.name ?? (isFolder ? "Folder" : "Removable Media"),
+                    media.removableMediaVolume?.name ?? (isFolder ? "Folder" : "Removable Media"),
                     systemImage: isFolder ? "folder" : "externaldrive.connected.to.line.below"
                 )
                     .font(.headline)
-                if let accessHint = viewModel.removableMediaVolume?.accessHint {
+                if let accessHint = media.removableMediaVolume?.accessHint {
                     Text(accessHint)
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
             }
             Spacer()
-            if viewModel.isRemovableMediaScanning && !viewModel.removableMediaFiles.isEmpty {
+            if media.isRemovableMediaScanning && !media.removableMediaFiles.isEmpty {
                 ProgressView()
                     .controlSize(.small)
                 Text("Scanning…")
                     .foregroundStyle(.secondary)
                     .font(.callout)
             }
-            if !viewModel.removableMediaFiles.isEmpty {
-                Text("\(viewModel.removableMediaSelection.count) of \(viewModel.removableMediaFiles.count) selected")
+            if !media.removableMediaFiles.isEmpty {
+                Text("\(media.removableMediaSelection.count) of \(media.removableMediaFiles.count) selected")
                     .foregroundStyle(.secondary)
                     .font(.callout)
             }
@@ -82,9 +83,9 @@ struct RemovableMediaSelectorView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
 
-            if !viewModel.removableMediaWarnings.isEmpty {
+            if !media.removableMediaWarnings.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    ForEach(viewModel.removableMediaWarnings, id: \.self) { warning in
+                    ForEach(media.removableMediaWarnings, id: \.self) { warning in
                         Label(warning, systemImage: "exclamationmark.triangle")
                             .font(.caption)
                             .foregroundStyle(.orange)
@@ -96,7 +97,7 @@ struct RemovableMediaSelectorView: View {
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18, pinnedViews: [.sectionHeaders]) {
-                    ForEach(MediaVolumeDayGroup.groups(for: viewModel.visibleRemovableMediaFiles)) { group in
+                    ForEach(MediaVolumeDayGroup.groups(for: media.visibleRemovableMediaFiles)) { group in
                         Section {
                             LazyVGrid(
                                 columns: [GridItem(.adaptive(minimum: Self.cellWidth), spacing: 10)],
@@ -124,20 +125,20 @@ struct RemovableMediaSelectorView: View {
     /// background comparison is still running.
     @ViewBuilder
     private var libraryStatus: some View {
-        let inLibrary = viewModel.removableMediaInLibrary.count
+        let inLibrary = media.removableMediaInLibrary.count
         if inLibrary > 0 {
-            Text("\(inLibrary) of \(viewModel.removableMediaFiles.count) already in library")
+            Text("\(inLibrary) of \(media.removableMediaFiles.count) already in library")
                 .font(.callout)
                 .foregroundStyle(.secondary)
-            Toggle("Hide", isOn: $viewModel.hidesInLibraryRemovableMedia)
+            Toggle("Hide", isOn: $media.hidesInLibraryRemovableMedia)
                 .toggleStyle(.checkbox)
                 .help("Hide photos that are already in the library")
                 .accessibilityLabel("Hide photos already in library")
         }
-        if viewModel.isCheckingRemovableMediaLibrary {
+        if media.isCheckingRemovableMediaLibrary {
             ProgressView()
                 .controlSize(.small)
-            Text("Checking library… \(viewModel.removableMediaLibraryChecked)/\(viewModel.removableMediaFiles.count)")
+            Text("Checking library… \(media.removableMediaLibraryChecked)/\(media.removableMediaFiles.count)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -157,8 +158,8 @@ struct RemovableMediaSelectorView: View {
     }
 
     private func cell(for file: MediaVolumeFile) -> some View {
-        let isSelected = viewModel.removableMediaSelection.contains(file)
-        let isInLibrary = viewModel.removableMediaInLibrary.contains(file.id)
+        let isSelected = media.removableMediaSelection.contains(file)
+        let isInLibrary = media.removableMediaInLibrary.contains(file.id)
         return Button {
             if NSEvent.modifierFlags.contains(.shift) {
                 viewModel.selectRemovableMediaRange(to: file)
@@ -202,7 +203,7 @@ struct RemovableMediaSelectorView: View {
 
     private var footer: some View {
         HStack {
-            if let progress = viewModel.removableMediaImportProgress {
+            if let progress = media.removableMediaImportProgress {
                 ProgressView(value: progress.fraction)
                     .frame(width: 130)
                 Text(progress.cancelled
@@ -216,7 +217,7 @@ struct RemovableMediaSelectorView: View {
                 .keyboardShortcut(.cancelAction)
             Button("Import Selected to Library") { viewModel.importSelectedRemovableMedia() }
                 .keyboardShortcut(.defaultAction)
-                .disabled(viewModel.isRemovableMediaScanning || viewModel.selectedRemovableMediaFiles.isEmpty)
+                .disabled(media.isRemovableMediaScanning || media.selectedRemovableMediaFiles.isEmpty)
         }
         .padding(16)
     }

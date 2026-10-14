@@ -58,7 +58,9 @@ Active pastes commit through `updateDocument`. During a filmstrip load, matching
 source reference restores the matching asset/history before that commit. Non-active pastes use
 `EditorDocumentCoordinator.apply` to record per-photo history and revisions, skip unchanged
 sessions, then request forced thumbnail/persistence updates and a batch flush. The root retains
-thin command and presentation forwards, with synchronous child observation for existing views.
+thin command and presentation forwards. Derive, Look-save, and removable-media state are observed
+directly by `FeatureSheetsModifier` and `RemovableMediaMenu` (not forwarded through the root);
+settings, library, clipboard, and editor-document children still forward synchronously.
 `EditClipboardCoordinatorTests` cover source validation, remembered selection/cancel, selective
 active commits, RAW/raster batch behavior, selection transitions, per-photo undo, and no-op writes
 without constructing `AppViewModel`.
