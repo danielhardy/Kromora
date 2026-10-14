@@ -1,4 +1,5 @@
 import AppKit
+import Observation
 import Photos
 import Synchronization
 
@@ -46,6 +47,28 @@ struct PhotosThumbnailLoader: Sendable {
     }
 }
 
+/// Owns the visible state for one thumbnail request so the UI state transitions can be tested
+/// independently of SwiftUI and PhotoKit.
+@Observable
+@MainActor
+final class PhotosThumbnailModel {
+    private(set) var state = PhotosThumbnailState.loading
+
+    private let loader: PhotosThumbnailLoader
+
+    init(loader: PhotosThumbnailLoader) {
+        self.loader = loader
+    }
+
+    func load(_ localIdentifier: String?) async {
+        state = .loading
+        let result = await loader.load(localIdentifier)
+        guard !Task.isCancelled else { return }
+        if case .failed(.cancelled) = result { return }
+        state = result
+    }
+}
+
 /// PhotoKit-backed provider. Network access is allowed so iCloud-only originals resolve; the
 /// request is cancelled with the calling task and the continuation resumes exactly once, on the
 /// first non-degraded result, error, cancellation, or nil image.
@@ -59,6 +82,7 @@ struct PhotoKitThumbnailProvider: PhotosThumbnailProviding {
         options.deliveryMode = .opportunistic
         options.isNetworkAccessAllowed = true
         let requests = RequestBox()
+        let completion = CompletionBox()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 let id = PHImageManager.default().requestImage(
@@ -66,16 +90,28 @@ struct PhotoKitThumbnailProvider: PhotosThumbnailProviding {
                 ) { image, info in
                     let info = info ?? [:]
                     if let error = info[PHImageErrorKey] as? NSError {
-                        continuation.resume(throwing: PhotosThumbnailFailure.failed(error.localizedDescription))
+                        if completion.finish() {
+                            continuation.resume(throwing: PhotosThumbnailFailure.failed(error.localizedDescription))
+                        }
                     } else if (info[PHImageCancelledKey] as? Bool) == true {
-                        continuation.resume(throwing: PhotosThumbnailFailure.cancelled)
+                        if completion.finish() {
+                            continuation.resume(throwing: PhotosThumbnailFailure.cancelled)
+                        }
                     } else if let image {
-                        // Opportunistic delivery sends a degraded image first; the final one
-                        // follows. Accept the first image and stop, keeping resume single-shot.
+                        // Opportunistic delivery sends a degraded image first; wait for its final
+                        // result, and finish only once even if PhotoKit calls the handler again.
                         if (info[PHImageResultIsDegradedKey] as? Bool) == true { return }
-                        continuation.resume(returning: image)
+                        if completion.finish() { continuation.resume(returning: image) }
+                    } else if (info[PHImageResultIsInCloudKey] as? Bool) == true {
+                        // Network access is enabled above. If Photos still returns no image and
+                        // marks the asset as cloud-only, surface a failed tile instead of waiting.
+                        if completion.finish() {
+                            continuation.resume(throwing: PhotosThumbnailFailure.assetUnavailable)
+                        }
                     } else {
-                        continuation.resume(throwing: PhotosThumbnailFailure.assetUnavailable)
+                        if completion.finish() {
+                            continuation.resume(throwing: PhotosThumbnailFailure.assetUnavailable)
+                        }
                     }
                 }
                 requests.set(id)
@@ -88,17 +124,40 @@ struct PhotoKitThumbnailProvider: PhotosThumbnailProviding {
 
 /// Holds the PhotoKit request id so the cancellation handler can cancel it.
 private final class RequestBox: Sendable {
-    private let state = Mutex<PHImageRequestID?>(nil)
-    private let cancelled = Mutex(false)
+    private struct State {
+        var requestID: PHImageRequestID?
+        var isCancelled = false
+    }
+
+    private let state = Mutex(State(requestID: nil))
 
     func set(_ id: PHImageRequestID) {
-        let shouldCancel = cancelled.withLock { $0 }
+        let shouldCancel = state.withLock { state in
+            state.requestID = id
+            return state.isCancelled
+        }
         if shouldCancel { PHImageManager.default().cancelImageRequest(id) }
-        state.withLock { $0 = id }
     }
 
     func cancel() {
-        cancelled.withLock { $0 = true }
-        if let id = state.withLock({ $0 }) { PHImageManager.default().cancelImageRequest(id) }
+        let id = state.withLock { state -> PHImageRequestID? in
+            state.isCancelled = true
+            return state.requestID
+        }
+        if let id { PHImageManager.default().cancelImageRequest(id) }
+    }
+}
+
+/// Prevents accidental multiple continuation resumes if PhotoKit delivers overlapping terminal
+/// callbacks (for example, cancellation racing with a completed image result).
+private final class CompletionBox: Sendable {
+    private let isFinished = Mutex(false)
+
+    func finish() -> Bool {
+        isFinished.withLock { finished in
+            guard !finished else { return false }
+            finished = true
+            return true
+        }
     }
 }

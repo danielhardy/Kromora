@@ -25,4 +25,23 @@ final class PhotosThumbnailLoaderTests: XCTestCase {
         let unavailable = PhotosThumbnailLoader(provider: Provider { _ in throw PhotosThumbnailFailure.assetUnavailable })
         guard case .failed(.assetUnavailable) = await unavailable.load("a") else { return XCTFail("expected unavailable") }
     }
+
+    @MainActor
+    func testModelExposesLoadingLoadedAndFailedStates() async {
+        let image = NSImage(size: NSSize(width: 4, height: 4))
+        let loaded = PhotosThumbnailModel(
+            loader: PhotosThumbnailLoader(provider: Provider { _ in image })
+        )
+        guard case .loading = loaded.state else { return XCTFail("expected loading") }
+        await loaded.load("a")
+        guard case .loaded(let loadedImage) = loaded.state else { return XCTFail("expected loaded") }
+        XCTAssertEqual(loadedImage.size, image.size)
+
+        let failed = PhotosThumbnailModel(
+            loader: PhotosThumbnailLoader(provider: Provider { _ in throw PhotosThumbnailFailure.assetUnavailable })
+        )
+        guard case .loading = failed.state else { return XCTFail("expected loading") }
+        await failed.load("a")
+        guard case .failed(.assetUnavailable) = failed.state else { return XCTFail("expected failed") }
+    }
 }

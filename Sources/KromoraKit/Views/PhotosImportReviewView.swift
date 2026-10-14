@@ -118,14 +118,19 @@ struct PhotosImportReviewView: View {
 
 private struct PhotosReviewThumbnail: View {
     let localIdentifier: String?
-    @State private var state = PhotosThumbnailState.loading
+    @State private var model: PhotosThumbnailModel
     @State private var attempt = 0
 
-    private let loader = PhotosThumbnailLoader(provider: PhotoKitThumbnailProvider())
+    init(localIdentifier: String?) {
+        self.localIdentifier = localIdentifier
+        _model = State(initialValue: PhotosThumbnailModel(
+            loader: PhotosThumbnailLoader(provider: PhotoKitThumbnailProvider())
+        ))
+    }
 
     var body: some View {
         Group {
-            switch state {
+            switch model.state {
             case .loaded(let image):
                 Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
             case .loading:
@@ -141,10 +146,7 @@ private struct PhotosReviewThumbnail: View {
         .frame(width: 128, height: 96)
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .task(id: "\(localIdentifier ?? "")#\(attempt)") {
-            state = .loading
-            let result = await loader.load(localIdentifier)
-            if case .failed(.cancelled) = result { return }
-            state = result
+            await model.load(localIdentifier)
         }
     }
 
