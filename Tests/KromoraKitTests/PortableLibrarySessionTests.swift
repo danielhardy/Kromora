@@ -711,6 +711,66 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         await session.shutdown()
     }
 
+    /// A session over a package holding one imported PNG, opened without a scheduler so the
+    /// mutation runs inline and the lease check is the only thing that can fail it.
+    private func makeSessionWithOneAsset(named name: String) throws
+        -> (session: PortableLibrarySession, assetID: PortablePhotoAssetID, packageURL: URL)
+    {
+        let packageURL = tempDirectory.appendingPathComponent("\(name).kromoralibrary")
+        let package = try PortableLibraryPackage.create(at: packageURL)
+        let source = try Fixtures.writeGradientPNG(
+            width: 24, height: 16, named: "\(name).png", in: tempDirectory
+        )
+        let lease = try PortablePackageLease.acquire(at: packageURL)
+        let imported = try package.importSources([.init(url: source)], lease: lease)
+        try lease.release()
+        let asset = try XCTUnwrap(imported.imported.first)
+        let session = try PortableLibrarySession(at: packageURL, scheduler: nil)
+        return (session, asset.assetID, packageURL)
+    }
+
+    func testRemovalRenewsLeaseAtTheWriteAndSucceeds() async throws {
+        let (session, assetID, packageURL) = try makeSessionWithOneAsset(named: "RemoveOK")
+        let removal = try await session.removeFromLibraryOffMain(assetID)
+        XCTAssertEqual(removal.assetID, assetID)
+        let reopened = try PortableLibraryPackage.open(at: packageURL)
+        XCTAssertThrowsError(try reopened.readAssetRecord(for: assetID))
+        await session.shutdown()
+    }
+
+    func testRemovalWithLostLeaseFailsAndLeavesTheAssetInTheLibrary() async throws {
+        let (session, assetID, packageURL) = try makeSessionWithOneAsset(named: "RemoveLost")
+        try FileManager.default.removeItem(at: packageURL.appendingPathComponent("manifest.lock"))
+        do {
+            _ = try await session.removeFromLibraryOffMain(assetID)
+            XCTFail("a lost lease must not report a successful removal")
+        } catch {
+            XCTAssertEqual(error as? PortablePackageLeaseError, .lostDuringSession)
+        }
+        XCTAssertNoThrow(try PortableLibraryPackage.open(at: packageURL).readAssetRecord(for: assetID))
+        do {
+            _ = try await session.removeFromLibraryOffMain(assetID)
+            XCTFail("the session stays read-only after the loss")
+        } catch {
+            XCTAssertEqual(error as? PortablePackageLeaseError, .lostDuringSession)
+        }
+        await session.shutdown()
+    }
+
+    func testVirtualCopyWithLostLeaseFailsWithoutCreatingACopy() async throws {
+        let (session, assetID, packageURL) = try makeSessionWithOneAsset(named: "CopyLost")
+        let before = session.assetCount
+        try FileManager.default.removeItem(at: packageURL.appendingPathComponent("manifest.lock"))
+        do {
+            _ = try await session.createVirtualCopy(of: assetID)
+            XCTFail("a lost lease must not report a successful copy")
+        } catch {
+            XCTAssertEqual(error as? PortablePackageLeaseError, .lostDuringSession)
+        }
+        XCTAssertEqual(session.assetCount, before)
+        await session.shutdown()
+    }
+
     func testShutdownWaitsForHeartbeatBeforeReleasingLease() async throws {
         let packageURL = tempDirectory.appendingPathComponent("ShutdownHeartbeat.kromoralibrary")
         let scheduler = ImageWorkScheduler()

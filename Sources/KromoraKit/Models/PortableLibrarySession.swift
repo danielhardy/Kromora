@@ -767,6 +767,20 @@ final class PortableLibrarySession {
         }
     }
 
+    /// Main-actor preflight that reads only in-memory state. The worker that performs the
+    /// mutation renews and verifies the lease itself (`renewLeaseForWrite`).
+    private func ensureWritableState() throws {
+        guard !isShuttingDown else { throw PortablePackageLeaseError.notOwner }
+        guard !lostDuringSession else { throw PortablePackageLeaseError.lostDuringSession }
+    }
+
+    /// Renews the lease on the calling (worker) thread immediately before a mutation.
+    nonisolated private static func renewLeaseForWrite(
+        _ lease: PortablePackageLease, now: Date
+    ) throws {
+        do { try lease.renew(now: now) } catch { throw PortablePackageLeaseError.lostDuringSession }
+    }
+
     private func ensureLeaseError(_ error: Error) -> Error {
         if error is PortablePackageLeaseError { return PortablePackageLeaseError.lostDuringSession }
         return error
@@ -1259,10 +1273,27 @@ final class PortableLibrarySession {
     /// for a session without a scheduler); only the incremental index update runs here. The
     /// caller persists the copied edit document under the returned independent identity.
     func createVirtualCopy(of sourceID: PortablePhotoAssetID) async throws -> VirtualCopyResult {
-        try ensureWritableLease()
+        try ensureWritableState()
         let package = self.package
         let lease = self.lease
         let now = clock.now
+        let result: VirtualCopyResult
+        do {
+            result = try await writeVirtualCopyOffMain(of: sourceID, package: package, lease: lease, now: now)
+        } catch {
+            if error is PortablePackageLeaseError { lostDuringSession = true }
+            throw error
+        }
+        if !isShuttingDown { _ = try applyIndexDelta(result.indexDelta) }
+        return result
+    }
+
+    private func writeVirtualCopyOffMain(
+        of sourceID: PortablePhotoAssetID,
+        package: PortableLibraryPackage,
+        lease: PortablePackageLease,
+        now: @escaping @Sendable () -> Date
+    ) async throws -> VirtualCopyResult {
         let result: VirtualCopyResult
         if let scheduler {
             let outcome = VirtualCopyOutcome()
@@ -1291,7 +1322,6 @@ final class PortableLibrarySession {
         } else {
             result = try Self.writeVirtualCopy(of: sourceID, package: package, lease: lease, now: now)
         }
-        if !isShuttingDown { _ = try applyIndexDelta(result.indexDelta) }
         return result
     }
 
@@ -1302,6 +1332,7 @@ final class PortableLibrarySession {
         now: @escaping @Sendable () -> Date
     ) throws -> VirtualCopyResult {
         do {
+            try renewLeaseForWrite(lease, now: now())
             let sourceRecord = try package.readAssetRecord(for: sourceID)
             let sourceURL = try package.embeddedSourceURL(for: sourceRecord)
             // Keep the extension at the end. "IMG_1370.DNG — Copy" has no path extension, so the
@@ -1753,7 +1784,7 @@ final class PortableLibrarySession {
     func removeFromLibraryOffMain(_ assetID: PortablePhotoAssetID) async throws
         -> PortablePackageRemovalResult
     {
-        try ensureWritableLease()
+        try ensureWritableState()
         let package = self.package
         let lease = self.lease
         let now = clock.now
@@ -1795,7 +1826,9 @@ final class PortableLibrarySession {
             if !isShuttingDown { _ = try applyIndexDelta(.init(removals: [assetID])) }
             throw PortablePackageTrashError.alreadyRemoved(removedID)
         case .failure(let error):
-            throw ensureLeaseError(error)
+            let mapped = ensureLeaseError(error)
+            if mapped is PortablePackageLeaseError { lostDuringSession = true }
+            throw mapped
         }
     }
 
@@ -1805,7 +1838,8 @@ final class PortableLibrarySession {
         lease: PortablePackageLease,
         now: Date
     ) throws -> PortablePackageRemovalResult {
-        try lease.withWriterMutationLock {
+        try renewLeaseForWrite(lease, now: now)
+        return try lease.withWriterMutationLock {
             try package.removeFromLibrary(assetID, lease: lease, now: now)
         }
     }
