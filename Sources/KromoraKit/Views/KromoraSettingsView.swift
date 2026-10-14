@@ -17,7 +17,7 @@ public struct KromoraSettingsView: View {
         editDatabaseURL: URL?,
         fileDialog: any FileDialogProviding = AppKitFileDialog(),
         workspace: any WorkspaceRevealing = AppKitWorkspaceRevealer(),
-        releaseLibrary: @escaping @MainActor () async -> Bool = { true }
+        releaseLibrary: @escaping @MainActor () async -> LibraryReleaseOutcome = { .released }
     ) {
         _settings = Bindable(wrappedValue: settings)
         self.editDatabaseFileURL = editDatabaseURL

@@ -9,6 +9,17 @@ protocol AppRelaunching {
     func relaunch() async throws
 }
 
+/// How an attempt to close the open library for a relaunch ended.
+public enum LibraryReleaseOutcome: Equatable, Sendable {
+    /// Everything was flushed and the package lease is released; a replacement may start.
+    case released
+    /// The user declined, or canceled after a failed flush. Nothing changed and the app keeps running.
+    case declined
+    /// A flush failed and the user chose Quit Without Saving. Edits were discarded and the library is
+    /// closed, but the failed flush never authorizes a replacement process.
+    case releasedWithoutSaving
+}
+
 struct AppKitRelauncher: AppRelaunching {
     func relaunch() async throws {
         let configuration = NSWorkspace.OpenConfiguration()
@@ -37,16 +48,16 @@ final class ActiveLibraryChooser {
     @ObservationIgnored private let fileDialog: any FileDialogProviding
     @ObservationIgnored private let sheets: any SheetPresenting
     @ObservationIgnored private let relauncher: any AppRelaunching
-    /// Flushes pending edits and culling state and releases the open package lease. Returns `false`
-    /// when the user cancels or declines after a failed flush, in which case nothing is relaunched.
-    @ObservationIgnored private let releaseLibrary: @MainActor () async -> Bool
+    /// Flushes pending edits and culling state and releases the open package lease. Only `.released`
+    /// permits a relaunch.
+    @ObservationIgnored private let releaseLibrary: @MainActor () async -> LibraryReleaseOutcome
 
     init(
         selection: ActiveLibrarySelection,
         fileDialog: any FileDialogProviding,
         sheets: any SheetPresenting = AppKitSheetPresenter(),
         relauncher: any AppRelaunching = AppKitRelauncher(),
-        releaseLibrary: @escaping @MainActor () async -> Bool = { true }
+        releaseLibrary: @escaping @MainActor () async -> LibraryReleaseOutcome = { .released }
     ) {
         self.selection = selection
         self.fileDialog = fileDialog
@@ -104,8 +115,15 @@ final class ActiveLibraryChooser {
         )
         guard relaunch else { return }
         // The replacement must not start while this process still holds the writer lease.
-        guard await releaseLibrary() else {
+        switch await releaseLibrary() {
+        case .released:
+            break
+        case .declined:
             statusMessage = "Relaunch canceled. The library choice applies the next time Kromora starts."
+            return
+        case .releasedWithoutSaving:
+            statusMessage = "Kromora did not relaunch because unsaved edits were discarded and the library is closed. "
+                + "Quit and reopen Kromora to use the new library."
             return
         }
         do {

@@ -112,31 +112,36 @@ public final class KromoraAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Confirms, flushes pending edits and culling state, and shuts the model down so the package
-    /// lease is released, for a relaunch. Returns `false`, leaving the app running, when the user
-    /// declines or cancels. After `true` the model is closed and the next quit proceeds directly.
-    func flushAndReleaseLibrary() async -> Bool {
-        if libraryReleased { return true }
-        guard !terminationFlushInProgress else { return false }
+    /// lease is released, for a relaunch. Returns `.declined`, leaving the app running, when the user
+    /// declines or cancels. Quit Without Saving after a failed flush closes the library but returns
+    /// `.releasedWithoutSaving`, which never authorizes a replacement. After either release the model
+    /// is closed and the next quit proceeds directly.
+    func flushAndReleaseLibrary() async -> LibraryReleaseOutcome {
+        if libraryReleased { return .released }
+        guard !terminationFlushInProgress else { return .declined }
         guard let viewModel else {
             libraryReleased = true
-            return true
+            return .released
         }
         terminationFlushInProgress = true
         defer { terminationFlushInProgress = false }
-        guard await viewModel.terminationGuard.shouldQuit(presenter: quitConfirmation) else { return false }
+        guard await viewModel.terminationGuard.shouldQuit(presenter: quitConfirmation) else { return .declined }
+        var outcome = LibraryReleaseOutcome.released
         while true {
             let result = await viewModel.flushPendingWrites()
             if case .success = result { break }
             switch askSaveFailure(for: result) {
             case .retry: continue
-            case .discard: await viewModel.discardPendingWrites()
-            case .cancel: return false
+            case .discard:
+                await viewModel.discardPendingWrites()
+                outcome = .releasedWithoutSaving
+            case .cancel: return .declined
             }
             break
         }
         await viewModel.shutdown()
         libraryReleased = true
-        return true
+        return outcome
     }
 
     private func startTerminationFlush(_ sender: NSApplication, viewModel: AppViewModel) {

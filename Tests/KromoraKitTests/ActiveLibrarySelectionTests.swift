@@ -141,8 +141,11 @@ final class ActiveLibrarySelectionTests: XCTestCase {
         var error: (any Error)?
         /// Records what happened before the launch was requested.
         var events: EventLog?
+        /// Runs at the moment the launch is requested.
+        var onLaunch: (@MainActor () -> Void)?
         func relaunch() async throws {
             events?.append("launch")
+            onLaunch?()
             count += 1
             if let error { throw error }
         }
@@ -202,9 +205,52 @@ final class ActiveLibrarySelectionTests: XCTestCase {
         let relauncher = SpyRelauncher(); relauncher.events = log
         let chooser = ActiveLibraryChooser(
             selection: selection, fileDialog: dialog, sheets: sheets, relauncher: relauncher,
-            releaseLibrary: { log.append("release"); return true })
+            releaseLibrary: { log.append("release"); return .released })
         await chooser.choose()
         XCTAssertEqual(log.values, ["release", "launch"])
+    }
+
+    func testLaunchRequestFindsPackageLeaseReleased() async throws {
+        let openURL = directory.appendingPathComponent("Open.kromoralibrary")
+        let session = try PortableLibrarySession(at: openURL)
+        let chosen = try await makePackage("Chosen.kromoralibrary")
+        let dialog = StubDialog(); dialog.folder = chosen
+        let sheets = FakeSheets(); sheets.confirmResult = true
+        var leaseHeldAtLaunch: Bool?
+        let relauncher = SpyRelauncher()
+        relauncher.onLaunch = {
+            // A replacement process opening the old package must be able to take the writer lease.
+            do {
+                let next = try PortableLibrarySession(at: openURL)
+                try next.lease.release()
+                leaseHeldAtLaunch = false
+            } catch {
+                leaseHeldAtLaunch = true
+            }
+        }
+        let chooser = ActiveLibraryChooser(
+            selection: selection, fileDialog: dialog, sheets: sheets, relauncher: relauncher,
+            releaseLibrary: {
+                try? session.lease.release()
+                return .released
+            })
+        await chooser.choose()
+        XCTAssertEqual(relauncher.count, 1)
+        XCTAssertEqual(leaseHeldAtLaunch, false)
+    }
+
+    func testReleaseWithoutSavingDoesNotLaunch() async throws {
+        let url = try await makePackage("Chosen.kromoralibrary")
+        let dialog = StubDialog(); dialog.folder = url
+        let sheets = FakeSheets(); sheets.confirmResult = true
+        let relauncher = SpyRelauncher()
+        let chooser = ActiveLibraryChooser(
+            selection: selection, fileDialog: dialog, sheets: sheets, relauncher: relauncher,
+            releaseLibrary: { .releasedWithoutSaving })
+        await chooser.choose()
+        XCTAssertEqual(relauncher.count, 0)
+        XCTAssertFalse(chooser.statusMessage.isEmpty)
+        XCTAssertEqual(chooser.errorMessage, "")
     }
 
     func testDeclinedReleaseDoesNotLaunch() async throws {
@@ -214,7 +260,7 @@ final class ActiveLibrarySelectionTests: XCTestCase {
         let relauncher = SpyRelauncher()
         let chooser = ActiveLibraryChooser(
             selection: selection, fileDialog: dialog, sheets: sheets, relauncher: relauncher,
-            releaseLibrary: { false })
+            releaseLibrary: { .declined })
         await chooser.choose()
         XCTAssertEqual(relauncher.count, 0)
         XCTAssertFalse(chooser.statusMessage.isEmpty)
@@ -228,7 +274,7 @@ final class ActiveLibrarySelectionTests: XCTestCase {
         let relauncher = SpyRelauncher(); relauncher.error = LaunchFailure()
         let chooser = ActiveLibraryChooser(
             selection: selection, fileDialog: dialog, sheets: sheets, relauncher: relauncher,
-            releaseLibrary: { true })
+            releaseLibrary: { .released })
         await chooser.choose()
         XCTAssertTrue(chooser.errorMessage.contains("no launch."))
     }
@@ -242,7 +288,7 @@ final class ActiveLibrarySelectionTests: XCTestCase {
         var released = 0
         let chooser = ActiveLibraryChooser(
             selection: selection, fileDialog: dialog, sheets: sheets, relauncher: relauncher,
-            releaseLibrary: { released += 1; return true })
+            releaseLibrary: { released += 1; return .released })
         await chooser.choose()
         XCTAssertEqual(sheets.confirmCalls, 0)
         XCTAssertEqual(relauncher.count, 0)
