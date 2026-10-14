@@ -16,14 +16,16 @@ labels:
   - design
   - performance
 created: 2026-10-12T21:56:49.211Z
-updated: 2026-10-14T01:26:18.106Z
+updated: 2026-10-14T13:12:55.058Z
 blockers:
   - id: evt_mv6x4j4h_ul6zvn
     type: human
     reason: Remaining acceptance needs a live, in-motion visual review of the 'Darkroom Development' treatment (5a090b2c) across bright/dark/portrait/landscape/busy photos, canvas sizes and zoom. The ticket's prior feedback was 'underwhelming', and I cannot see motion in a non-interactive run.
     action: Run 'swift run', request a Smart Mask on several photos, and record accept / what to change. Say whether to build the optional extras (cursor-as-safelight, haptic at edge lock-in, sound, longer-wait choreography). A supervised GPU-contention measurement per CLAUDE.md is also needed if near-zero interference is to be claimed.
     created_at: 2026-10-13T16:51:38.321Z
-order: n
+    resolved_at: 2026-10-14T12:23:35.454Z
+    resolved_by: web
+order: zv
 board: product
 blocked_reason: Remaining acceptance needs a live, in-motion visual review of the 'Darkroom Development' treatment (5a090b2c) across bright/dark/portrait/landscape/busy photos, canvas sizes and zoom. The ticket's prior feedback was 'underwhelming', and I cannot see motion in a non-interactive run.
 blocked_action: Run 'swift run', request a Smart Mask on several photos, and record accept / what to change. Say whether to build the optional extras (cursor-as-safelight, haptic at edge lock-in, sound, longer-wait choreography). A supervised GPU-contention measurement per CLAUDE.md is also needed if near-zero interference is to be claimed.
@@ -60,6 +62,13 @@ context:
     - scripts/app-store-build.sh
     - git diff --check
     - dg validate
+footprint:
+  source: observed
+  paths: []
+  observed:
+    paths: []
+    captured_at: 2026-10-14T13:12:54.371Z
+    unavailable_reason: "missing_commits: no implementation commits are recorded"
 ---
 
 ## Objective
@@ -246,5 +255,10 @@ Not built yet (ideas from the brief): cursor-as-safelight interaction, trackpad 
 ### Comment - human
 
 The current implementation works well but is missing two critical features. 
-1. When the animation is resolved the mask should alwasy be shown (even if the masks setting is hidden (o key)) -- this is critical in showign the results so it should switch the masks back on
+1. When the animation is resolved the mask should alwasy be shown (even if the masks setting is hidden (o key) turn it back on) -- this is critical in showing the results so it should switch the masks back on.
 2. When it is in the "discovering" phase, it would be more ideal if the entire image had a similar animation as it does right before it resolves. It would feel like a more natural transition from "discovering people" to "found someone" or discovering background to found background
+
+
+### Comment — claude @ 2026-10-14T13:12:53.860Z
+
+Addressed the two human-requested features in cfcd7c7e. (1) On resolve, both createSmartMask and addSmartMaskComponent now set interactionState.showOverlay = true, so the returned mask is shown even if overlays were hidden (new test testResolvedSmartMaskTurnsHiddenOverlayBackOn). (2) Waiting phase now carries the reveal's vocabulary across the whole frame: slow uniform waves of silver-grain nucleation and sparkle (a field, not a region; no coverage or progress implied) fading into the reveal. MaskDiscovery.metal rewritten and metallib rebuilt (--check passes). Verified: strict swift build passes; 71 focused tests pass; git diff --check clean. NOT run: app-store-build.sh, live in-motion visual review, GPU contention measurement. Visual acceptance remains the user's call.

@@ -2,9 +2,51 @@
 id: KRMA-973
 title: "Observation step 2: Convert view-local state objects to @Observable"
 type: task
-status: backlog
+status: done
 priority: medium
 human_review_required: false
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: All seven view-local state objects are @MainActor @Observable final classes with no ObservableObject or @Published.
+      result: pass
+      notes: Source scans found all seven declarations in the requested form; swift build succeeded.
+    - criterion: No @ObservedObject or @StateObject remains for the seven migrated types.
+      result: pass
+      notes: The issue's wrapper scan returned no matches.
+    - criterion: InspectorState.isPresented still triggers the histogram gate synchronously after assignment.
+      result: pass
+      notes: isPresented retains its didSet callback, wired directly to refreshHistogramGate(); the callback runs synchronously after assignment.
+    - criterion: KRMA-972 observation probes show mask and retouch mutations do not invalidate InfoInspectorView or the Light, Color, and Effects mirrors, with affected after-values recorded.
+      result: pass
+      notes: The serial lane printed zero invalidations for all 16 targeted InfoInspector and Light/Color/Effects interaction rows; the plan after column records those zeros. StatusBar reads only the mask resolution properties displayed by its activity child.
+    - criterion: ObservationInvalidationTests scans the seven migrated types to prevent ObservableObject regressions.
+      result: pass
+      notes: The source-scan test includes all seven type names and passed in the fast lane.
+    - criterion: Masking, retouch, preview-surface, and analysis-panel tests pass, apart from the InspectorState objectWillChange rewrite.
+      result: pass
+      notes: The serial lane passed 549/549 tests, including the affected suites.
+    - criterion: AppViewModel.swift is no longer than before.
+      result: pass
+      notes: Both the parent commit and current file are 5,044 lines.
+  checks_run:
+    - swift build — exit 0.
+    - scripts/ci-tests.sh serial — exit 0; 549 tests passed, including affected suites and the observation baseline.
+    - scripts/ci-tests.sh fast — three full runs; all exited 1 due only to intermittent unrelated parallel-test failures. StoredEditAdoptionTests.testShutdownWaitsForPlaceholderMaterializationAndSuppressesItsResult failed in runs 1 and 2, then passed in run 3; DeriveCoordinatorTests.testStaleSuccessAfterDismissDoesNotPublish failed in runs 2 and 3.
+    - swift test --no-parallel --filter StoredEditAdoptionTests/testShutdownWaitsForPlaceholderMaterializationAndSuppressesItsResult — exit 0; 1 test passed.
+    - swift test --no-parallel --filter DeriveCoordinatorTests/testStaleSuccessAfterDismissDoesNotPublish — exit 0; 1 test passed.
+    - Migrated declaration and wrapper scans — passed.
+    - AppViewModel.swift line count comparison — parent 5,044; current 5,044.
+    - git show --check HEAD — exit 0.
+  findings:
+    - "Non-blocking parallel-lane flake: StoredEditAdoptionTests.testShutdownWaitsForPlaceholderMaterializationAndSuppressesItsResult failed twice at the sourcePreparationCount assertion but passed in isolation and on the third full run. Created KRMA-992 (backlog, verification label, parent KRMA-973) to investigate test determinism."
+    - "Non-blocking known scratch-directory collision: DeriveCoordinatorTests.testStaleSuccessAfterDismissDoesNotPublish failed twice under parallel execution and passed in isolation. Existing backlog ticket KRMA-968 tracks it; no duplicate was opened."
+  fixes: []
+  verification_commits: []
+  actor: codex
+  resolved_model: gpt-6-luna
+  completed_at: 2026-10-14T03:03:29.353Z
+  session: 01MV7IEJ52IFAWL2C5
 creation_provenance:
   runner: claude
   model: sonnet
@@ -14,12 +56,19 @@ labels:
   - should-fix
   - swiftui
 created: 2026-10-13T19:36:52.020Z
-updated: 2026-10-13T19:36:52.956Z
+updated: 2026-10-14T03:03:29.356Z
 depends_on:
   - KRMA-972
 blockers: []
-order: zzzzq
+order: a0
 board: product
+footprint:
+  source: observed
+  paths: []
+  observed:
+    paths: []
+    captured_at: 2026-10-14T02:47:06.231Z
+    unavailable_reason: "missing_commits: no implementation commits are recorded"
 ---
 
 ## Objective
@@ -79,3 +128,34 @@ scripts/ci-tests.sh serial
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-10-14T03:03:29.353Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] All seven view-local state objects are @MainActor @Observable final classes with no ObservableObject or @Published. (pass) — Source scans found all seven declarations in the requested form; swift build succeeded.
+- [x] No @ObservedObject or @StateObject remains for the seven migrated types. (pass) — The issue's wrapper scan returned no matches.
+- [x] InspectorState.isPresented still triggers the histogram gate synchronously after assignment. (pass) — isPresented retains its didSet callback, wired directly to refreshHistogramGate(); the callback runs synchronously after assignment.
+- [x] KRMA-972 observation probes show mask and retouch mutations do not invalidate InfoInspectorView or the Light, Color, and Effects mirrors, with affected after-values recorded. (pass) — The serial lane printed zero invalidations for all 16 targeted InfoInspector and Light/Color/Effects interaction rows; the plan after column records those zeros. StatusBar reads only the mask resolution properties displayed by its activity child.
+- [x] ObservationInvalidationTests scans the seven migrated types to prevent ObservableObject regressions. (pass) — The source-scan test includes all seven type names and passed in the fast lane.
+- [x] Masking, retouch, preview-surface, and analysis-panel tests pass, apart from the InspectorState objectWillChange rewrite. (pass) — The serial lane passed 549/549 tests, including the affected suites.
+- [x] AppViewModel.swift is no longer than before. (pass) — Both the parent commit and current file are 5,044 lines.
+Checks run:
+- swift build — exit 0.
+- scripts/ci-tests.sh serial — exit 0; 549 tests passed, including affected suites and the observation baseline.
+- scripts/ci-tests.sh fast — three full runs; all exited 1 due only to intermittent unrelated parallel-test failures. StoredEditAdoptionTests.testShutdownWaitsForPlaceholderMaterializationAndSuppressesItsResult failed in runs 1 and 2, then passed in run 3; DeriveCoordinatorTests.testStaleSuccessAfterDismissDoesNotPublish failed in runs 2 and 3.
+- swift test --no-parallel --filter StoredEditAdoptionTests/testShutdownWaitsForPlaceholderMaterializationAndSuppressesItsResult — exit 0; 1 test passed.
+- swift test --no-parallel --filter DeriveCoordinatorTests/testStaleSuccessAfterDismissDoesNotPublish — exit 0; 1 test passed.
+- Migrated declaration and wrapper scans — passed.
+- AppViewModel.swift line count comparison — parent 5,044; current 5,044.
+- git show --check HEAD — exit 0.
+Findings:
+- Non-blocking parallel-lane flake: StoredEditAdoptionTests.testShutdownWaitsForPlaceholderMaterializationAndSuppressesItsResult failed twice at the sourcePreparationCount assertion but passed in isolation and on the third full run. Created KRMA-992 (backlog, verification label, parent KRMA-973) to investigate test determinism.
+- Non-blocking known scratch-directory collision: DeriveCoordinatorTests.testStaleSuccessAfterDismissDoesNotPublish failed twice under parallel execution and passed in isolation. Existing backlog ticket KRMA-968 tracks it; no duplicate was opened.
+Fixes:
+- None
+Verification commits:
+- None
+Actor: codex
+Resolved model: gpt-6-luna
+Pickup session: 01MV7IEJ52IFAWL2C5
+Summary: Counterpoint verification passed: migration criteria and serial lane are green; parallel test flakes are recorded in KRMA-992 and KRMA-968.

@@ -2,9 +2,39 @@
 id: KRMA-977
 title: "Observation step 6: Extract InfoState (histogram and metadata)"
 type: task
-status: backlog
+status: done
 priority: medium
 human_review_required: false
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: InfoState.swift is @MainActor @Observable; AppViewModel owns let info, removes the four targeted @Published properties, and does not grow.
+      result: pass
+      notes: All four targeted declarations are absent. AppViewModel is 5,029 lines versus 5,044 at HEAD. The current aggregate @Published count is 28 because two unrelated declarations, virtualCopyMetadata and portableLibrary, were added in the broader shared-tree diff; the isolated ticket target of 26 does not account for those additions.
+    - criterion: InfoInspectorView, PreviewView, and MaskingWorkspace read viewModel.info.*; histogram gating, loading/error display, and source reset behavior are preserved.
+      result: pass
+      notes: The gate remains on AppViewModel, admission writes route into InfoState, and the source-empty reset still clears the histogram. Histogram and preview lifecycle tests passed.
+    - criterion: Histogram refresh re-evaluates the real InfoInspectorView once and does not re-evaluate StatusBar or the Light, Color, and Effects mirrors; update the baseline table.
+      result: pass
+      notes: Focused body probe reported InfoInspectorView=1, StatusBar=0, Light=0, Color=0, Effects=0, and PreviewView mirror=1. The histogram after-values are recorded in APP_VIEWMODEL_OBSERVATION_PLAN.md.
+    - criterion: Fast-lane Observation tracking fires when info.histogram is assigned and does not fire when statusMessage changes.
+      result: pass
+      notes: ObservationInvalidationTests.testInfoStateHistogramTracksIndependentlyOfStatusMessage passed in the final fast-lane run.
+  checks_run:
+    - swift build — passed, exit 0, no warnings
+    - scripts/ci-tests.sh fast — final run passed, exit 0; the first run had one unrelated StoredEditAdoptionTests.testShutdownWaitsForPlaceholderMaterializationAndSuppressesItsResult timing failure (expected 0, got 1); isolated rerun passed
+    - scripts/ci-tests.sh serial — passed, exit 0; includes HistogramTests and ObservationBodyBaselineTests
+    - swift test --no-parallel --filter ObservationBodyBaselineTests — passed, 6 tests; histogram body counts matched the updated baseline
+    - swift test --filter testShutdownWaitsForPlaceholderMaterializationAndSuppressesItsResult — passed, exit 0
+    - git diff --check — passed, exit 0
+    - Reviewed all InfoState readers/writers, reset paths, histogram admission routing, and scoped AppViewModel diff
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: codex
+  resolved_model: gpt-6-luna
+  completed_at: 2026-10-14T04:34:37.907Z
+  session: 01MV7LT6CEQV3W4FE9
 creation_provenance:
   runner: claude
   model: sonnet
@@ -14,12 +44,19 @@ labels:
   - should-fix
   - swiftui
 created: 2026-10-13T19:36:57.998Z
-updated: 2026-10-13T19:36:58.927Z
+updated: 2026-10-14T04:34:37.911Z
 depends_on:
   - KRMA-976
 blockers: []
-order: zzzzz
+order: a0
 board: product
+footprint:
+  source: observed
+  paths: []
+  observed:
+    paths: []
+    captured_at: 2026-10-14T04:22:30.982Z
+    unavailable_reason: "missing_commits: no implementation commits are recorded"
 ---
 
 ## Objective
@@ -66,3 +103,29 @@ Until step 9 the views still hold `@ObservedObject var viewModel`; reading `view
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-10-14T04:34:37.907Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] InfoState.swift is @MainActor @Observable; AppViewModel owns let info, removes the four targeted @Published properties, and does not grow. (pass) — All four targeted declarations are absent. AppViewModel is 5,029 lines versus 5,044 at HEAD. The current aggregate @Published count is 28 because two unrelated declarations, virtualCopyMetadata and portableLibrary, were added in the broader shared-tree diff; the isolated ticket target of 26 does not account for those additions.
+- [x] InfoInspectorView, PreviewView, and MaskingWorkspace read viewModel.info.*; histogram gating, loading/error display, and source reset behavior are preserved. (pass) — The gate remains on AppViewModel, admission writes route into InfoState, and the source-empty reset still clears the histogram. Histogram and preview lifecycle tests passed.
+- [x] Histogram refresh re-evaluates the real InfoInspectorView once and does not re-evaluate StatusBar or the Light, Color, and Effects mirrors; update the baseline table. (pass) — Focused body probe reported InfoInspectorView=1, StatusBar=0, Light=0, Color=0, Effects=0, and PreviewView mirror=1. The histogram after-values are recorded in APP_VIEWMODEL_OBSERVATION_PLAN.md.
+- [x] Fast-lane Observation tracking fires when info.histogram is assigned and does not fire when statusMessage changes. (pass) — ObservationInvalidationTests.testInfoStateHistogramTracksIndependentlyOfStatusMessage passed in the final fast-lane run.
+Checks run:
+- swift build — passed, exit 0, no warnings
+- scripts/ci-tests.sh fast — final run passed, exit 0; the first run had one unrelated StoredEditAdoptionTests.testShutdownWaitsForPlaceholderMaterializationAndSuppressesItsResult timing failure (expected 0, got 1); isolated rerun passed
+- scripts/ci-tests.sh serial — passed, exit 0; includes HistogramTests and ObservationBodyBaselineTests
+- swift test --no-parallel --filter ObservationBodyBaselineTests — passed, 6 tests; histogram body counts matched the updated baseline
+- swift test --filter testShutdownWaitsForPlaceholderMaterializationAndSuppressesItsResult — passed, exit 0
+- git diff --check — passed, exit 0
+- Reviewed all InfoState readers/writers, reset paths, histogram admission routing, and scoped AppViewModel diff
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: codex
+Resolved model: gpt-6-luna
+Pickup session: 01MV7LT6CEQV3W4FE9
+Summary: Verified InfoState extraction, view invalidation boundaries, and histogram lifecycle; build and final fast/serial lanes passed.

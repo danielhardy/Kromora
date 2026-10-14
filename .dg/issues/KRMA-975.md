@@ -2,9 +2,51 @@
 id: KRMA-975
 title: "Observation step 4: Convert KromoraSettings and LUTLibrary (builds on KRMA-908)"
 type: task
-status: backlog
+status: done
 priority: medium
 human_review_required: false
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: KromoraSettings and LUTLibrary are @MainActor @Observable with no @Published or ObservableObject declarations, and the existing public settings surface builds for the SwiftPM Kromora executable.
+      result: pass
+      notes: Both models compile in the SwiftPM launcher. Existing public properties remain public; the setter callback is module-internal.
+    - criterion: No Combine publisher consumer or settings AnyCancellable remains for KromoraSettings or LUTLibrary.
+      result: pass
+      notes: Publisher and AnyCancellable source scan is clean.
+    - criterion: Appearance mode applies synchronously, mask overlay appearance reaches interaction state immediately, and launch applies the persisted overlay value.
+      result: pass
+      notes: Immediate window appearance and mask interaction state assertions pass, including the seeded launch preference.
+    - criterion: Every UserDefaults-backed setting round-trips using injected preferences.
+      result: pass
+      notes: KromoraSettingsTests passed all 17 tests using isolated UserDefaults suites.
+    - criterion: showPhotoNames changes invalidate only readers, and the observation baseline after column records the settings result.
+      result: pass
+      notes: The serial probe reports zero reevaluations for StatusBar and Light/Color/Effects mirrors and zero for other non-readers; the positive-control reader reevaluates. The plan's after values are updated.
+    - criterion: Settings and library are absent from root forwarding; the low-frequency forwarding test no longer asserts them.
+      result: pass
+      notes: The current AppViewModel has no child forwarding loop, and the legacy forwarding test is absent; direct observation tests verify settings/library changes stay out of the root.
+    - criterion: AppViewModel.swift does not grow.
+      result: pass
+      notes: It is 5,044 lines both before and after.
+  checks_run:
+    - swift build — exit 0; KromoraKit and SwiftPM Kromora launcher built, including after verification fixes.
+    - scripts/ci-tests.sh fast — exit 0; 1,889 required fast tests.
+    - scripts/ci-tests.sh serial — exit 0; required serial lane passed, including body probes and appearance-controller tests.
+    - swift test --no-parallel --filter 'ObservationInvalidationTests|KromoraSettingsTests|KromoraWindowAppearanceControllerTests|ObservationBodyBaselineTests' — 49 tests passed, exit 0 after verification fixes.
+    - git diff --check on touched implementation and test files — exit 0.
+    - Publisher, root-forwarding, and public-callback visibility scans — clean.
+  findings:
+    - The appearance callback had been made public despite only being used inside KromoraKit; that unnecessarily expanded KromoraSettings API.
+    - LUT projection caches and their diagnostic counter were observable stored properties, so cache initialization could invalidate a view during its first projection read.
+  fixes:
+    - Made onAppearanceModeChange module-internal.
+    - Marked LUT projection caches and their test diagnostic counter @ObservationIgnored, and added a regression assertion that cache fill does not notify an observer.
+  verification_commits: []
+  actor: codex
+  resolved_model: gpt-6-luna
+  completed_at: 2026-10-14T03:39:21.337Z
+  session: 01MV7JXMMDUPISIGUV
 creation_provenance:
   runner: claude
   model: sonnet
@@ -14,13 +56,20 @@ labels:
   - should-fix
   - swiftui
 created: 2026-10-13T19:36:54.997Z
-updated: 2026-10-13T19:36:55.915Z
+updated: 2026-10-14T03:39:21.340Z
 depends_on:
   - KRMA-974
   - KRMA-908
 blockers: []
-order: zzzzx
+order: a0
 board: product
+footprint:
+  source: observed
+  paths: []
+  observed:
+    paths: []
+    captured_at: 2026-10-14T03:30:00.088Z
+    unavailable_reason: "missing_commits: no implementation commits are recorded"
 ---
 
 ## Objective
@@ -79,3 +128,33 @@ scripts/ci-tests.sh serial
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-10-14T03:39:21.337Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] KromoraSettings and LUTLibrary are @MainActor @Observable with no @Published or ObservableObject declarations, and the existing public settings surface builds for the SwiftPM Kromora executable. (pass) — Both models compile in the SwiftPM launcher. Existing public properties remain public; the setter callback is module-internal.
+- [x] No Combine publisher consumer or settings AnyCancellable remains for KromoraSettings or LUTLibrary. (pass) — Publisher and AnyCancellable source scan is clean.
+- [x] Appearance mode applies synchronously, mask overlay appearance reaches interaction state immediately, and launch applies the persisted overlay value. (pass) — Immediate window appearance and mask interaction state assertions pass, including the seeded launch preference.
+- [x] Every UserDefaults-backed setting round-trips using injected preferences. (pass) — KromoraSettingsTests passed all 17 tests using isolated UserDefaults suites.
+- [x] showPhotoNames changes invalidate only readers, and the observation baseline after column records the settings result. (pass) — The serial probe reports zero reevaluations for StatusBar and Light/Color/Effects mirrors and zero for other non-readers; the positive-control reader reevaluates. The plan's after values are updated.
+- [x] Settings and library are absent from root forwarding; the low-frequency forwarding test no longer asserts them. (pass) — The current AppViewModel has no child forwarding loop, and the legacy forwarding test is absent; direct observation tests verify settings/library changes stay out of the root.
+- [x] AppViewModel.swift does not grow. (pass) — It is 5,044 lines both before and after.
+Checks run:
+- swift build — exit 0; KromoraKit and SwiftPM Kromora launcher built, including after verification fixes.
+- scripts/ci-tests.sh fast — exit 0; 1,889 required fast tests.
+- scripts/ci-tests.sh serial — exit 0; required serial lane passed, including body probes and appearance-controller tests.
+- swift test --no-parallel --filter 'ObservationInvalidationTests|KromoraSettingsTests|KromoraWindowAppearanceControllerTests|ObservationBodyBaselineTests' — 49 tests passed, exit 0 after verification fixes.
+- git diff --check on touched implementation and test files — exit 0.
+- Publisher, root-forwarding, and public-callback visibility scans — clean.
+Findings:
+- The appearance callback had been made public despite only being used inside KromoraKit; that unnecessarily expanded KromoraSettings API.
+- LUT projection caches and their diagnostic counter were observable stored properties, so cache initialization could invalidate a view during its first projection read.
+Fixes:
+- Made onAppearanceModeChange module-internal.
+- Marked LUT projection caches and their test diagnostic counter @ObservationIgnored, and added a regression assertion that cache fill does not notify an observer.
+Verification commits:
+- None
+Actor: codex
+Resolved model: gpt-6-luna
+Pickup session: 01MV7JXMMDUPISIGUV
+Summary: Independent verification passed; localized callback visibility and LUT cache observation fixes verified.

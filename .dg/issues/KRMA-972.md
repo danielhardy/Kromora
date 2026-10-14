@@ -2,9 +2,39 @@
 id: KRMA-972
 title: "Observation step 1: Add re-evaluation probe and baseline"
 type: task
-status: backlog
+status: done
 priority: medium
 human_review_required: false
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: Support/BodyProbe.swift provides a counter, mirror-view helper, and window-independent hosting helper without @unchecked Sendable, nonisolated(unsafe), or @preconcurrency.
+      result: pass
+    - criterion: ObservationBodyBaselineTests is assigned to the serial lane; serial runs it and fast excludes it.
+      result: pass
+      notes: Lane audit showed 548 serial and 1,886 fast tests; the baseline test printed its 24 measurements in serial.
+    - criterion: The test covers 24 view/property cells and records body-count deltas.
+      result: pass
+      notes: All 24 printed deltas matched the plan table.
+    - criterion: The plan has a baseline table with real/mirror labels and a blank after column; counts are logical evaluations.
+      result: pass
+    - criterion: Assertions cover repeatability and the two positive controls without asserting unrelated-view invalidations.
+      result: pass
+    - criterion: git diff --stat -- Sources is empty.
+      result: pass
+  checks_run:
+    - swift build — exit 0
+    - scripts/ci-tests.sh serial — exit 0; 548 tests passed, 0 failures; baseline measurements matched the table
+    - scripts/ci-tests.sh fast — exit 0; 1,886 scheduled tests completed
+    - git diff --stat -- Sources — empty
+    - git diff --check -- docs/APP_VIEWMODEL_OBSERVATION_PLAN.md scripts/ci-tests.sh — exit 0
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: codex
+  resolved_model: gpt-6-luna
+  completed_at: 2026-10-14T02:35:12.282Z
+  session: 01MV7HPGFD87OC0JOA
 creation_provenance:
   runner: claude
   model: sonnet
@@ -14,10 +44,17 @@ labels:
   - should-fix
   - swiftui
 created: 2026-10-13T19:36:51.090Z
-updated: 2026-10-13T19:36:51.090Z
+updated: 2026-10-14T02:35:12.285Z
 blockers: []
-order: zzzzh
+order: a0
 board: product
+footprint:
+  source: observed
+  paths: []
+  observed:
+    paths: []
+    captured_at: 2026-10-14T02:27:39.692Z
+    unavailable_reason: "missing_commits: no implementation commits are recorded"
 ---
 
 ## Objective
@@ -72,6 +109,36 @@ scripts/ci-tests.sh fast
 
 Adding `RenderDiagnostics` hooks to Light/Color/Effects/Preview (that edits `Sources/`). If mirrors prove too weak, raise it as a decision in the ticket comment rather than changing production views here.
 
+### Comment — claude @ 2026-10-14T02:27:37.503Z
+
+Added Support/BodyProbe.swift, ObservationBodyBaselineTests (serial lane), and the Baseline table in the plan doc. Baseline: every subject re-evaluates once for document/statusMessage/histogram; showPhotoNames only reaches the PreviewView mirror (it observes settings). Serial lane: 548 tests pass; fast lane passes. No Sources changes.
+
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-10-14T02:35:12.282Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Support/BodyProbe.swift provides a counter, mirror-view helper, and window-independent hosting helper without @unchecked Sendable, nonisolated(unsafe), or @preconcurrency. (pass)
+- [x] ObservationBodyBaselineTests is assigned to the serial lane; serial runs it and fast excludes it. (pass) — Lane audit showed 548 serial and 1,886 fast tests; the baseline test printed its 24 measurements in serial.
+- [x] The test covers 24 view/property cells and records body-count deltas. (pass) — All 24 printed deltas matched the plan table.
+- [x] The plan has a baseline table with real/mirror labels and a blank after column; counts are logical evaluations. (pass)
+- [x] Assertions cover repeatability and the two positive controls without asserting unrelated-view invalidations. (pass)
+- [x] git diff --stat -- Sources is empty. (pass)
+Checks run:
+- swift build — exit 0
+- scripts/ci-tests.sh serial — exit 0; 548 tests passed, 0 failures; baseline measurements matched the table
+- scripts/ci-tests.sh fast — exit 0; 1,886 scheduled tests completed
+- git diff --stat -- Sources — empty
+- git diff --check -- docs/APP_VIEWMODEL_OBSERVATION_PLAN.md scripts/ci-tests.sh — exit 0
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: codex
+Resolved model: gpt-6-luna
+Pickup session: 01MV7HPGFD87OC0JOA
+Summary: Independent verification passed; required build and CI lanes are green, and the 24-cell baseline matches the plan.
