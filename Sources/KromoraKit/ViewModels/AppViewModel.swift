@@ -4226,8 +4226,9 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         async let frameStores: Void = flushPendingFrameStores()
         let result = await edits
         await frameStores
-        await portableLibrary?.flushPendingLibraryState()
-        return result
+        let cullingResult = await portableLibrary?.flushPendingLibraryState() ?? .success
+        // A culling write that is still dirty is a failed save, even when every edit committed.
+        return result.succeeded ? cullingResult : result
     }
 
     /// Flush both rebuildable frame stores concurrently. Their own write failures are best effort

@@ -111,6 +111,9 @@ final class PortableLibrarySession {
     private var pendingLibraryStateUpdates: [PortablePhotoAssetID: LibraryStateUpdate] = [:]
     private var isDrainingLibraryState = false
     private var libraryStateIndexWriteMayBeLost = false
+    /// Culling changes whose shard failed to commit. They stay dirty until a later drain (the next
+    /// enqueue or flush) writes them or a newer intent for the same asset replaces them.
+    private var failedLibraryStateUpdates: [PortablePhotoAssetID: LibraryStateUpdate] = [:]
     private var libraryStateIdleWaiters: [CheckedContinuation<Void, Never>] = []
     private var libraryStateFailureHandler: (@MainActor (Error) -> Void)?
     private var lostDuringSession = false
@@ -1840,15 +1843,10 @@ final class PortableLibrarySession {
         let package = self.package
         let lease = self.lease
         let now = clock.now()
-        let entries: [LibraryIndexEntry]
-        do {
-            entries = try Self.writeLibraryState(
-                updates, package: package, lease: lease, now: now
-            )
-        } catch {
-            throw ensureLeaseError(error)
-        }
-        if !entries.isEmpty { _ = try applyIndexDelta(.init(upserts: entries)) }
+        let outcome = Self.commitLibraryState(updates, package: package, lease: lease, now: now)
+        // Shards that committed are durable even when another shard failed; mirror them first.
+        if !outcome.entries.isEmpty { _ = try applyIndexDelta(.init(upserts: outcome.entries)) }
+        if let error = outcome.error { throw ensureLeaseError(error) }
     }
 
     /// Queue culling changes for a serial, off-main write. Changes for the same asset coalesce
@@ -1859,19 +1857,39 @@ final class PortableLibrarySession {
         onFailure: @escaping @MainActor (Error) -> Void
     ) {
         guard !updates.isEmpty else { return }
-        for update in updates { pendingLibraryStateUpdates[update.assetID] = update }
+        for update in updates {
+            pendingLibraryStateUpdates[update.assetID] = update
+            // The newer intent replaces a failed one; a retry must not resurrect the old value.
+            failedLibraryStateUpdates[update.assetID] = nil
+        }
         libraryStateFailureHandler = onFailure
         if !isDrainingLibraryState { startLibraryStateDrain() }
     }
 
-    /// Suspends until every queued culling change has been written (or has failed and been
-    /// reported). Used before quit so a rating made just before ⌘Q is durable.
-    func flushPendingLibraryState() async {
-        guard isDrainingLibraryState || !pendingLibraryStateUpdates.isEmpty else { return }
-        await withCheckedContinuation { libraryStateIdleWaiters.append($0) }
+    /// Suspends until every queued culling change has been written or has failed. Changes that
+    /// failed earlier are retried first. Used before quit so a rating made just before ⌘Q is
+    /// durable; a failure means some changes are still dirty, so the caller can offer a retry.
+    @discardableResult
+    func flushPendingLibraryState() async -> PersistenceFlushResult {
+        if !isDrainingLibraryState, !failedLibraryStateUpdates.isEmpty {
+            startLibraryStateDrain()
+        }
+        if isDrainingLibraryState || !pendingLibraryStateUpdates.isEmpty {
+            await withCheckedContinuation { libraryStateIdleWaiters.append($0) }
+        }
+        let unsaved = failedLibraryStateUpdates.count + pendingLibraryStateUpdates.count
+        guard unsaved > 0 else { return .success }
+        let noun = unsaved == 1 ? "photo's rating or flag" : "photos' ratings or flags"
+        return .failure("Kromora could not save \(unsaved) \(noun) to the library.")
     }
 
     private func startLibraryStateDrain() {
+        // Retry earlier failures with this drain; anything newer already in the queue wins.
+        for (assetID, update) in failedLibraryStateUpdates
+        where pendingLibraryStateUpdates[assetID] == nil {
+            pendingLibraryStateUpdates[assetID] = update
+        }
+        failedLibraryStateUpdates.removeAll()
         let batch = Array(pendingLibraryStateUpdates.values)
         pendingLibraryStateUpdates.removeAll()
         guard !batch.isEmpty else { finishLibraryStateDrain(); return }
@@ -1910,21 +1928,17 @@ final class PortableLibrarySession {
                 }
             },
             operation: {
-                box.store(Result {
-                    try Self.writeLibraryState(batch, package: package, lease: lease, now: now())
-                })
+                box.store(
+                    Self.commitLibraryState(batch, package: package, lease: lease, now: now())
+                )
             }
         )
     }
 
     private func writeLibraryStateInline(_ batch: [LibraryStateUpdate])
-        -> Result<[LibraryIndexEntry], Error>
+        -> LibraryStateWriteOutcome
     {
-        Result {
-            try Self.writeLibraryState(
-                batch, package: package, lease: lease, now: clock.now()
-            )
-        }
+        Self.commitLibraryState(batch, package: package, lease: lease, now: clock.now())
     }
 
     /// Retry a scheduler job that never entered its package-I/O operation without moving durable
@@ -1934,30 +1948,34 @@ final class PortableLibrarySession {
         let lease = self.lease
         let now = clock.now
         Task.detached(priority: .utility) { [weak self] in
-            let result = Result {
-                try Self.writeLibraryState(batch, package: package, lease: lease, now: now())
-            }
+            let result = Self.commitLibraryState(
+                batch, package: package, lease: lease, now: now()
+            )
             await self?.completeLibraryStateBatch(batch, outcome: result)
         }
     }
 
     private func completeLibraryStateBatch(
-        _ batch: [LibraryStateUpdate], outcome: Result<[LibraryIndexEntry], Error>?
+        _ batch: [LibraryStateUpdate], outcome: LibraryStateWriteOutcome?
     ) {
-        switch outcome {
-        case .success(let entries):
-            if !entries.isEmpty {
+        if let outcome {
+            if !outcome.entries.isEmpty {
                 libraryStateIndexWriteMayBeLost = true
-                do { _ = try applyIndexDelta(.init(upserts: entries)) } catch {
+                do { _ = try applyIndexDelta(.init(upserts: outcome.entries)) } catch {
                     libraryStateFailureHandler?(error)
                 }
             }
-        case .failure(let error):
-            let mapped = ensureLeaseError(error)
-            if mapped is PortablePackageLeaseError { lostDuringSession = true }
-            libraryStateFailureHandler?(mapped)
-        case nil:
-            break
+            // Committed shards are already out of the batch. Failed ones stay dirty unless a newer
+            // intent for the asset is queued, or the asset no longer exists in the library.
+            for update in outcome.failed where pendingLibraryStateUpdates[update.assetID] == nil {
+                if outcome.missingAssetIDs.contains(update.assetID) { continue }
+                failedLibraryStateUpdates[update.assetID] = update
+            }
+            if let error = outcome.error {
+                let mapped = ensureLeaseError(error)
+                if mapped is PortablePackageLeaseError { lostDuringSession = true }
+                libraryStateFailureHandler?(mapped)
+            }
         }
         if pendingLibraryStateUpdates.isEmpty {
             finishLibraryStateDrain()
@@ -1979,20 +1997,28 @@ final class PortableLibrarySession {
 
     /// Thread-safe result handoff from the package-I/O operation to the main-actor session.
     private final class LibraryStateWriteResult: Sendable {
-        private let value = OSAllocatedUnfairLock<Result<[LibraryIndexEntry], Error>?>(
-            initialState: nil
-        )
-        func store(_ result: Result<[LibraryIndexEntry], Error>) {
+        private let value = OSAllocatedUnfairLock<LibraryStateWriteOutcome?>(initialState: nil)
+        func store(_ result: LibraryStateWriteOutcome) {
             value.withLock { $0 = result }
         }
-        func take() -> Result<[LibraryIndexEntry], Error>? {
+        func take() -> LibraryStateWriteOutcome? {
             value.withLock { $0 }
         }
     }
 
-    /// Groups updates by membership shard and commits exactly one transaction per shard under the
-    /// writer mutation lock. Unchanged entries are skipped, and a shard with no change commits
-    /// nothing. Returns the refreshed index entries for the entries that changed.
+    /// What a culling write achieved, shard by shard.
+    struct LibraryStateWriteOutcome: Sendable {
+        /// Refreshed index entries for the shards that committed.
+        var entries: [LibraryIndexEntry] = []
+        /// Updates whose shard did not commit (all of them when the lease was lost).
+        var failed: [LibraryStateUpdate] = []
+        /// Assets a failing shard reported as no longer in the library; retrying cannot help.
+        var missingAssetIDs: Set<PortablePhotoAssetID> = []
+        /// The first failure, if any shard failed.
+        var error: Error?
+    }
+
+    /// Throwing form of `commitLibraryState` for callers that treat any failed shard as failure.
     nonisolated static func writeLibraryState(
         _ updates: [LibraryStateUpdate],
         package: PortableLibraryPackage,
@@ -2000,16 +2026,39 @@ final class PortableLibrarySession {
         now: Date,
         didCommitShard: (@Sendable (String) -> Void)? = nil
     ) throws -> [LibraryIndexEntry] {
-        do { try lease.renew(now: now) } catch { throw PortablePackageLeaseError.lostDuringSession }
+        let outcome = commitLibraryState(
+            updates, package: package, lease: lease, now: now, didCommitShard: didCommitShard
+        )
+        if let error = outcome.error { throw error }
+        return outcome.entries
+    }
+
+    /// Groups updates by membership shard and commits exactly one transaction per shard under the
+    /// writer mutation lock. Unchanged entries are skipped, and a shard with no change commits
+    /// nothing. A failing shard does not undo or block the others: its updates are reported in
+    /// `failed` so the caller can keep them dirty.
+    nonisolated static func commitLibraryState(
+        _ updates: [LibraryStateUpdate],
+        package: PortableLibraryPackage,
+        lease: PortablePackageLease,
+        now: Date,
+        didCommitShard: (@Sendable (String) -> Void)? = nil
+    ) -> LibraryStateWriteOutcome {
+        var outcome = LibraryStateWriteOutcome()
         // Last update for an asset wins within a batch.
         var latest: [PortablePhotoAssetID: LibraryStateUpdate] = [:]
         for update in updates { latest[update.assetID] = update }
+        do { try lease.renew(now: now) } catch {
+            outcome.failed = Array(latest.values)
+            outcome.error = PortablePackageLeaseError.lostDuringSession
+            return outcome
+        }
         let byShard = Dictionary(grouping: latest.values) {
             PortableLibraryPackage.shard(for: $0.assetID)
         }
-        var changed: [LibraryIndexEntry] = []
         for shardName in byShard.keys.sorted() {
             let shardUpdates = byShard[shardName] ?? []
+            do {
             let entries: [LibraryIndexEntry] = try lease.withWriterMutationLock {
                 var shard = try package.readMembershipShard(shardName)
                 var positions: [PortablePhotoAssetID: Int] = [:]
@@ -2046,9 +2095,16 @@ final class PortableLibrarySession {
                 didCommitShard?(shardName)
                 return touched.map { LibraryIndexEntry(from: shard.entries[$0]) }
             }
-            changed.append(contentsOf: entries)
+            outcome.entries.append(contentsOf: entries)
+            } catch {
+                outcome.failed.append(contentsOf: shardUpdates)
+                if case PortablePackageTrashError.assetNotFound(let missing) = error {
+                    outcome.missingAssetIDs.insert(missing)
+                }
+                if outcome.error == nil { outcome.error = error }
+            }
         }
-        return changed
+        return outcome
     }
 
 }

@@ -230,6 +230,90 @@ final class CullingStateBatchWriteTests: TempDirectoryTestCase {
         ) { _ in failures += 1 }
         await session.flushPendingLibraryState()
         XCTAssertEqual(failures, 1)
+        // The same flush reports a failed save only while a change is still dirty; unknown assets
+        // are gone from the library, so there is nothing left to retry.
+        let retried = await session.flushPendingLibraryState()
+        XCTAssertEqual(retried, .success)
+        await session.shutdown()
+    }
+
+    /// Corrupt a shard, then restore the bytes, so a write fails and can later succeed.
+    private func corruptShard(_ session: PortableLibrarySession, _ shard: String) throws -> () throws -> Void {
+        let url = session.package.membershipURL(for: shard)
+        let original = try Data(contentsOf: url)
+        try Data("not json".utf8).write(to: url)
+        return { try original.write(to: url) }
+    }
+
+    func testFailedWriteStaysDirtyAndRetriesOnFlush() async throws {
+        let (session, _, ids) = try makeSession(assetCount: 1)
+        let shard = PortableLibraryPackage.shard(for: ids[0])
+        let repair = try corruptShard(session, shard)
+        var failures = 0
+        session.enqueueLibraryStateUpdates(updates(ids, rating: 4, flag: .pick)) { _ in failures += 1 }
+        let first = await session.flushPendingLibraryState()
+        // One report for the queued write and one for the flush's retry of the dirty change.
+        XCTAssertEqual(failures, 2)
+        guard case .failure = first else { return XCTFail("expected failure, got \(first)") }
+
+        try repair()
+        let second = await session.flushPendingLibraryState()
+        XCTAssertEqual(second, .success)
+        let entry = try session.package.readMembershipShard(shard).entries
+            .first { $0.assetID == ids[0] }
+        XCTAssertEqual(entry?.summary.rating, 4)
+        XCTAssertEqual(entry?.summary.flag, PhotoFlag.pick.rawValue)
+        let third = await session.flushPendingLibraryState()
+        XCTAssertEqual(third, .success)
+        await session.shutdown()
+    }
+
+    func testNewerIntentReplacesFailedValue() async throws {
+        let (session, _, ids) = try makeSession(assetCount: 1)
+        let shard = PortableLibraryPackage.shard(for: ids[0])
+        let repair = try corruptShard(session, shard)
+        session.enqueueLibraryStateUpdates(updates(ids, rating: 4, flag: .pick)) { _ in }
+        _ = await session.flushPendingLibraryState()
+
+        try repair()
+        session.enqueueLibraryStateUpdates(updates(ids, rating: 2, flag: .reject)) { _ in
+            XCTFail("unexpected failure")
+        }
+        let result = await session.flushPendingLibraryState()
+        XCTAssertEqual(result, .success)
+        let entry = try session.package.readMembershipShard(shard).entries
+            .first { $0.assetID == ids[0] }
+        XCTAssertEqual(entry?.summary.rating, 2)
+        XCTAssertEqual(entry?.summary.flag, PhotoFlag.reject.rawValue)
+        await session.shutdown()
+    }
+
+    func testPartialShardFailureKeepsOnlyFailedAssetsDirty() async throws {
+        let (session, _, ids) = try makeSession(assetCount: 24)
+        let byShard = Dictionary(grouping: ids) { PortableLibraryPackage.shard(for: $0) }
+        guard byShard.count >= 2, let badShard = byShard.keys.sorted().first else {
+            return XCTFail("fixture needs at least two shards")
+        }
+        let repair = try corruptShard(session, badShard)
+        session.enqueueLibraryStateUpdates(updates(ids, rating: 3, flag: .pick)) { _ in }
+        let first = await session.flushPendingLibraryState()
+        guard case .failure = first else { return XCTFail("expected failure, got \(first)") }
+
+        for (shard, shardIDs) in byShard where shard != badShard {
+            let stored = try session.package.readMembershipShard(shard).entries
+            for id in shardIDs {
+                XCTAssertEqual(stored.first { $0.assetID == id }?.summary.rating, 3)
+            }
+        }
+
+        try repair()
+        let second = await session.flushPendingLibraryState()
+        XCTAssertEqual(second, .success)
+        for id in byShard[badShard] ?? [] {
+            let entry = try session.package.readMembershipShard(badShard).entries
+                .first { $0.assetID == id }
+            XCTAssertEqual(entry?.summary.rating, 3)
+        }
         await session.shutdown()
     }
 }
