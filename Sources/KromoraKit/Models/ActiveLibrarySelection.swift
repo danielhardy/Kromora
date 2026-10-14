@@ -83,26 +83,28 @@ struct ActiveLibrarySelection {
     /// The package this launch opens. A stored choice that is stale, unresolvable, unreachable or no
     /// longer a directory yields the default plus a one-time notice; the bookmark is cleared so the
     /// notice does not repeat, and the old path is never modified.
-    func resolve() -> Resolution {
+    func resolve(
+        bookmarkResolver: (Data, inout Bool) throws -> URL = { data, stale in
+            try URL(
+                resolvingBookmarkData: data, options: [.withSecurityScope],
+                relativeTo: nil, bookmarkDataIsStale: &stale)
+        },
+        accessStarter: (URL) -> SecurityScopedResourceAccess? = {
+            SecurityScopedResourceAccess.startAccessing($0)
+        }
+    ) -> Resolution {
         guard let data = preferences.data(forKey: Self.bookmarkKey) else {
             return Resolution(url: defaultURL, access: nil, notice: nil)
         }
         var stale = false
-        if let url = try? URL(
-            resolvingBookmarkData: data, options: [.withSecurityScope],
-            relativeTo: nil, bookmarkDataIsStale: &stale),
-           let access = SecurityScopedResourceAccess.startAccessing(url)
+        if let url = try? bookmarkResolver(data, &stale),
+           !stale,
+           let access = accessStarter(url)
         {
             var isDirectory: ObjCBool = false
             if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
                isDirectory.boolValue
             {
-                if stale,
-                   let fresh = try? url.bookmarkData(
-                       options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil)
-                {
-                    preferences.set(fresh, forKey: Self.bookmarkKey)
-                }
                 return Resolution(url: url, access: access, notice: nil)
             }
             access.release()

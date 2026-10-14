@@ -73,6 +73,31 @@ final class ActiveLibrarySelectionTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: defaultURL.path))
     }
 
+    func testStaleBookmarkFallsBackWithNoticeOnceWithoutStartingAccess() {
+        let chosenURL = directory.appendingPathComponent("Moved.kromoralibrary")
+        defaults.set(Data("stale bookmark".utf8), forKey: ActiveLibrarySelection.bookmarkKey)
+        var accessStartCount = 0
+
+        let first = selection.resolve(
+            bookmarkResolver: { _, isStale in
+                isStale = true
+                return chosenURL
+            },
+            accessStarter: { _ in
+                accessStartCount += 1
+                return nil
+            }
+        )
+
+        XCTAssertEqual(first.url, defaultURL)
+        XCTAssertNotNil(first.notice)
+        XCTAssertEqual(accessStartCount, 0)
+        XCTAssertFalse(selection.hasChoice)
+        XCTAssertNil(selection.resolve().notice)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: chosenURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: defaultURL.path))
+    }
+
     func testMissingChosenPackageFallsBackWithoutRecreatingIt() async throws {
         let url = try await makePackage("Gone.kromoralibrary")
         try selection.choose(url, access: access(url))
