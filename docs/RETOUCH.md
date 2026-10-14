@@ -143,6 +143,24 @@ or speck repair cannot separate texture-reconstruction error from a defect remna
 separate deterministic low-frequency-grain profile (for example, smooth noise sampled on an 8 px
 lattice and interpolated between points) before changing thresholds.
 
+### Stress report versus shipping gate
+
+Two different numbers come from this suite; do not conflate them.
+
+- **Stress report** (`testStressCorpusReportsCurrentHealAndCloneResults`): all 36 background/defect
+  rows per mode, including wires and the 60 px broad-removal case that v1 does not support. It prints
+  pass counts (currently Heal 8/36, automatic Heal 5/36, Clone 7/36) and asserts only that the corpus
+  ran. It does not require any family to fail, so an improvement never breaks it.
+- **Shipping gate** (`testShippingGateHoldsSupportedClassFloors`): only the supported small-defect
+  classes. `dust/speck` is 5 px soft dust plus hard speck (12 rows per mode); `hair/fibre` is 6 rows
+  per mode. Wires and 60 px dust are excluded. Each class and mode has a floor initialised at its
+  passing count when KRMA-1003 landed: dust/speck Heal 5, automatic Heal 5, Clone 5; hair/fibre
+  Heal 1, automatic Heal 0, Clone 1. The test fails when a count drops below its floor. Raise a floor
+  when a repair improves it (KRMA-1004); never lower one to turn the run green.
+
+Both run on 96 × 72 px synthetic fixtures. Neither is a camera-scale sign-off; camera-scale
+inspection is tracked in KRMA-1016.
+
 The gate measures Heal and Clone quality against the unchanged KRMA-658 limits. Manual fixture
 offsets passed 8/36 Heal rows and 7/36 Clone rows; the automatic picker passed 5/36 Heal rows in
 the corpus run of 2026-10-12. These are generated-fixture results, not claims about

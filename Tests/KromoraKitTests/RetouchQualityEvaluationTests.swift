@@ -41,10 +41,30 @@ final class RetouchQualityEvaluationTests: TempDirectoryTestCase {
         "skin": Limits(deltaE: 3.0, gradient: 28, variance: 0.55...1.65, luminance: 0.025),
     ]
 
-    func testGroundTruthGateReportsCurrentHealAndCloneResults() throws {
-        var table: [(String, String, String, Metrics, [String])] = []
-        var healFailuresByDefect: [String: Int] = [:]
-        var automaticHealPasses = 0
+    /// Defect families the v1 product supports. Wires and broad removal (the 60 px dust case) are
+    /// stress-corpus rows only; they are reported but never gate shipping.
+    private static let shippingClasses: [String: [String]] = [
+        "dust/speck": ["soft dust 5px", "hard speck"],
+        "hair/fibre": ["hair/fibre"],
+    ]
+
+    /// Minimum passing rows (of `backgrounds × defects in the class`) per shipping class and mode.
+    /// Initialised at the passing count measured when KRMA-1003 landed, so this is not an algorithm
+    /// change. Raise a floor when a repair improves it (KRMA-1004); never lower one to go green.
+    private static let shippingFloors: [String: [String: Int]] = [
+        "dust/speck": ["Heal": 5, "Heal (auto)": 5, "Clone": 5],
+        "hair/fibre": ["Heal": 1, "Heal (auto)": 0, "Clone": 1],
+    ]
+
+    private struct Row {
+        let background: String, defect: String, label: String
+        let metrics: Metrics
+        let failed: [String]
+    }
+
+    /// Runs the whole synthetic corpus once and returns every mode row.
+    private func evaluateCorpus() throws -> [Row] {
+        var table: [Row] = []
 
         for background in RetouchQualityFixtures.backgrounds {
             for defect in RetouchQualityFixtures.defects {
@@ -83,30 +103,50 @@ final class RetouchQualityEvaluationTests: TempDirectoryTestCase {
                     } else { continue }
                     let values = measure(clean: clean, output: output, fixture: fixture)
                     let failed = values.failures(against: limits[background]!)
-                    table.append((background, defect, label, values, failed))
-                    if label == "Heal (auto)" && failed.isEmpty { automaticHealPasses += 1 }
-                    if label == "Heal" && !failed.isEmpty { healFailuresByDefect[defect, default: 0] += 1 }
+                    table.append(Row(background: background, defect: defect, label: label,
+                                     metrics: values, failed: failed))
                 }
             }
         }
 
-        let header = "BACKGROUND / DEFECT | MODE | ΔE2000 | GRADIENT | VAR RATIO | LUMA SHIFT | RESULT"
-        print("\nRETOUCH QUALITY — limits: ΔE / gradient RGB levels / variance ratio / abs luma shift\n\(header)")
-        for row in table {
-            let result = row.4.isEmpty ? "PASS" : "FAIL: " + row.4.joined(separator: ",")
-            print(String(format: "%@ / %@ | %@ | %.2f | %.2f | %.2f | %+.4f | %@",
-                row.0, row.1, row.2, row.3.deltaE2000, row.3.gradientError,
-                row.3.varianceRatio, row.3.luminanceShift, result))
-        }
-        print("Automatic Heal quality rows passing: \(automaticHealPasses)/\(RetouchQualityFixtures.backgrounds.count * RetouchQualityFixtures.defects.count)")
+        return table
+    }
 
-        // These are behavior assertions about the current Heal renderer.
-        for defect in RetouchQualityFixtures.defects {
-            XCTAssertGreaterThan(healFailuresByDefect[defect, default: 0], 0,
-                "current Heal must miss at least one (defect) case")
+    /// Stress report: prints every row and the corpus-wide pass counts. It asserts only that the
+    /// corpus ran completely; it never requires a family to fail, so a real improvement stays green.
+    func testStressCorpusReportsCurrentHealAndCloneResults() throws {
+        let table = try evaluateCorpus()
+        let header = "BACKGROUND / DEFECT | MODE | ΔE2000 | GRADIENT | VAR RATIO | LUMA SHIFT | RESULT"
+        print("\nRETOUCH STRESS CORPUS — limits: ΔE / gradient RGB levels / variance ratio / abs luma shift\n\(header)")
+        for row in table {
+            let result = row.failed.isEmpty ? "PASS" : "FAIL: " + row.failed.joined(separator: ",")
+            print(String(format: "%@ / %@ | %@ | %.2f | %.2f | %.2f | %+.4f | %@",
+                row.background, row.defect, row.label, row.metrics.deltaE2000, row.metrics.gradientError,
+                row.metrics.varianceRatio, row.metrics.luminanceShift, result))
         }
-        XCTAssertGreaterThan(automaticHealPasses, 0, "automatic source picks should clear some KRMA-658 heal rows")
-        XCTAssertEqual(table.count, RetouchQualityFixtures.backgrounds.count * RetouchQualityFixtures.defects.count * 4)
+        let perMode = RetouchQualityFixtures.backgrounds.count * RetouchQualityFixtures.defects.count
+        for label in ["Heal", "Heal (auto)", "Clone", "Current"] {
+            let passes = table.filter { $0.label == label && $0.failed.isEmpty }.count
+            print("STRESS \(label) rows passing: \(passes)/\(perMode)")
+        }
+        XCTAssertEqual(table.count, perMode * 4)
+    }
+
+    /// Shipping gate: supported classes must not drop below their floors. Synthetic fixtures only;
+    /// passing is not camera-scale sign-off (see KRMA-1016).
+    func testShippingGateHoldsSupportedClassFloors() throws {
+        let table = try evaluateCorpus()
+        for (name, defects) in Self.shippingClasses.sorted(by: { $0.key < $1.key }) {
+            let total = RetouchQualityFixtures.backgrounds.count * defects.count
+            for (label, floor) in Self.shippingFloors[name, default: [:]].sorted(by: { $0.key < $1.key }) {
+                let passes = table.filter {
+                    $0.label == label && defects.contains($0.defect) && $0.failed.isEmpty
+                }.count
+                print("SHIPPING \(name) \(label): \(passes)/\(total) (floor \(floor))")
+                XCTAssertGreaterThanOrEqual(passes, floor,
+                    "shipping class \(name) / \(label) fell below its floor")
+            }
+        }
     }
 
     func testSyntheticFixtureGenerationIsRepeatable() throws {
