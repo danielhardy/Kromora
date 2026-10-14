@@ -4,8 +4,8 @@ import SwiftUI
 /// shares the debug model's loading and mask policy, while keeping the normal inspector's layout
 /// and presentation independent from the developer-only sheet.
 struct PhotoAnalysisInspectSection: View {
-    @StateObject private var model: AnalysisDebugPanelModel
-    @ObservedObject private var surface: PreviewSurface
+    @State private var model: AnalysisDebugPanelModel
+    private let surface: PreviewSurface
     let sourceSize: CGSize
     let crop: CropAdjustments
     let histogram: HistogramData?
@@ -23,10 +23,10 @@ struct PhotoAnalysisInspectSection: View {
         isExpanded: Binding<Bool>,
         onUseEditingMask: @escaping (SemanticMaskKind, RegionMask, NormalizedMask) -> Void
     ) {
-        _model = StateObject(wrappedValue: AnalysisDebugPanelModel(
+        _model = State(wrappedValue: AnalysisDebugPanelModel(
             coordinator: coordinator, assetID: assetID, source: source
         ))
-        _surface = ObservedObject(wrappedValue: surface)
+        self.surface = surface
         self.sourceSize = sourceSize
         self.crop = crop
         self.histogram = histogram

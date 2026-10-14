@@ -11,10 +11,11 @@ struct PreviewFrameIdentity: Equatable, Sendable {
 }
 
 @MainActor
-final class PreviewSurface: ObservableObject {
+@Observable
+final class PreviewSurface {
     /// Diagnostic count used by the presentation acceptance tests. A publication evaluates the
     /// source image once; retained-texture redraws must not evaluate it again.
-    @Published private(set) var revision: UInt64 = 0
+    private(set) var revision: UInt64 = 0
     private(set) var image: CIImage?
     /// True after a source switch cleared `image` while the departing photo is still on the
     /// drawable. `draw` returns before presenting when `image` is nil, so the layer keeps its last
@@ -22,61 +23,61 @@ final class PreviewSurface: ObservableObject {
     /// spinner instead of unmounting it. It is display-only: every consumer of `image` still sees
     /// no pixels for the active source. Cleared by the next publication or any full `clear()`.
     private(set) var holdsDepartingFrame = false
-    private(set) var presentationImageExtent: CGRect?
+    @ObservationIgnored private(set) var presentationImageExtent: CGRect?
     /// When true, a smaller texture is a stand-in for the whole `presentationImageExtent`
     /// (a camera JPEG first frame, or a cropped fit preview whose ROI is the committed crop).
     /// Fit/Fill then fill the canvas instead of treating the texture as a top-left ROI of a
     /// larger virtual frame. Viewport-fragment ROI previews leave this false.
-    private(set) var coversPresentationExtent = false
+    @ObservationIgnored private(set) var coversPresentationExtent = false
     /// Navigation that produced the currently published frame. A partial ROI keeps this value so
     /// the presenter can tell pointer motion from a matching render; the ROI itself still follows
     /// the pointer, with the last complete photo filling newly exposed edges.
-    private(set) var presentationNavigation: CanvasNavigation?
+    @ObservationIgnored private(set) var presentationNavigation: CanvasNavigation?
     /// Planner-space rectangle for an uncovered ROI fragment. Interactive frames can decode
     /// below the planner `targetSize`, so this is not always `image.extent`.
-    private(set) var layoutImageExtent: CGRect?
-    private(set) var space: WorkingSpace = .current
+    @ObservationIgnored private(set) var layoutImageExtent: CGRect?
+    @ObservationIgnored private(set) var space: WorkingSpace = .current
     /// The last image known to have made it through the presentation command buffer. Production
     /// frames are already completed texture-backed images; the confirmation still matters because
     /// drawable acquisition/presentation can fail independently of processing.
-    private var lastValidImage: CIImage?
+    @ObservationIgnored private var lastValidImage: CIImage?
     /// The display-ready copy of `image`. It is materialized once when a new render revision is
     /// published and sampled directly by the Metal presenter for every drawable thereafter.
-    private(set) var presentationTexture: MTLTexture?
-    private(set) var presentationTextureExtent: CGRect?
-    private(set) var presentationTextureGeneration: UInt64 = 0
+    @ObservationIgnored private(set) var presentationTexture: MTLTexture?
+    @ObservationIgnored private(set) var presentationTextureExtent: CGRect?
+    @ObservationIgnored private(set) var presentationTextureGeneration: UInt64 = 0
     /// A bounded sample read from the same presentation texture and command buffer. It stays
     /// attached to its surface revision even while the Info inspector is hidden.
-    private(set) var presentationHistogramSample: HistogramData.PresentationSample?
-    var onPresentationHistogramSampleChange: ((HistogramData.PresentationSample) -> Void)?
-    private var presentedDigest: PerceptualDigest?
-    private var staleRefinementPending = false
-    private var transitionTexture: MTLTexture?
-    private var transitionTextureExtent: CGRect?
-    private var transitionImageExtent: CGRect?
-    private var transitionLayoutImageExtent: CGRect?
-    private var transitionSpace: WorkingSpace = .current
-    private var transitionStartedAt: ContinuousClock.Instant?
-    private var transitionTask: Task<Void, Never>?
-    private(set) var reduceMotion = false
-    private var lastValidPresentationTexture: MTLTexture?
-    private var lastValidPresentationTextureExtent: CGRect?
-    private var lastValidPresentationImageExtent: CGRect?
-    private var lastValidLayoutImageExtent: CGRect?
-    private var lastValidCoversPresentationExtent = false
-    private var lastValidPresentationNavigation: CanvasNavigation?
-    private var lastValidSpace: WorkingSpace = .current
+    @ObservationIgnored private(set) var presentationHistogramSample: HistogramData.PresentationSample?
+    @ObservationIgnored var onPresentationHistogramSampleChange: ((HistogramData.PresentationSample) -> Void)?
+    @ObservationIgnored private var presentedDigest: PerceptualDigest?
+    @ObservationIgnored private var staleRefinementPending = false
+    @ObservationIgnored private var transitionTexture: MTLTexture?
+    @ObservationIgnored private var transitionTextureExtent: CGRect?
+    @ObservationIgnored private var transitionImageExtent: CGRect?
+    @ObservationIgnored private var transitionLayoutImageExtent: CGRect?
+    @ObservationIgnored private var transitionSpace: WorkingSpace = .current
+    @ObservationIgnored private var transitionStartedAt: ContinuousClock.Instant?
+    @ObservationIgnored private var transitionTask: Task<Void, Never>?
+    @ObservationIgnored private(set) var reduceMotion = false
+    @ObservationIgnored private var lastValidPresentationTexture: MTLTexture?
+    @ObservationIgnored private var lastValidPresentationTextureExtent: CGRect?
+    @ObservationIgnored private var lastValidPresentationImageExtent: CGRect?
+    @ObservationIgnored private var lastValidLayoutImageExtent: CGRect?
+    @ObservationIgnored private var lastValidCoversPresentationExtent = false
+    @ObservationIgnored private var lastValidPresentationNavigation: CanvasNavigation?
+    @ObservationIgnored private var lastValidSpace: WorkingSpace = .current
     /// A complete frame is the gap-free backing image for live navigation while a newer ROI is
     /// being rendered. It is deliberately kept separately from the current publication: moving
     /// a partial ROI under a new transform would expose the canvas background at its edges.
-    private var retainedCompleteImage: CIImage?
-    private var retainedCompletePresentationImageExtent: CGRect?
-    private var retainedCompleteLayoutImageExtent: CGRect?
-    private var retainedCompleteTexture: MTLTexture?
-    private var retainedCompleteTextureExtent: CGRect?
-    private var retainedCompleteSpace: WorkingSpace = .current
-    private var retainedCompleteDetail: PublishedDetail?
-    private var retainedCompleteGeneration: UInt64 = 0
+    @ObservationIgnored private var retainedCompleteImage: CIImage?
+    @ObservationIgnored private var retainedCompletePresentationImageExtent: CGRect?
+    @ObservationIgnored private var retainedCompleteLayoutImageExtent: CGRect?
+    @ObservationIgnored private var retainedCompleteTexture: MTLTexture?
+    @ObservationIgnored private var retainedCompleteTextureExtent: CGRect?
+    @ObservationIgnored private var retainedCompleteSpace: WorkingSpace = .current
+    @ObservationIgnored private var retainedCompleteDetail: PublishedDetail?
+    @ObservationIgnored private var retainedCompleteGeneration: UInt64 = 0
     /// The detail level of a published frame, plus whether that frame is the complete photo.
     /// Coverage is part of the record because a partial ROI frame is not interchangeable with a
     /// whole-photo frame of the same source and document, however sharp it is.
@@ -85,43 +86,43 @@ final class PreviewSurface: ObservableObject {
         let factor: CGFloat
         let coversPresentationExtent: Bool
     }
-    private var lastValidDetail: PublishedDetail?
-    private var currentDetail: PublishedDetail?
-    private var pendingPresentationMaterializationRevision: UInt64?
-    private var pendingPresentationMaterialization: (texture: MTLTexture, extent: CGRect)?
-    private var presentationMaterializations:
+    @ObservationIgnored private var lastValidDetail: PublishedDetail?
+    @ObservationIgnored private var currentDetail: PublishedDetail?
+    @ObservationIgnored private var pendingPresentationMaterializationRevision: UInt64?
+    @ObservationIgnored private var pendingPresentationMaterialization: (texture: MTLTexture, extent: CGRect)?
+    @ObservationIgnored private var presentationMaterializations:
         [UInt64: (
             texture: MTLTexture, extent: CGRect, histogramReadbackBuffer: MTLBuffer
         )] = [:]
-    private var histogramRetryReadbackBuffers: [UInt64: MTLBuffer] = [:]
-    private var histogramRetryRevisions: Set<UInt64> = []
-    private var pendingDisplayID: UInt64?
-    private var pendingGPURevision: UInt64?
+    @ObservationIgnored private var histogramRetryReadbackBuffers: [UInt64: MTLBuffer] = [:]
+    @ObservationIgnored private var histogramRetryRevisions: Set<UInt64> = []
+    @ObservationIgnored private var pendingDisplayID: UInt64?
+    @ObservationIgnored private var pendingGPURevision: UInt64?
     /// The paused MTKView does not continuously redraw. Keep the active destination weakly so a
     /// completed publication can invalidate it immediately, even when SwiftUI does not schedule
     /// an NSViewRepresentable update for the nested surface object.
-    private weak var displayView: MTKView?
+    @ObservationIgnored private weak var displayView: MTKView?
     private struct PendingTelemetry {
         let telemetry: LiveEditTelemetry
         let source: ImageSource?
         let quality: RenderQuality
     }
-    private var telemetryByRevision: [UInt64: PendingTelemetry] = [:]
-    private var submittedTelemetryRevisions: Set<UInt64> = []
-    private var skippedTelemetryRevisions: Set<UInt64> = []
-    private var presentationConfirmations: [UInt64: () -> Void] = [:]
-    private var submittedPresentationConfirmations: Set<UInt64> = []
-    private var skippedPresentationConfirmations: Set<UInt64> = []
-    private var hasManagedPresentationLifecycle = false
-    var onPresentationFailure: (() -> Void)?
+    @ObservationIgnored private var telemetryByRevision: [UInt64: PendingTelemetry] = [:]
+    @ObservationIgnored private var submittedTelemetryRevisions: Set<UInt64> = []
+    @ObservationIgnored private var skippedTelemetryRevisions: Set<UInt64> = []
+    @ObservationIgnored private var presentationConfirmations: [UInt64: () -> Void] = [:]
+    @ObservationIgnored private var submittedPresentationConfirmations: Set<UInt64> = []
+    @ObservationIgnored private var skippedPresentationConfirmations: Set<UInt64> = []
+    @ObservationIgnored private var hasManagedPresentationLifecycle = false
+    @ObservationIgnored var onPresentationFailure: (() -> Void)?
     /// Optional test recorder. The production publication path has a single nil check and
     /// allocates no change records when no recorder is installed.
-    var presentationChangeLedger: PresentationChangeLedger?
+    @ObservationIgnored var presentationChangeLedger: PresentationChangeLedger?
 
     var hasPresentedDigest: Bool { staleRefinementPending && presentedDigest != nil }
     var retainsTransitionTexture: Bool { transitionTexture != nil }
     /// Number of refinements that entered the real drawable crossfade path.
-    private(set) var crossfadeAdmissionCount = 0
+    @ObservationIgnored private(set) var crossfadeAdmissionCount = 0
 
     func prepareStaleRefinement(using digest: PerceptualDigest) {
         presentedDigest = digest
@@ -133,7 +134,7 @@ final class PreviewSurface: ObservableObject {
     /// still went through the presentation lifecycle and the capture needs a timestamp. When set,
     /// such drawables are marked with this clock instead of being dropped as skipped frames.
     /// Production leaves it nil, so Metal's zero-means-skipped contract is unchanged.
-    var zeroPresentedTimeFallback: (() -> TimeInterval)?
+    @ObservationIgnored var zeroPresentedTimeFallback: (() -> TimeInterval)?
 
     /// The Metal view calls this when a real presentation lifecycle exists. Headless/test callers
     /// have no drawable to confirm, so `present` confirms immediately for that compatibility seam.
@@ -1110,7 +1111,7 @@ final class PreviewSurface: ObservableObject {
 
 /// Persistent CAMetalLayer/MTKView destination for the completed preview texture.
 struct PreviewSurfaceView: NSViewRepresentable {
-    @ObservedObject var surface: PreviewSurface
+    let surface: PreviewSurface
     var navigation: CanvasNavigation = CanvasNavigation()
     /// Point-space visible area inside the stable, top-aligned drawable.
     var viewportSize: CGSize?
@@ -1192,6 +1193,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
         }
         context.coordinator.surface = surface
         surface.setReduceMotion(reduceMotion)
+        // Reading the revision makes SwiftUI call this update for every published frame.
+        _ = surface.revision
         context.coordinator.navigation = navigation
         context.coordinator.viewSpaceRotationAngle = viewSpaceRotationAngle
         context.coordinator.onDrawableSizeChange = onDrawableSizeChange

@@ -1,4 +1,4 @@
-import Combine
+import Observation
 import CoreGraphics
 import Foundation
 
@@ -90,7 +90,8 @@ enum MaskResolutionState: Equatable, Sendable {
 /// once, on gesture completion; it is never encoded, hashed, or sent through the app-wide model
 /// while the pointer is moving.
 @MainActor
-final class MaskInteractionState: ObservableObject {
+@Observable
+final class MaskInteractionState {
     /// What a drag on the canvas does. Smart masks (subject, background, …) are not tools: they
     /// are created from the Add Mask menu and never respond to the pointer, so they do not appear
     /// here where they would capture the canvas without acting on it.
@@ -167,50 +168,50 @@ final class MaskInteractionState: ObservableObject {
         case creation
     }
 
-    @Published private(set) var selectedLayerID: UUID?
-    @Published private(set) var selectedComponentID: UUID?
-    @Published private(set) var hoveredOverlayTarget: MaskOverlayPreviewTarget?
-    @Published private(set) var accessibilityOverlayTarget: MaskOverlayPreviewTarget?
-    @Published private(set) var activeTool: Tool = .selection
-    @Published private(set) var hoverPoint: CGPoint?
-    @Published private(set) var draftLayer: LocalAdjustmentLayer?
-    @Published private(set) var activeLinearHandle: LinearHandle?
-    @Published private(set) var hoveredLinearHandle: LinearHandle?
-    @Published private(set) var activeRadialHandle: RadialHandle?
-    @Published private(set) var linearCreationPending = false
-    @Published private(set) var radialCreationPending = false
-    @Published private(set) var resolutionState: MaskResolutionState = .idle
+    private(set) var selectedLayerID: UUID?
+    private(set) var selectedComponentID: UUID?
+    private(set) var hoveredOverlayTarget: MaskOverlayPreviewTarget?
+    private(set) var accessibilityOverlayTarget: MaskOverlayPreviewTarget?
+    private(set) var activeTool: Tool = .selection
+    private(set) var hoverPoint: CGPoint?
+    private(set) var draftLayer: LocalAdjustmentLayer?
+    private(set) var activeLinearHandle: LinearHandle?
+    private(set) var hoveredLinearHandle: LinearHandle?
+    private(set) var activeRadialHandle: RadialHandle?
+    private(set) var linearCreationPending = false
+    private(set) var radialCreationPending = false
+    private(set) var resolutionState: MaskResolutionState = .idle
     /// Monotonic generation forcing mask overlay tasks to re-resolve without disturbing the
     /// selection. Retry must heal a cold store by warming signals and then re-running the
     /// overlay task, but warming alone changes none of the task's inputs — without this the
     /// `.task(id:)` never restarts and the banner it was meant to clear persists.
-    @Published private(set) var maskResolveEpoch: UInt64 = 0
+    private(set) var maskResolveEpoch: UInt64 = 0
     /// Transient controls used by the active brush. They are copied into a stroke at begin time;
     /// changing a slider never mutates the document or the in-progress stroke retroactively.
-    @Published var brushRadius = BrushMaskMath.defaultRadius
-    @Published var brushFeather = BrushMaskMath.defaultFeather
-    @Published var brushFlow = BrushMaskMath.defaultFlow
-    @Published var brushDensity = BrushMaskMath.defaultDensity
-    @Published private(set) var isSpacePanning = false
-    private(set) var gestureStartPoint: CGPoint?
-    private(set) var gestureStartDefinition: LinearGradientDefinition?
-    private(set) var gestureStartRadialDefinition: RadialGradientDefinition?
-    private(set) var gestureSourceSize: CGSize = CGSize(width: 1, height: 1)
-    private var brushLastRawPoint: CGPoint?
-    private var brushLastRawPressure: Double?
-    private var brushDistanceSinceAcceptedSample = 0.0
-    private let maximumLiveBrushSamples = 4_096
-    private var selectionBeforePendingCreationLayerID: UUID?
-    private var selectionBeforePendingCreationComponentID: UUID?
+    var brushRadius = BrushMaskMath.defaultRadius
+    var brushFeather = BrushMaskMath.defaultFeather
+    var brushFlow = BrushMaskMath.defaultFlow
+    var brushDensity = BrushMaskMath.defaultDensity
+    private(set) var isSpacePanning = false
+    @ObservationIgnored private(set) var gestureStartPoint: CGPoint?
+    @ObservationIgnored private(set) var gestureStartDefinition: LinearGradientDefinition?
+    @ObservationIgnored private(set) var gestureStartRadialDefinition: RadialGradientDefinition?
+    @ObservationIgnored private(set) var gestureSourceSize: CGSize = CGSize(width: 1, height: 1)
+    @ObservationIgnored private var brushLastRawPoint: CGPoint?
+    @ObservationIgnored private var brushLastRawPressure: Double?
+    @ObservationIgnored private var brushDistanceSinceAcceptedSample = 0.0
+    @ObservationIgnored private let maximumLiveBrushSamples = 4_096
+    @ObservationIgnored private var selectionBeforePendingCreationLayerID: UUID?
+    @ObservationIgnored private var selectionBeforePendingCreationComponentID: UUID?
 
     // Presentation-only controls. These values intentionally never enter EditDocument, history,
     // or a render request; they describe how the photographer is inspecting the saved recipe.
-    @Published var showOverlay = false
-    @Published var overlayInspection: OverlayInspection = .colorWash
-    @Published var overlayColorValue: MaskOverlayColor = .orange
-    @Published var overlayOpacity: Double = 0.35
-    @Published private(set) var soloLayerID: UUID?
-    @Published private(set) var soloComponentID: UUID?
+    var showOverlay = false
+    var overlayInspection: OverlayInspection = .colorWash
+    var overlayColorValue: MaskOverlayColor = .orange
+    var overlayOpacity: Double = 0.35
+    private(set) var soloLayerID: UUID?
+    private(set) var soloComponentID: UUID?
 
     var hasDraft: Bool { draftLayer != nil }
 

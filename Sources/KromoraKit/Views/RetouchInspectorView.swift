@@ -10,11 +10,11 @@ struct RetouchInspectorView: View {
     @State private var spotsExpanded = true
     @State private var dustExpanded = false
     @State private var eyesExpanded = false
-    @ObservedObject private var interaction: RetouchInteractionState
+    @Bindable private var interaction: RetouchInteractionState
 
     init(viewModel: AppViewModel) {
         self.viewModel = viewModel
-        _interaction = ObservedObject(wrappedValue: viewModel.retouchInteractionState)
+        _interaction = Bindable(wrappedValue: viewModel.retouchInteractionState)
     }
 
     var body: some View {

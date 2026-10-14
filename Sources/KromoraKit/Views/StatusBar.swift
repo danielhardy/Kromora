@@ -112,7 +112,7 @@ struct StatusBar: View {
 /// Trailing busy indicator for mask analysis. Shown here rather than in the inspector so
 /// its appearance never shifts the controls the user is dragging.
 private struct MaskActivityIndicator: View {
-    @ObservedObject var state: MaskInteractionState
+    let state: MaskInteractionState
     let retry: () -> Void
 
     var body: some View {

@@ -1,10 +1,11 @@
-import Combine
+import Observation
 import Foundation
 
 /// Presentation events only. Discovery never requests inference, delays a document commit, or
 /// claims analysis progress. A replacement visual needs only this boundary and stored pixels.
 @MainActor
-final class MaskDiscoveryState: ObservableObject {
+@Observable
+final class MaskDiscoveryState {
     struct Request: Equatable, Sendable {
         enum Phase: Equatable, Sendable {
             case waiting
@@ -18,7 +19,7 @@ final class MaskDiscoveryState: ObservableObject {
         var phase: Phase
     }
 
-    @Published private(set) var request: Request?
+    private(set) var request: Request?
 
     @discardableResult
     func begin(title: String, now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> UUID {

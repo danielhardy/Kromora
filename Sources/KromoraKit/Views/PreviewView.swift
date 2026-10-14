@@ -9,24 +9,24 @@ struct PreviewView: View {
     // The preview image is owned by a separate observation boundary. Keep observing it even while
     // the spinner is on screen; otherwise a completed replacement render can sit in the surface
     // until an unrelated AppViewModel change causes this view to rebuild.
-    @ObservedObject private var previewSurface: PreviewSurface
-    @ObservedObject private var originalPreviewSurface: PreviewSurface
+    private let previewSurface: PreviewSurface
+    private let originalPreviewSurface: PreviewSurface
     /// Full drawable height, including the area temporarily covered by the bottom chrome.
     private let surfaceHeight: CGFloat?
     @State private var isDropTargeted = false
     @State private var isCaptureOverlayVisible = false
-    @ObservedObject private var maskingState: MaskInteractionState
-    @ObservedObject private var retouchState: RetouchInteractionState
+    private let maskingState: MaskInteractionState
+    private let retouchState: RetouchInteractionState
     @ObservedObject private var settings: KromoraSettings
 
     init(viewModel: AppViewModel, surfaceHeight: CGFloat? = nil) {
         self.surfaceHeight = surfaceHeight
         _viewModel = ObservedObject(wrappedValue: viewModel)
         _canvasState = Bindable(wrappedValue: viewModel.canvasState)
-        _previewSurface = ObservedObject(wrappedValue: viewModel.previewSurface)
-        _originalPreviewSurface = ObservedObject(wrappedValue: viewModel.originalPreviewSurface)
-        _maskingState = ObservedObject(wrappedValue: viewModel.maskInteractionState)
-        _retouchState = ObservedObject(wrappedValue: viewModel.retouchInteractionState)
+        previewSurface = viewModel.previewSurface
+        originalPreviewSurface = viewModel.originalPreviewSurface
+        maskingState = viewModel.maskInteractionState
+        retouchState = viewModel.retouchInteractionState
         _settings = ObservedObject(wrappedValue: viewModel.settings)
     }
 

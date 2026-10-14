@@ -5,7 +5,7 @@ import SwiftUI
 struct InfoInspectorView: View {
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @ObservedObject var viewModel: AppViewModel
-    @ObservedObject var inspectorState: AppViewModel.InspectorState
+    let inspectorState: AppViewModel.InspectorState
     @Bindable private var canvasState: CanvasInteractionState
 
     init(viewModel: AppViewModel, inspectorState: AppViewModel.InspectorState) {

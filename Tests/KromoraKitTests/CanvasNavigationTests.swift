@@ -1,4 +1,5 @@
 import XCTest
+import os
 import CoreGraphics
 import CoreImage
 import Combine
@@ -694,11 +695,8 @@ final class CanvasObservationTests: TempDirectoryTestCase {
         )
 
         var appChanges = 0
-        var inspectorChanges = 0
+        let inspectorChanges = OSAllocatedUnfairLock(initialState: 0)
         let appSubscription = viewModel.objectWillChange.sink { _ in appChanges += 1 }
-        let inspectorSubscription = viewModel.inspectorState.objectWillChange.sink {
-            _ in inspectorChanges += 1
-        }
 
         // A wheel/pinch update is presentation-only and must not fan out through AppViewModel.
         // CanvasInteractionState is @Observable (KRMA-521): assert the value changed locally
@@ -720,11 +718,16 @@ final class CanvasObservationTests: TempDirectoryTestCase {
         // Inspector chrome is independently observable and is not forwarded through the broad
         // model publisher either.
         appChanges = 0
+        withObservationTracking {
+            _ = viewModel.inspectorState.tab
+        } onChange: {
+            inspectorChanges.withLock { $0 += 1 }
+        }
         viewModel.inspectorState.tab = .effects
         XCTAssertEqual(appChanges, 0)
-        XCTAssertGreaterThan(inspectorChanges, 0)
+        XCTAssertGreaterThan(inspectorChanges.withLock { $0 }, 0)
 
-        withExtendedLifetime((appSubscription, inspectorSubscription)) {}
+        withExtendedLifetime(appSubscription) {}
     }
 
     func testSourceResetClearsNavigationAndCropTransientState() {

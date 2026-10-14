@@ -1,10 +1,11 @@
 import Foundation
-import Combine
+import Observation
 
 /// Developer-only analysis presentation state. The SwiftUI panels render this model but do not
 /// own analysis requests, mask policy, or task-group lifetime.
 @MainActor
-final class AnalysisDebugPanelModel: ObservableObject {
+@Observable
+final class AnalysisDebugPanelModel {
     struct MaskEntry: Identifiable {
         let kind: SemanticMaskKind
         let mask: RegionMask?
@@ -42,16 +43,16 @@ final class AnalysisDebugPanelModel: ObservableObject {
         }
     }
 
-    @Published private(set) var analysis: PhotoAnalysis?
-    @Published private(set) var masks: [MaskEntry] = []
-    @Published var visibleKinds = Set<SemanticMaskKind>()
-    @Published private(set) var isLoading = false
-    @Published private(set) var errorMessage: String?
+    private(set) var analysis: PhotoAnalysis?
+    private(set) var masks: [MaskEntry] = []
+    var visibleKinds = Set<SemanticMaskKind>()
+    private(set) var isLoading = false
+    private(set) var errorMessage: String?
 
-    private let coordinator: PhotoAnalysisCoordinator
-    private let assetID: PhotoAssetID
-    private let source: ImageSource
-    private var loadTask: Task<Void, Never>?
+    @ObservationIgnored private let coordinator: PhotoAnalysisCoordinator
+    @ObservationIgnored private let assetID: PhotoAssetID
+    @ObservationIgnored private let source: ImageSource
+    @ObservationIgnored private var loadTask: Task<Void, Never>?
 
     init(coordinator: PhotoAnalysisCoordinator, assetID: PhotoAssetID, source: ImageSource) {
         self.coordinator = coordinator

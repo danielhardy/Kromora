@@ -5,7 +5,7 @@ import SwiftUI
 /// Replaceable, presentation-only surface. The existing preview renderer stays paused and owns
 /// the photograph; this independently scheduled transparent layer owns only the optical effect.
 struct MaskDiscoveryOverlay: View {
-    @ObservedObject var state: MaskDiscoveryState
+    let state: MaskDiscoveryState
     let loadPixels: @Sendable (RegionMaskReference) async -> NormalizedMask?
     let mapping: GeometryPointMapping
     let navigation: CanvasNavigation

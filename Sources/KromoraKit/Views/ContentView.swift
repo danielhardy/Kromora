@@ -9,7 +9,7 @@ public struct ContentView: View {
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @StateObject private var viewModel: AppViewModel
     @Bindable private var photosImportCoordinator: PhotosImportCoordinator
-    @ObservedObject private var inspectorState: AppViewModel.InspectorState
+    private let inspectorState: AppViewModel.InspectorState
     @Bindable private var canvasState: CanvasInteractionState
     @Bindable private var collection: ImageCollection
     @Bindable private var exportCoordinator: ExportCoordinator
@@ -31,7 +31,7 @@ public struct ContentView: View {
         let viewModel = AppViewModel(includeBundledLooks: true)
         _viewModel = StateObject(wrappedValue: viewModel)
         _photosImportCoordinator = Bindable(wrappedValue: viewModel.photosImportCoordinator)
-        _inspectorState = ObservedObject(wrappedValue: viewModel.inspectorState)
+        inspectorState = viewModel.inspectorState
         _canvasState = Bindable(wrappedValue: viewModel.canvasState)
         _collection = Bindable(wrappedValue: viewModel.collection)
         _exportCoordinator = Bindable(wrappedValue: viewModel.export)
@@ -43,7 +43,7 @@ public struct ContentView: View {
     public init(viewModel: AppViewModel) {
         _viewModel = StateObject(wrappedValue: viewModel)
         _photosImportCoordinator = Bindable(wrappedValue: viewModel.photosImportCoordinator)
-        _inspectorState = ObservedObject(wrappedValue: viewModel.inspectorState)
+        inspectorState = viewModel.inspectorState
         _canvasState = Bindable(wrappedValue: viewModel.canvasState)
         _collection = Bindable(wrappedValue: viewModel.collection)
         _exportCoordinator = Bindable(wrappedValue: viewModel.export)

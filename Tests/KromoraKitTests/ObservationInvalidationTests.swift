@@ -369,4 +369,28 @@ final class ObservationInvalidationTests: TempDirectoryTestCase {
         XCTAssertTrue((PhotosImportCoordinator.self as Any) is AnyObject.Type)
         XCTAssertTrue((ExportCoordinator.self as Any) is AnyObject.Type)
     }
+
+    /// KRMA-973: the view-local state objects are `@Observable`; none may regress to Combine.
+    func testViewLocalStateTypesAreNotObservableObjects() throws {
+        let sources = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/KromoraKit")
+        let types = [
+            "InspectorState", "MaskInteractionState", "RetouchInteractionState",
+            "MaskDiscoveryState", "PreviewSurface", "MaskingPanelModel", "AnalysisDebugPanelModel",
+        ]
+        let files = try XCTUnwrap(FileManager.default.enumerator(
+            at: sources, includingPropertiesForKeys: nil))
+        var scanned = 0
+        for case let url as URL in files where url.pathExtension == "swift" {
+            let text = try String(contentsOf: url, encoding: .utf8)
+            for type in types {
+                if text.contains("final class \(type)") { scanned += 1 }
+                XCTAssertFalse(
+                    text.contains("class \(type): ObservableObject"),
+                    "\(type) must be @Observable (\(url.lastPathComponent))")
+            }
+        }
+        XCTAssertEqual(scanned, types.count, "every converted type should be found by the scan")
+    }
 }

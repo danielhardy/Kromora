@@ -1,11 +1,12 @@
 import Foundation
-import Combine
+import Observation
 
 /// Presentation state and intent handling for the legacy semantic-result masking panel. The
 /// editor workflow uses `MaskingWorkspace`; this model remains a coordinator-backed compatibility
 /// surface and deliberately delegates policy and inversion to shared services.
 @MainActor
-final class MaskingPanelModel: ObservableObject {
+@Observable
+final class MaskingPanelModel {
     struct Selection: Identifiable, Hashable {
         let kind: SemanticMaskKind
 
@@ -25,17 +26,17 @@ final class MaskingPanelModel: ObservableObject {
         }
     }
 
-    @Published private(set) var availableSelections: [Selection] = []
-    @Published private(set) var selectedKind: SemanticMaskKind?
-    @Published private(set) var selectedMask: RegionMask?
-    @Published private(set) var selectedPixels: NormalizedMask?
-    @Published private(set) var appliedMask: RegionMask?
-    @Published private(set) var isLoading = false
-    @Published private(set) var isApplying = false
-    @Published private(set) var errorMessage: String?
-    @Published private(set) var loadWarningMessage: String?
-    @Published private(set) var unavailableTargetMessages: [String] = []
-    @Published var isInverted = false {
+    private(set) var availableSelections: [Selection] = []
+    private(set) var selectedKind: SemanticMaskKind?
+    private(set) var selectedMask: RegionMask?
+    private(set) var selectedPixels: NormalizedMask?
+    private(set) var appliedMask: RegionMask?
+    private(set) var isLoading = false
+    private(set) var isApplying = false
+    private(set) var errorMessage: String?
+    private(set) var loadWarningMessage: String?
+    private(set) var unavailableTargetMessages: [String] = []
+    var isInverted = false {
         didSet {
             guard isInverted != oldValue else { return }
             appliedMask = nil
@@ -43,16 +44,16 @@ final class MaskingPanelModel: ObservableObject {
         }
     }
 
-    private let coordinator: PhotoAnalysisCoordinator
-    private let assetID: PhotoAssetID
-    private let source: ImageSource
+    @ObservationIgnored private let coordinator: PhotoAnalysisCoordinator
+    @ObservationIgnored private let assetID: PhotoAssetID
+    @ObservationIgnored private let source: ImageSource
     /// Optional until the local-adjustment model can own a RegionMask. Keeping the hook explicit
     /// lets tests prove the full select/invert/apply handoff without shipping a button that only
     /// dismisses this sheet.
-    private let onApply: (@MainActor (PhotoAssetID, RegionMask) -> Void)?
-    private var masks: [SemanticMaskKind: RegionMask] = [:]
-    private var pixels: [SemanticMaskKind: NormalizedMask] = [:]
-    private var loadTask: Task<Void, Never>?
+    @ObservationIgnored private let onApply: (@MainActor (PhotoAssetID, RegionMask) -> Void)?
+    @ObservationIgnored private var masks: [SemanticMaskKind: RegionMask] = [:]
+    @ObservationIgnored private var pixels: [SemanticMaskKind: NormalizedMask] = [:]
+    @ObservationIgnored private var loadTask: Task<Void, Never>?
 
     init(
         coordinator: PhotoAnalysisCoordinator,

@@ -1,35 +1,36 @@
-import Combine
+import Observation
 import CoreGraphics
 import Foundation
 
 /// Pointer-frequency state for the retouch canvas. Drafts and selection never enter the recipe.
 @MainActor
-final class RetouchInteractionState: ObservableObject {
+@Observable
+final class RetouchInteractionState {
     enum OverlayPolicy: String, CaseIterable, Sendable { case auto, always, selected, never
         var title: String { rawValue.capitalized }
     }
     enum Handle: Sendable, Equatable { case destination(UUID), source(UUID), create }
 
-    @Published var mode: RetouchMode = .heal
-    @Published var radius = 0.012
-    @Published var feather = 0.35
-    @Published var opacity = 1.0
-    @Published private(set) var isArmed = false
-    @Published private(set) var selectedSpotID: UUID?
-    @Published private(set) var hoveredSpotID: UUID?
-    @Published private(set) var hoverPoint: CGPoint?
-    @Published private(set) var activeHandle: Handle?
-    @Published private(set) var draftSamples: [BrushSample] = []
-    @Published private(set) var draftRadius = 0.012
-    @Published private(set) var draftFeather = 0.35
-    @Published private(set) var solvingSpotIDs: Set<UUID> = []
-    @Published private(set) var shiftClickAnchor: CGPoint?
-    @Published var overlayPolicy: OverlayPolicy = .auto
-    @Published var visualizationEnabled = false
-    @Published var visualizationThreshold = 0.025
-    @Published private(set) var dustSuggestions: [RetouchDustSuggestion] = []
-    @Published private(set) var visualizationCandidates: [RetouchDustSuggestion] = []
-    @Published var isSpacePanning = false
+    var mode: RetouchMode = .heal
+    var radius = 0.012
+    var feather = 0.35
+    var opacity = 1.0
+    private(set) var isArmed = false
+    private(set) var selectedSpotID: UUID?
+    private(set) var hoveredSpotID: UUID?
+    private(set) var hoverPoint: CGPoint?
+    private(set) var activeHandle: Handle?
+    private(set) var draftSamples: [BrushSample] = []
+    private(set) var draftRadius = 0.012
+    private(set) var draftFeather = 0.35
+    private(set) var solvingSpotIDs: Set<UUID> = []
+    private(set) var shiftClickAnchor: CGPoint?
+    var overlayPolicy: OverlayPolicy = .auto
+    var visualizationEnabled = false
+    var visualizationThreshold = 0.025
+    private(set) var dustSuggestions: [RetouchDustSuggestion] = []
+    private(set) var visualizationCandidates: [RetouchDustSuggestion] = []
+    var isSpacePanning = false
 
     var hasDraft: Bool { activeHandle != nil && !draftSamples.isEmpty }
     var shouldShowOverlay: Bool {

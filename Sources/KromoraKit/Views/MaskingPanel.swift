@@ -53,7 +53,7 @@ struct MaskGridView: View {
 }
 
 struct MaskingPanel: View {
-    @StateObject private var model: MaskingPanelModel
+    @State private var model: MaskingPanelModel
     let surface: PreviewSurface?
 
     init(
@@ -62,7 +62,7 @@ struct MaskingPanel: View {
         source: ImageSource,
         surface: PreviewSurface? = nil
     ) {
-        _model = StateObject(wrappedValue: MaskingPanelModel(
+        _model = State(wrappedValue: MaskingPanelModel(
             coordinator: coordinator, assetID: assetID, source: source
         ))
         self.surface = surface
@@ -103,7 +103,7 @@ struct MaskingPanel: View {
                     .frame(minHeight: 220)
 
                 HStack {
-                    Toggle("Invert selection", isOn: $model.isInverted)
+                    Toggle("Invert selection", isOn: Bindable(model).isInverted)
                     Spacer()
                     if let mask = model.selectedMask {
                         Text("Preview • \(Int(mask.coverage * 100))% coverage")

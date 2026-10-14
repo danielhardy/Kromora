@@ -9,14 +9,14 @@ import SwiftUI
 /// hidden from the header (or with O), and its color and style are preferences in Settings.
 struct MaskingWorkspace: View {
     @ObservedObject var viewModel: AppViewModel
-    @ObservedObject private var maskingState: MaskInteractionState
+    @Bindable private var maskingState: MaskInteractionState
 
     @State private var adjustmentsExpanded = true
     @State private var maskShapeExpanded = true
 
     init(viewModel: AppViewModel) {
         self.viewModel = viewModel
-        _maskingState = ObservedObject(wrappedValue: viewModel.maskInteractionState)
+        _maskingState = Bindable(wrappedValue: viewModel.maskInteractionState)
     }
 
     var body: some View {
@@ -1057,7 +1057,7 @@ fileprivate extension LocalAdjustmentControl {
 /// what it selects, and the switch and menu hold the few per-mask actions.
 private struct MaskLayerRow: View {
     @ObservedObject var viewModel: AppViewModel
-    @ObservedObject var maskingState: MaskInteractionState
+    let maskingState: MaskInteractionState
     let layer: LocalAdjustmentLayer
     let index: Int
     let total: Int
@@ -1187,7 +1187,7 @@ private struct MaskLayerRow: View {
 /// shows its controls in the Mask section and points canvas gestures at it.
 private struct MaskPartRow: View {
     @ObservedObject var viewModel: AppViewModel
-    @ObservedObject var maskingState: MaskInteractionState
+    let maskingState: MaskInteractionState
     let layer: LocalAdjustmentLayer
     let component: MaskComponent
     let index: Int
@@ -1437,7 +1437,7 @@ private struct LiveBrushStroke: Equatable {
 /// without putting pointer-frequency geometry into AppViewModel's published document.
 struct MaskCanvasOverlay: View {
     @ObservedObject var viewModel: AppViewModel
-    @ObservedObject var maskingState: MaskInteractionState
+    let maskingState: MaskInteractionState
     let sourceSize: CGSize
     let crop: CropAdjustments
     let navigation: CanvasNavigation

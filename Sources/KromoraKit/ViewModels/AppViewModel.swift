@@ -91,19 +91,19 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Inspector presentation state has its own observation boundary. The editor model still
     /// owns histogram scheduling and tab validity, but changing the inspector chrome does not
     /// need to publish through the model observed by the library and canvas shells.
-    @MainActor
-    final class InspectorState: ObservableObject {
+    @MainActor @Observable
+    final class InspectorState {
         /// Inspector visibility drives the histogram gate synchronously after assignment.
-        var onPresentationChange: (() -> Void)?
+        @ObservationIgnored var onPresentationChange: (() -> Void)?
 
-        @Published var isPresented = false {
+        var isPresented = false {
             didSet { onPresentationChange?() }
         }
-        @Published var tab: InspectorTab = .light
+        var tab: InspectorTab = .light
 
         /// Masking is an inspector tab, not a second presentation mode. Keep the previous tab so
         /// Done/Escape can return to the edit control the user came from.
-        private var tabBeforeMasking: InspectorTab = .light
+        @ObservationIgnored private var tabBeforeMasking: InspectorTab = .light
 
         /// Compatibility access for masking commands and tests. `tab` remains the one source of
         /// truth for which inspector surface is active; changing this value only translates the
@@ -1402,7 +1402,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
         // Inspector chrome is observed by its own view subtree. Histogram work still belongs to
         // this model. Use InspectorState's post-assignment callback so the gate sees the new
-        // value synchronously; @Published emits from willSet and would otherwise read stale state.
+        // value synchronously.
         inspectorState.onPresentationChange = { [weak self] in
             self?.refreshHistogramGate()
         }
