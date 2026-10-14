@@ -89,6 +89,53 @@ final class PreviewAdmissionCoordinatorTests: TempDirectoryTestCase {
         await destination.scheduler.cancelAllAndWait()
     }
 
+    func testSettledEditedFrameReplacesItsInteractiveHistogramSample() async throws {
+        let engine = FakeRenderEngine()
+        let destination = makeDestination(engine: engine)
+        let coordinator = makeCoordinator(destination: destination, engine: engine)
+        let initialRequest = makeRequest(source: destination.source)
+        let initialSample = try makeHistogram(red: 50, green: 40, blue: 30)
+        destination.admissionInspectorPresented = true
+        destination.admissionLastPresentedRequest = initialRequest
+        destination.admissionPresentationHistogramSample = .init(
+            surfaceRevision: 1, state: .sample(initialSample)
+        )
+        coordinator.updateHistogram(for: initialRequest, presentedImage: CIImage(color: .black))
+
+        let editedDocument = EditDocument(adjustments: [.exposure(ev: 1)])
+        let interactiveRequest = RenderRequest(
+            source: destination.source, document: editedDocument, quality: .interactive
+        )
+        let interactiveSample = try makeHistogram(red: 120, green: 110, blue: 100)
+        destination.admissionLastPresentedRequest = interactiveRequest
+        destination.admissionPresentationHistogramSample = .init(
+            surfaceRevision: 2, state: .sample(interactiveSample)
+        )
+        coordinator.updateHistogram(
+            for: interactiveRequest, presentedImage: CIImage(color: .white)
+        )
+        XCTAssertEqual(destination.admissionHistogram, interactiveSample)
+
+        let settledRequest = RenderRequest(
+            source: destination.source, document: editedDocument, quality: .preview
+        )
+        let settledSample = try makeHistogram(red: 200, green: 190, blue: 180)
+        destination.admissionLastPresentedRequest = settledRequest
+        destination.admissionPresentationHistogramSample = .init(
+            surfaceRevision: 3, state: .sample(settledSample)
+        )
+        coordinator.updateHistogram(
+            for: settledRequest, presentedImage: CIImage(color: .gray), forceRefresh: true
+        )
+
+        XCTAssertEqual(destination.admissionHistogram, settledSample)
+        XCTAssertEqual(destination.histogramPublicationCount, 3)
+        let histogramRequests = await engine.histogramRequests
+        XCTAssertTrue(histogramRequests.isEmpty)
+        coordinator.shutdown()
+        await destination.scheduler.cancelAllAndWait()
+    }
+
     func testNewerInteractiveTextureSampleWinsAndOlderCompletionIsIgnored() async throws {
         let engine = FakeRenderEngine()
         let destination = makeDestination(engine: engine)

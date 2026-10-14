@@ -68,6 +68,40 @@ final class PreviewPublicationCoordinatorTests: XCTestCase {
         XCTAssertEqual(destination.histogramCount, 3)
     }
 
+    func testSettledEditFrameForcesHistogramRefreshAfterInteractiveSamples() throws {
+        let destination = FakeDestination()
+        destination.storedEditsResolvedSourceRevision = destination.sourceRevision
+        let coordinator = PreviewPublicationCoordinator(destination: destination)
+        let base = try makePublication(destination: destination)
+        coordinator.publish(base)
+
+        let editedDocument = EditDocument(adjustments: [.exposure(ev: 1)])
+        destination.displayDocument = editedDocument
+        let editedRequest = RenderRequest(
+            source: destination.imageSource, document: editedDocument, quality: .interactive
+        )
+        let interactive = PreviewCoordinator.Publication(
+            request: editedRequest, image: try Fixtures.makeCGImage(width: 32, height: 24),
+            gpuImage: nil, revision: 2, assetID: destination.activeAssetID,
+            sourceRevision: destination.sourceRevision,
+            displayRevision: destination.displayRevision, phase: .interactive
+        )
+        coordinator.publish(interactive)
+
+        let settledRequest = RenderRequest(
+            source: destination.imageSource, document: editedDocument, quality: .preview
+        )
+        let settled = PreviewCoordinator.Publication(
+            request: settledRequest, image: try Fixtures.makeCGImage(width: 32, height: 24),
+            gpuImage: nil, revision: 3, assetID: destination.activeAssetID,
+            sourceRevision: destination.sourceRevision,
+            displayRevision: destination.displayRevision, phase: .settled
+        )
+        coordinator.publish(settled)
+
+        XCTAssertEqual(destination.forceHistogramRefreshes, [false, false, true])
+    }
+
     func testInteractiveFrameSupersededBeforePresentationDoesNotAdmitHistogram() throws {
         let destination = FakeDestination()
         destination.storedEditsResolvedSourceRevision = destination.sourceRevision
@@ -267,6 +301,7 @@ private final class FakeDestination: PreviewPublicationDestination {
     var statusMessage = "Loading Test..."
     var presentCount = 0
     var histogramCount = 0
+    var forceHistogramRefreshes: [Bool] = []
     var refuseNextPresentation = false
     var deferPresentation = false
     var visiblePreview: CIImage?
@@ -333,8 +368,11 @@ private final class FakeDestination: PreviewPublicationDestination {
         lastOriginalScheduleAllowedHiddenPreparation = allowHiddenPreparation
     }
     func publicationCancelComparisonPreview() { comparisonCancelCount += 1 }
-    func publicationUpdateHistogram(for request: RenderRequest, presentedImage: CIImage?) {
+    func publicationUpdateHistogram(
+        for request: RenderRequest, presentedImage: CIImage?, forceRefresh: Bool
+    ) {
         histogramCount += 1
+        forceHistogramRefreshes.append(forceRefresh)
         visiblePreview = presentedImage
     }
     var publicationVisiblePreview: CIImage? { visiblePreview }

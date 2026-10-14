@@ -38,7 +38,9 @@ protocol PreviewPublicationDestination: AnyObject {
         allowHiddenPreparation: Bool, allowBeforePresentationConfirmation: Bool
     )
     func publicationCancelComparisonPreview()
-    func publicationUpdateHistogram(for request: RenderRequest, presentedImage: CIImage?)
+    func publicationUpdateHistogram(
+        for request: RenderRequest, presentedImage: CIImage?, forceRefresh: Bool
+    )
     func publicationScheduleIdlePreviewBuild()
     func writeCanonicalPreview(_ image: CIImage, request: RenderRequest)
     /// False while the canvas shows something other than the photo's own edit — the original
@@ -215,7 +217,9 @@ final class PreviewPublicationCoordinator {
         lastPresentedVisibleRequest = request
         lastPresentedVisibleImage = image
         guard destination.publicationStoredEditsResolvedSourceRevision == sourceRevision else { return }
-        destination.publicationUpdateHistogram(for: request, presentedImage: image)
+        destination.publicationUpdateHistogram(
+            for: request, presentedImage: image, forceRefresh: false
+        )
     }
 
     /// Feeds an interactive frame's presentation sample to Info while the drag is still active.
@@ -237,7 +241,9 @@ final class PreviewPublicationCoordinator {
             ),
             destination.publicationStoredEditsResolvedSourceRevision == sourceRevision
         else { return }
-        destination.publicationUpdateHistogram(for: request, presentedImage: image)
+        destination.publicationUpdateHistogram(
+            for: request, presentedImage: image, forceRefresh: false
+        )
     }
 
     private func didPresentVisibleFrame(
@@ -256,6 +262,11 @@ final class PreviewPublicationCoordinator {
                 generation: sourceRevision
             )
         else { return }
+        let previousPresentedRequest = lastPresentedVisibleRequest
+        let settledEditChanged = previousPresentedRequest.map {
+            $0.source == request.source
+                && ($0.document != request.document || $0.lut != request.lut || $0.space != request.space)
+        } ?? false
         destination.confirmPresentationFrame(
             assetID: assetID, identity: request.source.portableIdentity,
             generation: sourceRevision, source: confirmationSource
@@ -286,7 +297,10 @@ final class PreviewPublicationCoordinator {
         pendingDevelopChange = false
 
         if destination.publicationStoredEditsResolvedSourceRevision == sourceRevision {
-            destination.publicationUpdateHistogram(for: request, presentedImage: presentedImage)
+            destination.publicationUpdateHistogram(
+                for: request, presentedImage: presentedImage,
+                forceRefresh: settledEditChanged
+            )
         }
         destination.publicationScheduleIdlePreviewBuild()
 

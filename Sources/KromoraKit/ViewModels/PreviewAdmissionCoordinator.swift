@@ -196,7 +196,8 @@ final class PreviewAdmissionCoordinator {
     /// source graph, so the pinned chart describes the same comparison or edited request on screen.
     func updateHistogram(
         for displayedRequest: RenderRequest? = nil,
-        presentedImage: CIImage? = nil
+        presentedImage: CIImage? = nil,
+        forceRefresh: Bool = false
     ) {
         guard let destination else { return }
         guard destination.admissionInspectorPresented else {
@@ -224,7 +225,8 @@ final class PreviewAdmissionCoordinator {
         let sourceRevision = destination.admissionSourceRevision
         // Zoom and pan re-present the same edit through a new surface or region of interest. The
         // histogram describes the edit, so identical image content never resamples it.
-        if completedHistogramAssetID == assetID,
+        if !forceRefresh,
+            completedHistogramAssetID == assetID,
             completedHistogramSourceRevision == sourceRevision,
             completedHistogramIdentity?.hasSameImageContent(as: identity) == true,
             destination.admissionHistogram != nil
@@ -262,7 +264,8 @@ final class PreviewAdmissionCoordinator {
                     from: image, identity: identity, assetID: assetID,
                     sourceRevision: sourceRevision,
                     validation: .prepared(
-                        request, surfaceRevision: presentationSample.surfaceRevision)
+                        request, surfaceRevision: presentationSample.surfaceRevision),
+                    forceRefresh: forceRefresh
                 )
             case .failed:
                 retryPresentationHistogramSample(
@@ -441,17 +444,19 @@ final class PreviewAdmissionCoordinator {
 
     private func scheduleHistogram(
         from image: CIImage, identity: HistogramIdentity, assetID: PhotoAssetID?,
-        sourceRevision: UInt64, validation: HistogramValidation
+        sourceRevision: UInt64, validation: HistogramValidation,
+        forceRefresh: Bool = false
     ) {
         guard let destination else { return }
-        if workScheduler.contains(histogramJobID),
+        if !forceRefresh, workScheduler.contains(histogramJobID),
             histogramTaskAssetID == assetID,
             histogramTaskSourceRevision == sourceRevision,
             histogramTaskIdentity?.hasSameImageContent(as: identity) == true
         {
             return
         }
-        if completedHistogramAssetID == assetID,
+        if !forceRefresh,
+            completedHistogramAssetID == assetID,
             completedHistogramSourceRevision == sourceRevision,
             completedHistogramIdentity?.hasSameImageContent(as: identity) == true
         {

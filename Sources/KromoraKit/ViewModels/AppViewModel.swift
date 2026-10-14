@@ -4559,8 +4559,12 @@ extension AppViewModel: PreviewPublicationDestination {
         )
     }
     func publicationCancelComparisonPreview() { cancelComparisonPreview() }
-    func publicationUpdateHistogram(for request: RenderRequest, presentedImage: CIImage?) {
-        updateHistogram(for: request, presentedImage: presentedImage)
+    func publicationUpdateHistogram(
+        for request: RenderRequest, presentedImage: CIImage?, forceRefresh: Bool
+    ) {
+        previewAdmissionCoordinator.updateHistogram(
+            for: request, presentedImage: presentedImage, forceRefresh: forceRefresh
+        )
     }
     func publicationScheduleIdlePreviewBuild() { scheduleIdlePreviewBuild() }
     func writeCanonicalPreview(_ image: CIImage, request: RenderRequest) {
