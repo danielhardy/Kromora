@@ -1221,7 +1221,7 @@ private func writeDurably(_ data: Data, to url: URL) throws {
     }
 }
 
-private func fullSync(_ descriptor: Int32) throws {
+func fullSync(_ descriptor: Int32) throws {
     #if os(macOS)
         if fcntl(descriptor, F_FULLFSYNC) != 0 { throw CocoaError(.fileWriteUnknown) }
     #else
@@ -1229,9 +1229,13 @@ private func fullSync(_ descriptor: Int32) throws {
     #endif
 }
 
-private func fullSyncDirectory(_ url: URL) throws {
+/// Flushes a directory's entries to stable storage with the same primitive as `fullSync`.
+/// Throws when the directory cannot be opened or the sync fails: a rename or unlink that
+/// was not made durable must not be reported as committed. `sync` is a test seam for
+/// forcing a sync failure, which APFS will not produce on demand.
+func fullSyncDirectory(_ url: URL, sync: (Int32) throws -> Void = fullSync) throws {
     let descriptor = open(url.path, O_RDONLY)
-    guard descriptor >= 0 else { return }
+    guard descriptor >= 0 else { throw CocoaError(.fileWriteUnknown) }
     defer { close(descriptor) }
-    _ = fsync(descriptor)
+    try sync(descriptor)
 }

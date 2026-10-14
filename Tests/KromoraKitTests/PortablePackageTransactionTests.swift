@@ -307,3 +307,22 @@ final class PortablePackageTransactionTests: TempDirectoryTestCase {
         return url
     }
 }
+
+final class FullSyncDirectoryTests: TempDirectoryTestCase {
+    func testMissingDirectoryThrows() {
+        let missing = tempDirectory.appendingPathComponent("does-not-exist")
+        XCTAssertThrowsError(try fullSyncDirectory(missing))
+    }
+
+    func testExistingDirectorySyncs() throws {
+        XCTAssertNoThrow(try fullSyncDirectory(tempDirectory))
+    }
+
+    /// APFS will not fail a directory sync on demand, so the `sync` seam injects the failure.
+    func testSyncFailureIsPropagated() {
+        struct Injected: Error {}
+        XCTAssertThrowsError(try fullSyncDirectory(tempDirectory, sync: { _ in throw Injected() })) {
+            XCTAssertTrue($0 is Injected)
+        }
+    }
+}
