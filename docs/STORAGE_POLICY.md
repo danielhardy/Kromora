@@ -95,7 +95,23 @@ as cache misses and regenerate from package originals. Their bytes may linger un
 rebuilt. The `originalThumbnail480` / `editedThumbnail480` kind names remain persisted identifiers;
 no package format version changes.
 
-## Backup and restore semantics
+## Moving or backing up a library
+
+Verified backup/restore is post-MVP (ADR-936). The supported path is manual:
+
+1. Quit Kromora so no writer holds the package.
+2. Copy the `.kromoralibrary` package in Finder. Time Machine already covers `~/Pictures`.
+3. To use a copy, place it at the default path (`~/Pictures/Kromora Library.kromoralibrary`) or
+   choose it in Settings > Choose Library…; the choice applies on the next launch. Kromora does not
+   register as a Finder opener for the package, so double-clicking it does not open it.
+
+Restoring is the same copy in reverse. The local index and caches rebuild from the package.
+
+## Backup and restore semantics (unwired model code)
+
+> **Not shipped.** This section describes `PortableLibraryBackup` / `PortableLibraryRestore`, which
+> are tested but not wired to any menu, command, or UI. The "Backup / restore" column in the matrix
+> above likewise describes that dormant model, not a user-visible feature.
 
 The built-in verified backup copies the manifest, catalog, originals, metadata, edit revisions, and
 Look blobs, then writes its own verified `Recovery/Backup/` metadata. It excludes transient package

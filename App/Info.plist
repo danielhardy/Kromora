@@ -18,21 +18,6 @@
 	<string>1</string>
 	<key>KromoraGitCommit</key>
 	<string>$(KROMORA_GIT_COMMIT)</string>
-	<key>CFBundleDocumentTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleTypeName</key>
-			<string>Kromora Library</string>
-			<key>CFBundleTypeRole</key>
-			<string>Editor</string>
-			<key>LSHandlerRank</key>
-			<string>Owner</string>
-			<key>LSItemContentTypes</key>
-			<array>
-				<string>com.kromora.kromoralibrary</string>
-			</array>
-		</dict>
-	</array>
 	<key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
 	<key>NSHighResolutionCapable</key>

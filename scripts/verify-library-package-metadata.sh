@@ -42,14 +42,8 @@ if not isinstance(photos_usage_description, str) or not photos_usage_description
 
 expected_uti = "com.kromora.kromoralibrary"
 expected_extension = "kromoralibrary"
-document_types = info.get("CFBundleDocumentTypes", [])
-if not any(
-    expected_uti in entry.get("LSItemContentTypes", [])
-    and entry.get("CFBundleTypeRole") == "Editor"
-    and entry.get("LSHandlerRank") == "Owner"
-    for entry in document_types
-):
-    raise SystemExit("Kromora Library document declaration is missing or not editor/owner")
+if "CFBundleDocumentTypes" in info:
+    raise SystemExit("CFBundleDocumentTypes must stay absent: the MVP has no Finder open-library handler (ADR-936)")
 
 declarations = info.get("UTExportedTypeDeclarations", [])
 if not any(
@@ -62,5 +56,5 @@ if not any(
 ):
     raise SystemExit("Kromora Library UTI declaration is missing package/extension metadata")
 
-print("verified Photos usage description, Kromora Library package declaration, and exact App Sandbox entitlement set")
+print("verified Photos usage description, Kromora Library package UTI declaration (no document type), and exact App Sandbox entitlement set")
 PY

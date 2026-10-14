@@ -26,8 +26,8 @@ The product's core loop is:
    Looks, local masks, Auto, and small-defect retouch.
 4. Review edits, copy them between photos, and export one image or a batch at full source quality
    or with supported output sizing.
-5. Reopen the library with its edits and package-owned originals intact; use package backup/restore
-   when moving or recovering the library.
+5. Reopen the library with its edits and package-owned originals intact; move or back up the library by
+   quitting Kromora and copying the package; use Settings > Choose Library… to open a copy.
 
 The package is the production library mode. Folder, Photos, and removable-volume choices are import
 sources that copy accepted images into the package. The app does not maintain a live folder-backed
@@ -41,7 +41,7 @@ following properties hold:
 
 - Imports and exports report partial failures honestly, preserve the user's source files, and
   leave recoverable package state after interrupted operations.
-- Edits survive navigation, relaunch, undo/redo, and package backup/restore. A corrupt or unsupported
+- Edits survive navigation, relaunch, undo/redo, and a quit-and-copy of the package. A corrupt or unsupported
   edit is reported instead of silently replaced with a blank edit.
 - Preview and full-resolution export use one ordered rendering pipeline; supported crop, masks,
   Looks, and retouch recipes stay aligned across both.
@@ -60,7 +60,7 @@ claims.
 
 The MVP includes package-backed library membership, local imports, culling, image metadata and
 histogram inspection, non-destructive edits, comparison, copy/paste, edit history and named
-snapshots, virtual copies, verified package backup/restore, reusable `.cube` Looks, and full-resolution
+snapshots, virtual copies, reusable `.cube` Looks, and full-resolution
 single/batch export. Editing includes decoder-supported RAW development, global Light/Color/Effects,
 crop and rotation, local mask composition and adjustments, content-aware Auto, and Heal/Clone
 retouch. Exact format options vary with the source, encoder, and macOS capabilities.
@@ -76,7 +76,10 @@ product decision with a concrete user need:
 
 - Full Lightroom-style digital-asset-management breadth, catalog migration, and broad metadata
   round-tripping.
-- Cloud sync or shared multi-user libraries; package portability and local backup are the current
+- Verified package backup/restore and an in-app Open/Switch Library or Finder double-click
+  handler (ADR-936). `PortableLibraryBackup` / `PortableLibraryRestore` remain in the tree, tested
+  but unwired; the supported path is quit-and-copy.
+- Cloud sync or shared multi-user libraries; package portability by manual copy is the current
   model.
 - Tethered capture, video editing, generative large-object removal, or universal embedded-depth
   support.

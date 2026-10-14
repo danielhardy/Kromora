@@ -1,7 +1,7 @@
 # Portable library package format
 
 > **Format reference, not an implementation-phase plan.** The phase wording below records the
-> format's design origin. Current runtime ownership and backup/restore behavior are specified in
+> format's design origin. Current runtime ownership and data-safety behavior (backup/restore is unwired model code) are specified in
 > [`STORAGE_POLICY.md`](STORAGE_POLICY.md) and [`APP_ARCHITECTURE.md`](APP_ARCHITECTURE.md).
 
 The format began as a read/write contract; the transaction journal, import, edit sidecars, and
