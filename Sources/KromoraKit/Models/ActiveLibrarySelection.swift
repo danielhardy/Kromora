@@ -62,18 +62,39 @@ struct ActiveLibrarySelection {
         }
     }
 
-    /// Validates `url` and stores it as the library for the next launch. `url` must carry access
-    /// already started by the panel; it is released here once the bookmark exists. An invalid folder
-    /// changes nothing.
-    func choose(_ url: URL, access: SecurityScopedResourceAccess) throws {
-        defer { access.release() }
-        try Self.validate(url)
+    /// Validates `url` and returns its security-scoped bookmark. Pure package and volume I/O with no
+    /// preference writes, so it can run off the main actor. An invalid folder throws.
+    nonisolated private static func bookmark(for url: URL) throws -> Data {
+        try validate(url)
         guard let data = try? url.bookmarkData(
             options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil
         ) else {
             throw ChoiceError.bookmarkFailed(name: url.lastPathComponent)
         }
+        return data
+    }
+
+    /// Validates `url` and stores it as the library for the next launch. `url` must carry access
+    /// already started by the panel; it is released here once the bookmark exists. An invalid folder
+    /// changes nothing.
+    func choose(_ url: URL, access: SecurityScopedResourceAccess) throws {
+        defer { access.release() }
+        preferences.set(try Self.bookmark(for: url), forKey: Self.bookmarkKey)
+    }
+
+    /// `choose` with validation on the global executor. Validation reads the manifest and every
+    /// membership shard, which can be slow on an external volume (timing not measured), so the
+    /// Settings flow awaits it instead of blocking the main actor. Only the preference write happens
+    /// back on the caller's actor.
+    nonisolated(nonsending) func chooseOffMain(_ url: URL, access: SecurityScopedResourceAccess) async throws {
+        defer { access.release() }
+        let data = try await Self.bookmarkOffMain(for: url)
         preferences.set(data, forKey: Self.bookmarkKey)
+    }
+
+    @concurrent
+    private static func bookmarkOffMain(for url: URL) async throws -> Data {
+        try bookmark(for: url)
     }
 
     func useDefault() {

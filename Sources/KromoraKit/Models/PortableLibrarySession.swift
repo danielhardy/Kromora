@@ -735,7 +735,7 @@ final class PortableLibrarySession {
         await scheduler?.cancelAndWait(id: virtualCopyJobID)
         await scheduler?.cancelAndWait(id: removalJobID)
         await scheduler?.cancelAndWait(id: indexWriteJobID)
-        if libraryStateIndexWriteMayBeLost { try? queryController.index.write(to: indexURL) }
+        if libraryStateIndexWriteMayBeLost { await writeShutdownIndex() }
         await scheduler?.cancelAndWait(id: indexLoadJobID)
         await scheduler?.cancelAndWait(id: presentedAspectRatioRepairJobID)
         for jobID in pendingFingerprintRepairs.values {
@@ -757,6 +757,30 @@ final class PortableLibrarySession {
         await detachedCaptureMetadataBackfillTask?.value
         detachedCaptureMetadataBackfillTask = nil
         try? lease.release()
+    }
+
+    /// Persists the current projection off the main actor and waits for it, so shutdown does not
+    /// report finished before the file is written. Ownership is re-checked at the write: a session
+    /// that lost its lease must not overwrite the file a new owner may be using. A failure is
+    /// reported through the same path as other index write failures.
+    private func writeShutdownIndex() async {
+        let projection = queryController.index
+        let indexURL = self.indexURL
+        let lease = self.lease
+        let now = clock.now
+        let failure: String? = await Task.detached(priority: .utility) {
+            do {
+                try lease.renew(now: now())
+                try projection.write(to: indexURL)
+                return nil
+            } catch {
+                return error.localizedDescription
+            }
+        }.value
+        if let failure {
+            KromoraObservability.event(.libraryIndexWriteFailed, detail: failure)
+            onIndexWriteFailure?(failure)
+        }
     }
 
     private func ensureWritableLease() throws {

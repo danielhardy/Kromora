@@ -183,6 +183,24 @@ final class ActiveLibrarySelectionTests: XCTestCase {
         XCTAssertTrue(chooser.isUsingDefault)
     }
 
+    /// KRMA-1006: validation runs off the main actor; a failure still throws and stores nothing.
+    /// External-volume timing was not measured.
+    func testChooseOffMainRejectsInvalidFolderAndAcceptsPackage() async throws {
+        let folder = directory.appendingPathComponent("Plain")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let invalid = selection
+        do {
+            try await invalid.chooseOffMain(folder, access: .systemGranted(for: folder, stop: { _ in }))
+            XCTFail("expected failure")
+        } catch {
+            XCTAssertEqual(error as? ActiveLibrarySelection.ChoiceError, .notALibrary(name: "Plain"))
+        }
+        XCTAssertFalse(selection.hasChoice)
+        let url = try await makePackage("Valid.kromoralibrary")
+        try await selection.chooseOffMain(url, access: .systemGranted(for: url, stop: { _ in }))
+        XCTAssertTrue(selection.hasChoice)
+    }
+
     func testChooserLaterKeepsRunningAndUseDefaultClears() async throws {
         let url = try await makePackage("Chosen.kromoralibrary")
         let dialog = StubDialog(); dialog.folder = url

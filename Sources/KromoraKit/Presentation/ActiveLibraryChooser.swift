@@ -85,7 +85,7 @@ final class ActiveLibraryChooser {
             canCreateDirectories: false
         ) else { return }
         do {
-            try selection.choose(url, access: .systemGranted(for: url))
+            try await selection.chooseOffMain(url, access: .systemGranted(for: url))
         } catch {
             errorMessage = error.localizedDescription
             return

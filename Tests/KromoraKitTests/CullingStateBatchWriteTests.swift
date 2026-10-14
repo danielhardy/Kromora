@@ -124,6 +124,41 @@ final class CullingStateBatchWriteTests: TempDirectoryTestCase {
         XCTAssertEqual(states[ids[0]]?.1, PhotoFlag.pick.rawValue)
     }
 
+    /// KRMA-1006: the shutdown projection write is awaited off the main actor and a failure is
+    /// reported, not dropped. External-volume timing was not measured; these use a temp package.
+    func testShutdownReportsIndexWriteFailure() async throws {
+        let scheduler = ImageWorkScheduler()
+        let (session, _, ids) = try makeSession(assetCount: 2, scheduler: scheduler)
+        var reported: [String] = []
+        session.onIndexWriteFailure = { reported.append($0) }
+        session.enqueueLibraryStateUpdates(updates(ids, rating: 2, flag: .pick)) { _ in
+            XCTFail("unexpected failure")
+        }
+        await session.flushPendingLibraryState()
+        // Make the index directory read-only so the projection write fails.
+        let indexDirectory = session.indexURL.deletingLastPathComponent()
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: indexDirectory.path)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o700], ofItemAtPath: indexDirectory.path)
+        }
+        reported.removeAll()
+        await session.shutdown()
+        XCTAssertFalse(reported.isEmpty)
+    }
+
+    func testShutdownWritesIndexBeforeReturning() async throws {
+        let scheduler = ImageWorkScheduler()
+        let (session, _, ids) = try makeSession(assetCount: 2, scheduler: scheduler)
+        session.enqueueLibraryStateUpdates(updates(ids, rating: 2, flag: .pick)) { _ in
+            XCTFail("unexpected failure")
+        }
+        await session.flushPendingLibraryState()
+        try? FileManager.default.removeItem(at: session.indexURL)
+        await session.shutdown()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: session.indexURL.path))
+    }
+
     func testShutdownFlushesPendingWrites() async throws {
         let scheduler = ImageWorkScheduler()
         let (session, packageURL, ids) = try makeSession(assetCount: 20, scheduler: scheduler)
