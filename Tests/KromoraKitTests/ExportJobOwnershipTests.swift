@@ -131,6 +131,31 @@ final class ExportJobOwnershipTests: TempDirectoryTestCase {
         XCTAssertEqual(coordinator.lastFinishedJob?.outcome, .cancelled)
     }
 
+    func testCancellationAfterAnOperationReturnsIsStillRecordedAsCancelled() async throws {
+        let coordinator = ExportCoordinator(engine: FakeRenderEngine(), photosDelivery: nil)
+        let started = AsyncGate()
+        let release = AsyncGate()
+        let caller = Task { @MainActor in
+            try await coordinator.runJob(.originalBundle) {
+                started.open()
+                await release.wait()
+                return true
+            }
+        }
+        await started.wait()
+        caller.cancel()
+        release.open()
+
+        do {
+            _ = try await caller.value
+            XCTFail("cancelled bundle work must not report success")
+        } catch is CancellationError {
+        }
+        XCTAssertFalse(coordinator.isExporting)
+        XCTAssertEqual(coordinator.lastFinishedJob?.kind, .originalBundle)
+        XCTAssertEqual(coordinator.lastFinishedJob?.outcome, .cancelled)
+    }
+
     func testTerminationGuardReportsEachJobKind() {
         let single = TerminationGuard(singleExportActive: true)
         let share = TerminationGuard(shareRenderCount: 2)

@@ -432,6 +432,7 @@ final class ExportWorkflowCoordinator {
             format = ShareExportPolicy.fallbackFormat
             data = try await encode(ShareExportPolicy.options(format: format))
         }
+        try Task.checkCancellation()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appendingPathComponent(name + "_share." + format.fileExtension)
         try await Self.write(data, to: url)

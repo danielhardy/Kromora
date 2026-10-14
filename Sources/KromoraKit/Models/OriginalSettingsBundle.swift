@@ -35,7 +35,7 @@ enum OriginalSettingsBundle {
         destination: URL,
         locationMetadataIncluded: Bool
     ) async throws {
-        try await Task.detached(priority: .userInitiated) {
+        try await withCancellableDetachedTask {
             try createSynchronously(
                 source: source,
                 sourceName: sourceName,
@@ -43,7 +43,20 @@ enum OriginalSettingsBundle {
                 destination: destination,
                 locationMetadataIncluded: locationMetadataIncluded
             )
-        }.value
+        }
+    }
+
+    /// Detached I/O does not inherit cancellation from the job that awaits it. Forward cancellation
+    /// explicitly so shutdown can stop bundle creation at its next cooperative checkpoint.
+    static func withCancellableDetachedTask<Value: Sendable>(
+        operation: @escaping @Sendable () throws -> Value
+    ) async throws -> Value {
+        let worker = Task.detached(priority: .userInitiated, operation: operation)
+        return try await withTaskCancellationHandler {
+            try await worker.value
+        } onCancel: {
+            worker.cancel()
+        }
     }
 
     private static func createSynchronously(
@@ -53,11 +66,13 @@ enum OriginalSettingsBundle {
         destination: URL,
         locationMetadataIncluded: Bool
     ) throws {
+        try Task.checkCancellation()
         let original: Data
         switch source.backing {
         case .url(let url): original = try Data(contentsOf: url, options: .mappedIfSafe)
         case .data(let data): original = data
         }
+        try Task.checkCancellation()
         let settings = try JSONEncoder.prettySorted.encode(document)
         let originalFilename = safeFilename(sourceName, fallbackExtension: extensionFor(source))
         let manifest = Manifest(
@@ -74,11 +89,15 @@ enum OriginalSettingsBundle {
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
         let temporary = parent.appendingPathComponent(".\(UUID().uuidString).partial", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: temporary) }
+        try Task.checkCancellation()
         try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: false)
         try original.write(to: temporary.appendingPathComponent(originalFilename), options: .atomic)
+        try Task.checkCancellation()
         try settings.write(to: temporary.appendingPathComponent(settingsFilename), options: .atomic)
+        try Task.checkCancellation()
         try manifestData.write(to: temporary.appendingPathComponent(manifestFilename), options: .atomic)
         _ = try verify(at: temporary)
+        try Task.checkCancellation()
         try FileManager.default.moveItem(at: temporary, to: destination)
     }
 

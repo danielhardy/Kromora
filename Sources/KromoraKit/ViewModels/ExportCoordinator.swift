@@ -164,6 +164,7 @@ final class ExportCoordinator {
         let work = Task { @MainActor [weak self] in
             do {
                 let value = try await operation()
+                try Task.checkCancellation()
                 self?.finishJob(id)
                 return value
             } catch {

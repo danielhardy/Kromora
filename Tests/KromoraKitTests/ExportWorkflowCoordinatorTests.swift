@@ -172,6 +172,28 @@ final class ExportWorkflowCoordinatorTests: XCTestCase {
         XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: root.path).isEmpty)
     }
 
+    func testCancelledShareRenderDoesNotWriteEncodedData() async throws {
+        let (workflow, _) = makeWorkflow()
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("KromoraShareCancel-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let render = Task {
+            try await workflow.renderShareFile(name: "Photo", into: directory) { _ in
+                withUnsafeCurrentTask { $0?.cancel() }
+                return Data("encoded bytes".utf8)
+            }
+        }
+        do {
+            _ = try await render.value
+            XCTFail("cancelled Share render must not create a file")
+        } catch is CancellationError {
+        }
+
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), [])
+    }
+
     func testStartingShareCleansAbandonedFilesWithoutTouchingUserExports() throws {
         try XCTSkipIf(NSApplication.shared.keyWindow != nil, "A key window is present")
         let root = try makeShareRoot()
