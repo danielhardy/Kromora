@@ -533,7 +533,8 @@ XCTest main-thread sample set contains SwiftUI graph/layout work (`AG::Graph::Up
 samples do not isolate the grid interval or quantify a specific view's contribution. A separate
 SwiftUI-template recording produced no SwiftUI update rows. The profiling request therefore remains
 open. A subsequent 30-sample capture after changing the grid's `AppViewModel` property from
-`@ObservedObject` to a plain reference was skipped before measurement because the capture window was
+an observed-object wrapper to a plain reference (the finished `@Observable` migration is recorded in
+`docs/APP_VIEWMODEL_OBSERVATION_PLAN.md`) was skipped before measurement because the capture window was
 not onscreen (`occlusionState=8192`, `isVisible=false`, `keyWindow=false`, `appActive=false`); it
 provides no performance evidence. Keep the KRMA-734 target unchanged and complete the capture from an
 unlocked, awake display before claiming a pass.

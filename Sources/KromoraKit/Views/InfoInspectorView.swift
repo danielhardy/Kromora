@@ -212,19 +212,11 @@ struct InfoInspectorView: View {
                 identitySection
                 if let assetID = viewModel.maskingAssetID,
                    let source = viewModel.maskingSource {
-                    PhotoAnalysisInspectSection(
-                        coordinator: viewModel.photoAnalysisCoordinator,
+                    InfoAnalysisSection(
+                        viewModel: viewModel,
                         assetID: assetID,
                         source: source,
-                        surface: viewModel.previewSurface,
-                        sourceSize: viewModel.sourceSize,
-                        crop: viewModel.document.crop,
-                        histogram: viewModel.info.histogram,
-                        isExpanded: $analysisExpanded,
-                        onUseEditingMask: { kind, result, pixels in
-                            viewModel.useInfoAnalysisMask(
-                                kind, demonstrated: result, pixels: pixels)
-                        }
+                        isExpanded: $analysisExpanded
                     )
                     .id(assetID)
                 }
@@ -357,13 +349,7 @@ struct InfoInspectorView: View {
                 }
                 // The counts above matter more than this label, so it is what gives way when the
                 // inspector is narrow.
-                Text(histogramSourceLabel)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.primary.opacity(0.08), in: Capsule())
+                HistogramSourceBadge(viewModel: viewModel)
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
@@ -460,12 +446,6 @@ struct InfoInspectorView: View {
     }
 
     @State private var channel: HistogramChart.Mode = .rgb
-
-    private var histogramSourceLabel: String {
-        if viewModel.isShowingOriginal { return "Original" }
-        if viewModel.selectedLook != nil { return "Graded" }
-        return viewModel.isComparisonAvailable ? "Edited" : "Original"
-    }
 
     // MARK: - Metadata
 
@@ -752,5 +732,52 @@ struct HistogramPlotValues: VectorArithmetic {
 
     var magnitudeSquared: Double {
         bins.reduce(0) { $0 + Double($1 * $1) }
+    }
+}
+
+/// Owns the `document.crop` and `info.histogram` reads for the Info tab's analysis section, so the
+/// inspector shell does not track `document` and a slider tick does not re-evaluate it.
+private struct InfoAnalysisSection: View {
+    let viewModel: AppViewModel
+    let assetID: PhotoAssetID
+    let source: ImageSource
+    @Binding var isExpanded: Bool
+
+    var body: some View {
+        PhotoAnalysisInspectSection(
+            coordinator: viewModel.photoAnalysisCoordinator,
+            assetID: assetID,
+            source: source,
+            surface: viewModel.previewSurface,
+            sourceSize: viewModel.sourceSize,
+            crop: viewModel.document.crop,
+            histogram: viewModel.info.histogram,
+            isExpanded: $isExpanded,
+            onUseEditingMask: { kind, result, pixels in
+                viewModel.useInfoAnalysisMask(kind, demonstrated: result, pixels: pixels)
+            }
+        )
+    }
+}
+
+/// Which rendering the histogram describes. Owns the `document` reads behind the label (Look and
+/// visible-edit state) so the inspector shell stays out of `document`'s observation.
+private struct HistogramSourceBadge: View {
+    let viewModel: AppViewModel
+
+    private var label: String {
+        if viewModel.isShowingOriginal { return "Original" }
+        if viewModel.selectedLook != nil { return "Graded" }
+        return viewModel.isComparisonAvailable ? "Edited" : "Original"
+    }
+
+    var body: some View {
+        Text(label)
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.primary.opacity(0.08), in: Capsule())
     }
 }

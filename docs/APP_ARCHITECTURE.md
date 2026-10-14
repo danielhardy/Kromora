@@ -243,7 +243,7 @@ display order and keeps selection and the shift-click anchor keyed by file id.
 ## Masking-workflow ownership
 
 `MaskingWorkflowCoordinator` owns the masking workspace: layer/component selection and transient
-creation state (`MaskInteractionState`, an `ObservableObject` this coordinator constructs and
+creation state (`MaskInteractionState`, an `@Observable` class this coordinator constructs and
 exposes), plus smart-mask analysis invocation, cancellation, retry context, and the person-signal
 warm-up task. `AppViewModel` remains the owner of the published `EditDocument`, undo grouping,
 preview scheduling, and inspector chrome; the coordinator reaches into that state only through

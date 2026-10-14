@@ -236,4 +236,39 @@ final class ObservationBodyBaselineTests: TempDirectoryTestCase {
         XCTAssertGreaterThan(counter.count - before, 0)
         withExtendedLifetime(hosting) {}
     }
+
+    /// KRMA-981: with a photo open and the Light tab selected, the real inspector shell does not
+    /// read `document`, so Light, Color and Effects mutations leave its body count unchanged. The
+    /// mounted tab itself still re-evaluates (all sections live in the one `document` property).
+    func testInspectorShellDoesNotReadDocumentWithAPhotoOpen() async throws {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let image = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "shell-probe.png", in: tempDirectory)
+        viewModel.openImage(url: image)
+        let deadline = Date().addingTimeInterval(5)
+        while viewModel.sourceImage == nil || viewModel.previewSurface.image == nil {
+            XCTAssertLessThan(Date(), deadline, "timed out opening the photo")
+            if Date() > deadline { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        viewModel.inspectorTab = .light
+
+        let hosting = host(InfoInspectorView(
+            viewModel: viewModel, inspectorState: viewModel.inspectorState))
+        let mutations: [(String, @MainActor (AppViewModel) -> Void)] = [
+            ("light", { vm in vm.updateDocument { $0.light.exposure += 0.25 } }),
+            ("color", { vm in vm.updateDocument { $0.color.saturation += 0.1 } }),
+            ("effects", { vm in vm.updateDocument { $0.effects.clarity += 10 } }),
+        ]
+        for (name, mutate) in mutations {
+            drainMainActor(seconds: 0.5)
+            let before = RenderDiagnostics.snapshot.inspectorBodyEvaluations
+            mutate(viewModel)
+            drainMainActor(seconds: 0.5)
+            let delta = RenderDiagnostics.snapshot.inspectorBodyEvaluations - before
+            print("BODY-BASELINE | InfoInspectorView (real, Light tab) / \(name) | \(delta)")
+            XCTAssertEqual(delta, 0, "shell re-evaluated for a \(name) mutation")
+        }
+        withExtendedLifetime(hosting) {}
+    }
 }

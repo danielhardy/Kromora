@@ -1,6 +1,6 @@
 # AppViewModel Observation migration plan
 
-Status: plan (KRMA-940). No migration has started. Read "Phasing and go/no-go" first. This document is the staged route from
+Status: completed (KRMA-981). Steps 1-10 (KRMA-972 to KRMA-981) are done; the text below is the history of the plan, written before the migration. Read "Phasing and go/no-go" first. This document is the staged route from
 `ObservableObject`/`@Published` to `@Observable` for `AppViewModel` and its remaining child objects,
 so a slider tick re-evaluates only the views that read the changed property.
 
@@ -173,7 +173,7 @@ mount the production view (it counts itself through `RenderDiagnostics`); "mirro
 test-only views in `Tests/KromoraKitTests/Support/BodyProbe.swift` that read the same properties as
 the production view, so they are not the production view. Reproduce with
 `swift test --no-parallel --filter ObservationBodyBaselineTests` (rows print as `BODY-BASELINE`).
-Steps 2-10 fill in the "after" column; KRMA-980 completed it.
+Steps 2-10 filled in the "after" column; KRMA-980 completed it and KRMA-981 added the shell rows below.
 
 | View | Kind | Property changed | Before | After |
 | --- | --- | --- | --- | --- |
@@ -224,6 +224,26 @@ Steps 2-10 fill in the "after" column; KRMA-980 completed it.
 | EffectsInspectorView | mirror | maskInteractionState.brushRadius | 0 | 0 |
 | EffectsInspectorView | mirror | retouchInteractionState.radius | 0 | 0 |
 | EffectsInspectorView | mirror | retouchInteractionState.hover | 0 | 0 |
+| InfoInspectorView (Light tab mounted) | real | document: Light edit | 1 | 0 |
+| InfoInspectorView (Light tab mounted) | real | document: Color edit | 1 | 0 |
+| InfoInspectorView (Light tab mounted) | real | document: Effects edit | 1 | 0 |
+
+KRMA-981 (step 10): the first InfoInspectorView rows above use a fresh model with no photo, which
+shows the empty state and never reaches the document reads. The last three rows open a photo, select
+the Light tab and mount the real shell (`testInspectorShellDoesNotReadDocumentWithAPhotoOpen`). Before
+the change the shell read `document` through the histogram source badge (`selectedLook`,
+`isComparisonAvailable`) and the Info tab's `document.crop`, so every edit re-evaluated it; both reads
+now sit in leaf subviews (`HistogramSourceBadge`, `InfoAnalysisSection`), giving 0.
+
+Not done, with reasons: splitting Light/Color/Effects into per-row subviews would not narrow
+anything, because `document` is one observed property and every row reads it, so every row still
+re-evaluates on every tick; only a per-section projection would help, and that was out of scope
+without measured cost. The Light/Color/Effects "mirror" rows stay at 1 for a document change for the
+same reason (they model the read set of a mounted tab, which really does read `document`). Only one
+tab is mounted at a time in the app, so the mirrors are not alive together. PreviewView, masking and
+retouch read `document` for sections they render, so they re-evaluate legitimately. The Effects
+`.onChange(of: document.effects)` compares one section on a view that is already re-evaluating, so
+it adds no extra invalidation.
 
 KRMA-978 view probe results: a `statusMessage` change evaluates the real `StatusBar` once and the
 `PreviewView` mirror once; `InfoInspectorView`, the Light/Color/Effects mirrors, and the
@@ -247,7 +267,7 @@ table above (the flag still changes rarely). `@Published` remaining on `AppViewM
 named in the ticket; `virtualCopyMetadata` and `portableLibrary` are plain properties set once at
 bind time; the open flow's `navigation`/`presentation` publishes refresh their derived readers.
 
-## Additions from ticket review (2026-10-13)
+## Additions from ticket review (2026-10-13, history)
 
 The first inventory missed these root-invalidation paths. Each is assigned to a step below.
 
@@ -300,4 +320,4 @@ The first inventory missed these root-invalidation paths. Each is assigned to a 
 
 ## Ticket map
 
-Steps 1-10 are KRMA-972 through KRMA-981, in order, each depending on the previous one.
+Steps 1-10 are KRMA-972 through KRMA-981, in order, each depending on the previous one. All ten are done.

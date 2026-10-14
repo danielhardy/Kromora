@@ -30,6 +30,31 @@ navigation and crop drafts live in `CanvasInteractionState`; inspector chrome li
 `AppViewModel.InspectorState`; library surfaces observe `ImageCollection`. Committed crop, history,
 persistence, and render scheduling remain at the document boundary.
 
+## Observation
+
+Application state is `@Observable` throughout; there is no Combine-based observation, publisher
+forwarding or `objectWillChange` anywhere. SwiftUI tracks the stored properties a `body` reads, so a
+view re-evaluates only for values it displays.
+
+- Wrapper mapping: a view holds an observable model as a plain `let`/`var`, uses `@Bindable` when it
+  needs `$model.property` bindings, and owns view-local models with `@State`. An `@Observable`
+  type is never held by the legacy object-owning wrapper (`ObservationInvalidationTests` enforces this).
+- `@Observable` classes are `@MainActor final class`. Mark storage views never read (tasks, caches,
+  closures, injected collaborators, `lazy` coordinators) `@ObservationIgnored`; a property a view reads
+  stays tracked.
+- Child state that changes at a different rate than the document lives in its own `@Observable`
+  (`info`, `whiteBalance`, `capabilities`, `autoLook`, interaction states), so a histogram refresh or
+  pointer move does not invalidate unrelated views.
+- `document` is one stored `EditDocument`, so tracking is per property, not per section: any edit
+  re-evaluates every view that reads any part of it. Keep `document` reads (including computed
+  accessors such as `selectedLook` or `isComparisonAvailable`) out of container views such as the
+  inspector shell by putting them in a small leaf subview. Splitting a mounted inspector into row
+  subviews does not narrow this on its own; it would need a per-section projection that updates
+  only when its section changes.
+- Verify with the body-count probe (`Tests/KromoraKitTests/Support/BodyProbe.swift`,
+  `ObservationBodyBaselineTests`) in the serial lane; the table and history are in
+  `APP_VIEWMODEL_OBSERVATION_PLAN.md`.
+
 ## Value document and render path
 
 `EditDocument` is the single editable value. It is Codable, Equatable, and Sendable, and contains
