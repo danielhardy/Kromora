@@ -1392,33 +1392,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
 
         // KRMA-521: High-frequency children (collection/items, import, export, canvas) are
-        // @Observable and observed directly by their views through `@Bindable`. They are
-        // intentionally absent from the forwarding list below: thumbnail streaming, metadata,
-        // scan ticks, canvas pointer updates, and import/export progress must not reevaluate
-        // unrelated inspector or toolbar views. A Task per child notification also had incorrect
-        // will-change timing, so no forwarding path here may spawn a Task.
-        //
-        // Derive, look-save and the removable-media workflow are observed directly by
-        // `FeatureSheetsModifier`, `RemovableMediaMenu` and `RemovableMediaSelectorView`, so they
-        // are also absent below. Settings and the Look library are observed directly by
-        // `LookInspectorView`, `FilmstripView`, the grid cells, `PreviewView`, `KromoraCommands`
-        // and the settings view. Remaining ObservableObject children (editor document, edit
-        // clipboard) are still consumed via `viewModel.*` (clipboard/undo read
-        // `editClipboardWorkflow`/`editorDocument`). Forward synchronously:
-        // `send()` in the same turn preserves will-change timing until views hold children directly
-        // and the corresponding entry can be removed. Delete this loop only when every entry
-        // is gone; removing an entry before its views observe the child directly makes that
-        // surface stale (sheets stop presenting, library scans stop refreshing).
-        for child in [
-            editorDocument.objectWillChange.eraseToAnyPublisher(),
-            editClipboardWorkflow.objectWillChange.eraseToAnyPublisher(),
-        ] {
-            cancellables.append(
-                child.sink { [weak self] _ in
-                    guard let self, !self.isShuttingDown else { return }
-                    self.objectWillChange.send()
-                })
-        }
+        // @Observable and observed directly by their views through `@Bindable`. Derive, look-save,
+        // removable-media, settings, the Look library and the edit clipboard are observed directly
+        // by the views that render them (`FeatureSheetsModifier`, `SelectiveCopySheetModifier`,
+        // `KeyboardSurface`, `LookInspectorView`, `FilmstripView`, ...), so no child notification
+        // is forwarded through the root. `EditorDocumentCoordinator` is a plain value-state owner
+        // with no publisher; undo/redo availability refreshes through root document publications
+        // and the explicit gesture-end publication in `endUndoGrouping`.
 
         // Inspector chrome is observed by its own view subtree. Histogram work still belongs to
         // this model. Use InspectorState's post-assignment callback so the gate sees the new
@@ -3823,6 +3803,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     /// Finish a continuous gesture. A gesture that did not change the document is not recorded.
     func endUndoGrouping() {
+        // Closing a gesture group can flip `canUndo` without a document change; announce it
+        // before the history mutates so undo controls refresh.
+        if editorDocument.isGrouping { objectWillChange.send() }
         let wasGrouping = editorDocument.endGrouping(document: document)
         if wasGrouping { saveActiveDocument(force: true) }
     }

@@ -78,14 +78,7 @@ public struct ContentView: View {
             )) {
                 PhotosImportReviewView(review: viewModel.photosImportReview)
             }
-            .sheet(isPresented: $viewModel.isSelectiveCopyDialogPresented) {
-                SelectiveCopySheet(
-                    categories: $viewModel.selectiveCopyCategories,
-                    sourceName: viewModel.sourceName,
-                    onCopy: viewModel.confirmSelectiveCopy,
-                    onCancel: viewModel.cancelSelectiveCopy
-                )
-            }
+            .modifier(SelectiveCopySheetModifier(viewModel: viewModel))
             .sheet(isPresented: $isWelcomePresented, onDismiss: { hasSeenWelcome = true }) {
                 WelcomeView(
                     canImportIntoLibrary: viewModel.canImportIntoPortableLibrary,

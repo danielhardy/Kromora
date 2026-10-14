@@ -60,7 +60,7 @@ source reference restores the matching asset/history before that commit. Non-act
 sessions, then request forced thumbnail/persistence updates and a batch flush. The root retains
 thin command and presentation forwards. Derive, Look-save, and removable-media state are observed
 directly by `FeatureSheetsModifier` and `RemovableMediaMenu` (not forwarded through the root);
-settings and the Look library are observed directly by `LookInspectorView`, `FilmstripView`, the grid cells, `PreviewView`, and `KromoraCommands`; clipboard and editor-document children still forward synchronously.
+settings and the Look library are observed directly by `LookInspectorView`, `FilmstripView`, the grid cells, `PreviewView`, and `KromoraCommands`. The edit clipboard is observed directly by `SelectiveCopySheetModifier` (sheet and categories) and `KeyboardSurface` (paste availability). No child notification forwards through the root. `EditorDocumentCoordinator` is a plain value-state owner with no publisher: undo/redo availability refreshes through root document publications, and `endUndoGrouping` publishes explicitly when closing a gesture group.
 `EditClipboardCoordinatorTests` cover source validation, remembered selection/cancel, selective
 active commits, RAW/raster batch behavior, selection transitions, per-photo undo, and no-op writes
 without constructing `AppViewModel`.

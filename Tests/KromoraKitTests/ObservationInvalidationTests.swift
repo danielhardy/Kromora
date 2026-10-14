@@ -29,20 +29,44 @@ final class ObservationInvalidationTests: TempDirectoryTestCase {
         XCTAssertNotNil(viewModel.canvasState as Any)
     }
 
-    func testLowFrequencyChildrenForwardSynchronouslyWithoutTask() {
-        // Interim KRMA-521 boundary: legacy views still read these via `viewModel.*`, so a
-        // child will-change must synchronously invalidate the root in the same turn. A Task
-        // would defer to a later turn (the pre-migration bug); asserting the increment is
-        // visible immediately proves no Task sits in the path.
+    func testClipboardPresentationIsObservedDirectlyNotThroughRoot() {
+        // KRMA-909: the selective-copy sheet and paste availability observe the clipboard
+        // directly, so clipboard-only changes publish on the child and never on the root.
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
-        var appChanges = 0
-        let subscription = viewModel.objectWillChange.sink { _ in appChanges += 1 }
+        var rootChanges = 0
+        var clipboardChanges = 0
+        let subscriptions = [
+            viewModel.objectWillChange.sink { _ in rootChanges += 1 },
+            viewModel.editClipboardWorkflow.objectWillChange.sink { _ in clipboardChanges += 1 },
+        ]
 
         viewModel.editClipboardWorkflow.selectiveCopyCategories = [.light]
         viewModel.editClipboardWorkflow.isSelectiveCopyDialogPresented = true
-        // Clipboard presentation forwards two child will-change events synchronously.
-        XCTAssertEqual(appChanges, 2, "clipboard must forward synchronously")
 
+        XCTAssertEqual(clipboardChanges, 2, "the sheet's observer receives each presentation change")
+        XCTAssertEqual(rootChanges, 0, "clipboard presentation must not invalidate the root")
+        XCTAssertTrue(viewModel.isSelectiveCopyDialogPresented)
+        XCTAssertEqual(viewModel.selectiveCopyCategories, [.light])
+        withExtendedLifetime(subscriptions) {}
+    }
+
+    func testClosingAnUndoGroupPublishesHistoryAvailabilityOnTheRoot() {
+        // KRMA-909: the editor coordinator has no publisher. Ending a gesture group flips
+        // canUndo without a document change, so the root announces it before the mutation.
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        viewModel.beginUndoGrouping()
+        viewModel.editorDocument.recordChange(from: viewModel.document, to: {
+            var changed = viewModel.document
+            changed.light.exposure = 0.5
+            return changed
+        }())
+        XCTAssertFalse(viewModel.canUndo, "recording inside a group is deferred")
+
+        var rootChanges = 0
+        let subscription = viewModel.objectWillChange.sink { _ in rootChanges += 1 }
+        viewModel.endUndoGrouping()
+
+        XCTAssertEqual(rootChanges, 1)
         withExtendedLifetime(subscription) {}
     }
 

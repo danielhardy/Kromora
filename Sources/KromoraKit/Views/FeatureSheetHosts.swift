@@ -58,3 +58,26 @@ struct RemovableMediaMenu: View {
         .disabled(!viewModel.canImportIntoPortableLibrary)
     }
 }
+
+/// Presents the selective-copy sheet by observing the edit clipboard directly, so dialog and
+/// category changes never invalidate `ContentView` or the root `AppViewModel` observers.
+struct SelectiveCopySheetModifier: ViewModifier {
+    let viewModel: AppViewModel
+    @ObservedObject var clipboard: EditClipboardCoordinator
+
+    init(viewModel: AppViewModel) {
+        self.viewModel = viewModel
+        _clipboard = ObservedObject(wrappedValue: viewModel.editClipboardWorkflow)
+    }
+
+    func body(content: Content) -> some View {
+        content.sheet(isPresented: $clipboard.isSelectiveCopyDialogPresented) {
+            SelectiveCopySheet(
+                categories: $clipboard.selectiveCopyCategories,
+                sourceName: viewModel.sourceName,
+                onCopy: clipboard.confirmSelectiveCopy,
+                onCancel: clipboard.cancelSelectiveCopy
+            )
+        }
+    }
+}

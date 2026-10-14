@@ -1,5 +1,4 @@
 import Foundation
-import Combine
 
 /// Owns the value-only editor session boundary.
 ///
@@ -12,7 +11,7 @@ import Combine
 /// and receive `EditDocument`/`PhotoEditSession` values, which makes this workflow testable without
 /// constructing the application model.
 @MainActor
-final class EditorDocumentCoordinator: ObservableObject {
+final class EditorDocumentCoordinator {
     private(set) var activeHistory = EditHistory()
     private var sessions: [PhotoAssetID: PhotoEditSession] = [:]
     private var sessionRevisions: [PhotoAssetID: UInt64] = [:]
@@ -21,6 +20,7 @@ final class EditorDocumentCoordinator: ObservableObject {
     var canUndo: Bool { activeHistory.canUndo }
     var canRedo: Bool { activeHistory.canRedo }
     var undoDepth: Int { activeHistory.undoCount }
+    var isGrouping: Bool { activeHistory.isGrouping }
 
     func session(for assetID: PhotoAssetID) -> PhotoEditSession? {
         sessions[assetID]
