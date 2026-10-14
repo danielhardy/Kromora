@@ -92,13 +92,14 @@ The access-lifetime risk is tracked in KRMA-818. Evidence: [`PreviewView.swift`:
 
 ### Reopening the library package after relaunch
 
-There is no stored “last library package” URL or bookmark in the production startup path. Both
-production `AppViewModel` initializers open the fixed `KromoraStorage.defaultPortableLibraryPackageURL`,
-which is `~/Pictures/Kromora Library.kromoralibrary`; `PortableLibrarySession` opens it if present
-and creates it if absent. The Pictures read/write entitlement is the code-declared access grant, so
-this design does not depend on a security-scoped bookmark surviving relaunch. This is sandbox-safe
-in principle if the signed app carries the declared Pictures entitlement. Code review cannot verify
-the signed entitlement or package I/O under App Sandbox. Evidence: [`KromoraStorage.swift`:89-96](../Sources/KromoraKit/Models/KromoraStorage.swift), [`AppViewModel.swift`:971-992, 1044-1058](../Sources/KromoraKit/ViewModels/AppViewModel.swift), [`PortableLibrarySession.swift`:90-124](../Sources/KromoraKit/Models/PortableLibrarySession.swift), [`Kromora.entitlements`:5-14](../App/Kromora.entitlements).
+`ActiveLibrarySelection` stores a security-scoped bookmark for a chosen package, and
+`AppLaunch.open()` resolves that choice after the first window. If no choice resolves, launch falls
+back to `KromoraStorage.defaultPortableLibraryPackageURL` at
+`~/Pictures/Kromora Library.kromoralibrary`; `PortableLibrarySession` opens that package if present
+and creates it if absent. Access to the default location relies on the Pictures read/write
+entitlement. A chosen package relies on its resolved security-scoped bookmark, which `AppLaunch`
+holds for the session. Code review cannot verify the signed entitlement or package I/O under App
+Sandbox. Evidence: [`KromoraStorage.swift`:89-96](../Sources/KromoraKit/Models/KromoraStorage.swift), [`KromoraSettings.swift`:213-217, 293-299, 451-459](../Sources/KromoraKit/Models/KromoraSettings.swift), [`AppLaunch.swift`](../Sources/KromoraKit/Presentation/AppLaunch.swift), [`PortableLibrarySession.swift`:90-124](../Sources/KromoraKit/Models/PortableLibrarySession.swift), [`Kromora.entitlements`:5-14](../App/Kromora.entitlements).
 
 ### RAW originals and neighboring sidecars
 

@@ -392,6 +392,39 @@ default), holds the security scope for the session, and passes the URL to the vi
 unresolvable or missing choice falls back to the default with a one-time notice and clears only the
 bookmark; the old path is never touched. "Use Default Library" clears the bookmark.
 
+## Launch sequence (KRMA-944)
+
+1. **Process start.** The SwiftPM or Xcode launcher creates `KromoraAppDelegate`.
+2. **Delegate init (no I/O).** It sets window-tabbing and activation policy and creates
+   `AppLaunch()` with `KromoraSettings`. No package, lease, recovery or `AppViewModel` work runs in
+   the delegate, `KromoraScene` or `AppLaunch.init`. (Activation policy there is KRMA-945's scope.)
+3. **First window with the library shell.** `KromoraRootView` shows a progress shell while
+   `AppLaunch.viewModel` is nil; its `.task` calls `AppLaunch.open()`. Settings also calls it.
+4. **Open starts.** `open()` resolves the active library (see above), builds `AppViewModel` through
+   `makeViewModel` (the only `AppViewModel(` construction in Presentation) with `defersLibraryOpen`,
+   and starts `beginOpeningLibrary`. `LibraryOpenState` becomes `.opening` ("Opening library…") and
+   library commands are gated.
+5. **Lease-recovery prompt (when needed).** `PortablePackageLeaseRecoveryPrompt` asks through the
+   sheet seam; a stale-bookmark notice is shown first. Declining leaves the library closed with one
+   error.
+6. **Async package open.** `LibraryOpenCoordinator` calls `PortablePackageOpener` through the
+   `PackageOpening` protocol. Package open and recovery run off the main actor.
+7. **Bind.** The returned `OpenedPackage` is bound on the main actor and `PortableLibrarySession`
+   is built.
+8. **Collection/index load.** Binding publishes the collection, then the packed index loads
+   asynchronously (KRMA-557).
+9. **Ready.** `LibraryOpenState` becomes `.ready` and commands enable.
+
+An open failure sets `LibraryOpenState.failed` and publishes one error message.
+`ApplicationShellCoordinator` (process observers, maintenance admission) is owned by the model and
+starts when it is built.
+
+**Shutdown during open.** `AppViewModel.shutdown()` cancels the open first; an unbound lease is
+released rather than bound. `applicationShouldTerminate` returns `.terminateNow` only when
+`AppLaunch.viewModel` is still nil, which happens when the user quits before the first frame's
+`.task` has run: nothing was opened, so there is nothing to flush or release. Otherwise it goes
+through the termination guard, flush and `shutdown()`.
+
 ## Library open (KRMA-984)
 
 `AppLaunch.open()` builds `AppViewModel` immediately with `defersLibraryOpen`, then

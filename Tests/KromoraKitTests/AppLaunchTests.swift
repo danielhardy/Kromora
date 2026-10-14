@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import KromoraKit
 
@@ -65,6 +66,19 @@ final class AppLaunchTests: XCTestCase {
                 )
             }
         )
+    }
+
+    func testNoModelExistsUntilOpenIsRequested() throws {
+        let (url, _) = try makeStaleLibrary()
+        let appLaunch = launch(url, sheets: FakeSheets())
+        XCTAssertNil(appLaunch.viewModel, "construction does no package work and builds no model")
+    }
+
+    func testDelegateTerminatesBeforeFirstFrameCreatesModel() {
+        let delegate = KromoraAppDelegate()
+
+        XCTAssertNil(delegate.launch.viewModel)
+        XCTAssertEqual(delegate.applicationShouldTerminate(.shared), .terminateNow)
     }
 
     func testLaunchOpensLibraryWhenTakeoverAccepted() async throws {
