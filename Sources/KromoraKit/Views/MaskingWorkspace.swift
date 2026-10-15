@@ -759,7 +759,7 @@ struct MaskingWorkspace: View {
                 title: title,
                 value: value,
                 entry: SliderValueEntry(
-                    range: range, step: 0.01, displayScale: 100, unit: "%"
+                    range: range, displayScale: 100, unit: "%"
                 ),
                 readout: Int(value.wrappedValue * 100).description + "%",
                 width: 42,

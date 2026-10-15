@@ -19,6 +19,7 @@ struct SliderValueField: View {
 
     @State private var isEditing = false
     @State private var text = ""
+    @State private var textAtStart = ""
     @State private var errorMessage: String?
     @FocusState private var isFocused: Bool
 
@@ -79,6 +80,7 @@ struct SliderValueField: View {
 
     private func beginEditing() {
         text = entry.editingText(for: value)
+        textAtStart = text
         errorMessage = nil
         isEditing = true
         Task { @MainActor in
@@ -100,12 +102,15 @@ struct SliderValueField: View {
             errorMessage = failure.message
             AccessibilityNotification.Announcement(failure.message).post()
         case .success(let newValue):
-            if abs(newValue - value) > 1e-9 {
+            let valueToAnnounce = text == textAtStart ? value : newValue
+            if text != textAtStart, abs(newValue - value) > 1e-9 {
                 onEditingChanged(true)
                 value = newValue
                 onEditingChanged(false)
             }
-            AccessibilityNotification.Announcement("\(title) \(entry.announcement(for: newValue))").post()
+            AccessibilityNotification.Announcement(
+                "\(title) \(entry.announcement(for: valueToAnnounce))"
+            ).post()
             isEditing = false
             errorMessage = nil
         }

@@ -27,6 +27,10 @@ final class SliderValueEntryTests: XCTestCase {
             entry.parse("101"), .failure(.outOfRange(lower: "-100", upper: "100")))
         XCTAssertEqual(
             entry.parse("-100.5"), .failure(.outOfRange(lower: "-100", upper: "100")))
+        XCTAssertEqual(
+            entry.parse("100.00000001"), .failure(.outOfRange(lower: "-100", upper: "100")))
+        XCTAssertEqual(
+            entry.parse("-100.00000001"), .failure(.outOfRange(lower: "-100", upper: "100")))
         XCTAssertEqual(SliderValueEntry.Failure.outOfRange(lower: "-100", upper: "100").message,
                        "Enter -100 to 100")
     }
@@ -54,6 +58,11 @@ final class SliderValueEntryTests: XCTestCase {
         XCTAssertEqual(value(entry.parse("0.04")), 0)
         let whole = SliderValueEntry(range: 2000...50000, step: 50, locale: us)
         XCTAssertEqual(value(whole.parse("5520")), 5500)
+    }
+
+    func testContinuousControlDoesNotSnapTypedValues() {
+        let entry = SliderValueEntry(range: 0...1, displayScale: 100, unit: "%", locale: us)
+        XCTAssertEqual(value(entry.parse("55.25%")), 0.5525)
     }
 
     func testDisplayScaleAndOrigin() {

@@ -89,7 +89,13 @@ struct SliderValueEntry: Equatable, Sendable {
               number.isFinite
         else { return .failure(.notANumber) }
 
-        let tolerance = 1e-9 * max(1, abs(displayRange.upperBound), abs(displayRange.lowerBound))
+        // Allow only a few floating-point rounding units from the scale/origin conversion above.
+        // A relative epsilon here let real out-of-range inputs pass and then get clamped.
+        let tolerance = 8 * max(
+            Double.ulpOfOne,
+            displayRange.lowerBound.ulp,
+            displayRange.upperBound.ulp
+        )
         guard number >= displayRange.lowerBound - tolerance,
               number <= displayRange.upperBound + tolerance
         else {

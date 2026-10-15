@@ -515,7 +515,7 @@ struct LookInspectorView: View {
                         get: { viewModel.lookIntensity },
                         set: { viewModel.setLookIntensity($0) }
                     ),
-                    entry: SliderValueEntry(range: 0...1, step: 0.01, displayScale: 100, unit: "%"),
+                    entry: SliderValueEntry(range: 0...1, displayScale: 100, unit: "%"),
                     readout: "\(Int((viewModel.lookIntensity * 100).rounded()))%",
                     width: 48,
                     onEditingChanged: { editing in
@@ -523,6 +523,7 @@ struct LookInspectorView: View {
                         else { viewModel.endPreviewInteraction() }
                     }
                 )
+                .disabled(viewModel.selectedLook == nil)
             }
 
             NeutralOriginSlider(
