@@ -51,7 +51,6 @@ the active MVP or roadmap.
 | Path | Classification | Disposition |
 | --- | --- | --- |
 | [`.context/initial_concept.md`](../.context/initial_concept.md) | Historical project provenance | Its pre-fork feature brief, milestone sequence, exclusions, and commands are superseded. Use PRODUCT_SCOPE and current guides. |
-| [`.context/2026-09-22-professional-polish-evaluation.md`](../.context/2026-09-22-professional-polish-evaluation.md) | Deferred idea archive | Preserves competitor-gap analysis and removed proposal specifications. Proposals may be reconsidered through future product decisions; none is an MVP commitment or active roadmap. |
 | [`.context/2026-10-03-icloud-sync-plan.md`](../.context/2026-10-03-icloud-sync-plan.md) | Deferred proposal | iCloud library sync evaluation and phased plan. Sync is a post-MVP boundary in PRODUCT_SCOPE; current storage authority stays STORAGE_POLICY. |
 | [`.dg/decisions/`](../.dg/decisions/) | Accepted decision history | Decision records explain choices; implementation and current guides define present behavior. |
 | [`.dg/issues/`](../.dg/issues/) | Canonical issue history | Lifecycle and implementation records, not user-facing product documentation. |
@@ -62,7 +61,8 @@ Superseded plans, one-off reviews, run records, and scratch artifacts are delete
 archived; git history preserves them. Documents stay only if a current guide, test, or evidence
 file depends on them, or if they preserve a decision or idea set that may be reconsidered (the
 package plan, pre-package baseline, scale-regression evidence, the edit-store disposition, and the
-two `.context` archives above). Update this map when a document is added, retired, or changes role.
+`.context` archives above). Update this map when a document is added, retired, or changes role.
+The 2026-09-22 professional-polish evaluation was retired on 2026-10-14; git history keeps it.
 
 ## Refresh record (2026-10-12)
 

@@ -26,9 +26,7 @@ parity.
 
 The current intent, intended user, release bar, and post-MVP boundaries are in
 [`docs/PRODUCT_SCOPE.md`](docs/PRODUCT_SCOPE.md). That page is the product-scope source of truth;
-this README summarizes the running app. Deferred proposals remain recoverable in the
-[professional-polish evaluation](.context/2026-09-22-professional-polish-evaluation.md) and are not
-MVP commitments.
+this README summarizes the running app.
 
 ## The workflow today
 
@@ -145,9 +143,7 @@ durable storage rules are in [`docs/STORAGE_POLICY.md`](docs/STORAGE_POLICY.md).
   [storage policy](docs/STORAGE_POLICY.md), and [testing](docs/TESTING.md) — current technical contracts.
 - [Looks](docs/LOOKS.md), [Auto policy](docs/AUTO_EXPOSURE_POLICY.md),
   [comparison](docs/COMPARISON_MODE.md), and [retouch](docs/RETOUCH.md) — current feature details.
-- [Historical package design](docs/LIBRARY_PACKAGE_PLAN.md) and
-  [deferred professional-polish proposals](.context/2026-09-22-professional-polish-evaluation.md)
-  retain provenance and are not live plans.
+- [Historical package design](docs/LIBRARY_PACKAGE_PLAN.md) retains provenance and is not a live plan.
 
 ## Fork and attribution
 

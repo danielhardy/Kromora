@@ -89,11 +89,10 @@ product decision with a concrete user need:
 - Every camera maker's proprietary controls, profiles, or pixel-matched output relative to another
   editor.
 
-The [2026-09-22 professional-polish evaluation](../.context/2026-09-22-professional-polish-evaluation.md)
-retains competitor-gap analysis and the original proposal specifications for possible future
-reconsideration. It is an idea archive, not a roadmap or release commitment. The
+The
 [initial concept](../.context/initial_concept.md) is historical provenance and does not define the
-current MVP.
+current MVP. The 2026-09-22 professional-polish evaluation was removed on 2026-10-14; shipped work
+lives in its DispatchGraph issues, and anything still out of scope is listed above.
 
 ## Documentation authority
 
