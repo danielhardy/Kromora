@@ -13,9 +13,9 @@ labels:
   - release-readiness
   - epic
 created: 2026-10-13T14:47:33.325Z
-updated: 2026-10-13T14:48:15.731Z
+updated: 2026-10-14T16:11:00.787Z
 blockers: []
-order: 7kubd9gw
+order: 5mhzzzzv
 board: product
 ---
 
@@ -41,3 +41,8 @@ drift) and say so in your comment if it does not.
 
 Do not implement anything under this ticket directly; it only tracks children. Child naming:
 `must-fix` = review section M, `should-fix` = section S, `nice-to-have` = remainder.
+
+
+### Comment — cursor @ 2026-10-14T16:11:00.786Z
+
+The 2026-10-14 review is tracked by KRMA-994. KRMA-941, KRMA-942, KRMA-952, KRMA-953, KRMA-954, KRMA-959, KRMA-960, and KRMA-963 were updated in place and remain children of this epic. Do not close them only because the newer review exists.

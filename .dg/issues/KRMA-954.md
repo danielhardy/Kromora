@@ -15,11 +15,18 @@ labels:
   - performance
   - render
   - needs-decomposition
-parent: KRMA-922
 created: 2026-10-13T14:48:04.666Z
-updated: 2026-10-13T14:48:22.153Z
+updated: 2026-10-14T16:10:57.028Z
+parent: KRMA-922
+context:
+  files: []
+  docs:
+    - .context/2026-10-14-release-readiness-review.md
+  issues:
+    - KRMA-994
+  commands: []
 blockers: []
-order: zv
+order: cdhzzzzp
 board: product
 ---
 
@@ -59,3 +66,23 @@ Review `.context/2026-10-13-release-readiness-review.md` finding S10.
       equal documents produce equal keys and any edit changes the key.
 - [ ] No production behavior change in this ticket (the benchmark may be added under `Tests/` as an
       opt-in method; follow how other benchmarks are gated).
+
+## 2026-10-14 review
+
+Finding 11 tightens this plan. Re-read `RenderCacheKey.swift` around line 155 and `RenderEngine.swift` around lines 214, 2285, and 2766; line numbers drift.
+
+Required constraints for the plan and its children:
+
+- Compute immutable identity once per relevant mutation. Do not JSON-encode and hash the whole document on every repeated interaction.
+- Session-local caches may use revision or structural keys. Durable cross-launch identity keeps a stable digest.
+- Do not persist Swift's randomized `Hasher` output.
+- Do not remove source, Look, or pipeline-version fences.
+- The baseline must include a large brush/mask recipe. A neutral document hides this cost.
+- Texture pooling is not this ticket. It is KRMA-963, and it is blocked on GPU-completion ownership.
+
+Epic KRMA-994 tracks the finding. This issue stays a child of KRMA-922.
+
+## Additional acceptance criteria
+
+- [ ] `docs/RENDER_KEY_PLAN.md` includes the constraints above, and the benchmark reports the large-recipe number beside the plain-document number.
+- [ ] Child tickets repeat the fence and `Hasher` rules in their acceptance criteria.

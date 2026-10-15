@@ -1,12 +1,37 @@
 ---
 id: KRMA-987
-title: "Guard the Observation convention: CLAUDE.md rule and ObservableObject allowlist test"
+title: Document the Observation convention for new UI state
 type: task
-status: backlog
+status: done
 priority: medium
 agent: claude
 human_review_required: false
 model: sonnet
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: CLAUDE.md contains concise Observation guidance and a working link to docs/ENGINEERING_GUIDE.md#observation.
+      result: pass
+    - criterion: The guidance prefers Observation for new UI-facing state and maps plain stored references, @Bindable bindings, and @State view-owned models.
+      result: pass
+    - criterion: No tests, source scans, allowlists, lint/compiler checks, or CI gates were added or changed for this convention.
+      result: pass
+      notes: Reviewed the changed test and CI paths; their unrelated export coverage/filter changes add no Observation enforcement.
+    - criterion: .dg/AGENTS.md remains unchanged.
+      result: pass
+  checks_run:
+    - Resolved the CLAUDE.md relative link and confirmed the observation anchor exists in docs/ENGINEERING_GUIDE.md.
+    - Reviewed the CLAUDE.md documentation diff.
+    - git diff --check -- CLAUDE.md passed.
+    - Build and tests skipped as directed for this documentation-only change.
+  findings: []
+  fixes: []
+  verification_commits:
+    - 4b40e90a764a75954619c0e212f72d284542cabf
+  actor: codex
+  resolved_model: gpt-6-luna
+  completed_at: 2026-10-15T01:36:49.055Z
+  session: 01MV8V9A59CYQTK5HN
 creation_provenance:
   runner: claude
   model: sonnet
@@ -16,58 +41,73 @@ labels:
   - swiftui
   - maintainability
 created: 2026-10-13T22:11:31.143Z
-updated: 2026-10-13T22:11:31.143Z
+updated: 2026-10-15T01:36:49.059Z
 blockers: []
-order: zzzzzzq
+order: a0
 board: product
+footprint:
+  source: observed
+  paths: []
+  observed:
+    paths: []
+    captured_at: 2026-10-15T01:34:47.291Z
+    unavailable_reason: "missing_commits: no implementation commits are recorded"
+commits:
+  - 4b40e90a764a75954619c0e212f72d284542cabf
 ---
 
 ## Objective
 
-Make new UI-facing state use Observation by default, enforced by a test rather than by prose alone: add a rule to `CLAUDE.md` and a source-scan test that fails when a new `ObservableObject` is declared outside a shrinking allowlist of the types still awaiting conversion.
+Document the project convention for new UI-facing state: prefer Swift Observation (`@Observable`) by default, and point contributors to the architecture guidance for the ownership and SwiftUI wrapper details. This is contributor guidance only; do not add hard enforcement.
 
 ## Context
 
-See `docs/APP_VIEWMODEL_OBSERVATION_PLAN.md`. KRMA-521 already moved the high-frequency children to `@Observable`, and the migration (KRMA-907 to KRMA-909 in Phase 1, KRMA-972 to KRMA-981 in optional Phase 2) will convert the rest only if the go/no-go gate says so. Whatever happens there, new code should not add to the problem, and agents default to Combine-era patterns (`ObservableObject`, `@Published`, `@ObservedObject`) unless told otherwise. This ticket has no dependencies and should land early.
+The Observation migration completed in KRMA-981. [`docs/ENGINEERING_GUIDE.md`](../../docs/ENGINEERING_GUIDE.md#observation) already explains the current architecture and implementation details, but `CLAUDE.md` has no short convention for agents adding new UI state. Since `CLAUDE.md` is the canonical shared agent guidance, add a concise pointer there rather than duplicating the full architecture section.
 
-Do not edit `.dg/AGENTS.md`; DispatchGraph generates it. `CLAUDE.md` is the canonical shared guidance (root `AGENTS.md` points to it).
-
-The 15 classes that declare `ObservableObject` today (verified 2026-10-13 with `grep -rn "ObservableObject" Sources`): `AppViewModel`, `AppViewModel.InspectorState`, `KromoraSettings`, `LUTLibrary`, `LibraryMediaWorkflowCoordinator`, `EditorDocumentCoordinator`, `EditClipboardCoordinator`, `DeriveCoordinator`, `LookSaveCoordinator`, `MaskInteractionState`, `RetouchInteractionState`, `MaskDiscoveryState`, `PreviewSurface` (in `Views/`), `MaskingPanelModel`, `AnalysisDebugPanelModel`. Regenerate the list before writing the allowlist.
-
-Existing scan style to copy: `Tests/KromoraKitTests/ObservationInvalidationTests.swift` (source-scan tests) and `PackageSettingsTests` (file-reading structural tests such as `testAppViewModelDoesNotRegrow`).
+Do not add a source scan, allowlist, lint rule, compiler check, or CI gate for this convention. Do not change existing tests as part of this documentation issue.
 
 ## Approach
 
-1. **CLAUDE.md.** Add a short "Observation" subsection under the Swift 6 section, roughly:
-   - New UI-facing state is `@MainActor @Observable final class`. Do not add new `ObservableObject` or `@Published` types.
-   - Hold it in views with a plain `let`/`var`, `@Bindable` when the view needs `$x.prop`, or `@State` for view-owned state. Never wrap an `@Observable` type in `@StateObject`/`@ObservedObject`.
-   - Mark storage that views never read (tasks, closures, caches, injected collaborators) `@ObservationIgnored`. `@Observable` rejects `lazy` stored properties, so use `@ObservationIgnored` there too.
-   - A view updates only for properties its `body` reads during that evaluation. Reads inside `.task`, gesture or `onChange` closures are not tracked.
-   - Do not add entries to the `AppViewModel` child-forwarding loop. New child state is observed directly by the views that show it.
-   - Prefer one small state object per surface over adding properties to `AppViewModel` (which has a line ceiling in `PackageSettingsTests`).
-   Keep it to about ten lines and link the plan doc.
-2. **Test.** Add `testObservableObjectDeclarationsMatchAllowlist` to `ObservationInvalidationTests` (fast lane; it only reads source files). Scan every `*.swift` under `Sources/KromoraKit` for type declarations conforming to `ObservableObject` (including nested types such as `AppViewModel.InspectorState`; match the declaration line, ignore comments and strings) and assert the set equals a hard-coded allowlist of the 15 names. Fail with a message that says: new UI state should be `@Observable`; if you are converting a type, remove it from the allowlist in the same change. Also assert that a type on the allowlist that no longer declares `ObservableObject` fails the test, so the list must shrink as steps land.
-3. A second assertion in the same test: no file under `Sources/KromoraKit` declares `@StateObject` or `@ObservedObject` for a type that is `@Observable` (generalises the existing `testObservableTypesAreNotWrappedInStateObject`, which only documents the contract). Derive the `@Observable` type names from the scan.
+1. Add a short Observation subsection under the Swift 6 guidance in `CLAUDE.md`.
+2. State that new UI-facing state should generally use `@MainActor @Observable`, with plain stored references, `@Bindable` for needed bindings, and `@State` for view-owned models.
+3. Mention `@ObservationIgnored` for stored implementation details views do not read, then link to the Observation section of `docs/ENGINEERING_GUIDE.md` for the complete rules and rationale.
+4. Keep this change limited to documentation; no source, tests, or enforcement mechanisms.
 
 ## Acceptance criteria
 
-- [ ] `CLAUDE.md` has the Observation rule described above (about ten lines, links `docs/APP_VIEWMODEL_OBSERVATION_PLAN.md`), and `.dg/AGENTS.md` is unchanged.
-- [ ] A fast-lane test fails if a new `ObservableObject` type is added anywhere in `Sources/KromoraKit`, and fails if an allowlisted type has been converted but left on the list. Demonstrate both by temporarily adding and removing a declaration locally (do not commit that).
-- [ ] A test fails if an `@Observable` type is held with `@StateObject`/`@ObservedObject`.
-- [ ] The allowlist contains exactly the 15 current types, each with a one-line comment naming the migration ticket that removes it (KRMA-907/908/909 or the Phase 2 step).
-- [ ] Zero changes to production code under `Sources/`; `swift build` and `scripts/ci-tests.sh fast` pass; the new test is not added to `serial_filter`.
+- [ ] `CLAUDE.md` contains concise Observation guidance and a working link to `docs/ENGINEERING_GUIDE.md#observation`.
+- [ ] The guidance says to prefer Observation for new UI-facing state and gives the basic SwiftUI ownership and wrapper mapping.
+- [ ] No tests, source scans, allowlists, lint/compiler checks, or CI gates are added or changed for this convention.
+- [ ] `.dg/AGENTS.md` remains unchanged.
 
 ## Verification
 
-```
-swift build
-scripts/ci-tests.sh fast
-```
-
-## Notes for the migration tickets
-
-When KRMA-907, 908, 909 and each Phase 2 step convert a type, they must remove it from this allowlist in the same commit. Add that sentence to the "Common rules" in the plan doc as part of this ticket.
+- Check that the Markdown link resolves to the existing Observation section in `docs/ENGINEERING_GUIDE.md`.
+- Review the documentation diff; no build or test run is needed for this docs-only change.
 
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-10-15T01:36:49.055Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] CLAUDE.md contains concise Observation guidance and a working link to docs/ENGINEERING_GUIDE.md#observation. (pass)
+- [x] The guidance prefers Observation for new UI-facing state and maps plain stored references, @Bindable bindings, and @State view-owned models. (pass)
+- [x] No tests, source scans, allowlists, lint/compiler checks, or CI gates were added or changed for this convention. (pass) — Reviewed the changed test and CI paths; their unrelated export coverage/filter changes add no Observation enforcement.
+- [x] .dg/AGENTS.md remains unchanged. (pass)
+Checks run:
+- Resolved the CLAUDE.md relative link and confirmed the observation anchor exists in docs/ENGINEERING_GUIDE.md.
+- Reviewed the CLAUDE.md documentation diff.
+- git diff --check -- CLAUDE.md passed.
+- Build and tests skipped as directed for this documentation-only change.
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- 4b40e90a764a75954619c0e212f72d284542cabf
+Actor: codex
+Resolved model: gpt-6-luna
+Pickup session: 01MV8V9A59CYQTK5HN
+Summary: Counterpoint verification passed; documentation link and guidance are correct. Commit 4b40e90a764a75954619c0e212f72d284542cabf.

@@ -9,13 +9,13 @@ labels:
   - epic:quality
   - phase:10
 created: 2026-08-30T18:30:37.650Z
-updated: 2026-10-13T14:48:00.662Z
+updated: 2026-10-14T16:11:01.464Z
 depends_on:
   - KRMA-058
   - KRMA-056
 blockers: []
 estimate: 5
-order: 2ubd9h1u
+order: 3dhzzzzx
 board: product
 ---
 
@@ -52,6 +52,10 @@ Part of **Epic 10 — Image quality, performance, and MVP release gate**. The so
 ### Comment — codex @ 2026-10-04T23:20:54.695Z
 
 Acceptance note for KRMA-059: run the end-to-end acceptance pass against the signed, sandboxed Xcode Release build, not `swift run`. Follow [docs/APP_STORE_ACCEPTANCE.md](../../docs/APP_STORE_ACCEPTANCE.md) for commands, manual cases, expected results, and the results template.
+
+### Comment — cursor @ 2026-10-14T16:11:01.463Z
+
+The 2026-10-14 signed-app qualification checklist is KRMA-1016 under epic KRMA-994. This MVP gate stays the broader release ticket. Do not file a second end-to-end acceptance issue for the same pass.
 
 ## Agent log
 
