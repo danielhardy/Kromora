@@ -18,6 +18,8 @@ final class PhotosImportReviewCoordinator {
 
     private(set) var items: [Item] = []
     private(set) var inLibrary: Set<String> = []
+    /// Items whose original bytes do not match their filename; the import will skip them.
+    private(set) var mismatched: [String: String] = [:]
     private(set) var checked = 0
     private(set) var isChecking = false
     private(set) var selection = MediaVolumeSelectionModel()
@@ -51,6 +53,7 @@ final class PhotosImportReviewCoordinator {
             Item(selection: $0, name: provider.originalFilename(for: $0) ?? "Photo \($0.ordinal + 1)")
         }
         inLibrary = []
+        mismatched = [:]
         checked = 0
         hidesInLibrary = false
         selection = MediaVolumeSelectionModel()
@@ -100,6 +103,7 @@ final class PhotosImportReviewCoordinator {
         provider = nil
         items = []
         inLibrary = []
+        mismatched = [:]
         selection = MediaVolumeSelectionModel()
     }
 
@@ -115,13 +119,11 @@ final class PhotosImportReviewCoordinator {
         isChecking = true
         checkTask = Task { [weak self] in
             let matcher = try? await loader()
-            if let matcher, !matcher.isEmpty {
-                for item in pending {
-                    guard !Task.isCancelled else { return }
-                    let isMember = await Self.isMember(item, provider: provider, matcher: matcher)
-                    guard let self, self.reviewID == operationID, !Task.isCancelled else { return }
-                    self.record(item, isMember: isMember)
-                }
+            for item in pending {
+                guard !Task.isCancelled else { return }
+                let result = await Self.inspect(item, provider: provider, matcher: matcher)
+                guard let self, self.reviewID == operationID, !Task.isCancelled else { return }
+                self.record(item, result: result)
             }
             guard let self, self.reviewID == operationID else { return }
             self.isChecking = false
@@ -131,20 +133,28 @@ final class PhotosImportReviewCoordinator {
 
     /// An item whose bytes cannot be transferred stays untagged: the import reports it as a
     /// failure, and the review must not claim membership it cannot prove.
-    private static func isMember(
-        _ item: Item, provider: any PhotosImportProviding, matcher: LibraryMembershipMatcher
-    ) async -> Bool {
-        guard let data = try? await provider.transferData(for: item.selection) else { return false }
-        return await Task.detached(priority: .utility) {
-            matcher.contains(contentHash: LibraryMembershipMatcher.contentHash(of: data))
-        }.value
+    private static func inspect(
+        _ item: Item, provider: any PhotosImportProviding, matcher: LibraryMembershipMatcher?
+    ) async -> (isMember: Bool, mismatch: String?) {
+        guard let data = try? await provider.transferData(for: item.selection) else { return (false, nil) }
+        let mismatch = OriginalFileTypeCheck.mismatchReason(name: item.name, data: data)
+        guard let matcher, !matcher.isEmpty else { return (false, mismatch) }
+        return (await contains(data, in: matcher), mismatch)
+    }
+
+    @concurrent private static func contains(_ data: Data, in matcher: LibraryMembershipMatcher) async -> Bool {
+        matcher.contains(contentHash: LibraryMembershipMatcher.contentHash(of: data))
     }
 
     /// Tags a match and drops it from the default selection. An item the user already clicked
     /// keeps its state, so a late result never undoes a deliberate choice.
-    private func record(_ item: Item, isMember: Bool) {
+    private func record(_ item: Item, result: (isMember: Bool, mismatch: String?)) {
         checked += 1
-        guard isMember else { return }
+        if let reason = result.mismatch {
+            mismatched[item.id] = reason
+            selection.deselectDefaults([item.id])
+        }
+        guard result.isMember else { return }
         inLibrary.insert(item.id)
         selection.deselectDefaults([item.id])
     }

@@ -2,6 +2,7 @@ import Foundation
 import Photos
 import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct PhotosImportProgress: Equatable, Sendable {
     enum Phase: String, Sendable {
@@ -58,16 +59,63 @@ final class PhotosPickerImportProvider: PhotosImportProviding {
     }
 
     func originalFilename(for selection: PhotosImportSelection) -> String? {
-        guard let identifier = selection.localIdentifier else { return nil }
-        let result = PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil)
-        guard let asset = result.firstObject else { return nil }
-        return PHAssetResource.assetResources(for: asset)
-            .first(where: { $0.type == .photo && !$0.originalFilename.isEmpty })?.originalFilename
+        Self.originalResource(for: selection)?.originalFilename
     }
 
     func transferData(for selection: PhotosImportSelection) async throws -> Data? {
-        guard items.indices.contains(selection.ordinal) else { return nil }
-        return try await items[selection.ordinal].loadTransferable(type: Data.self)
+        guard let resource = Self.originalResource(for: selection) else {
+            throw PhotosOriginalError.noOriginalResource
+        }
+        return try await Self.readOriginal(resource)
+    }
+
+    /// The camera original, never an edited rendition. A RAW+JPEG pair exposes the RAW as
+    /// `.alternatePhoto` and the JPEG as `.photo`; `.fullSizePhoto` is the edited render and is
+    /// deliberately never used (KRMA-1031).
+    private static func originalResource(for selection: PhotosImportSelection) -> PHAssetResource? {
+        guard let identifier = selection.localIdentifier,
+            let asset = PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil).firstObject
+        else { return nil }
+        let resources = PHAssetResource.assetResources(for: asset)
+            .filter { !$0.originalFilename.isEmpty }
+        if let raw = resources.first(where: {
+            $0.type == .alternatePhoto && UTType($0.uniformTypeIdentifier)?.conforms(to: .rawImage) == true
+        }) {
+            return raw
+        }
+        return resources.first(where: { $0.type == .photo })
+    }
+
+    /// Streams the original to a temporary file, allowing iCloud download, and returns its bytes.
+    private static func readOriginal(_ resource: PHAssetResource) async throws -> Data {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("KromoraPhotosImport-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("original")
+        let options = PHAssetResourceRequestOptions()
+        options.isNetworkAccessAllowed = true
+        do {
+            try await PHAssetResourceManager.default().writeData(for: resource, toFile: file, options: options)
+        } catch {
+            throw PhotosOriginalError.unavailable(error.localizedDescription)
+        }
+        try Task.checkCancellation()
+        return try Data(contentsOf: file, options: .mappedIfSafe)
+    }
+}
+
+enum PhotosOriginalError: LocalizedError, Equatable {
+    case noOriginalResource
+    case unavailable(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .noOriginalResource:
+            return "Photos has no original file for this item, so it was not imported."
+        case .unavailable(let detail):
+            return "The original could not be retrieved from Photos or iCloud (\(detail))."
+        }
     }
 }
 
@@ -123,6 +171,10 @@ enum PhotosImportInsertionOutcome: Equatable, Sendable {
 @MainActor
 @Observable
 final class PhotosImportCoordinator {
+    @concurrent private static func contentDigest(of data: Data) async -> String {
+        PhotoAssetID.contentDigest(data)
+    }
+
     private(set) var progress: PhotosImportProgress?
     private(set) var failures: [PhotosImportFailure] = []
     private(set) var wasCancelled = false
@@ -192,15 +244,20 @@ final class PhotosImportCoordinator {
                         break
                     }
 
+                    if let reason = OriginalFileTypeCheck.mismatchReason(name: name, data: data) {
+                        self.recordFailure(
+                            name: name, ordinal: selection.ordinal, reason: reason, outcome: .skipped
+                        )
+                        continue
+                    }
+
                     // Legacy folder imports share this digest with source/thumbnail identity.
                     // Package imports compute their digest in the detached package staging pass.
                     let contentDigest: String?
                     if self.destination?.packageImportDoesNotNeedDigest == true {
                         contentDigest = nil
                     } else {
-                        contentDigest = await Task.detached(priority: .utility) {
-                            PhotoAssetID.contentDigest(data)
-                        }.value
+                        contentDigest = await Self.contentDigest(of: data)
                     }
 
                     guard self.isCurrent(currentOperationID), !Task.isCancelled else {

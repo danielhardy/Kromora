@@ -92,7 +92,15 @@ struct PhotosImportReviewView: View {
                         .padding(6)
                 }
                 .overlay(alignment: .bottomLeading) {
-                    if isInLibrary {
+                    if let reason = review.mismatched[item.id] {
+                        Label("Not an original", systemImage: "exclamationmark.triangle")
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.regularMaterial, in: Capsule())
+                            .padding(6)
+                            .help(reason)
+                    } else if isInLibrary {
                         Label("In library", systemImage: "checkmark.seal")
                             .font(.caption2.weight(.semibold))
                             .padding(.horizontal, 6)

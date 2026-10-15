@@ -172,3 +172,12 @@ writer lock. A still-missing field is the durable resume marker, unreadable orig
 and an interrupted open continues at the remaining shards. Coarse location is a one-degree grid cell
 rounded on-device; precise GPS is never copied into the index. The field definitions are in
 [`LIBRARY_PACKAGE_FORMAT.md`](LIBRARY_PACKAGE_FORMAT.md). The package format version does not change.
+
+## Photos originals
+
+Photos import reads the original `PHAssetResource` (`.alternatePhoto` RAW for RAW+JPEG pairs, else
+`.photo`) through `PHAssetResourceManager` with network access allowed; it never uses the edited
+`.fullSizePhoto` rendition. `OriginalFileTypeCheck` compares the filename extension with the bytes'
+magic number: a mismatch (for example JPEG bytes named `.ARW`) is flagged in the review sheet and
+skipped at import with a per-item message, never stored as an original. Files imported before this
+check can be re-imported from Photos; originals are not rewritten automatically.

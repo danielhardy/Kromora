@@ -82,7 +82,7 @@ final class PhotosImportTests: TempDirectoryTestCase {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         let coordinator = PhotosImportCoordinator(destination: viewModel)
         let provider = TestPhotosImportProvider(
-            names: [0: "IMG_0001.HEIC", 1: "IMG_0002.JPG"],
+            names: [0: "IMG_0001.JPG", 1: "IMG_0002.JPG"],
             responses: [0: .success(firstData), 1: .success(secondData)]
         )
 
@@ -95,7 +95,7 @@ final class PhotosImportTests: TempDirectoryTestCase {
         )
         try await waitForCoordinator(coordinator)
 
-        XCTAssertEqual(viewModel.collection.items.map(\.displayName), ["IMG_0001.HEIC", "IMG_0002.JPG"])
+        XCTAssertEqual(viewModel.collection.items.map(\.displayName), ["IMG_0001.JPG", "IMG_0002.JPG"])
         XCTAssertTrue(viewModel.collection.items.allSatisfy { $0.imageData == nil })
         XCTAssertTrue(viewModel.collection.items.allSatisfy {
             guard let url = $0.url else { return false }
@@ -748,4 +748,61 @@ final class PhotosImportTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.inspectorTab, .look)
     }
     #endif
+}
+
+final class OriginalFileTypeCheckTests: XCTestCase {
+    private let jpeg = Data([0xFF, 0xD8, 0xFF, 0xE0, 0, 0x10] + Array("JFIF".utf8) + [0, 1, 1, 0])
+    private let tiffRAW = Data([0x49, 0x49, 0x2A, 0x00, 8, 0, 0, 0, 0, 0, 0, 0])
+
+    func testJPEGBytesUnderRAWNameAreRejected() {
+        XCTAssertNotNil(OriginalFileTypeCheck.mismatchReason(name: "DSC00160.ARW", data: jpeg))
+    }
+
+    func testTIFFBasedRAWUnderRAWNameIsAccepted() {
+        XCTAssertNil(OriginalFileTypeCheck.mismatchReason(name: "DSC00160.ARW", data: tiffRAW))
+    }
+
+    func testJPEGNameWithJPEGBytesIsAcceptedAndPNGNameIsNot() {
+        XCTAssertNil(OriginalFileTypeCheck.mismatchReason(name: "a.jpg", data: jpeg))
+        XCTAssertNotNil(OriginalFileTypeCheck.mismatchReason(name: "a.png", data: jpeg))
+    }
+
+    func testHEICBrandUnderCR3NameIsRejectedButCanonBrandIsNot() {
+        let heic = Data([0, 0, 0, 0x18] + Array("ftypheic".utf8) + [0, 0, 0, 0])
+        let crx = Data([0, 0, 0, 0x18] + Array("ftypcrx ".utf8) + [0, 0, 0, 0])
+        XCTAssertNotNil(OriginalFileTypeCheck.mismatchReason(name: "a.CR3", data: heic))
+        XCTAssertNil(OriginalFileTypeCheck.mismatchReason(name: "a.CR3", data: crx))
+    }
+
+    @MainActor
+    func testCoordinatorSkipsMismatchedOriginalAndReportsIt() async {
+        let destination = MismatchDestination()
+        let coordinator = PhotosImportCoordinator(destination: destination)
+        let provider = MismatchProvider(data: jpeg)
+        coordinator.start(selections: [.init(ordinal: 0, localIdentifier: nil)], provider: provider)
+        for _ in 0..<200 where destination.summaries.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(destination.inserted, 0)
+        XCTAssertEqual(destination.summaries.first?.skipped, 1)
+    }
+}
+
+@MainActor
+private final class MismatchProvider: PhotosImportProviding {
+    let data: Data
+    init(data: Data) { self.data = data }
+    func originalFilename(for selection: PhotosImportSelection) -> String? { "DSC00160.ARW" }
+    func transferData(for selection: PhotosImportSelection) async throws -> Data? { data }
+}
+
+@MainActor
+private final class MismatchDestination: PhotosImportDestination {
+    var inserted = 0
+    var summaries: [ImportOutcomeSummary] = []
+    func preparePhotosImport(totalCount: Int) {}
+    func insertPhotosImport(_ item: ImageCollection.PhotoImportItem, ordinal: Int) -> PhotosImportInsertionOutcome {
+        inserted += 1
+        return .inserted("x")
+    }
+    func recordPhotosImportFailureDestination(name: String, ordinal: Int?, reason: String) {}
+    func finishPhotosImportDestination(summary: ImportOutcomeSummary) { summaries.append(summary) }
 }
