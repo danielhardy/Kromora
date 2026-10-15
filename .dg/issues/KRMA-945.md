@@ -2,9 +2,43 @@
 id: KRMA-945
 title: Limit the `swift run` activation workaround to unbundled launches
 type: task
-status: backlog
+status: done
 priority: low
 human_review_required: false
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: The workaround runs only when Bundle.main.bundleIdentifier == nil (unbundled swift run), behind a small named helper with a doc comment explaining why.
+      result: pass
+      notes: promoteUnbundledLaunchIfNeeded gates both activation calls through needsUnbundledActivation; the helper documents the unbundled launch rationale.
+    - criterion: activate(ignoringOtherApps:) is replaced with NSApp.activate() everywhere in Sources/ (grep -rn ignoringOtherApps Sources is empty).
+      result: pass
+      notes: Source search returned no ignoringOtherApps matches in Sources/.
+    - criterion: A unit test covers the helper predicate with an injected bundle identifier.
+      result: pass
+      notes: UnbundledActivationTests covers nil and a nonnil identifier; the fast lane passed.
+    - criterion: applicationDidFinishLaunching still activates the app for both launch types.
+      result: pass
+      notes: applicationDidFinishLaunching calls NSApp.activate() unconditionally.
+    - criterion: "swift build is warning-free and Swift 6 mode stays clean (no @unchecked Sendable, nonisolated(unsafe), @preconcurrency, or #available branches)."
+      result: pass
+      notes: swift build exited 0 without warnings; none of the prohibited constructs occur in Sources/.
+    - criterion: scripts/ci-tests.sh fast exits 0.
+      result: pass
+      notes: The fast lane completed all 2010 required tests and exited 0.
+  checks_run:
+    - swift build — passed with no warnings
+    - scripts/ci-tests.sh fast — passed; 2010 required tests, exit 0
+    - rg source check for ignoringOtherApps — no matches in Sources/
+    - git diff --check -- Sources/KromoraKit/Presentation/KromoraAppDelegate.swift — passed
+    - Swift 6 escape-hatch and availability check in Sources/ — no matches
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: codex
+  resolved_model: gpt-6-luna
+  completed_at: 2026-10-15T12:51:39.685Z
+  session: 01MV9J9SVAK3KCGMB9
 creation_provenance:
   runner: claude
   model: sonnet
@@ -13,11 +47,11 @@ labels:
   - release-readiness
   - should-fix
   - startup
-parent: KRMA-922
 created: 2026-10-13T14:47:54.782Z
-updated: 2026-10-13T14:48:20.353Z
+updated: 2026-10-15T12:51:39.689Z
+parent: KRMA-922
 blockers: []
-order: td9h1w6y
+order: a0
 board: product
 ---
 
@@ -45,3 +79,36 @@ and `activate(ignoringOtherApps:)` is deprecated in favor of `activate()`.
 - [ ] `applicationDidFinishLaunching` still activates the app for both launch types.
 - [ ] `swift build` is warning-free and Swift 6 mode stays clean (no `@unchecked Sendable`, `nonisolated(unsafe)`, `@preconcurrency`, no `#available` branches).
 - [ ] `scripts/ci-tests.sh fast` exits 0 (if only `StoredEditAdoptionTests.testSlowMaterializationCannotReopenSupersededPhoto` fails, re-run it alone with `swift test --filter`, note it in the review comment, and do not change it here; it is tracked separately).
+
+
+### Comment — claude @ 2026-10-15T06:42:44.946Z
+
+Implemented: KromoraAppDelegate.needsUnbundledActivation(bundleIdentifier:) predicate + promoteUnbundledLaunchIfNeeded() (runs setActivationPolicy/activate only when Bundle.main.bundleIdentifier == nil); applicationDidFinishLaunching still calls NSApp.activate() for both launch types and no longer sets the policy. No ignoringOtherApps remains in Sources (it remains only in opt-in benchmark tests under Tests/, outside the criterion). Added UnbundledActivationTests. swift build clean. ci-tests.sh fast: first run failed on EditPersistenceIntegrationTests.testLongGestureCheckpointsIntermediateSnapshotsBeforeMouseUp (timing flake; passes alone), second run exit 0. Not committed.
+
+## Agent log
+
+- 2026-10-15T12:51:39.685Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] The workaround runs only when Bundle.main.bundleIdentifier == nil (unbundled swift run), behind a small named helper with a doc comment explaining why. (pass) — promoteUnbundledLaunchIfNeeded gates both activation calls through needsUnbundledActivation; the helper documents the unbundled launch rationale.
+- [x] activate(ignoringOtherApps:) is replaced with NSApp.activate() everywhere in Sources/ (grep -rn ignoringOtherApps Sources is empty). (pass) — Source search returned no ignoringOtherApps matches in Sources/.
+- [x] A unit test covers the helper predicate with an injected bundle identifier. (pass) — UnbundledActivationTests covers nil and a nonnil identifier; the fast lane passed.
+- [x] applicationDidFinishLaunching still activates the app for both launch types. (pass) — applicationDidFinishLaunching calls NSApp.activate() unconditionally.
+- [x] swift build is warning-free and Swift 6 mode stays clean (no @unchecked Sendable, nonisolated(unsafe), @preconcurrency, or #available branches). (pass) — swift build exited 0 without warnings; none of the prohibited constructs occur in Sources/.
+- [x] scripts/ci-tests.sh fast exits 0. (pass) — The fast lane completed all 2010 required tests and exited 0.
+Checks run:
+- swift build — passed with no warnings
+- scripts/ci-tests.sh fast — passed; 2010 required tests, exit 0
+- rg source check for ignoringOtherApps — no matches in Sources/
+- git diff --check -- Sources/KromoraKit/Presentation/KromoraAppDelegate.swift — passed
+- Swift 6 escape-hatch and availability check in Sources/ — no matches
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: codex
+Resolved model: gpt-6-luna
+Pickup session: 01MV9J9SVAK3KCGMB9
+Summary: Counterpoint verification passed: all acceptance criteria hold; swift build and the fast CI lane pass, and no verification fixes or blockers were needed.

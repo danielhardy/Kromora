@@ -52,14 +52,26 @@ public final class KromoraAppDelegate: NSObject, NSApplicationDelegate {
         // Kromora is a single-window editor. Automatic window tabbing inserts
         // Hide Tab Bar / Show All Tabs into the View menu before scenes build.
         NSWindow.allowsAutomaticWindowTabbing = false
-        // Unbundled `swift run` starts as a background process. The launch lease-recovery sheet
-        // would otherwise stay invisible — the terminal prints "Build complete!" and appears hung.
-        NSApplication.shared.setActivationPolicy(.regular)
-        NSApp.activate()
+        Self.promoteUnbundledLaunchIfNeeded()
         let launch = AppLaunch()
         self.launch = launch
         self.appearanceController = KromoraWindowAppearanceController(settings: launch.settings)
         super.init()
+    }
+
+    /// Whether the process needs to promote itself to a regular, frontmost app. Only an unbundled
+    /// launch (`swift run`) does: it has no `Info.plist`, so it starts as a background process.
+    nonisolated static func needsUnbundledActivation(bundleIdentifier: String?) -> Bool {
+        bundleIdentifier == nil
+    }
+
+    /// Makes an unbundled `swift run` process a regular app before `AppLaunch` can raise the launch
+    /// lease-recovery sheet. Without it the sheet stays invisible and the terminal, after printing
+    /// "Build complete!", appears hung. A bundled app is already regular through its `Info.plist`.
+    private static func promoteUnbundledLaunchIfNeeded(bundleIdentifier: String? = Bundle.main.bundleIdentifier) {
+        guard needsUnbundledActivation(bundleIdentifier: bundleIdentifier) else { return }
+        NSApplication.shared.setActivationPolicy(.regular)
+        NSApp.activate()
     }
 
     public func applicationWillFinishLaunching(_ notification: Notification) {
@@ -70,7 +82,6 @@ public final class KromoraAppDelegate: NSObject, NSApplicationDelegate {
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         appearanceController.start()
-        NSApp.setActivationPolicy(.regular)
         NSApp.activate()
     }
 
