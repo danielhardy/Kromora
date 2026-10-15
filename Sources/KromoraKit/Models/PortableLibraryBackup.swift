@@ -573,7 +573,7 @@ struct PortableLibraryBackup {
             try? input.close(); try? output.close(); try? FileManager.default.removeItem(at: destination)
             throw error
         }
-        let actual = hasher.finalize().portableHexString
+        let actual = hasher.finalize().hexString
         guard count == expected.byteCount else {
             throw PortableLibraryBackupError.sourceChanged(path: expected.relativePath)
         }
@@ -615,7 +615,7 @@ struct PortableLibraryBackup {
             }
             try input.close()
         } catch { try? input.close(); throw error }
-        return (count, hasher.finalize().portableHexString)
+        return (count, hasher.finalize().hexString)
     }
 
     private static func cloneOrLink(from source: URL, to destination: URL) throws {
@@ -735,8 +735,4 @@ extension PortableLibraryPackage {
             isCancelled: isCancelled, progress: progress, now: now
         )
     }
-}
-
-private extension SHA256.Digest {
-    var portableHexString: String { map { String(format: "%02x", $0) }.joined() }
 }

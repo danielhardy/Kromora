@@ -132,7 +132,7 @@ enum OriginalSettingsBundle {
     }
 
     private static func checksum(_ data: Data) -> String {
-        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        SHA256.hash(data: data).hexString
     }
 
     private static func safeFilename(_ name: String, fallbackExtension: String) -> String {

@@ -309,7 +309,7 @@ actor LatestPreviewFrameStore {
     // MARK: Internals
 
     nonisolated static func assetHash(_ assetID: PortablePhotoAssetID) -> String? {
-        SHA256.hash(data: Data(assetID.raw.utf8)).map { String(format: "%02x", $0) }.joined()
+        SHA256.hash(data: Data(assetID.raw.utf8)).hexString
     }
 
     private func fileURL(forHash hash: String) -> URL {

@@ -278,9 +278,7 @@ final class PreviewPresentationCoordinator {
     private static func opaqueToken(_ identity: PortablePhotoIdentity) -> String {
         // The portable UUID already has no path/content data. Hashing it directly avoids
         // JSON-encoding the full fingerprint on every selection just to emit a private-safe token.
-        let digest = SHA256.hash(data: Data(identity.assetID.raw.utf8))
-            .map { String(format: "%02x", $0) }
-            .joined()
+        let digest = SHA256.hash(data: Data(identity.assetID.raw.utf8)).hexString
         return String(digest.prefix(16))
     }
 

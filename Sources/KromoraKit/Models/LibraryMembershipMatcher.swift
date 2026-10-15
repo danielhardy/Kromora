@@ -38,7 +38,7 @@ struct LibraryMembershipMatcher: Sendable {
 
     /// The digest of in-memory bytes, identical to `contentHash(of:)` for the same content.
     static func contentHash(of data: Data) -> String {
-        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        SHA256.hash(data: data).hexString
     }
 
     func contains(contentHash: String) -> Bool {
@@ -56,7 +56,7 @@ struct LibraryMembershipMatcher: Sendable {
             guard let chunk = try handle.read(upToCount: Self.chunkSize), !chunk.isEmpty else { break }
             hasher.update(data: chunk)
         }
-        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+        return hasher.finalize().hexString
     }
 
     /// The ids of `files` whose bytes are already in the library. Unreadable files are left

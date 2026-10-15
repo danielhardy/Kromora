@@ -394,8 +394,7 @@ struct ImageSource: Sendable, Equatable {
     }
 
     private static func makeTraceToken(from fingerprint: String) -> String {
-        let digest = SHA256.hash(data: Data(fingerprint.utf8))
-            .map { String(format: "%02x", $0) }.joined()
+        let digest = SHA256.hash(data: Data(fingerprint.utf8)).hexString
         return String(digest.prefix(16))
     }
 }

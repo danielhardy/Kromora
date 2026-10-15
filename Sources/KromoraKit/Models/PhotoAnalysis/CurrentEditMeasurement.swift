@@ -1373,8 +1373,7 @@ actor CurrentEditMeasurementCache {
     }
 
     private static func filename(for key: CurrentEditMeasurementKey) -> String {
-        let digest = SHA256.hash(data: Data(key.cacheKey.utf8))
-            .map { String(format: "%02x", $0) }.joined()
+        let digest = SHA256.hash(data: Data(key.cacheKey.utf8)).hexString
         return "current-edit-\(digest).json"
     }
 

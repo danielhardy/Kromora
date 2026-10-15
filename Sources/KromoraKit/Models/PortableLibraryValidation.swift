@@ -578,7 +578,7 @@ struct PortableLibraryValidation {
                 result.critical.append(issue(.embeddedLook, .missing, path, "embedded Look blob is missing or unreadable"))
                 continue
             }
-            let actual = SHA256.hash(data: data).portableHexString
+            let actual = SHA256.hash(data: data).hexString
             recordChecksum(component: .embeddedLook, path: path, data: data, into: &result)
             let expected = file.deletingPathExtension().lastPathComponent.lowercased()
             if expected.count != 64 || expected != actual {
@@ -789,7 +789,7 @@ struct PortableLibraryValidation {
     ) {
         result.checkedFiles.append(.init(
             component: component, path: path, byteCount: UInt64(data.count),
-            checksum: SHA256.hash(data: data).portableHexString
+            checksum: SHA256.hash(data: data).hexString
         ))
     }
 
@@ -812,7 +812,7 @@ struct PortableLibraryValidation {
             try? input.close()
             throw error
         }
-        return (count, hasher.finalize().portableHexString)
+        return (count, hasher.finalize().hexString)
     }
 
     private static func checkCancellation(_ isCancelled: @Sendable () -> Bool) throws {
@@ -881,8 +881,4 @@ extension PortableLibraryPackage {
     ) throws -> PortableLibraryValidationReport {
         try validate(options: options, isCancelled: isCancelled, progress: progress)
     }
-}
-
-private extension SHA256.Digest {
-    var portableHexString: String { map { String(format: "%02x", $0) }.joined() }
 }

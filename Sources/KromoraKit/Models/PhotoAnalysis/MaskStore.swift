@@ -186,8 +186,7 @@ actor MaskStore {
         let identity = [key.identity.cacheKey, String(describing: key.kind),
                         key.quality.rawValue, key.providerVersion]
             .joined(separator: "\u{1f}")
-        let digest = SHA256.hash(data: Data(identity.utf8))
-            .map { String(format: "%02x", $0) }.joined()
+        let digest = SHA256.hash(data: Data(identity.utf8)).hexString
         return "mask-\(digest).\(ext)"
     }
 

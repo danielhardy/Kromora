@@ -53,7 +53,7 @@ struct PortablePackageLookReference: Codable, Equatable, Sendable, Hashable {
     }
 
     init(data: Data) {
-        let hash = SHA256.hash(data: data).portableHexString
+        let hash = SHA256.hash(data: data).hexString
         self.init(
             contentHash: hash,
             relativePath: "Looks/\(hash).cube",
@@ -461,7 +461,7 @@ extension PortableLibraryPackage {
             let blobURL = try packageURL(for: reference.relativePath)
             if FileManager.default.fileExists(atPath: blobURL.path) {
                 let existing = try Data(contentsOf: blobURL)
-                let actual = SHA256.hash(data: existing).portableHexString
+                let actual = SHA256.hash(data: existing).hexString
                 guard existing.count == bytes.count, actual == reference.contentHash else {
                     throw PortablePackageError.lookChecksumMismatch(
                         expected: reference.contentHash, actual: actual
@@ -956,7 +956,7 @@ extension PortableLibraryPackage {
             throw PortablePackageError.missingLook(reference.contentHash)
         }
         let data = try Data(contentsOf: url)
-        let actual = SHA256.hash(data: data).portableHexString
+        let actual = SHA256.hash(data: data).hexString
         guard UInt64(data.count) == reference.byteCount, actual == reference.contentHash else {
             throw PortablePackageError.lookChecksumMismatch(
                 expected: reference.contentHash, actual: actual
@@ -1000,11 +1000,6 @@ private extension PortablePackageEditRevision {
         try PackageJSONCoder.decode(Self.self, from: data)
     }
 }
-
-private extension SHA256.Digest {
-    var portableHexString: String { map { String(format: "%02x", $0) }.joined() }
-}
-
 private extension Data {
     var containsDOCTYPE: Bool {
         range(of: Data("<!DOCTYPE".utf8)) != nil

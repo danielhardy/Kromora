@@ -133,7 +133,7 @@ struct PortablePhotoSourceFingerprint: Codable, Hashable, Sendable, Equatable {
     }
 
     static func contentHash(of data: Data) -> String {
-        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        SHA256.hash(data: data).hexString
     }
 
     /// Chunk size for streaming a file through SHA-256: large enough to keep the read syscalls
@@ -150,7 +150,7 @@ struct PortablePhotoSourceFingerprint: Codable, Hashable, Sendable, Equatable {
         while let chunk = try handle.read(upToCount: streamingChunkSize), !chunk.isEmpty {
             hasher.update(data: chunk)
         }
-        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+        return hasher.finalize().hexString
     }
 
     private static func escape(_ value: String) -> String {

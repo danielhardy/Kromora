@@ -253,9 +253,7 @@ struct KromoraTraceContext: Sendable, Equatable {
     }
 
     init(sourceFingerprint: String, quality: String) {
-        let digest = SHA256.hash(data: Data(sourceFingerprint.utf8))
-            .map { String(format: "%02x", $0) }
-            .joined()
+        let digest = SHA256.hash(data: Data(sourceFingerprint.utf8)).hexString
         self.sourceToken = String(digest.prefix(16))
         self.quality = quality
     }
@@ -402,9 +400,7 @@ enum KromoraObservability {
     /// Hash an input name without ever passing it to an OSLog interpolation. Used before an
     /// `ImageSource` exists, during the eager open-time decode.
     static func sourceToken(forInput input: String) -> String {
-        let digest = SHA256.hash(data: Data(input.utf8))
-            .map { String(format: "%02x", $0) }
-            .joined()
+        let digest = SHA256.hash(data: Data(input.utf8)).hexString
         return String(digest.prefix(16))
     }
 

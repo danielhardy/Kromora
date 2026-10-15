@@ -125,7 +125,7 @@ struct CubeLUT: Identifiable, Hashable, Sendable {
     /// world's LUTs.
     private static func derivedID(name: String, table: Data) -> String {
         let digest = SHA256.hash(data: table)
-        let hex = digest.prefix(8).map { String(format: "%02x", $0) }.joined()
+        let hex = digest.prefix(8).hexString
         return "derived://\(name)/\(hex)"
     }
 
@@ -603,7 +603,7 @@ private final class LUTLineReader {
     /// SHA-256 (lowercase hex) of every byte read so far. Meaningful once `readLine` has returned
     /// `nil`, i.e. after end of file.
     func contentHash() -> String {
-        hasher.finalize().map { String(format: "%02x", $0) }.joined()
+        hasher.finalize().hexString
     }
 
     private func read(upToCount count: Int) throws -> Data {

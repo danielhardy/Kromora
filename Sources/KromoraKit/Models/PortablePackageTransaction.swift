@@ -1377,11 +1377,6 @@ struct PortablePackageTransaction {
         return String(url.standardizedFileURL.path.dropFirst(rootPath.count))
     }
 }
-
-extension SHA256.Digest {
-    fileprivate var hexString: String { map { String(format: "%02x", $0) }.joined() }
-}
-
 private func writeDurably(_ data: Data, to url: URL) throws {
     let temporary = url.deletingLastPathComponent().appendingPathComponent(
         ".\(url.lastPathComponent).tmp-\(UUID().uuidString)")
