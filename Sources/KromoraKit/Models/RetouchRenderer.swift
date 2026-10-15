@@ -15,29 +15,22 @@ enum RetouchRenderer {
         var result = image
         for spot in settings.spots where !spot.isIdentity {
             guard let source = spot.source else { continue }
+            // The brush radius is the defect the user covered, so the blend must be fully opaque
+            // across it. Feather transitions outward into the surrounding pixels, where the healed
+            // fill already matches the ring; an inward feather left the rim of the hole partly
+            // original and showed as a remnant on smooth backgrounds.
+            let featherScale = 1 + spot.feather
             let maskStroke = BrushStroke(
-                id: spot.id, samples: spot.region.samples, radius: spot.region.radius,
-                feather: spot.feather, flow: 1, density: 1
+                id: spot.id, samples: spot.region.samples, radius: spot.region.radius * featherScale,
+                feather: spot.feather / featherScale, flow: 1, density: 1
             )
             let maskPayload = LocalMaskPayload(
-                sourceFingerprint: "retouch", definitionHash: RenderCacheHash.digest(spot.region),
+                sourceFingerprint: "retouch", definitionHash: RenderCacheHash.digest(spot.region) + ":feather:\(spot.feather)",
                 targetSize: PixelDimensions(width: Int(sourceSize.width), height: Int(sourceSize.height)),
                 quality: .fullResolution, descriptor: .brush(BrushMaskDefinition(strokes: [maskStroke]))
             )
             guard let fullMask = maskRenderer.image(
                 for: maskPayload, extent: image.extent, transform: .identity
-            ) else { continue }
-            let holePayload = LocalMaskPayload(
-                sourceFingerprint: "retouch", definitionHash: RenderCacheHash.digest(spot.region) + ":hole",
-                targetSize: PixelDimensions(width: Int(sourceSize.width), height: Int(sourceSize.height)),
-                quality: .fullResolution,
-                descriptor: .brush(BrushMaskDefinition(strokes: [BrushStroke(
-                    id: spot.id, samples: spot.region.samples, radius: spot.region.radius,
-                    feather: 0, flow: 1, density: 1
-                )]))
-            )
-            guard let holeMask = maskRenderer.image(
-                for: holePayload, extent: image.extent, transform: .identity
             ) else { continue }
             let radius = CGFloat(spot.region.radius) * min(image.extent.width, image.extent.height)
             let bounds = workBounds(for: spot, extent: image.extent)
@@ -54,7 +47,7 @@ enum RetouchRenderer {
                 "inputAVector": CIVector(x: 0, y: 0, z: 0, w: spot.opacity)
             ]).cropped(to: bounds)
             let effect = spot.mode == .heal
-                ? healedFill(fill, destination: destination, mask: holeMask.cropped(to: bounds), bounds: bounds, radius: radius)
+                ? healedFill(fill, destination: destination, mask: fullMask.cropped(to: bounds), bounds: bounds, radius: radius)
                 : fill
             result = blend(effect, over: result, mask: mask, bounds: bounds)
         }
@@ -98,8 +91,10 @@ enum RetouchRenderer {
             .insetBy(dx: -radius - padding, dy: -radius - padding).intersection(extent)
     }
 
-    /// Pull/push normalized convolution is driven by weights that are exactly zero in the hole.
-    /// Thus no destination pixel inside the defect can contribute to the correction field.
+    /// Pull/push normalized convolution is driven by weights that are zero wherever the blend mask
+    /// is opaque and fall off across its feather. No destination pixel the blend can replace, which
+    /// includes a defect edge the brush covered by only a fraction of a pixel, contributes to the
+    /// correction field.
     private static func healedFill(
         _ fill: CIImage, destination: CIImage, mask: CIImage, bounds: CGRect, radius: CGFloat
     ) -> CIImage {

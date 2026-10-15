@@ -150,21 +150,30 @@ Two different numbers come from this suite; do not conflate them.
 
 - **Stress report** (`testStressCorpusReportsCurrentHealAndCloneResults`): all 36 background/defect
   rows per mode, including wires and the 60 px broad-removal case that v1 does not support. It prints
-  pass counts (currently Heal 8/36, automatic Heal 5/36, Clone 7/36) and asserts only that the corpus
+  pass counts (currently Heal 22/36, automatic Heal 11/36, Clone 21/36) and asserts only that the corpus
   ran. It does not require any family to fail, so an improvement never breaks it.
 - **Shipping gate** (`testShippingGateHoldsSupportedClassFloors`): only the supported small-defect
   classes. `dust/speck` is 5 px soft dust plus hard speck (12 rows per mode); `hair/fibre` is 6 rows
-  per mode. Wires and 60 px dust are excluded. Each class and mode has a floor initialised at its
-  passing count when KRMA-1003 landed: dust/speck Heal 5, automatic Heal 5, Clone 5; hair/fibre
-  Heal 1, automatic Heal 0, Clone 1. The test fails when a count drops below its floor. Raise a floor
-  when a repair improves it (KRMA-1004); never lower one to turn the run green.
+  per mode. Wires and 60 px dust are excluded. Each class and mode has a floor. KRMA-1003 initialised
+  them at dust/speck Heal 5, automatic Heal 5, Clone 5 and hair/fibre Heal 1, automatic Heal 0,
+  Clone 1; KRMA-1004 raised them to dust/speck Heal 10, automatic Heal 11, Clone 10 and hair/fibre
+  Heal 2, automatic Heal 0, Clone 2. The test fails when a count drops below its floor. Raise a floor
+  when a repair improves it; never lower one to turn the run green.
+
+KRMA-1004 changed boundary handling, not thresholds. The blend mask used to feather inward from the
+brush radius, so the rim of a defect the brush just covered was only partly replaced. The mask is now
+opaque across the brush radius and feathers outward. The Heal pull/push correction now takes its
+exterior weights from that same mask rather than a hard-edged hole, so a defect pixel at the brush
+edge (a half-pixel placement error in the fixtures) can no longer be sampled as trusted ring and
+drag the correction toward the dust. Still failing: cloud-boundary dust/speck for manual Heal and
+Clone (the fixed manual offset lands on a cloud edge), and every automatic-Heal hair/fibre row.
 
 Both run on 96 × 72 px synthetic fixtures. Neither is a camera-scale sign-off; camera-scale
 inspection is tracked in KRMA-1016.
 
-The stress report measures Heal and Clone quality against the unchanged KRMA-658 limits. Manual
-fixture offsets passed 8/36 Heal rows and 7/36 Clone rows; the automatic picker passed 5/36 Heal
-rows in the corpus run of 2026-10-12. The shipping gate applies those limits only to the supported
+The stress report measures Heal and Clone quality against the unchanged KRMA-658 limits. Before KRMA-1004, manual
+fixture offsets passed 8/36 Heal rows and 7/36 Clone rows and the automatic picker 5/36 Heal rows
+(2026-10-12); the current counts are in the stress-report bullet above. The shipping gate applies those limits only to the supported
 classes and enforces the per-class floors above. These are generated-fixture results, not claims
 about camera-image performance. The evaluation limits are a quality gate, not a timing benchmark. For
 real-camera coverage, use local RAW fixtures in `realworldtest/` or another fixture directory with
