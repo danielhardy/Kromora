@@ -310,14 +310,17 @@ final class CullingStateBatchWriteTests: TempDirectoryTestCase {
 
         XCTAssertTrue(viewModel.setFocusedRating(4))
         XCTAssertTrue(viewModel.setFocusedFlag(.pick))
+        XCTAssertFalse(viewModel.setFocusedRating(4), "unchanged targets must not add an undo step")
         let afterChange = try await reopenedAfterFlush(session, packageURL)
         for id in imported { XCTAssertEqual(afterChange[id]?.0, 4) }
+        for id in imported { XCTAssertEqual(afterChange[id]?.1, PhotoFlag.pick.rawValue) }
 
         XCTAssertTrue(viewModel.undoCullingChange())
         let afterFlagUndo = try await reopenedAfterFlush(session, packageURL)
+        for id in imported { XCTAssertEqual(afterFlagUndo[id]?.0, 4) }
+        XCTAssertEqual(afterFlagUndo[imported[0]]?.1, PhotoFlag.none.rawValue)
+        XCTAssertEqual(afterFlagUndo[imported[1]]?.1, PhotoFlag.none.rawValue)
         XCTAssertEqual(afterFlagUndo[imported[2]]?.1, PhotoFlag.reject.rawValue)
-        for id in imported.prefix(2) { XCTAssertNotEqual(afterFlagUndo[id]?.1, PhotoFlag.pick.rawValue) }
-        XCTAssertEqual(afterFlagUndo[imported[2]]?.0, 4)
 
         XCTAssertTrue(viewModel.undoCullingChange())
         let restored = try await reopenedAfterFlush(session, packageURL)
@@ -328,6 +331,90 @@ final class CullingStateBatchWriteTests: TempDirectoryTestCase {
             XCTAssertNotEqual(restored[id]?.1, PhotoFlag.pick.rawValue)
         }
         XCTAssertFalse(viewModel.undoCullingChange(), "only two actions were recorded")
+        await viewModel.shutdown()
+    }
+
+    func testUnloadedCullingUndoRetriesFailedPackageWritesAndReportsError() async throws {
+        let packageURL = tempDirectory.appendingPathComponent("UndoFailure.kromoralibrary")
+        let indexURL = tempDirectory.appendingPathComponent("UndoFailureIndex/LibraryIndex.store")
+        let session = try PortableLibrarySession(
+            at: packageURL, indexURL: indexURL, pageSize: 2, scheduler: ImageWorkScheduler()
+        )
+        let urls = try (0..<3).map { ordinal in
+            try Fixtures.writeJPEG(
+                width: 16 + ordinal, height: 12, orientation: 1,
+                named: "undo-failure-\(ordinal).jpg", in: tempDirectory
+            )
+        }
+        let imported = try session.importURLs(urls).imported.map(\.assetID)
+        session.enqueueLibraryStateUpdates(
+            [.init(assetID: imported[2], rating: 2, flag: .reject)], onFailure: { _ in }
+        )
+        let seeded = await session.flushPendingLibraryState()
+        XCTAssertEqual(seeded, .success)
+
+        let viewModel = makeAppViewModel(portableLibrarySession: session)
+        viewModel.selectAllInGrid()
+        XCTAssertTrue(viewModel.setFocusedFlag(.pick))
+        let changed = await session.flushPendingLibraryState()
+        XCTAssertEqual(changed, .success)
+
+        let shards = Set(imported.map(PortableLibraryPackage.shard(for:)))
+        let repairs = try shards.map { try corruptShard(session, $0) }
+        XCTAssertTrue(viewModel.undoCullingChange())
+        guard case .failure = await session.flushPendingLibraryState() else {
+            return XCTFail("expected the unloaded undo write to stay dirty after failure")
+        }
+        XCTAssertNotNil(viewModel.errorMessage, "failed undo writes must use the existing error path")
+
+        for repair in repairs { try repair() }
+        let retried = await session.flushPendingLibraryState()
+        XCTAssertEqual(retried, .success)
+        let restored = try reopenedStates(packageURL)
+        XCTAssertEqual(restored[imported[0]]?.1, PhotoFlag.none.rawValue)
+        XCTAssertEqual(restored[imported[1]]?.1, PhotoFlag.none.rawValue)
+        XCTAssertEqual(restored[imported[2]]?.1, PhotoFlag.reject.rawValue)
+        await viewModel.shutdown()
+    }
+
+    func testUndoRestoresLoadedTargetsAfterTheyLeaveTheWindow() async throws {
+        let packageURL = tempDirectory.appendingPathComponent("UndoAcrossPages.kromoralibrary")
+        let indexURL = tempDirectory.appendingPathComponent("UndoAcrossPagesIndex/LibraryIndex.store")
+        let session = try PortableLibrarySession(
+            at: packageURL, indexURL: indexURL, pageSize: 2, scheduler: ImageWorkScheduler()
+        )
+        let urls = try (0..<3).map { ordinal in
+            try Fixtures.writeJPEG(
+                width: 16 + ordinal, height: 12, orientation: 1,
+                named: "undo-across-pages-\(ordinal).jpg", in: tempDirectory
+            )
+        }
+        let imported = try session.importURLs(urls).imported.map(\.assetID)
+        session.enqueueLibraryStateUpdates(
+            [.init(assetID: imported[2], rating: 2, flag: .reject)], onFailure: { _ in }
+        )
+        let seeded = await session.flushPendingLibraryState()
+        XCTAssertEqual(seeded, .success)
+
+        let viewModel = makeAppViewModel(portableLibrarySession: session)
+        viewModel.selectAllInGrid()
+        XCTAssertTrue(viewModel.setFocusedRating(4))
+        let changed = await session.flushPendingLibraryState()
+        XCTAssertEqual(changed, .success)
+
+        try viewModel.reloadPortableWindow(pageIndex: 1)
+        XCTAssertEqual(viewModel.collection.items.count, 1)
+        XCTAssertTrue(viewModel.undoCullingChange())
+        let flushed = await session.flushPendingLibraryState()
+        XCTAssertEqual(flushed, .success)
+
+        let restored = try reopenedStates(packageURL)
+        XCTAssertEqual(restored[imported[0]]?.0, 0)
+        XCTAssertEqual(restored[imported[1]]?.0, 0)
+        XCTAssertEqual(restored[imported[2]]?.0, 2)
+        XCTAssertEqual(restored[imported[0]]?.1, PhotoFlag.none.rawValue)
+        XCTAssertEqual(restored[imported[1]]?.1, PhotoFlag.none.rawValue)
+        XCTAssertEqual(restored[imported[2]]?.1, PhotoFlag.reject.rawValue)
         await viewModel.shutdown()
     }
 

@@ -625,13 +625,22 @@ final class ImageCollectionPresentationModel {
         lastUndoneUnloadedChanges = entry.unloaded
         var restored: [PhotoAssetID] = []
         for change in group {
-            guard let index = items.firstIndex(where: { $0.id == change.itemID }) else { continue }
+            guard let index = items.firstIndex(where: { $0.id == change.itemID }) else {
+                if let assetID = Self.portableID(for: change.itemID) {
+                    lastUndoneUnloadedChanges.append(.init(
+                        assetID: assetID,
+                        rating: change.oldState.rating,
+                        flag: change.oldState.flag
+                    ))
+                }
+                continue
+            }
             items[index].asset.libraryState = change.oldState
             restored.append(change.itemID)
         }
         guard let first = group.first, !restored.isEmpty else {
             lastCullingAssetIDs = []
-            return !entry.unloaded.isEmpty
+            return !lastUndoneUnloadedChanges.isEmpty
         }
         lastCullingAssetIDs = restored
         lastCullingAssetID = restored.last
