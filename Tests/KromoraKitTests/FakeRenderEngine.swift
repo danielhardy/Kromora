@@ -172,6 +172,11 @@ actor FakeRenderEngine: RenderEngining {
 
     /// Swap in a failure to exercise the caller's error path.
     var shouldFailEncode = false
+    /// Test-only paths that create a staging file before failing or being cancelled.
+    private var failAfterWritingPartialStagingFile = false
+    private var waitForCancellationAfterWritingPartialStagingFile = false
+    private var parkedPartialStagedEncodes: [CheckedContinuation<Void, Never>] = []
+    private(set) var didWritePartialStagingFile = false
     /// Formats whose encode throws while others succeed, to exercise format fallback.
     var failingEncodeFormats: Set<ExportFormat> = []
     /// Optional gates used by export lifecycle tests. The real engine owns one serial export lane;
@@ -245,6 +250,22 @@ actor FakeRenderEngine: RenderEngining {
                 colorSpace: request.space, quality: request.quality, output: request.output
             )
         }
+    }
+
+    func encode(_ request: RenderRequest, to stagingURL: URL) async throws {
+        if failAfterWritingPartialStagingFile || waitForCancellationAfterWritingPartialStagingFile {
+            _ = try await render(request)
+            try Data("incomplete-export".utf8).write(to: stagingURL)
+            didWritePartialStagingFile = true
+            if waitForCancellationAfterWritingPartialStagingFile {
+                await withCheckedContinuation { parkedPartialStagedEncodes.append($0) }
+                return
+            }
+            throw ImageError.exportFailed
+        }
+
+        let data = try await render(request).data
+        try data.write(to: stagingURL, options: .atomic)
     }
 
     func makeCIImage(_ request: RenderRequest) async -> sending CIImage? {
@@ -536,6 +557,18 @@ actor FakeRenderEngine: RenderEngining {
     private(set) var nativeRequests: [[NativePatchSpec]] = []
 
     func setShouldFailEncode(_ value: Bool) { shouldFailEncode = value }
+    func setFailAfterWritingPartialStagingFile(_ value: Bool) {
+        failAfterWritingPartialStagingFile = value
+    }
+    func setWaitForCancellationAfterWritingPartialStagingFile(_ value: Bool) {
+        waitForCancellationAfterWritingPartialStagingFile = value
+        didWritePartialStagingFile = false
+    }
+    func releasePartialStagedEncode() {
+        let parked = parkedPartialStagedEncodes
+        parkedPartialStagedEncodes.removeAll()
+        parked.forEach { $0.resume() }
+    }
     func setFailingEncodeFormats(_ value: Set<ExportFormat>) { failingEncodeFormats = value }
 
     /// Let the first encode finish but hold the second until the test chooses to release it.

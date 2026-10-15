@@ -36,6 +36,11 @@ protocol RenderEngining: EditedThumbnailRendering, Sendable {
     /// Render one UI-independent request through the deterministic pipeline.
     func render(_ request: RenderRequest) async throws -> RenderResult
 
+    /// Encode an `.encoded` request into `stagingURL` without holding the encoded bytes in memory.
+    /// The default renders to `Data` and writes it, so lightweight conformers stay source-compatible.
+    /// On throw the caller removes any partial file.
+    func encode(_ request: RenderRequest, to stagingURL: URL) async throws
+
     /// Render a bounded browsing thumbnail through the same document/look pipeline while keeping
     /// thumbnail work distinct from the editor preview lifecycle.
     func renderThumbnail(_ request: RenderRequest) async throws -> RenderResult
@@ -312,6 +317,11 @@ private struct MaskRasterCacheIdentity: Sendable, Hashable {
 }
 
 extension RenderEngining {
+    func encode(_ request: RenderRequest, to stagingURL: URL) async throws {
+        let data = try await render(request).data
+        try data.write(to: stagingURL, options: .atomic)
+    }
+
     func renderThumbnail(_ request: RenderRequest) async throws -> RenderResult {
         try await render(request)
     }
@@ -1030,6 +1040,18 @@ actor RenderEngine: RenderEngining {
     }
 
     func render(_ request: RenderRequest) async throws -> RenderResult {
+        try await render(request, stagingURL: nil)
+    }
+
+    /// Encode an export request straight into `stagingURL` through `CGImageDestinationCreateWithURL`,
+    /// so the encoded bytes are never held in memory. The caller owns the file: on throw a partial
+    /// file may remain and must be removed by the caller.
+    func encode(_ request: RenderRequest, to stagingURL: URL) async throws {
+        guard case .encoded = request.output else { throw ImageError.exportFailed }
+        _ = try await render(request, stagingURL: stagingURL)
+    }
+
+    private func render(_ request: RenderRequest, stagingURL: URL?) async throws -> RenderResult {
         var interval = KromoraObservability.begin(
             .render, source: request.source, quality: request.quality
         )
@@ -1126,47 +1148,24 @@ actor RenderEngine: RenderEngining {
             let alpha = options?.alpha ?? format.defaultAlpha
             let encodedImage = alpha == .opaque ? opaqueImage(outputImage) : outputImage
             let representationFormat: CIFormat
-            switch (bitDepth, alpha) {
-            case (.sixteen, .preserve): representationFormat = .RGBA16
-            case (.sixteen, .opaque): representationFormat = .RGBA16
-            case (.eight, .preserve), (.eight, .opaque): representationFormat = .RGBA8
-            }
             switch format {
-            case .tiff:
-                data = try encode(
-                    encodedImage,
-                    format: format,
-                    representationFormat: representationFormat,
-                    colorSpace: colorSpace,
-                    quality: quality,
-                    metadata: exportMetadata(for: request)
+            case .tiff, .png:
+                representationFormat = bitDepth == .sixteen ? .RGBA16 : .RGBA8
+            case .jpeg, .heif:
+                representationFormat = .RGBA8
+            }
+            let metadata = exportMetadata(for: request)
+            if let stagingURL {
+                try encode(
+                    encodedImage, format: format, representationFormat: representationFormat,
+                    colorSpace: colorSpace, quality: quality, metadata: metadata,
+                    to: stagingURL
                 )
-            case .jpeg:
+                data = Data()
+            } else {
                 data = try encode(
-                    encodedImage,
-                    format: format,
-                    representationFormat: .RGBA8,
-                    colorSpace: colorSpace,
-                    quality: quality,
-                    metadata: exportMetadata(for: request)
-                )
-            case .png:
-                data = try encode(
-                    encodedImage,
-                    format: format,
-                    representationFormat: representationFormat,
-                    colorSpace: colorSpace,
-                    quality: quality,
-                    metadata: exportMetadata(for: request)
-                )
-            case .heif:
-                data = try encode(
-                    encodedImage,
-                    format: format,
-                    representationFormat: .RGBA8,
-                    colorSpace: colorSpace,
-                    quality: quality,
-                    metadata: exportMetadata(for: request)
+                    encodedImage, format: format, representationFormat: representationFormat,
+                    colorSpace: colorSpace, quality: quality, metadata: metadata
                 )
             }
         }
@@ -1203,6 +1202,49 @@ actor RenderEngine: RenderEngining {
         quality: CGFloat,
         metadata: [CFString: Any]?
     ) throws -> Data {
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            data, format.utType.identifier as CFString, 1, nil
+        ) else {
+            throw ImageError.exportFailed
+        }
+        try finalize(
+            destination, image: image, format: format, representationFormat: representationFormat,
+            colorSpace: colorSpace, quality: quality, metadata: metadata
+        )
+        return data as Data
+    }
+
+    /// Same encode, streamed to a file instead of an in-memory buffer.
+    private func encode(
+        _ image: CIImage,
+        format: ExportFormat,
+        representationFormat: CIFormat,
+        colorSpace: CGColorSpace,
+        quality: CGFloat,
+        metadata: [CFString: Any]?,
+        to url: URL
+    ) throws {
+        guard let destination = CGImageDestinationCreateWithURL(
+            url as CFURL, format.utType.identifier as CFString, 1, nil
+        ) else {
+            throw ImageError.exportFailed
+        }
+        try finalize(
+            destination, image: image, format: format, representationFormat: representationFormat,
+            colorSpace: colorSpace, quality: quality, metadata: metadata
+        )
+    }
+
+    private func finalize(
+        _ destination: CGImageDestination,
+        image: CIImage,
+        format: ExportFormat,
+        representationFormat: CIFormat,
+        colorSpace: CGColorSpace,
+        quality: CGFloat,
+        metadata: [CFString: Any]?
+    ) throws {
         guard let cgImage = context.createCGImage(
             image,
             from: image.extent.integral,
@@ -1211,14 +1253,6 @@ actor RenderEngine: RenderEngining {
         ) else {
             throw ImageError.exportFailed
         }
-
-        let data = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(
-            data, format.utType.identifier as CFString, 1, nil
-        ) else {
-            throw ImageError.exportFailed
-        }
-
         var imageProperties = metadata ?? [:]
         if format == .jpeg || format == .heif {
             imageProperties[kCGImageDestinationLossyCompressionQuality] = quality
@@ -1228,7 +1262,6 @@ actor RenderEngine: RenderEngining {
         guard CGImageDestinationFinalize(destination) else {
             throw ImageError.exportFailed
         }
-        return data as Data
     }
 
     /// Read only the source's metadata dictionaries. The image itself is rendered upright before

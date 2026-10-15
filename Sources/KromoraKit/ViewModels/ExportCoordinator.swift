@@ -352,7 +352,7 @@ final class ExportCoordinator {
     ///
     /// The encode happens inside the engine; the *write* deliberately does not. File I/O is not the
     /// GPU's business, and keeping it out here means the actor never touches the sandbox or a
-    /// half-written file (`RenderEngining.encode` returns `Data` for exactly this reason).
+    /// half-written file (the engine encodes to a staging URL the coordinator then commits).
     func performExport(
         source: ImageSource,
         assetID: PhotoAssetID? = nil,
@@ -400,7 +400,7 @@ final class ExportCoordinator {
             defer { interval.end() }
             do {
                 try Task.checkCancellation()
-                let data = try await exportEngine.render(RenderRequest(
+                try await Self.export(RenderRequest(
                     source: source, assetID: assetID, document: document, lut: lut,
                     quality: .export,
                     output: .encoded(
@@ -408,14 +408,12 @@ final class ExportCoordinator {
                     ),
                     space: options.colorSpace,
                     exportOptions: options
-                )).data
-                try Task.checkCancellation()
-                try await Self.write(data, to: url, scopedFileURL: destinationAccess != nil)
+                ), using: exportEngine, to: url, scopedFileURL: destinationAccess != nil)
                 self?.onExportCompleted?(url)
                 if let photos = options.photos, let delivery = self?.photosDelivery {
                     do {
                         let result = try await delivery.deliver(
-                            data: data,
+                            data: try Data(contentsOf: url, options: .mappedIfSafe),
                             filename: url.lastPathComponent,
                             format: options.format,
                             options: photos
@@ -739,7 +737,7 @@ final class ExportCoordinator {
                     }
                     var interval = KromoraObservability.begin(.export, source: source, quality: .export)
                     defer { interval.end() }
-                    let data = try await exportEngine.render(RenderRequest(
+                    try await Self.export(RenderRequest(
                         source: source, assetID: itemAssetID, document: itemDocument, lut: itemLUT,
                         quality: .export,
                         output: .encoded(
@@ -747,17 +745,16 @@ final class ExportCoordinator {
                         ),
                         space: options.colorSpace,
                         exportOptions: options
-                    )).data
-                    try Task.checkCancellation()
-                    guard !isCancellationRequested(jobID) else { throw CancellationError() }
-                    try await Self.write(data, to: dest)
+                    ), using: exportEngine, to: dest, beforeCommit: {
+                        guard !self.isCancellationRequested(jobID) else { throw CancellationError() }
+                    })
                     try Task.checkCancellation()
                     guard !isCancellationRequested(jobID) else { throw CancellationError() }
                     exported += 1
                     if let photos = options.photos, let delivery = photosDelivery {
                         do {
                             let result = try await delivery.deliver(
-                                data: data,
+                                data: try Data(contentsOf: dest, options: .mappedIfSafe),
                                 filename: dest.lastPathComponent,
                                 format: options.format,
                                 options: photos
@@ -806,51 +803,56 @@ final class ExportCoordinator {
         return outcome
     }
 
-    /// Write off the main actor.
+    /// Encode `request` straight to a staging file, then commit it to `url`.
     ///
-    /// Both loops are `@MainActor` now that the encode happens inside `RenderEngine` rather than in a
-    /// detached task — but a full-resolution 16-bit TIFF is hundreds of megabytes, and handing that
-    /// to the main thread would stutter the window for exactly as long as the disk takes. `Data` and
-    /// `URL` are `Sendable`, so getting it off costs nothing.
-    private static func write(
-        _ data: Data,
+    /// The engine streams the encoded bytes to disk (`CGImageDestinationCreateWithURL`), so no
+    /// encoded `Data` is held in memory. A normal destination is staged beside itself as a
+    /// `.partial` file and moved into place; the move does not replace an existing destination, which
+    /// protects an already-exported file even if another process creates the same name after
+    /// reservation. A panel-selected file (`scopedFileURL`) only grants access to that exact URL, so
+    /// the encode stages in the temporary directory and the bytes are then streamed into the
+    /// exclusively created selection. Cancellation or failure removes the staging file.
+    private static func export(
+        _ request: RenderRequest,
+        using engine: any RenderEngining,
         to url: URL,
-        scopedFileURL: Bool = false
+        scopedFileURL: Bool = false,
+        beforeCommit: () throws -> Void = {}
     ) async throws {
+        let stagingURL: URL
         if scopedFileURL {
-            // NSSavePanel grants access to the selected file. Staging a sibling and moving it
-            // over the selection needs directory access that the file grant doesn't provide.
-            try Task.checkCancellation()
-            try await Task.detached(priority: .userInitiated) {
-                try Self.writeSelectedFile(data, to: url)
-            }.value
-            try Task.checkCancellation()
-            return
+            stagingURL = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "\(UUID().uuidString).partial"
+            )
+        } else {
+            stagingURL = url.deletingLastPathComponent().appendingPathComponent(
+                ".\(url.lastPathComponent).\(UUID().uuidString).partial"
+            )
         }
-
-        let temporaryURL = url.deletingLastPathComponent().appendingPathComponent(
-            ".\(url.lastPathComponent).\(UUID().uuidString).partial"
-        )
         var committed = false
         defer {
-            if !committed { try? FileManager.default.removeItem(at: temporaryURL) }
+            if !committed { try? FileManager.default.removeItem(at: stagingURL) }
         }
 
         try Task.checkCancellation()
-        try await Task.detached(priority: .userInitiated) {
-            try data.write(to: temporaryURL, options: .atomic)
-        }.value
+        try await engine.encode(request, to: stagingURL)
         try Task.checkCancellation()
-        // moveItem does not replace an existing destination. That last boundary protects an
-        // already-exported file even if another process creates the same name after reservation.
-        try FileManager.default.moveItem(at: temporaryURL, to: url)
-        committed = true
+        try beforeCommit()
+        if scopedFileURL {
+            try await Self.copyStagedFile(at: stagingURL, toSelectedFile: url)
+            // The copy leaves the staging file behind; the deferred cleanup removes it.
+            try Task.checkCancellation()
+        } else {
+            try FileManager.default.moveItem(at: stagingURL, to: url)
+            committed = true
+        }
     }
 
     /// Create a panel-selected file without touching its parent directory. The save-panel grant
     /// authorizes this exact URL; the exclusive create also preserves the export path's
     /// no-overwrite behavior while ensuring a failed write removes only the file we created.
-    nonisolated private static func writeSelectedFile(_ data: Data, to url: URL) throws {
+    /// The bytes are copied in bounded chunks so a large TIFF is never resident.
+    @concurrent private static func copyStagedFile(at stagingURL: URL, toSelectedFile url: URL) async throws {
         let descriptor = url.path.withCString {
             Darwin.open($0, O_WRONLY | O_CREAT | O_EXCL, mode_t(0o666))
         }
@@ -860,7 +862,12 @@ final class ExportCoordinator {
 
         let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
         do {
-            try handle.write(contentsOf: data)
+            let reader = try FileHandle(forReadingFrom: stagingURL)
+            defer { try? reader.close() }
+            while let chunk = try reader.read(upToCount: 4 << 20), !chunk.isEmpty {
+                try Task.checkCancellation()
+                try handle.write(contentsOf: chunk)
+            }
             try handle.synchronize()
             try handle.close()
         } catch {
