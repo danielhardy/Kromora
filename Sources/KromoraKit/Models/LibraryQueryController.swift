@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// The fields that can be ordered by the library index.  These fields intentionally mirror the
 /// denormalised membership summary rather than the asset record or an edit sidecar.
@@ -602,6 +603,32 @@ struct LibraryQueryPage: Codable, Equatable, Sendable {
     }
 }
 
+/// Holds the ordered result of the most recent query for one index generation.
+private final class OrderedEntriesCache: Sendable {
+    private struct State {
+        var query: LibraryQuery?
+        var entries: [LibraryIndexEntry] = []
+        var buildCount = 0
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
+
+    var buildCount: Int { state.withLock { $0.buildCount } }
+
+    func entries(
+        for query: LibraryQuery,
+        build: @Sendable () -> [LibraryIndexEntry]
+    ) -> [LibraryIndexEntry] {
+        state.withLock { state in
+            if state.query == query { return state.entries }
+            state.entries = build()
+            state.query = query
+            state.buildCount += 1
+            return state.entries
+        }
+    }
+}
+
 /// Paged, index-side library browsing with UUID-keyed selection.
 ///
 /// `LibraryQueryController` owns no AppKit objects and never materialises `PhotoAsset`.  A caller
@@ -615,6 +642,9 @@ struct LibraryQueryController: Sendable {
     let pageSize: Int
     private(set) var selectedAssetIDs: Set<PortablePhotoAssetID>
     private(set) var activeAssetID: PortablePhotoAssetID?
+    /// The index is immutable for the life of a controller, so its identity is the index
+    /// generation: a changed index is a new controller with a new, empty cache. Copies share it.
+    private let orderCache = OrderedEntriesCache()
 
     init(
         index: LibraryIndexProjection,
@@ -676,11 +706,16 @@ struct LibraryQueryController: Sendable {
         orderedEntries(query: query).map(\.assetID)
     }
 
+    /// How many times this index generation has filtered and sorted for a query.
+    var orderedEntriesBuildCount: Int { orderCache.buildCount }
+
     private func orderedEntries(query: LibraryQuery) -> [LibraryIndexEntry] {
-        let foldedSearchText = query.searchText?.foldedForLibrarySearch
-        return index.entries
-            .filter { matches($0, query: query, foldedSearchText: foldedSearchText) }
-            .sorted { precedes($0, $1, by: query.sort) }
+        orderCache.entries(for: query) {
+            let foldedSearchText = query.searchText?.foldedForLibrarySearch
+            return index.entries
+                .filter { matches($0, query: query, foldedSearchText: foldedSearchText) }
+                .sorted { precedes($0, $1, by: query.sort) }
+        }
     }
 
     func page(number: Int, query: LibraryQuery = .all) -> LibraryQueryPage {

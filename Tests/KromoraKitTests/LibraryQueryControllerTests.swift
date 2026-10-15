@@ -133,6 +133,44 @@ final class LibraryQueryControllerTests: TempDirectoryTestCase {
         XCTAssertFalse(thirdPage.hasNextPage)
     }
 
+    func testPagesOfOneQueryShareOneOrderedBuildAndANewQueryRebuilds() throws {
+        let ids = (0..<7).map { _ in PortablePhotoAssetID() }
+        let entries = ids.enumerated().map { index, assetID in
+            LibraryIndexEntry(from: .init(
+                assetID: assetID,
+                recordPath: "Assets/" + PortableLibraryPackage.shard(for: assetID)
+                    + "/" + assetID.raw + "/asset.json",
+                summary: .init(rating: index % 3, displayName: "Frame \(index)")
+            ))
+        }
+        let index = try LibraryIndexProjection(libraryID: UUID(), entries: entries)
+        var controller = LibraryQueryController(index: index, pageSize: 3)
+        let query = LibraryQuery(sort: .init(key: .displayName, direction: .descending))
+
+        let first = controller.page(at: 0, query: query)
+        let second = controller.page(at: 1, query: query)
+        XCTAssertEqual(controller.orderedEntriesBuildCount, 1)
+        XCTAssertEqual(first.items.count + second.items.count, 6)
+
+        controller.select(ids[0])
+        let selected = controller.page(at: 0, query: query)
+        XCTAssertEqual(controller.orderedEntriesBuildCount, 1)
+        XCTAssertEqual(selected.items.map(\.assetID), first.items.map(\.assetID))
+        XCTAssertEqual(selected.selectedIDs.union(controller.page(at: 2, query: query).selectedIDs), [ids[0]])
+
+        let other = LibraryQuery(sort: .init(key: .displayName, direction: .ascending))
+        let descending = first.items.map(\.assetID)
+            + second.items.map(\.assetID)
+            + controller.page(at: 2, query: query).items.map(\.assetID)
+        XCTAssertEqual(controller.orderedEntriesBuildCount, 1)
+        XCTAssertEqual(controller.orderedAssetIDs(query: other), descending.reversed())
+        XCTAssertEqual(controller.orderedEntriesBuildCount, 2)
+
+        let rebuilt = LibraryQueryController(index: index, pageSize: 3)
+        _ = rebuilt.page(at: 0, query: query)
+        XCTAssertEqual(rebuilt.orderedEntriesBuildCount, 1)
+    }
+
     func testOrderedAssetIDsMatchTheConcatenatedPagesForAnyQuery() throws {
         let ids = (0..<7).map { _ in PortablePhotoAssetID() }
         let entries = ids.enumerated().map { index, assetID in
