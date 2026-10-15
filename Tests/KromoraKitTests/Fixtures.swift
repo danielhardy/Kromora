@@ -15,7 +15,9 @@ final class EditPackageFixture {
         package = FileManager.default.fileExists(atPath: packageURL.path)
             ? try PortableLibraryPackage.open(at: packageURL)
             : try PortableLibraryPackage.create(at: packageURL)
-        lease = try PortablePackageLease.acquire(at: packageURL)
+        // The fixture never heartbeats, so the default 180 s lease can expire under a long test
+        // (the 1,000-asset identity gate saves for about that long) and fail mid-write.
+        lease = try PortablePackageLease.acquire(at: packageURL, duration: 3_600)
     }
 
     func register(_ source: EditSourceReference) throws {
