@@ -44,13 +44,30 @@ extension LibraryBrowsingProviding {
 
     /// Resolve `ids` to browsing assets one bounded chunk at a time, so a library-wide selection
     /// never materializes every asset in one call. Nothing is read or decoded from an original.
+    /// When a chunk fails, its ids are retried one at a time so a single bad projection cannot
+    /// hide the rest. Returns the ids that still could not be resolved; callers must report them.
     func forEachBrowsingAssetChunk(
         forIDs ids: [PortablePhotoAssetID], _ body: ([PhotoAsset]) -> Void
-    ) {
+    ) -> [PortablePhotoAssetID] {
         let size = Self.bulkSelectionChunkSize
+        var unresolved: [PortablePhotoAssetID] = []
         for start in stride(from: 0, to: ids.count, by: size) {
-            body((try? browsingAssets(forIDs: Array(ids[start..<min(ids.count, start + size)]))) ?? [])
+            let chunk = Array(ids[start..<min(ids.count, start + size)])
+            if let assets = try? browsingAssets(forIDs: chunk) {
+                body(assets)
+                continue
+            }
+            var recovered: [PhotoAsset] = []
+            for id in chunk {
+                if let assets = try? browsingAssets(forIDs: [id]) {
+                    recovered += assets
+                } else {
+                    unresolved.append(id)
+                }
+            }
+            body(recovered)
         }
+        return unresolved
     }
 }
 
@@ -554,15 +571,26 @@ final class LibraryBrowsingCoordinator {
         var candidates = collection.deletionCandidates
         let unloadedIDs = collection.unloadedSelectedPortableIDs
         guard let library, !unloadedIDs.isEmpty else { return candidates }
-        library.forEachBrowsingAssetChunk(forIDs: unloadedIDs) { assets in
+        let unresolved = library.forEachBrowsingAssetChunk(forIDs: unloadedIDs) { assets in
             candidates += assets.map {
                 ImageCollection.DeletionCandidate(
                     id: $0.id, displayName: $0.displayName, url: $0.url, sourceKind: .managed,
                     portableIdentity: $0.source.portableIdentity)
             }
         }
+        if !unresolved.isEmpty {
+            destination?.presentLibraryError(
+                LibraryBrowsingCoordinator.unresolvedSelectionMessage(count: unresolved.count, action: "removal"))
+        }
         return candidates
     }
+
+    /// User-facing description of selected photos a bulk action could not resolve.
+    static func unresolvedSelectionMessage(count: Int, action: String) -> String {
+        let photos = count == 1 ? "1 selected photo" : "\(count) selected photos"
+        return "Kromora could not read \(photos) from the library index, so \(action) did not include them."
+    }
+
 
     func confirmDeleteSelectedLibraryItems() {
         guard let destination, let confirmation = destination.libraryDeletionConfirmation else {
@@ -589,12 +617,13 @@ final class LibraryBrowsingCoordinator {
         let name = collection.selectedItem?.displayName
         let previousIndex = collection.selectedIndex
         let loadedChanged = collection.setFlagForSelection(flag, advance: advance)
-        let unloadedChanged = persistUnloadedLibraryState(
+        let unloadedResult = persistUnloadedLibraryState(
             unloaded, joiningLoadedChange: loadedChanged
         ) { _ in (nil, flag) }
-        let changed = loadedChanged || unloadedChanged
+        let changed = loadedChanged || unloadedResult.changed
         if loadedChanged { persistPortableLibraryStateIfNeeded() }
-        if changed {
+        // A partial result already raised an error; a success message would contradict it.
+        if changed, unloadedResult.unresolvedCount == 0 {
             let outcome = flag == .pick ? "Picked" : flag == .reject ? "Rejected" : "Flag cleared"
             if targetCount > 1 {
                 destination?.setLibraryStatusMessage("\(targetCount) photos: \(outcome)")
@@ -615,12 +644,13 @@ final class LibraryBrowsingCoordinator {
         let targetCount = collection.cullingTargetIDs.count + unloaded.count
         let loadedChanged = collection.setRatingForSelection(rating)
         let clamped = min(max(rating, 0), 5)
-        let unloadedChanged = persistUnloadedLibraryState(
+        let unloadedResult = persistUnloadedLibraryState(
             unloaded, joiningLoadedChange: loadedChanged
         ) { _ in (clamped, nil) }
-        let changed = loadedChanged || unloadedChanged
+        let changed = loadedChanged || unloadedResult.changed
         if loadedChanged { persistPortableLibraryStateIfNeeded() }
-        if changed {
+        // A partial result already raised an error; a success message would contradict it.
+        if changed, unloadedResult.unresolvedCount == 0 {
             let outcome = rating == 0 ? "Rating cleared" : "Rated \(rating) stars"
             if targetCount > 1 {
                 destination?.setLibraryStatusMessage("\(targetCount) photos: \(outcome)")
@@ -663,11 +693,11 @@ final class LibraryBrowsingCoordinator {
     /// as loaded rows. Their previous state joins the action's undo group.
     private func persistUnloadedLibraryState(
         _ ids: [PortablePhotoAssetID], joiningLoadedChange: Bool, newValue: (PhotoAsset) -> (rating: Int?, flag: PhotoFlag?)
-    ) -> Bool {
-        guard let library, !ids.isEmpty else { return false }
+    ) -> (changed: Bool, unresolvedCount: Int) {
+        guard let library, !ids.isEmpty else { return (false, 0) }
         var changed = false
         var joining = joiningLoadedChange
-        library.forEachBrowsingAssetChunk(forIDs: ids) { assets in
+        let unresolved = library.forEachBrowsingAssetChunk(forIDs: ids) { assets in
             var undo: [ImageCollection.UnloadedCullingChange] = []
             let updates = assets.compactMap { asset -> PortableLibrarySession.LibraryStateUpdate? in
                 let assetID = asset.source.portableIdentity.assetID
@@ -692,7 +722,11 @@ final class LibraryBrowsingCoordinator {
                 )
             }
         }
-        return changed
+        if !unresolved.isEmpty {
+            destination?.presentLibraryError(
+                Self.unresolvedSelectionMessage(count: unresolved.count, action: "this change"))
+        }
+        return (changed, unresolved.count)
     }
 
     private func persistPortableLibraryStateIfNeeded() {

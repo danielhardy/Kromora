@@ -29,6 +29,9 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
         private(set) var requestedPages: [Int] = []
         private(set) var rebuildCount = 0
         private(set) var persistedStates: [(PortablePhotoAssetID, Int, PhotoFlag)] = []
+        /// Ids whose browsing projection throws, failing any lookup that includes them.
+        var failingIDs = Set<PortablePhotoAssetID>()
+        private(set) var lookupSizes: [Int] = []
 
         init(count: Int, pageSize: Int, presentedAspectRatio: Double? = nil) {
             self.pageSize = pageSize
@@ -44,7 +47,7 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
                     )
                 )
                 let source = PhotoAssetSource(
-                    data: Data([UInt8(index)]),
+                    data: Data([UInt8(truncatingIfNeeded: index)]),
                     id: PhotoAssetID(rawValue: "portable:\(id.raw)"),
                     portableIdentity: identity
                 )
@@ -98,7 +101,9 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
         }
 
         func browsingAssets(forIDs ids: [PortablePhotoAssetID]) throws -> [PhotoAsset] {
-            ids.compactMap { id in assets.first { $0.source.portableIdentity.assetID == id } }
+            lookupSizes.append(ids.count)
+            if ids.contains(where: failingIDs.contains) { throw CocoaError(.fileReadCorruptFile) }
+            return ids.compactMap { id in assets.first { $0.source.portableIdentity.assetID == id } }
         }
         func browsingAssets(for items: [LibraryQueryItem]) throws -> [PhotoAsset] {
             items.compactMap { item in
@@ -767,6 +772,39 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(library.persistedStates.count, 1)
         XCTAssertEqual(library.persistedStates.first?.2, .pick)
+    }
+
+    func testBulkLookupIsolatesOneFailingIDAcrossChunks() throws {
+        let (_, _, library, _) = makeCoordinator(count: 1_200)
+        let ids = library.assets.map { $0.source.portableIdentity.assetID }
+        library.failingIDs = [ids[10]]
+
+        var resolved: [PhotoAsset] = []
+        let unresolved = library.forEachBrowsingAssetChunk(forIDs: ids) { resolved += $0 }
+
+        XCTAssertEqual(unresolved, [ids[10]])
+        XCTAssertEqual(resolved.count, 1_199)
+        XCTAssertEqual(Set(resolved.map { $0.source.portableIdentity.assetID }), Set(ids).subtracting([ids[10]]))
+        XCTAssertLessThanOrEqual(library.lookupSizes.max() ?? 0, 500)
+    }
+
+    func testCullingAndDeletionReportUnresolvedSelectedIDs() throws {
+        let (coordinator, _, library, destination) = makeCoordinator(count: 1_200)
+        try coordinator.reloadPortableWindow()
+        coordinator.selectAllInGrid()
+        let bad = library.assets[700].source.portableIdentity.assetID
+        library.failingIDs = [bad]
+
+        XCTAssertTrue(coordinator.setFocusedFlag(.pick))
+        XCTAssertEqual(destination.errors.count, 1)
+        XCTAssertTrue(destination.errors[0].contains("1 selected photo"))
+        XCTAssertFalse(destination.status.contains { $0.contains("Picked") })
+        XCTAssertFalse(library.persistedStates.contains { $0.0 == bad })
+        XCTAssertGreaterThan(library.persistedStates.count, 1_000)
+
+        let candidates = coordinator.deletionCandidates()
+        XCTAssertEqual(destination.errors.count, 2)
+        XCTAssertFalse(candidates.contains { $0.portableIdentity?.assetID == bad })
     }
 
     func testDeletionConfirmationIsRefusedOutsideGrid() {

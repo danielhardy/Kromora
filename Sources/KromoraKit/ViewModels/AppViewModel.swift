@@ -4081,17 +4081,22 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
 
     /// The panel-free request used by Export Selected Photos; never widened to the whole collection.
     var selectedBatchExportRequest: ExportWorkflowCoordinator.BatchRequest {
-        makeBatchExportRequest(from: collection.selectedItems, unloaded: unloadedSelectedAssets())
+        makeBatchExportRequest(from: collection.selectedItems, unloaded: unloadedSelectedAssets(action: "export"))
     }
 
     /// Browsing assets for selected ids whose rows are not loaded. They resolve to package file
     /// URLs from the index; no original is read or decoded to learn the id list. Resolution runs in
     /// bounded chunks so a library-wide selection never materializes every asset in one call.
-    private func unloadedSelectedAssets() -> [PhotoAsset] {
+    /// Selected ids the index could not resolve raise a library error naming `action`.
+    private func unloadedSelectedAssets(action: String) -> [PhotoAsset] {
         guard let portableLibrary else { return [] }
         var assets: [PhotoAsset] = []
-        portableLibrary.forEachBrowsingAssetChunk(forIDs: collection.unloadedSelectedPortableIDs) {
-            assets += $0
+        let unresolved = portableLibrary.forEachBrowsingAssetChunk(
+            forIDs: collection.unloadedSelectedPortableIDs
+        ) { assets += $0 }
+        if !unresolved.isEmpty {
+            presentError(LibraryBrowsingCoordinator.unresolvedSelectionMessage(
+                count: unresolved.count, action: action))
         }
         return assets
     }
@@ -4968,7 +4973,7 @@ extension AppViewModel: EditClipboardDestination {
             )
         }
         // Package-selected photos outside the loaded window paste by file URL; none is decoded.
-        for asset in unloadedSelectedAssets() {
+        for asset in unloadedSelectedAssets(action: "paste") {
             let isRAW = asset.url.map { ImageSource.kind(forExtension: $0.pathExtension) == .raw } ?? false
             targets.append(EditClipboardTarget(
                 sourceReference: EditSourceReference(
