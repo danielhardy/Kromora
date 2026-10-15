@@ -324,15 +324,16 @@ final class SourceSessionCoordinator {
     ) {
         guard preparation.isRAW, case .url(let url) = preparation.source.backing else { return }
         let provider = embeddedFirstFrameProvider
-        let extractionTask = Task.detached(priority: .userInitiated) { await provider(url) }
-        firstFrameTask = Task { [weak self, extractionTask] in
-            guard let image = await extractionTask.value, let self,
-                self.isCurrent(request), !Task.isCancelled
-            else { return }
-            self.onFirstFrame?(
-                FirstFramePublication(
-                    request: request, preparation: preparation, image: image
-                ))
+        firstFrameTask = Task.detached(priority: .userInitiated) { [weak self] in
+            guard let image = await provider(url), let self, !Task.isCancelled else { return }
+            await self.publishFirstFrame(image, request: request, preparation: preparation)
         }
+    }
+
+    private func publishFirstFrame(
+        _ image: NSImage, request: Request, preparation: ImageSourcePreparation
+    ) {
+        guard isCurrent(request), !Task.isCancelled else { return }
+        onFirstFrame?(FirstFramePublication(request: request, preparation: preparation, image: image))
     }
 }
