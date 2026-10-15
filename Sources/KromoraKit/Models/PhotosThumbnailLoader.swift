@@ -18,15 +18,22 @@ enum PhotosThumbnailState {
 enum PhotosThumbnailFailure: Error, Equatable {
     case missingIdentifier
     case accessDenied
+    case limitedAccess
     case assetUnavailable
     case cancelled
     case failed(String)
+
+    static func missingAssetFailure(for authorizationStatus: PHAuthorizationStatus) -> Self {
+        authorizationStatus == .limited ? .limitedAccess : .assetUnavailable
+    }
 
     /// Tooltip for a failed tile, naming the actionable cause when there is one.
     var helpText: String {
         switch self {
         case .accessDenied:
             "Kromora needs access to your Photos library to show thumbnails. Allow it in System Settings > Privacy & Security > Photos, then double-click to retry."
+        case .limitedAccess:
+            "This photo isn't available with Kromora's limited Photos access. Grant Kromora access to this photo in System Settings > Privacy & Security > Photos, then double-click to retry."
         case .missingIdentifier, .assetUnavailable:
             "Thumbnail unavailable. Double-click to retry."
         case .cancelled:
@@ -99,7 +106,7 @@ struct PhotoKitThumbnailProvider: PhotosThumbnailProviding {
         }
         guard status == .authorized || status == .limited else { throw PhotosThumbnailFailure.accessDenied }
         guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [localIdentifier], options: nil).firstObject
-        else { throw PhotosThumbnailFailure.assetUnavailable }
+        else { throw PhotosThumbnailFailure.missingAssetFailure(for: status) }
         let options = PHImageRequestOptions()
         options.deliveryMode = .opportunistic
         options.isNetworkAccessAllowed = true

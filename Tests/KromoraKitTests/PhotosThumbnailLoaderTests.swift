@@ -1,4 +1,5 @@
 import AppKit
+import Photos
 import XCTest
 @testable import KromoraKit
 
@@ -32,6 +33,14 @@ final class PhotosThumbnailLoaderTests: XCTestCase {
             return XCTFail("expected accessDenied")
         }
         XCTAssertTrue(failure.helpText.contains("System Settings"))
+    }
+
+    func testMissingAssetUnderLimitedAccessExplainsHowToGrantAccess() {
+        let failure = PhotosThumbnailFailure.missingAssetFailure(for: .limited)
+        XCTAssertEqual(failure, .limitedAccess)
+        XCTAssertTrue(failure.helpText.contains("limited Photos access"))
+        XCTAssertTrue(failure.helpText.contains("System Settings"))
+        XCTAssertEqual(PhotosThumbnailFailure.missingAssetFailure(for: .authorized), .assetUnavailable)
     }
 
     @MainActor

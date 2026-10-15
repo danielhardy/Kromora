@@ -12,6 +12,14 @@ through the Xcode project and verify the resulting app bundle, catching project-
 entitlement, Info.plist, and SwiftPM-versus-Xcode issues. It runs on pushes to `main` and manual
 workflow dispatches, not on pull requests.
 
+## Photos permission verification
+
+Use the packaged `Kromora` Xcode scheme to verify PhotoKit-backed Photos thumbnails and filenames.
+`swift run` launches the SwiftPM executable without the app bundle's `NSPhotoLibraryUsageDescription`
+and sandbox configuration, so its PhotosPicker transfer behavior does not verify the shipping app's
+PhotoKit authorization path. In the packaged app, grant Photos access when prompted; test denied access
+and Limited access through the tile's failure tooltip and retry behavior.
+
 ## Required lanes
 
 ```sh
