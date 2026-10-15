@@ -57,8 +57,11 @@ enum IdleFrameWarmPlanner {
     /// Orders the whole library once by viewport distance, launch-hint recency, then stable
     /// index position, and runs that work off the main actor.
     static let detached: IdleFrameWarmPlanProvider = { input in
-        let task = Task.detached(priority: .background) { rank(input) }
-        return await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+        await rankOffMain(input)
+    }
+
+    @concurrent private static func rankOffMain(_ input: IdleFrameWarmPlanInput) async -> [IdleFrameWarmPlanEntry] {
+        rank(input)
     }
 
     static func rank(_ input: IdleFrameWarmPlanInput) -> [IdleFrameWarmPlanEntry] {
@@ -132,6 +135,21 @@ protocol IdleFrameWarmerDestination: AnyObject {
 /// decides which pixels are missing before any source decode or render is requested.
 @MainActor
 final class IdleFrameWarmerCoordinator {
+    @concurrent private static func encodeOriginalFrame(
+        image: CGImage, identity: PortablePhotoIdentity
+    ) async -> PresentationFrame? {
+        ThumbnailFrameEncoder.originalFrame(image: image, identity: identity)
+    }
+
+    @concurrent private static func encodeEditedFrame(
+        image: CGImage, identity: PortablePhotoIdentity, signature: FrameSignature,
+        crop: CropAdjustments, rotation: ImageRotation
+    ) async -> PresentationFrame? {
+        ThumbnailFrameEncoder.editedFrame(
+            image: image, identity: identity, signature: signature, crop: crop, rotation: rotation
+        )
+    }
+
     enum PhotoOutcome: Sendable, Equatable {
         case completed
         case capacityReached
@@ -414,9 +432,7 @@ final class IdleFrameWarmerCoordinator {
                 return canContinue(generation: scheduledGeneration) ? .completed : .cancelled
             }
             let identity = candidate.identity
-            let frame = await Task.detached {
-                ThumbnailFrameEncoder.originalFrame(image: image, identity: identity)
-            }.value
+            let frame = await Self.encodeOriginalFrame(image: image, identity: identity)
             guard canContinue(generation: scheduledGeneration) else { return .cancelled }
             if let frame { await thumbnailStore.enqueueWrite(frame) }
         }
@@ -447,12 +463,10 @@ final class IdleFrameWarmerCoordinator {
                     look: request.lookSignature, workingSpace: request.space,
                     pixelEpoch: RenderPipeline.pixelEpoch
                 )
-                let frame = await Task.detached {
-                    ThumbnailFrameEncoder.editedFrame(
-                        image: image, identity: candidate.identity, signature: signature,
-                        crop: document.crop, rotation: document.rotation
-                    )
-                }.value
+                let frame = await Self.encodeEditedFrame(
+                    image: image, identity: candidate.identity, signature: signature,
+                    crop: document.crop, rotation: document.rotation
+                )
                 guard canContinue(generation: scheduledGeneration) else { return .cancelled }
                 if let frame { await thumbnailStore.enqueueWrite(frame) }
             }

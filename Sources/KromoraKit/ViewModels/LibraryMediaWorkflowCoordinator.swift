@@ -458,16 +458,13 @@ final class LibraryMediaWorkflowCoordinator {
 
     private static let libraryCheckChunk = 16
 
-    /// Hashing runs on a detached task so neither the main actor nor the caller's executor reads
-    /// file bytes; cancelling the caller cancels the hashing between chunks.
-    private nonisolated static func members(
+    /// Hashing runs on the global executor so neither the main actor nor the caller's executor
+    /// reads file bytes; cancelling the caller cancels the hashing between chunks.
+    @concurrent private static func members(
         of files: [MediaVolumeFile], in matcher: LibraryMembershipMatcher?
     ) async -> Set<String> {
         guard let matcher else { return [] }
-        let work = Task.detached(priority: .utility) {
-            matcher.memberIDs(in: files, isCancelled: { Task.isCancelled })
-        }
-        return await withTaskCancellationHandler { await work.value } onCancel: { work.cancel() }
+        return matcher.memberIDs(in: files, isCancelled: { Task.isCancelled })
     }
 
     /// An error part-way through a scan keeps the images already found, and says why it stopped.

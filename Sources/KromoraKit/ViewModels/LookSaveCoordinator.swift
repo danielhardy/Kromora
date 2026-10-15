@@ -45,9 +45,7 @@ final class LookSaveCoordinator {
 
         conversionTask = Task { [document, lut] in
             do {
-                let result = try await Task.detached(priority: .userInitiated) {
-                    try LookLUTConverter.convert(document: document, lut: lut)
-                }.value
+                let result = try await Self.convert(document: document, lut: lut)
                 guard !Task.isCancelled else { return }
                 self.conversion = result
                 self.isConverting = false
@@ -60,6 +58,10 @@ final class LookSaveCoordinator {
                 self.onError?("Save Look failed: \(error.localizedDescription)")
             }
         }
+    }
+
+    @concurrent private static func convert(document: EditDocument, lut: CubeLUT?) async throws -> LookLUTConversion {
+        try LookLUTConverter.convert(document: document, lut: lut)
     }
 
     func dismiss() {

@@ -44,6 +44,15 @@ protocol EditedThumbnailDestination: AnyObject {
 /// thumbnails. Documents and collection presentation remain with the application model.
 @MainActor
 final class EditedThumbnailCoordinator {
+    @concurrent private static func encodeEditedFrame(
+        image: CGImage, identity: PortablePhotoIdentity, signature: FrameSignature,
+        crop: CropAdjustments, rotation: ImageRotation
+    ) async -> PresentationFrame? {
+        ThumbnailFrameEncoder.editedFrame(
+            image: image, identity: identity, signature: signature, crop: crop, rotation: rotation
+        )
+    }
+
     private struct MaterializedThumbnail: Equatable {
         let sourceIdentity: PortablePhotoIdentity
         let revision: String
@@ -394,12 +403,10 @@ final class EditedThumbnailCoordinator {
                 let crop = document.crop
                 let rotation = document.rotation
                 let identity = thumbnailSourceIdentity
-                let frame = await Task.detached {
-                    ThumbnailFrameEncoder.editedFrame(
-                        image: rendered, identity: identity, signature: signature,
-                        crop: crop, rotation: rotation
-                    )
-                }.value
+                let frame = await Self.encodeEditedFrame(
+                    image: rendered, identity: identity, signature: signature,
+                    crop: crop, rotation: rotation
+                )
                 // Encoding can outlive a rapid edit or source switch. Recheck the same fences used
                 // for pixel publication before allowing obsolete work to replace the stable key.
                 guard !Task.isCancelled, await self.isCurrentEditedThumbnailRequest(
