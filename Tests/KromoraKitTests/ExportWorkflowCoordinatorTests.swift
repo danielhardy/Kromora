@@ -447,7 +447,13 @@ final class ExportWorkflowCoordinatorTests: XCTestCase {
     }
 
     func testShareAnchorTracksItsHostMovingBetweenWindows() throws {
-        let (workflow, _) = makeWorkflow()
+        let root = try makeShareRoot()
+        let (workflow, destination) = makeWorkflow(shareRoot: root)
+        destination.exportSelectionCount = 2
+        destination.batch = ExportBatchRequest(
+            items: [ExportCoordinator.BatchItem(url: nil, data: Data([1]), name: "Photo.dng")],
+            document: EditDocument(), lut: nil
+        )
         let host = NSHostingView(rootView: ShareAnchorView(workflow: workflow))
         host.frame = NSRect(x: 0, y: 0, width: 40, height: 20)
         host.layoutSubtreeIfNeeded()
@@ -486,6 +492,11 @@ final class ExportWorkflowCoordinatorTests: XCTestCase {
         let secondAnchor = try XCTUnwrap(workflow.shareAnchorView)
         XCTAssertTrue(secondAnchor.window === secondWindow)
         XCTAssertTrue(firstAnchor === secondAnchor)
+
+        var presentedIn: NSView?
+        workflow.showPicker = { _, _, view in presentedIn = view }
+        workflow.shareDialog()
+        XCTAssertTrue(presentedIn === secondAnchor)
 
         host.removeFromSuperview()
         XCTAssertNil(workflow.shareAnchorView)
