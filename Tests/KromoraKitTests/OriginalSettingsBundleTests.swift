@@ -31,27 +31,6 @@ final class OriginalSettingsBundleTests: XCTestCase {
         ))
     }
 
-    func testCancellationPropagatesToDetachedBundleWorker() async throws {
-        let task = Task {
-            try await OriginalSettingsBundle.withCancellableDetachedTask {
-                // If cancellation is not forwarded, this bounded loop returns successfully and
-                // the assertion below fails instead of hanging the test suite.
-                for _ in 0..<500 {
-                    try Task.checkCancellation()
-                    Thread.sleep(forTimeInterval: 0.001)
-                }
-            }
-        }
-        try await Task.sleep(for: .milliseconds(10))
-        task.cancel()
-
-        do {
-            try await task.value
-            XCTFail("detached bundle work should observe cancellation")
-        } catch is CancellationError {
-        }
-    }
-
     func testVerificationRejectsChangedOriginal() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

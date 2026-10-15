@@ -475,6 +475,8 @@ actor EditDocumentStore {
     private func delayIfNeeded() async {
         guard artificialWriteDelay > .zero else { return }
         let delay = artificialWriteDelay
+        // Deliberately detached: the artificial write delay must run its full length even when the
+        // caller is cancelled, which is what the slow-write tests model.
         await Task.detached {
             try? await Task.sleep(for: delay)
         }.value

@@ -113,6 +113,37 @@ final class PackageSettingsTests: XCTestCase {
         XCTAssertEqual(offenders, [], "Swift 6 mode is only worth having without opt-outs")
     }
 
+    /// `Task.detached { … }.value` drops cancellation and priority inheritance; use a `@concurrent`
+    /// function instead. A detached task is only for work that is stored and cancelled explicitly
+    /// (or fire-and-forget), and each such file is listed here with its remaining call count.
+    func testTaskDetachedStaysWithinTheAllowList() throws {
+        let allowed: [String: Int] = [
+            "SourceSessionCoordinator.swift": 2,    // stored metadata / first-frame tasks
+            "DeriveCoordinator.swift": 1,           // stored, cancelled workers
+            "ImageCollection.swift": 1,             // stored metadata task
+            "ImageWorkScheduler.swift": 1,          // scheduler-owned stored task
+            "RenderEngine.swift": 1,                // shared developed-source flight, stored
+            "EditDocumentStore.swift": 1,           // test-only write delay that must ignore cancellation
+            "MediaVolume.swift": 1,                 // scan stream task cancelled on termination
+            "PortableLibrarySession.swift": 5,      // stored backfill/repair tasks + fire-and-forget retry
+        ]
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources")
+        let enumerator = try XCTUnwrap(FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil))
+        var counts: [String: Int] = [:]
+        while let url = enumerator.nextObject() as? URL {
+            guard url.pathExtension == "swift" else { continue }
+            let text = try String(contentsOf: url, encoding: .utf8)
+            for line in text.split(separator: "\n") {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                guard !trimmed.hasPrefix("//"), trimmed.contains("Task.detached") else { continue }
+                counts[url.lastPathComponent, default: 0] += 1
+            }
+        }
+        XCTAssertEqual(counts, allowed, "Use a @concurrent function instead of a new Task.detached")
+    }
+
     func testEvaluationHarnessStaysOutOfShippingSources() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

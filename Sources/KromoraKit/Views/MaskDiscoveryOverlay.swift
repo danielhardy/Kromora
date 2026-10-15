@@ -54,12 +54,7 @@ struct MaskDiscoveryOverlay: View {
                     if !Task.isCancelled { state.finish(request.id) }
                     return
                 }
-                let preparation = Task.detached(priority: .utility) {
-                    try MaskDiscoveryRaster.make(from: pixels)
-                }
-                let result = await withTaskCancellationHandler {
-                    try? await preparation.value
-                } onCancel: { preparation.cancel() }
+                let result = try? await Self.prepareRaster(pixels)
                 guard !Task.isCancelled else { return }
                 raster = result
                 rasterRequestID = request.id
@@ -72,6 +67,10 @@ struct MaskDiscoveryOverlay: View {
             }
         }
         .onDisappear { state.reset() }
+    }
+
+    @concurrent private static func prepareRaster(_ pixels: NormalizedMask) async throws -> MaskDiscoveryRaster {
+        try MaskDiscoveryRaster.make(from: pixels)
     }
 
     private func label(for request: MaskDiscoveryState.Request) -> String {

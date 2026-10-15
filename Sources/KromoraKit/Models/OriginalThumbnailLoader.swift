@@ -57,27 +57,10 @@ enum OriginalThumbnailLoader {
         }
 
         await decodeObserver?()
-        let decoded = await Task.detached { () -> (image: CGImage, frame: PresentationFrame?)? in
-            let image: CGImage?
-            if let url {
-                image = PlatformThumbnailProvider.generateCGImage(
-                    from: url, maxPixelSize: size, portableIdentity: identity
-                )
-            } else if let data {
-                image = PlatformThumbnailProvider.generateCGImage(
-                    from: data, maxPixelSize: size, dataFingerprint: dataFingerprint,
-                    portableIdentity: identity
-                )
-            } else {
-                image = nil
-            }
-            guard let decodedImage = image else { return nil }
-            // Show exactly what will be stored, so a cold decode and a later packed read agree.
-            let shown = ThumbnailFrameEncoder.normalizedRaster(decodedImage)?.image ?? decodedImage
-            let frame = store == nil
-                ? nil : ThumbnailFrameEncoder.originalFrame(image: shown, identity: identity)
-            return (shown, frame)
-        }.value
+        let decoded = await Self.decode(
+            url: url, data: data, dataFingerprint: dataFingerprint, identity: identity,
+            size: size, buildsFrame: store != nil
+        )
         guard !Task.isCancelled else { return nil }
         KromoraObservability.thumbnailDiagnostic(
             .thumbnailOriginalLoad,
@@ -88,6 +71,31 @@ enum OriginalThumbnailLoader {
         guard let decoded else { return nil }
         if let store, let frame = decoded.frame { await store.enqueueWrite(frame) }
         return decoded.image
+    }
+
+    @concurrent private static func decode(
+        url: URL?, data: Data?, dataFingerprint: String?, identity: PortablePhotoIdentity,
+        size: Int, buildsFrame: Bool
+    ) async -> (image: CGImage, frame: PresentationFrame?)? {
+        let image: CGImage?
+        if let url {
+            image = PlatformThumbnailProvider.generateCGImage(
+                from: url, maxPixelSize: size, portableIdentity: identity
+            )
+        } else if let data {
+            image = PlatformThumbnailProvider.generateCGImage(
+                from: data, maxPixelSize: size, dataFingerprint: dataFingerprint,
+                portableIdentity: identity
+            )
+        } else {
+            image = nil
+        }
+        guard let decodedImage = image else { return nil }
+        // Show exactly what will be stored, so a cold decode and a later packed read agree.
+        let shown = ThumbnailFrameEncoder.normalizedRaster(decodedImage)?.image ?? decodedImage
+        let frame = buildsFrame
+            ? ThumbnailFrameEncoder.originalFrame(image: shown, identity: identity) : nil
+        return (shown, frame)
     }
 
     private static func milliseconds(_ duration: Duration) -> Int {

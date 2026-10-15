@@ -768,18 +768,23 @@ final class PortableLibrarySession {
         let indexURL = self.indexURL
         let lease = self.lease
         let now = clock.now
-        let failure: String? = await Task.detached(priority: .utility) {
-            do {
-                try lease.renew(now: now())
-                try projection.write(to: indexURL)
-                return nil
-            } catch {
-                return error.localizedDescription
-            }
-        }.value
+        let failure = await Self.writeIndex(projection, to: indexURL, lease: lease, now: now)
         if let failure {
             KromoraObservability.event(.libraryIndexWriteFailed, detail: failure)
             onIndexWriteFailure?(failure)
+        }
+    }
+
+    @concurrent private static func writeIndex(
+        _ projection: LibraryIndexProjection, to indexURL: URL, lease: PortablePackageLease,
+        now: @Sendable () -> Date
+    ) async -> String? {
+        do {
+            try lease.renew(now: now())
+            try projection.write(to: indexURL)
+            return nil
+        } catch {
+            return error.localizedDescription
         }
     }
 
@@ -846,7 +851,13 @@ final class PortableLibrarySession {
     /// A value snapshot of the query controller for index-side work off the main actor.
     func facetCounts(query: LibraryQuery) async -> LibraryFacetCounts {
         let controller = queryController
-        return await Task.detached { controller.facetCounts(query: query) }.value
+        return await Self.facetCounts(controller, query: query)
+    }
+
+    @concurrent private static func facetCounts(
+        _ controller: LibraryQueryController, query: LibraryQuery
+    ) async -> LibraryFacetCounts {
+        controller.facetCounts(query: query)
     }
 
     func page(at pageIndex: Int, query: LibraryQuery = .all) -> LibraryQueryPage {
@@ -1557,44 +1568,48 @@ final class PortableLibrarySession {
         await materializationGate?(assetID)
         let summary = entry.summary
         let package = self.package
-        let resolved = try await Task.detached {
-            let record = try package.readAssetRecord(for: assetID)
-            let sourceURL = try package.embeddedSourceURL(for: record)
-            let source = PhotoAssetSource(
-                url: sourceURL,
-                id: PhotoAssetID(rawValue: "portable:\(assetID.raw)"),
-                data: nil,
-                bookmarkData: nil,
-                portableIdentity: record.identity,
-                sourceChangeSignature: record.sourceChangeSignature
-            )
-            assert(
-                source.portableIdentity.sourceFingerprint == record.identity.sourceFingerprint,
-                "A materialized asset must retain the fingerprint persisted in its record."
-            )
-            return PhotoAsset(
-                source: source,
-                filename: summary.displayName,
-                fileType: sourceURL.pathExtension,
-                metadata: PhotoAssetMetadata(
-                    dimensions: summary.dimensions,
-                    captureDate: summary.captureDate,
-                    cameraMake: summary.cameraMake,
-                    cameraModel: summary.cameraModel,
-                    lens: summary.lens
-                ),
-                libraryState: PhotoAssetLibraryState(
-                    rating: summary.rating ?? 0,
-                    flag: PhotoFlag(rawValue: summary.flag ?? "none") ?? .none
-                ),
-                presentedAspectRatio: summary.presentedAspectRatio
-            )
-        }.value
+        let resolved = try await Self.readMaterializedAsset(assetID, summary: summary, package: package)
         let fingerprint = resolved.source.portableIdentity.sourceFingerprint
         if summary.sourceFingerprint != fingerprint {
             repairSourceFingerprintOnOpen(for: assetID, to: fingerprint)
         }
         return resolved
+    }
+
+    @concurrent private static func readMaterializedAsset(
+        _ assetID: PortablePhotoAssetID, summary: PortablePackageAssetSummary, package: PortableLibraryPackage
+    ) async throws -> PhotoAsset {
+        let record = try package.readAssetRecord(for: assetID)
+        let sourceURL = try package.embeddedSourceURL(for: record)
+        let source = PhotoAssetSource(
+            url: sourceURL,
+            id: PhotoAssetID(rawValue: "portable:\(assetID.raw)"),
+            data: nil,
+            bookmarkData: nil,
+            portableIdentity: record.identity,
+            sourceChangeSignature: record.sourceChangeSignature
+        )
+        assert(
+            source.portableIdentity.sourceFingerprint == record.identity.sourceFingerprint,
+            "A materialized asset must retain the fingerprint persisted in its record."
+        )
+        return PhotoAsset(
+            source: source,
+            filename: summary.displayName,
+            fileType: sourceURL.pathExtension,
+            metadata: PhotoAssetMetadata(
+                dimensions: summary.dimensions,
+                captureDate: summary.captureDate,
+                cameraMake: summary.cameraMake,
+                cameraModel: summary.cameraModel,
+                lens: summary.lens
+            ),
+            libraryState: PhotoAssetLibraryState(
+                rating: summary.rating ?? 0,
+                flag: PhotoFlag(rawValue: summary.flag ?? "none") ?? .none
+            ),
+            presentedAspectRatio: summary.presentedAspectRatio
+        )
     }
 
     /// Test seam awaited inside the off-main open-time fingerprint repair, before its write.

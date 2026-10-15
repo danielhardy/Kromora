@@ -242,9 +242,11 @@ private struct RemovableMediaThumbnail: View {
         .frame(width: 128, height: 96)
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .task(id: url) {
-            image = await Task.detached(priority: .utility) {
-                Thumbnails.generate(from: url, maxPixelSize: 256)
-            }.value
+            image = await Self.makeThumbnail(url)
         }
+    }
+
+    @concurrent private static func makeThumbnail(_ url: URL) async -> NSImage? {
+        Thumbnails.generate(from: url, maxPixelSize: 256)
     }
 }

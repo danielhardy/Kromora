@@ -302,9 +302,7 @@ struct MountedMediaVolumeProvider: MediaVolumeProviding {
     let supportsInteractiveAccessGrant = true
 
     func discover() async -> [MediaVolume] {
-        await Task.detached(priority: .utility) {
-            Self.discoverMountedVolumes()
-        }.value
+        await Self.discoverOffActor()
     }
 
     func scan(_ volume: MediaVolume) async throws -> MediaVolumeScanResult {
@@ -315,9 +313,18 @@ struct MountedMediaVolumeProvider: MediaVolumeProviding {
         _ volume: MediaVolume,
         access: SecurityScopedResourceAccess?
     ) async throws -> MediaVolumeScanResult {
-        try await Task.detached(priority: .utility) {
-            try Self.scanMountedVolume(volume, access: access)
-        }.value
+        try await Self.scanOffActor(volume, access: access)
+    }
+
+    @concurrent private static func discoverOffActor() async -> [MediaVolume] {
+        discoverMountedVolumes()
+    }
+
+    @concurrent private static func scanOffActor(
+        _ volume: MediaVolume,
+        access: SecurityScopedResourceAccess?
+    ) async throws -> MediaVolumeScanResult {
+        try scanMountedVolume(volume, access: access)
     }
 
     func scanBatches(
@@ -325,6 +332,7 @@ struct MountedMediaVolumeProvider: MediaVolumeProviding {
         access: SecurityScopedResourceAccess?
     ) -> AsyncThrowingStream<MediaVolumeScanBatch, Error> {
         AsyncThrowingStream { continuation in
+            // Stored and cancelled from `onTermination`, so it stays a detached task.
             let task = Task.detached(priority: .utility) {
                 do {
                     _ = try Self.scanMountedVolume(volume, access: access) { batch in

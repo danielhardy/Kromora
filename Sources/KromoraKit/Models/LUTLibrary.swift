@@ -305,9 +305,7 @@ final class LUTLibrary {
                 context: KromoraTraceContext(sourceFingerprint: folder.standardizedFileURL.path, quality: "background")
             )
             defer { interval.end() }
-            let outcome = await Task.detached { [access] in
-                withExtendedLifetime(access) { Self.scanSync(folder) }
-            }.value
+            let outcome = await Self.scanOffActor(folder, access: access)
             guard !Task.isCancelled else { return }
 
             guard let self else { return }
@@ -355,11 +353,7 @@ final class LUTLibrary {
         importError = nil
         let sources = importedSourceURLs
         importTask = Task {
-            let imported = await Task.detached {
-                sources.compactMap { source -> CubeLUT? in
-                    try? CubeLUT(url: source, category: "Imported")
-                }
-            }.value
+            let imported = await Self.loadImportedLUTs(sources)
             guard !Task.isCancelled else { return }
 
             self.isImporting = false
@@ -398,9 +392,7 @@ final class LUTLibrary {
         isImporting = true
         let sources = importedSourceURLs
         importTask = Task {
-            let imported = await Task.detached {
-                sources.compactMap { try? CubeLUT(url: $0, category: "Imported") }
-            }.value
+            let imported = await Self.loadImportedLUTs(sources)
             guard !Task.isCancelled else { return }
             self.isImporting = false
             self.importedLUTs = imported
@@ -536,6 +528,16 @@ final class LUTLibrary {
 
     /// The blocking half of `scan`. Pure: takes a folder, returns categories.
     /// `nonisolated` so it can run on a background executor.
+    @concurrent private static func scanOffActor(
+        _ folder: URL, access: SecurityScopedResourceAccess?
+    ) async -> ScanOutcome {
+        withExtendedLifetime(access) { scanSync(folder) }
+    }
+
+    @concurrent private static func loadImportedLUTs(_ sources: [URL]) async -> [CubeLUT] {
+        sources.compactMap { try? CubeLUT(url: $0, category: "Imported") }
+    }
+
     private nonisolated static func scanSync(_ folder: URL) -> ScanOutcome {
         var categoryMap: [String: [CubeLUT]] = [:]
 
