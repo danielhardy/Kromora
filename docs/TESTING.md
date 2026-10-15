@@ -246,7 +246,9 @@ Mask editing adds `MaskOverlayResolve`, `MaskSemanticResolve` and `MaskSemanticA
 resize and apply milliseconds with source/target sizes). To triage a stuck "Analyzing mask…", stream
 them with `log stream --predicate 'subsystem == "com.kromora.app"' --level debug`: a `loading` with no
 following `ready`/`unavailable`/`cancelled` is a hung or torn-down task; large `resizeMs`/`applyMs`
-points at the CPU passes. Fake-renderer timings are orchestration checks,
+points at the CPU passes. The mask, thumbnail and photo-switch mirrors log at `.debug`, so they are
+not persisted in release and appear only with `--level debug`; their detail strings are built lazily,
+only while a log or signpost stream is attached. Fake-renderer timings are orchestration checks,
 not product latency claims.
 
 ## Manual UI checks

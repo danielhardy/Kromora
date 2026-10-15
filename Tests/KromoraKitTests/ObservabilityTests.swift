@@ -1,7 +1,28 @@
+import os
 import XCTest
 @testable import KromoraKit
 
 final class ObservabilityTests: XCTestCase {
+
+    func testDiagnosticLogDoesNotBuildDetailWhenDisabled() {
+        let emitted = OSAllocatedUnfairLock(initialState: [String]())
+        let log = KromoraDiagnosticLog(isEnabled: { false }, emit: { line in emitted.withLock { $0.append(line) } })
+        var evaluations = 0
+        log.debug(.maskResolutionState, detail: { evaluations += 1; return "expensive" }())
+
+        XCTAssertEqual(evaluations, 0)
+        XCTAssertTrue(emitted.withLock { $0.isEmpty })
+    }
+
+    func testDiagnosticLogBuildsDetailOnceWhenEnabled() {
+        let emitted = OSAllocatedUnfairLock(initialState: [String]())
+        let log = KromoraDiagnosticLog(isEnabled: { true }, emit: { line in emitted.withLock { $0.append(line) } })
+        var evaluations = 0
+        log.debug(.maskResolutionState, detail: { evaluations += 1; return "loading" }())
+
+        XCTAssertEqual(evaluations, 1)
+        XCTAssertEqual(emitted.withLock { $0 }, ["MaskResolutionState loading"])
+    }
 
     func testWorkflowVocabularyHasStableNamesForEveryRequiredStage() {
         let names = KromoraWorkflowStage.allCases.map { String(describing: $0.name) }

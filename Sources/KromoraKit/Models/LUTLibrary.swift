@@ -1,10 +1,13 @@
 import Foundation
 import Observation
+import os
 
 /// Manages discovered and explicitly imported LUT files, scanning and grouping by subfolder.
 @MainActor
 @Observable
 final class LUTLibrary {
+    private nonisolated static let log = Logger(subsystem: "com.kromora.app", category: "lut-library")
+
     private struct ImportedAccess {
         let url: URL
         let access: SecurityScopedResourceAccess
@@ -281,7 +284,7 @@ final class LUTLibrary {
             )
             preferences.set(bookmark, forKey: Self.settingsKey)
         } catch {
-            print("Failed to save bookmark: \(error)")
+            Self.log.error("Failed to save LUT folder bookmark: \(error, privacy: .private)")
         }
     }
 
@@ -578,7 +581,7 @@ final class LUTLibrary {
                 categoryMap[category, default: []].append(lut)
             } catch {
                 skipped += 1
-                print("Skipping \(fileURL.lastPathComponent): \(error)")
+                Self.log.error("Skipping LUT \(fileURL.lastPathComponent, privacy: .private): \(error, privacy: .private)")
             }
         }
 

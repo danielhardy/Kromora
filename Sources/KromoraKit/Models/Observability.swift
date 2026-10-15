@@ -322,41 +322,48 @@ enum KromoraObservability {
     }
 
     /// Mask-resolution diagnostics also go to the regular log: signposts are invisible to a plain
-    /// `log stream` (they need `--signpost`), and these are the events used to triage a hang.
-    private static let maskLog = Logger(subsystem: "com.kromora.app", category: "mask-resolution")
+    /// `log stream` (they need `--signpost`), and these are the events used to triage a hang. They
+    /// log at `.debug`, so they are not persisted; use `log stream --level debug` to see them.
+    private static let maskLog = KromoraDiagnosticLog(category: "mask-resolution")
 
-    private static let thumbnailLog = Logger(subsystem: "com.kromora.app", category: "thumbnail-frames")
+    private static let thumbnailLog = KromoraDiagnosticLog(category: "thumbnail-frames")
 
     /// Library thumbnail load diagnostics, mirrored to the regular log for the same reason as
-    /// `maskDiagnostic`: a plain `log stream` cannot see signposts.
-    static func thumbnailDiagnostic(_ event: KromoraWorkflowEvent, detail: String) {
-        thumbnailLog.notice("\(event.name.description, privacy: .public) \(detail, privacy: .public)")
+    /// `maskDiagnostic`: a plain `log stream` cannot see signposts. `detail` is only evaluated
+    /// when the log or the signpost stream is being observed.
+    static func thumbnailDiagnostic(_ event: KromoraWorkflowEvent, detail: @autoclosure () -> String) {
+        guard thumbnailLog.isEnabled || signposter.isEnabled else { return }
+        let detail = detail()
+        thumbnailLog.debug(event, detail: detail)
         Self.event(event, detail: detail)
     }
 
-    private static let photoSwitchLog = Logger(subsystem: "com.kromora.app", category: "photo-switch")
+    private static let photoSwitchLog = KromoraDiagnosticLog(category: "photo-switch")
 
     /// One line per phase of a Library to Edit (or photo to photo) switch, timed from the moment
     /// the selection began. `since` is the `DispatchTime` uptime the presentation session already
     /// uses as its clock, so these numbers line up with `PresentationFirstPixel` / `Confirmed`.
-    static func photoSwitchPhase(_ phase: String, since uptime: UInt64?, detail: String = "") {
+    /// `detail` is only evaluated when the log or the signpost stream is being observed.
+    static func photoSwitchPhase(_ phase: String, since uptime: UInt64?, detail: @autoclosure () -> String = "") {
+        guard photoSwitchLog.isEnabled || signposter.isEnabled else { return }
         let elapsed = uptime.map { Double(DispatchTime.now().uptimeNanoseconds &- $0) / 1_000_000 }
         let ms = elapsed.map { String(format: "%.1f", $0) } ?? "?"
-        photoSwitchLog.notice(
-            "PhotoSwitchPhase phase=\(phase, privacy: .public) ms=\(ms, privacy: .public) \(detail, privacy: .public)"
-        )
+        let detail = detail()
+        photoSwitchLog.debug("PhotoSwitchPhase phase=\(phase) ms=\(ms) \(detail)")
         event(.photoSwitchPhase, detail: "phase=\(phase) ms=\(ms) \(detail)")
     }
 
     static func maskDiagnostic(_ event: KromoraWorkflowEvent, source: ImageSource? = nil,
-                               quality: RenderQuality? = nil, detail: String) {
-        maskLog.notice("\(event.name.description, privacy: .public) \(detail, privacy: .public)")
+                               quality: RenderQuality? = nil, detail: @autoclosure () -> String) {
+        guard maskLog.isEnabled || signposter.isEnabled else { return }
+        let detail = detail()
+        maskLog.debug(event, detail: detail)
         Self.event(event, source: source, quality: quality, detail: detail)
     }
 
     static func maskOverlayError(_ error: any Error, source: ImageSource) {
         let underlying = error as NSError
-        maskLog.error("MaskResolutionState overlayError code=\(underlying.code) domain=\(underlying.domain, privacy: .private) description=\(String(describing: error), privacy: .private)")
+        maskLog.logger.error("MaskResolutionState overlayError code=\(underlying.code) domain=\(underlying.domain, privacy: .private) description=\(String(describing: error), privacy: .private)")
         Self.event(
             .maskResolutionState, source: source,
             detail: "overlayError code=\(underlying.code)"
@@ -405,5 +412,39 @@ enum KromoraObservability {
                          revision: UInt64, detail: String = "") {
         self.event(event, source: source, quality: quality,
                    detail: "revision=\(revision) \(detail)")
+    }
+}
+
+/// A `Logger` for one diagnostic category whose detail strings are built only when the level is
+/// enabled. `isEnabled` and `emit` are injectable so tests can prove the closure stays unevaluated.
+struct KromoraDiagnosticLog: Sendable {
+    let logger: Logger
+    private let enabledCheck: @Sendable () -> Bool
+    private let sink: @Sendable (String) -> Void
+
+    init(category: String) {
+        let logger = Logger(subsystem: "com.kromora.app", category: category)
+        let log = OSLog(subsystem: "com.kromora.app", category: category)
+        self.logger = logger
+        self.enabledCheck = { log.isEnabled(type: .debug) }
+        self.sink = { logger.debug("\($0, privacy: .public)") }
+    }
+
+    init(isEnabled: @escaping @Sendable () -> Bool, emit: @escaping @Sendable (String) -> Void) {
+        self.logger = Logger(subsystem: "com.kromora.app", category: "injected")
+        self.enabledCheck = isEnabled
+        self.sink = emit
+    }
+
+    var isEnabled: Bool { enabledCheck() }
+
+    /// Logs `message` at `.debug`; the autoclosure is not evaluated when debug logging is off.
+    func debug(_ message: @autoclosure () -> String) {
+        guard enabledCheck() else { return }
+        sink(message())
+    }
+
+    func debug(_ event: KromoraWorkflowEvent, detail: @autoclosure () -> String) {
+        debug("\(event.name.description) \(detail())")
     }
 }
