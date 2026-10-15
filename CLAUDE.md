@@ -82,6 +82,15 @@ Practical consequences when writing code here:
   property is what makes "Swift 6 mode is on" mean anything; the mode is trivially satisfiable file
   by file otherwise.
 
+### Observation for UI state
+
+Prefer Swift Observation for new UI-facing state: a `@MainActor @Observable final class`, not
+Combine or `ObservableObject`. A view holds the model as a plain stored reference, uses `@Bindable`
+where it needs `$model.property` bindings, and owns view-local models with `@State`. Mark stored
+implementation details that views never read (tasks, caches, closures, injected collaborators) with
+`@ObservationIgnored`. See [`docs/ENGINEERING_GUIDE.md`](docs/ENGINEERING_GUIDE.md#observation)
+for the complete rules and rationale.
+
 ## Layout
 
 The package is split so the app's code is testable (`@testable` can't import an executable target):
