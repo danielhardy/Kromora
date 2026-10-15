@@ -185,9 +185,9 @@ enum PlatformThumbnailProvider {
 /// Source-compatible spelling retained for existing library and test seams.
 typealias Thumbnails = PlatformThumbnailProvider
 
-/// A small synchronous, lock-protected image cache for the thumbnail API. `CGImage` is intentionally
-/// kept inside the lock-protected state: it is not `Sendable`, but the cache is shared by detached
-/// thumbnail workers and must not rely on unsynchronized dictionary access.
+/// A small synchronous, lock-protected image cache for the thumbnail API. `CGImage` is `Sendable`, so
+/// the state uses the checked lock API; the cache is shared by detached thumbnail workers and must
+/// not rely on unsynchronized dictionary access.
 private final class ThumbnailImageCache: Sendable {
     private struct State {
         var entries: [String: CGImage] = [:]
@@ -206,11 +206,11 @@ private final class ThumbnailImageCache: Sendable {
     init(maxEntries: Int, maxCostBytes: Int) {
         self.maxEntries = max(0, maxEntries)
         self.maxCostBytes = max(0, maxCostBytes)
-        self.state = OSAllocatedUnfairLock(uncheckedState: State())
+        self.state = OSAllocatedUnfairLock(initialState: State())
     }
 
     func value(for key: String) -> CGImage? {
-        state.withLockUnchecked { state in
+        state.withLock { state in
             guard let value = state.entries[key] else {
                 state.misses += 1
                 return nil
@@ -223,7 +223,7 @@ private final class ThumbnailImageCache: Sendable {
     }
 
     func insert(_ image: CGImage, for key: String) {
-        state.withLockUnchecked { state in
+        state.withLock { state in
             if let oldCost = state.costs.removeValue(forKey: key) {
                 state.totalCost -= oldCost
                 state.entries.removeValue(forKey: key)
@@ -249,7 +249,7 @@ private final class ThumbnailImageCache: Sendable {
     }
 
     func removeAll(countAsEviction: Bool) {
-        state.withLockUnchecked { state in
+        state.withLock { state in
             if countAsEviction { state.evictions += state.entries.count }
             state.entries.removeAll(keepingCapacity: true)
             state.costs.removeAll(keepingCapacity: true)
@@ -259,7 +259,7 @@ private final class ThumbnailImageCache: Sendable {
     }
 
     var statistics: CacheStatistics {
-        state.withLockUnchecked { state in
+        state.withLock { state in
             CacheStatistics(
                 hits: state.hits, misses: state.misses, evictions: state.evictions,
                 count: state.entries.count, costBytes: state.totalCost

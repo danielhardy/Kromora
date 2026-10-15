@@ -100,7 +100,10 @@ final class PackageSettingsTests: XCTestCase {
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
                 // Doc comments discuss these by name — only real code counts.
                 guard !trimmed.hasPrefix("//") else { continue }
-                for hatch in ["@unchecked Sendable", "nonisolated(unsafe)", "@preconcurrency"]
+                for hatch in [
+                    "@unchecked Sendable", "nonisolated(unsafe)", "@preconcurrency",
+                    "uncheckedState", "withLockUnchecked"
+                ]
                 where trimmed.contains(hatch) {
                     offenders.append("\(url.lastPathComponent): \(trimmed)")
                 }
