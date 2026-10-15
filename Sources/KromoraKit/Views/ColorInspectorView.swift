@@ -469,13 +469,17 @@ private struct ColorValueRow: View {
                     resetActionTitle: resetActionTitle
                 )
                 Spacer()
-                TextField(title, value: wholeNumberValue, format: fieldFormat)
-                .textFieldStyle(.roundedBorder)
-                .font(.system(.caption, design: .monospaced))
-                .frame(width: 68)
-                .multilineTextAlignment(.trailing)
-                .accessibilityLabel(title)
-                .accessibilityValue(readout(value))
+                SliderValueField(
+                    title: title,
+                    value: wholeNumberValue,
+                    entry: SliderValueEntry(
+                        range: range, step: 1, unit: usesTemperatureSlider ? "K" : ""
+                    ),
+                    readout: readout(value),
+                    onEditingChanged: { editing in
+                        if editing { beginInteraction() } else { endInteraction() }
+                    }
+                )
                 .accessibilitySortPriority(1)
             }
 

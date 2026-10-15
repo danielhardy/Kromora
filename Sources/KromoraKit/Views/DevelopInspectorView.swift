@@ -138,10 +138,20 @@ struct DevelopInspectorView: View {
                 )
                 Spacer()
                 if !control.isToggle {
-                    Text(readout(for: control))
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .accessibilityHidden(true)
+                    SliderValueField(
+                        title: control == .whiteBalance ? "White Balance Temperature" : control.title,
+                        value: viewModel.developBinding(for: control),
+                        entry: SliderValueEntry(
+                            range: control.range,
+                            fractionDigits: control == .whiteBalance ? 0 : 2,
+                            unit: control == .whiteBalance ? "K" : ""
+                        ),
+                        readout: readout(for: control),
+                        onEditingChanged: { editing in
+                            if editing { viewModel.beginPreviewInteraction() }
+                            else { viewModel.endPreviewInteraction() }
+                        }
+                    )
                 }
             }
 

@@ -79,10 +79,17 @@ struct LightInspectorView: View {
                     reset: { viewModel.resetLight(control) }
                 )
                 Spacer()
-                Text(readout(for: control))
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
+                SliderValueField(
+                    title: control.title,
+                    value: viewModel.lightBinding(for: control),
+                    entry: SliderValueEntry(
+                        range: control.range,
+                        fractionDigits: control == .exposure ? 2 : 0,
+                        unit: control == .exposure ? "EV" : ""
+                    ),
+                    readout: readout(for: control),
+                    onEditingChanged: previewInteraction
+                )
             }
 
             NeutralOriginSlider(
@@ -104,6 +111,10 @@ struct LightInspectorView: View {
             }
             .help(control.explanation)
         }
+    }
+
+    private func previewInteraction(_ editing: Bool) {
+        if editing { viewModel.beginPreviewInteraction() } else { viewModel.endPreviewInteraction() }
     }
 
     private func readout(for control: LightControl) -> String {
@@ -463,15 +474,8 @@ struct ParametricToneCurveControls: View {
         }
         let value = viewModel.document.light.parametricCurve[keyPath: keyPath]
         let range = amount ? ParametricToneCurve.amountRange : 0...1
-        return VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Text(title)
-                Spacer()
-                Text(amount ? String(format: "%+.0f", value) : String(format: "%.2f", value))
-                    .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
-            }
-            NeutralOriginSlider(value: Binding(
-                get: { viewModel.document.light.parametricCurve[keyPath: keyPath] },
+        let parametricBinding = Binding<Double>(
+            get: { viewModel.document.light.parametricCurve[keyPath: keyPath] },
                 set: { next in
                     viewModel.updateDocument(debounced: true) {
                         var curve = $0.light.parametricCurve
@@ -488,7 +492,22 @@ struct ParametricToneCurveControls: View {
                         $0.light.parametricCurve = curve
                     }
                 }
-            ), in: range, neutral: amount ? 0 : 0,
+        )
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Text(title)
+                Spacer()
+                SliderValueField(
+                    title: title,
+                    value: parametricBinding,
+                    entry: SliderValueEntry(range: range, fractionDigits: amount ? 0 : 2),
+                    readout: amount ? String(format: "%+.0f", value) : String(format: "%.2f", value),
+                    onEditingChanged: { editing in
+                        if editing { viewModel.beginPreviewInteraction() } else { viewModel.endPreviewInteraction() }
+                    }
+                )
+            }
+            NeutralOriginSlider(value: parametricBinding, in: range, neutral: 0,
                accessibilityTitle: title, accessibilityReadout: String(format: "%.2f", value))
         }
     }

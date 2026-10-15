@@ -246,9 +246,19 @@ struct CropInspectorView: View {
             HStack {
                 ResettableAdjustmentLabel(title: "Straighten", reset: onResetStraighten)
                 Spacer()
-                Text("\(straightenAngle, specifier: "%.1f")°")
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
+                SliderValueField(
+                    title: "Straighten angle",
+                    value: Binding(
+                        get: { straightenAngle },
+                        set: { value in onStraightenChange(value) }
+                    ),
+                    entry: SliderValueEntry(range: -45...45, step: 0.1, fractionDigits: 1, unit: "°"),
+                    readout: String(format: "%.1f°", straightenAngle),
+                    font: .body.monospacedDigit(),
+                    onEditingChanged: { editing in
+                        if editing { onBeginInteraction() } else { onEndInteraction() }
+                    }
+                )
             }
             NeutralOriginSlider(
                 value: Binding(
@@ -308,9 +318,19 @@ struct CropInspectorView: View {
             HStack {
                 ResettableAdjustmentLabel(title: title, reset: reset)
                 Spacer()
-                Text("\(value.wrappedValue * 100, specifier: "%.0f")%")
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
+                SliderValueField(
+                    title: "\(title) perspective",
+                    value: value,
+                    entry: SliderValueEntry(
+                        range: -CropAdjustments.maximumPerspective...CropAdjustments.maximumPerspective,
+                        step: 0.01, displayScale: 100, unit: "%"
+                    ),
+                    readout: String(format: "%.0f%%", value.wrappedValue * 100),
+                    font: .body.monospacedDigit(),
+                    onEditingChanged: { editing in
+                        if editing { onBeginInteraction() } else { onEndInteraction() }
+                    }
+                )
             }
             NeutralOriginSlider(
                 value: value,

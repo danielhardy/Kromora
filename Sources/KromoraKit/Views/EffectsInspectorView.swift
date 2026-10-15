@@ -425,14 +425,16 @@ private struct EffectsValueRow<Accessory: View>: View {
                 ResettableAdjustmentLabel(title: title, reset: reset)
                 accessory
                 Spacer()
-                TextField(title, value: $value, format: .number)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.caption, design: .monospaced))
-                    .frame(width: 68)
-                    .multilineTextAlignment(.trailing)
-                    .accessibilityLabel(title)
-                    .accessibilityValue(readout(value))
-                    .accessibilitySortPriority(1)
+                SliderValueField(
+                    title: title,
+                    value: $value,
+                    entry: SliderValueEntry(range: range, step: 1),
+                    readout: readout(value),
+                    onEditingChanged: { editing in
+                        if editing { beginInteraction() } else { endInteraction() }
+                    }
+                )
+                .accessibilitySortPriority(1)
             }
 
             NeutralOriginSlider(

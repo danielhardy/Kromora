@@ -509,9 +509,20 @@ struct LookInspectorView: View {
                 Text("Intensity")
                     .font(InspectorStyle.sectionTitle)
                 Spacer()
-                Text("\(Int((viewModel.lookIntensity * 100).rounded()))%")
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                SliderValueField(
+                    title: "Look intensity",
+                    value: Binding(
+                        get: { viewModel.lookIntensity },
+                        set: { viewModel.setLookIntensity($0) }
+                    ),
+                    entry: SliderValueEntry(range: 0...1, step: 0.01, displayScale: 100, unit: "%"),
+                    readout: "\(Int((viewModel.lookIntensity * 100).rounded()))%",
+                    width: 48,
+                    onEditingChanged: { editing in
+                        if editing { viewModel.beginPreviewInteraction() }
+                        else { viewModel.endPreviewInteraction() }
+                    }
+                )
             }
 
             NeutralOriginSlider(

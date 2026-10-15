@@ -755,9 +755,16 @@ struct MaskingWorkspace: View {
                 value: value, in: range, neutral: range.lowerBound,
                 accessibilityTitle: title,
                 accessibilityReadout: "\(Int(value.wrappedValue * 100)) percent")
-            Text(Int(value.wrappedValue * 100).description + "%")
-                .font(.caption2.monospacedDigit())
-                .frame(width: 34, alignment: .trailing)
+            SliderValueField(
+                title: title,
+                value: value,
+                entry: SliderValueEntry(
+                    range: range, step: 0.01, displayScale: 100, unit: "%"
+                ),
+                readout: Int(value.wrappedValue * 100).description + "%",
+                width: 42,
+                font: .caption2.monospacedDigit()
+            )
         }
     }
 
@@ -798,9 +805,18 @@ struct MaskingWorkspace: View {
                         viewModel.endPreviewInteraction()
                     }
                 })
-            Text(text)
-                .font(.caption.monospacedDigit())
-                .frame(width: 42, alignment: .trailing)
+            SliderValueField(
+                title: title,
+                value: value,
+                entry: readout.entry(range: range),
+                readout: text,
+                width: 42,
+                font: .caption.monospacedDigit(),
+                onEditingChanged: { editing in
+                    if editing { viewModel.beginPreviewInteraction() }
+                    else { viewModel.endPreviewInteraction() }
+                }
+            )
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)
@@ -948,6 +964,21 @@ private enum MaskSliderReadout {
     case percent
     case degrees
 
+    /// Percent rows display position within the range (0–100), so they are typed that way and
+    /// mapped back; degree rows display the stored value.
+    func entry(range: ClosedRange<Double>) -> SliderValueEntry {
+        switch self {
+        case .degrees:
+            return SliderValueEntry(range: range, unit: "°")
+        case .percent:
+            let span = range.upperBound - range.lowerBound
+            return SliderValueEntry(
+                range: range, displayScale: span > 0 ? 100 / span : 1,
+                displayOrigin: range.lowerBound, unit: "%"
+            )
+        }
+    }
+
     func text(_ value: Double, range: ClosedRange<Double>) -> String {
         switch self {
         case .degrees:
@@ -978,17 +1009,21 @@ private struct LocalAdjustmentValueRow: View {
                     reset: reset
                 )
                 Spacer()
-                TextField(
-                    control.title,
+                SliderValueField(
+                    title: control.title,
                     value: $value,
-                    format: .number.precision(.fractionLength(0...2))
+                    entry: SliderValueEntry(
+                        range: control.range,
+                        step: control.step,
+                        fractionDigits: 2,
+                        unit: control == .exposure ? "EV" : control == .temperature ? "K" : ""
+                    ),
+                    readout: control.readout(value),
+                    width: 78,
+                    onEditingChanged: { editing in
+                        if editing { beginInteraction() } else { endInteraction() }
+                    }
                 )
-                .textFieldStyle(.roundedBorder)
-                .font(.system(.caption, design: .monospaced))
-                .frame(width: 78)
-                .multilineTextAlignment(.trailing)
-                .accessibilityLabel(control.title)
-                .accessibilityValue(control.readout(value))
                 .accessibilitySortPriority(1)
             }
 
