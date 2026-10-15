@@ -468,7 +468,7 @@ struct PortableLibraryPackage: Sendable {
         package.manifest = manifest
         try package.writeManifest()
         for shard in Self.allShards {
-            let shardURL = package.membershipURL(for: shard)
+            let shardURL = try package.membershipURL(for: shard)
             if !fm.fileExists(atPath: shardURL.path) {
                 let empty = try PortablePackageMembershipShard(shard: shard)
                 try package.writeJSON(empty, to: shardURL)
@@ -637,22 +637,22 @@ struct PortableLibraryPackage: Sendable {
 
     // internal (not private): LibraryQueryControllerTests corrupts a specific shard file on disk
     // to exercise the rebuild-failure path.
-    func membershipURL(for shard: String) -> URL {
-        try! packageURL(for: "Catalog/Membership/\(shard).json")
+    func membershipURL(for shard: String) throws -> URL {
+        try packageURL(for: "Catalog/Membership/\(shard).json")
     }
 
-    func assetRecordURL(for assetID: PortablePhotoAssetID) -> URL {
-        try! packageURL(for: "Assets/\(Self.shard(for: assetID))/\(assetID.raw)/asset.json")
+    func assetRecordURL(for assetID: PortablePhotoAssetID) throws -> URL {
+        try packageURL(for: "Assets/\(Self.shard(for: assetID))/\(assetID.raw)/asset.json")
     }
 
     // Internal package-native trash helpers. The active asset directory is moved as one unit so
     // originals and their edit sidecars have one recoverable location.
-    func assetDirectoryURL(for assetID: PortablePhotoAssetID) -> URL {
-        try! packageURL(for: "Assets/\(Self.shard(for: assetID))/\(assetID.raw)")
+    func assetDirectoryURL(for assetID: PortablePhotoAssetID) throws -> URL {
+        try packageURL(for: "Assets/\(Self.shard(for: assetID))/\(assetID.raw)")
     }
 
-    func quarantineDirectoryURL(for assetID: PortablePhotoAssetID) -> URL {
-        try! packageURL(for: "Recovery/Quarantine/\(assetID.raw)")
+    func quarantineDirectoryURL(for assetID: PortablePhotoAssetID) throws -> URL {
+        try packageURL(for: "Recovery/Quarantine/\(assetID.raw)")
     }
 
     func readAssetRecord(atRelativePath relativePath: String) throws -> PortablePackageAssetRecord {

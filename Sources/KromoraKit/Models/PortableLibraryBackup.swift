@@ -652,13 +652,9 @@ struct PortableLibraryBackup {
     }
 
     private static func canClonefile(source: URL, destination: URL) -> Bool {
-        #if os(macOS)
-            guard let a = try? source.resourceValues(forKeys: [.volumeIdentifierKey]).volumeIdentifier,
-                  let b = try? destination.deletingLastPathComponent().resourceValues(forKeys: [.volumeIdentifierKey]).volumeIdentifier else { return false }
-            return String(describing: a) == String(describing: b)
-        #else
-            return false
-        #endif
+        guard let a = try? source.resourceValues(forKeys: [.volumeIdentifierKey]).volumeIdentifier,
+              let b = try? destination.deletingLastPathComponent().resourceValues(forKeys: [.volumeIdentifierKey]).volumeIdentifier else { return false }
+        return String(describing: a) == String(describing: b)
     }
 
     private static func relativePath(from root: URL, to url: URL) -> String {
@@ -682,11 +678,7 @@ struct PortableLibraryBackup {
     }
 
     private static func syncFile(_ descriptor: Int32) throws {
-        #if os(macOS)
-            if fcntl(descriptor, F_FULLFSYNC) != 0 { throw CocoaError(.fileWriteUnknown) }
-        #else
-            if fsync(descriptor) != 0 { throw CocoaError(.fileWriteUnknown) }
-        #endif
+        if fcntl(descriptor, F_FULLFSYNC) != 0 { throw CocoaError(.fileWriteUnknown) }
     }
 
     private static func writeJSON<T: Encodable>(_ value: T, to url: URL) throws {

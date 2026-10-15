@@ -12,7 +12,7 @@ final class PortablePackageTrashTests: TempDirectoryTestCase {
         let removal = try package.removeFromLibrary(assetID, lease: lease)
         XCTAssertFalse(removal.wasReferenced)
         XCTAssertFalse(FileManager.default.fileExists(atPath: originalURL.path))
-        let quarantineOriginal = package.quarantineDirectoryURL(for: assetID)
+        let quarantineOriginal = try package.quarantineDirectoryURL(for: assetID)
             .appendingPathComponent("Original/source.jpg")
         XCTAssertEqual(try Data(contentsOf: quarantineOriginal), Data("original".utf8))
         let quarantinedRecord = try package.readAssetRecord(
@@ -42,13 +42,13 @@ final class PortablePackageTrashTests: TempDirectoryTestCase {
             XCTAssertEqual(error as? PortablePackageTrashError, .confirmationRequired)
         }
         XCTAssertTrue(FileManager.default.fileExists(
-            atPath: package.quarantineDirectoryURL(for: assetID).path))
+            atPath: try package.quarantineDirectoryURL(for: assetID).path))
 
         let result = try package.reclaimSpace(confirmed: true, lease: lease)
         XCTAssertEqual(result.reclaimedAssetIDs, [assetID])
         XCTAssertGreaterThanOrEqual(result.bytesReclaimed, UInt64(Data("original".utf8).count))
         XCTAssertFalse(FileManager.default.fileExists(
-            atPath: package.quarantineDirectoryURL(for: assetID).path))
+            atPath: try package.quarantineDirectoryURL(for: assetID).path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: originalURL.path))
         XCTAssertTrue(try package.readMembershipShard(PortableLibraryPackage.shard(for: assetID))
             .entries[0].isTombstone)
@@ -74,13 +74,13 @@ final class PortablePackageTrashTests: TempDirectoryTestCase {
         defer { try? lease.release() }
 
         _ = try package.removeFromLibrary(assetID, lease: lease)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: package.assetDirectoryURL(for: assetID).path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: try package.assetDirectoryURL(for: assetID).path))
         XCTAssertFalse(FileManager.default.fileExists(
-            atPath: package.quarantineDirectoryURL(for: assetID).path))
+            atPath: try package.quarantineDirectoryURL(for: assetID).path))
         let reclaim = try package.reclaimSpace(confirmed: true, lease: lease)
         XCTAssertTrue(reclaim.reclaimedAssetIDs.isEmpty)
         XCTAssertEqual(reclaim.skippedReferencedAssetIDs, [assetID])
-        XCTAssertTrue(FileManager.default.fileExists(atPath: package.assetDirectoryURL(for: assetID).path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: try package.assetDirectoryURL(for: assetID).path))
         XCTAssertTrue(try package.readAssetRecord(for: assetID).isRemoved)
     }
 
@@ -94,7 +94,7 @@ final class PortablePackageTrashTests: TempDirectoryTestCase {
             assetID, lease: lease, faultInjector: injector))
         XCTAssertTrue(FileManager.default.fileExists(atPath: originalURL.path))
         XCTAssertFalse(FileManager.default.fileExists(
-            atPath: package.quarantineDirectoryURL(for: assetID).path))
+            atPath: try package.quarantineDirectoryURL(for: assetID).path))
         XCTAssertFalse(try package.readMembershipShard(PortableLibraryPackage.shard(for: assetID))
             .entries[0].isTombstone)
         XCTAssertTrue(try PortablePackageTransaction.recover(at: package.rootURL)

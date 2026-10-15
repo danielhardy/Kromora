@@ -1359,23 +1359,16 @@ struct PortablePackageTransaction {
     }
 
     private static func canClonefile(source: URL, destination: URL) -> Bool {
-        #if os(macOS)
-            guard let sourceVolume = volumeIdentifier(for: source),
-                  let destinationVolume = volumeIdentifier(for: destination.deletingLastPathComponent())
-            else { return false }
-            return sourceVolume == destinationVolume
-        #else
-            return false
-        #endif
+        guard let sourceVolume = volumeIdentifier(for: source),
+              let destinationVolume = volumeIdentifier(for: destination.deletingLastPathComponent())
+        else { return false }
+        return sourceVolume == destinationVolume
     }
 
-    #if os(macOS)
-        private static func volumeIdentifier(for url: URL) -> String? {
-            let values = try? url.resourceValues(forKeys: [.volumeIdentifierKey])
-            return values?.volumeIdentifier.map { String(describing: $0) }
-        }
-    #endif
-
+    private static func volumeIdentifier(for url: URL) -> String? {
+        let values = try? url.resourceValues(forKeys: [.volumeIdentifierKey])
+        return values?.volumeIdentifier.map { String(describing: $0) }
+    }
 
     private static func relativePath(from root: URL, to url: URL) -> String {
         let rootPath =
@@ -1419,11 +1412,7 @@ private func writeDurably(_ data: Data, to url: URL) throws {
 }
 
 func fullSync(_ descriptor: Int32) throws {
-    #if os(macOS)
-        if fcntl(descriptor, F_FULLFSYNC) != 0 { throw CocoaError(.fileWriteUnknown) }
-    #else
-        if fsync(descriptor) != 0 { throw CocoaError(.fileWriteUnknown) }
-    #endif
+    if fcntl(descriptor, F_FULLFSYNC) != 0 { throw CocoaError(.fileWriteUnknown) }
 }
 
 /// Flushes a directory's entries to stable storage with the same primitive as `fullSync`.

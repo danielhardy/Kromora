@@ -106,7 +106,7 @@ extension PortableLibraryPackage {
         return PortablePackageRemovalResult(
             assetID: assetID,
             wasReferenced: referenced,
-            quarantinedURL: referenced ? nil : quarantineDirectoryURL(for: assetID)
+            quarantinedURL: referenced ? nil : try quarantineDirectoryURL(for: assetID)
         )
     }
 

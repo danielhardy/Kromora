@@ -341,13 +341,11 @@ struct PortableLibraryRestore {
         )
         try? FileManager.default.removeItem(at: destination)
 
-        #if os(macOS)
         if copyMode == .automatic,
            clonefile(source.path, destination.path, 0) == 0 {
             try faultInjector?.check(.stage)
             return
         }
-        #endif
 
         let input = try FileHandle(forReadingFrom: source)
         FileManager.default.createFile(atPath: destination.path, contents: nil)

@@ -95,7 +95,7 @@ final class EditDocumentStoreTests: TempDirectoryTestCase {
         let loaded = await store.load(for: reference(for: assets[0]))
         XCTAssertEqual(loaded.document, document)
 
-        let recordURL = package.assetRecordURL(for: assets[0])
+        let recordURL = try package.assetRecordURL(for: assets[0])
         try FileManager.default.removeItem(at: recordURL)
         let result = await store.load(for: reference(for: assets[0]))
 

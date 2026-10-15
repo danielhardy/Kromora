@@ -396,7 +396,7 @@ final class LibraryQueryControllerTests: TempDirectoryTestCase {
         let package = try packageWithMembership(count: 1_200)
         let indexURL = tempDirectory.appendingPathComponent("Indexes/LibraryIndex.store")
         let lastShard = PortableLibraryPackage.allShards.last!
-        try Data("not json".utf8).write(to: package.membershipURL(for: lastShard))
+        try Data("not json".utf8).write(to: try package.membershipURL(for: lastShard))
 
         let session = try await LibraryIndexSession.open(
             package: try PortableLibraryPackage.openForQuery(at: package.rootURL),

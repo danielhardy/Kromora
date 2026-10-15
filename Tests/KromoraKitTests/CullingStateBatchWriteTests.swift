@@ -37,7 +37,7 @@ final class CullingStateBatchWriteTests: TempDirectoryTestCase {
     private func reopenedStates(_ packageURL: URL) throws -> [PortablePhotoAssetID: (Int?, String?)] {
         let package = try PortableLibraryPackage.open(at: packageURL)
         var states: [PortablePhotoAssetID: (Int?, String?)] = [:]
-        let directory = package.membershipURL(for: "00").deletingLastPathComponent()
+        let directory = try package.membershipURL(for: "00").deletingLastPathComponent()
         let files = try FileManager.default.contentsOfDirectory(atPath: directory.path)
         for file in files where file.hasSuffix(".json") {
             let name = String(file.dropLast(".json".count))
@@ -470,7 +470,7 @@ final class CullingStateBatchWriteTests: TempDirectoryTestCase {
 
     /// Corrupt a shard, then restore the bytes, so a write fails and can later succeed.
     private func corruptShard(_ session: PortableLibrarySession, _ shard: String) throws -> () throws -> Void {
-        let url = session.package.membershipURL(for: shard)
+        let url = try session.package.membershipURL(for: shard)
         let original = try Data(contentsOf: url)
         try Data("not json".utf8).write(to: url)
         return { try original.write(to: url) }

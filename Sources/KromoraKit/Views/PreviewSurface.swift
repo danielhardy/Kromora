@@ -1903,15 +1903,17 @@ struct PreviewSurfaceView: NSViewRepresentable {
                 height: max(1, Int(size.height.rounded(.up)))))
         }
 
-        /// Render one retained presentation texture into an offscreen target using the same
-        /// pipeline as the drawable path. This is an acceptance-test seam for geometry and
+        /// Encode and commit one retained presentation texture into an offscreen target using the
+        /// same pipeline as the drawable path. This is an acceptance-test seam for geometry and
         /// repaint behavior on hosts without a logged-in display; it never evaluates Core Image.
-        func renderRetainedTexture(
+        /// The caller owns synchronization: it receives the committed command buffer and decides
+        /// whether to wait for it.
+        func commitRetainedTextureRender(
             surface: PreviewSurface, navigation: CanvasNavigation, destinationSize: CGSize,
             viewSpaceRotationAngle: Double = 0,
             appearance: NSAppearance? = nil,
             viewportSize: CGSize? = nil
-        ) -> MTLTexture? {
+        ) -> (texture: MTLTexture, commandBuffer: MTLCommandBuffer)? {
             guard destinationSize.width > 0, destinationSize.height > 0,
                 destinationSize.width.isFinite, destinationSize.height.isFinite,
                 let stack = surface.presentationStack(for: navigation),
@@ -1950,8 +1952,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
                 encoder: encoder)
             encoder.endEncoding()
             commandBuffer.commit()
-            commandBuffer.waitUntilCompleted()
-            return commandBuffer.status == .completed ? target : nil
+            return (target, commandBuffer)
         }
 
         func appearanceDidChange(_ _: NSAppearance) {
