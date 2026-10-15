@@ -1693,8 +1693,8 @@ actor RenderEngine: RenderEngining {
         return await Self.developSource(source, rawDevelop: rawDevelop, scale: scale, rotation: rotation)
     }
 
-    /// Runs the decode off the engine actor. The returned `CIImage` is immutable and `Sendable`;
-    /// every `CIFilter` and `CIContext` stays inside the actor.
+    /// Runs standard-image decoding away from the engine actor. Its immutable, `Sendable` `CIImage`
+    /// result returns to the actor's render flow. It does not access actor-owned contexts or caches.
     @concurrent private static func developSource(
         _ source: ImageSource, rawDevelop: RAWDevelopSettings, scale: RenderScale, rotation: ImageRotation
     ) async -> CIImage? {
