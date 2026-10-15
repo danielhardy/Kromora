@@ -1,3 +1,5 @@
+import AppKit
+import SwiftUI
 import XCTest
 
 @testable import KromoraKit
@@ -442,6 +444,53 @@ final class ExportWorkflowCoordinatorTests: XCTestCase {
         workflow.shareDialog()
 
         XCTAssertTrue(presentedIn === window.contentView)
+    }
+
+    func testShareAnchorTracksItsHostMovingBetweenWindows() throws {
+        let (workflow, _) = makeWorkflow()
+        let host = NSHostingView(rootView: ShareAnchorView(workflow: workflow))
+        host.frame = NSRect(x: 0, y: 0, width: 40, height: 20)
+        host.layoutSubtreeIfNeeded()
+
+        let firstWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 100, height: 100),
+            styleMask: [], backing: .buffered, defer: true
+        )
+        firstWindow.isReleasedWhenClosed = false
+        defer {
+            host.removeFromSuperview()
+            firstWindow.close()
+        }
+        firstWindow.contentView?.addSubview(host)
+        firstWindow.contentView?.layoutSubtreeIfNeeded()
+        host.layoutSubtreeIfNeeded()
+        drainMainActor()
+
+        let firstAnchor = try XCTUnwrap(workflow.shareAnchorView)
+        XCTAssertTrue(firstAnchor.window === firstWindow)
+
+        host.removeFromSuperview()
+        XCTAssertNil(workflow.shareAnchorView)
+
+        let secondWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 100, height: 100),
+            styleMask: [], backing: .buffered, defer: true
+        )
+        secondWindow.isReleasedWhenClosed = false
+        defer { secondWindow.close() }
+        secondWindow.contentView?.addSubview(host)
+        secondWindow.contentView?.layoutSubtreeIfNeeded()
+        host.layoutSubtreeIfNeeded()
+        drainMainActor()
+
+        let secondAnchor = try XCTUnwrap(workflow.shareAnchorView)
+        XCTAssertTrue(secondAnchor.window === secondWindow)
+        XCTAssertTrue(firstAnchor === secondAnchor)
+
+        host.removeFromSuperview()
+        XCTAssertNil(workflow.shareAnchorView)
+        firstWindow.close()
+        secondWindow.close()
     }
 
     func testPickerDismissalAndShareServiceTerminalCallbacksReleaseTheirExports() {
