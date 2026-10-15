@@ -91,8 +91,13 @@ final class ExportCoordinator {
         editStore: EditDocumentStore? = nil,
         lutResolver: ((LUTID?) -> CubeLUT?)? = nil,
         photosDelivery: (any PhotosDelivering)? = PhotoKitDelivery(),
-        sheets: any SheetPresenting = AppKitSheetPresenter()
+        sheets: any SheetPresenting = AppKitSheetPresenter(),
+        defaults: UserDefaults = .standard
     ) {
+        self.defaults = defaults
+        self.lastUsedFilenamePolicy = defaults.data(forKey: Self.filenamePolicyKey)
+            .flatMap { try? JSONDecoder().decode(ExportFilenamePolicy.self, from: $0) }
+            ?? .sourceNameWithLook
         self.sheets = sheets
         // Test renderers are deliberately shared so request assertions remain simple. The real
         // renderer gets isolated mutable Core Image state for export work.
@@ -105,6 +110,17 @@ final class ExportCoordinator {
     }
 
     private static let defaultFormat: ExportFormat = .jpeg
+
+    private static let filenamePolicyKey = "export.batchFilenamePolicy"
+
+    /// The batch naming last used, persisted so the next Export All starts from it.
+    private(set) var lastUsedFilenamePolicy: ExportFilenamePolicy {
+        didSet {
+            guard let data = try? JSONEncoder().encode(lastUsedFilenamePolicy) else { return }
+            defaults.set(data, forKey: Self.filenamePolicyKey)
+        }
+    }
+    private let defaults: UserDefaults
 
     // MARK: - Jobs
 
@@ -494,7 +510,10 @@ final class ExportCoordinator {
             return
         }
         isPresentingSheet = true
-        let formatPicker = ExportFormatAccessoryView(selectedFormat: lastUsedFormat)
+        let formatPicker = ExportFormatAccessoryView(
+            selectedFormat: lastUsedFormat,
+            batchNaming: (lastUsedFilenamePolicy, items[0].name, lut?.name)
+        )
         let directoryURL = defaultFolderURL?()
         Task { [weak self] in
             guard let self else { return }
@@ -531,6 +550,7 @@ final class ExportCoordinator {
         // Record the choice as soon as the dialog completes, before the async batch starts.
         lastUsedFormat = format
         let options = formatPicker.exportOptions(destination: .folder(folder))
+        lastUsedFilenamePolicy = options.filenamePolicy
         let task = Task { [weak self, access] in
             guard let self else {
                 access.release()
@@ -692,18 +712,11 @@ final class ExportCoordinator {
                     break
                 }
                 let itemDocument = documentResolution.document
-                let lookName = options.filenamePolicy == .sourceNameWithLook ? itemLUT?.name : nil
-                let base = options.filenamePolicy.baseName(source: item.name, look: lookName)
-                var dest = uniqueExportURL(
-                    in: folder, base: base, ext: options.format.fileExtension
+                let base = options.filenamePolicy.baseName(source: item.name, look: itemLUT?.name)
+                let dest = uniqueExportURL(
+                    in: folder, base: base, ext: options.format.fileExtension,
+                    reservedPaths: reservedPaths
                 )
-                var counter = 2
-                while reservedPaths.contains(dest.standardizedFileURL.path) {
-                    dest = folder.appendingPathComponent(
-                        "\(base) \(counter).\(options.format.fileExtension)"
-                    )
-                    counter += 1
-                }
                 reservedPaths.insert(dest.standardizedFileURL.path)
                 do {
                     try Task.checkCancellation()
@@ -986,9 +999,70 @@ final class ExportFormatAccessoryView: NSView {
     private let albumField: NSTextField
     private let sharpeningMedium: NSPopUpButton
     private let sharpeningStrength: NSPopUpButton
+    /// Batch-only naming controls; nil for single export, which has its own Save As name field.
+    private let naming: NamingControls?
     var onSelectionChanged: ((ExportFormat) -> Void)?
 
-    init(selectedFormat: ExportFormat) {
+    /// Prefix/suffix/Look controls with a live example built from the first batch item.
+    @MainActor
+    private final class NamingControls: NSObject, NSTextFieldDelegate {
+        let prefixField = NSTextField(string: "")
+        let suffixField = NSTextField(string: "")
+        let lookCheckbox = NSButton(checkboxWithTitle: "Append Look name", target: nil, action: nil)
+        let exampleLabel = NSTextField(labelWithString: "")
+        let exampleSource: String
+        let exampleLook: String?
+        let fileExtension: () -> String
+
+        init(
+            policy: ExportFilenamePolicy, exampleSource: String, exampleLook: String?,
+            fileExtension: @escaping () -> String
+        ) {
+            self.exampleSource = exampleSource
+            self.exampleLook = exampleLook
+            self.fileExtension = fileExtension
+            super.init()
+            prefixField.stringValue = policy.prefix
+            suffixField.stringValue = policy.suffix
+            prefixField.placeholderString = "Prefix (optional)"
+            suffixField.placeholderString = "Suffix (optional)"
+            prefixField.setAccessibilityLabel("Filename prefix")
+            suffixField.setAccessibilityLabel("Filename suffix")
+            for field in [prefixField, suffixField] {
+                field.delegate = self
+                field.translatesAutoresizingMaskIntoConstraints = false
+                field.widthAnchor.constraint(greaterThanOrEqualToConstant: 220).isActive = true
+            }
+            lookCheckbox.state = policy.appendsLook ? .on : .off
+            lookCheckbox.target = self
+            lookCheckbox.action = #selector(changed)
+            lookCheckbox.setAccessibilityLabel("Append Look name to filename")
+            exampleLabel.textColor = .secondaryLabelColor
+            exampleLabel.lineBreakMode = .byTruncatingMiddle
+            exampleLabel.setAccessibilityLabel("Example filename")
+            refreshExample()
+        }
+
+        var policy: ExportFilenamePolicy {
+            ExportFilenamePolicy(
+                appendsLook: lookCheckbox.state == .on,
+                prefix: prefixField.stringValue, suffix: suffixField.stringValue
+            )
+        }
+
+        func refreshExample() {
+            exampleLabel.stringValue = policy.baseName(source: exampleSource, look: exampleLook)
+                + "." + fileExtension()
+        }
+
+        @objc func changed() { refreshExample() }
+        func controlTextDidChange(_ notification: Notification) { refreshExample() }
+    }
+
+    init(
+        selectedFormat: ExportFormat,
+        batchNaming: (policy: ExportFilenamePolicy, exampleSource: String, exampleLook: String?)? = nil
+    ) {
         picker = NSSegmentedControl(
             labels: ExportFormat.allCases.map(\.rawValue),
             trackingMode: .selectOne,
@@ -1007,10 +1081,18 @@ final class ExportFormatAccessoryView: NSView {
         albumField = NSTextField(string: "")
         sharpeningMedium = NSPopUpButton(frame: .zero, pullsDown: false)
         sharpeningStrength = NSPopUpButton(frame: .zero, pullsDown: false)
+        let pickerRef = picker
+        naming = batchNaming.map {
+            NamingControls(
+                policy: $0.policy, exampleSource: $0.exampleSource, exampleLook: $0.exampleLook,
+                fileExtension: {
+                    let index = pickerRef.selectedSegment
+                    let all = ExportFormat.allCases
+                    return (all.indices.contains(index) ? all[index] : .jpeg).fileExtension
+                }
+            )
+        }
         super.init(frame: .zero)
-
-        let label = NSTextField(labelWithString: "Export format:")
-        label.setContentHuggingPriority(.required, for: .horizontal)
 
         picker.translatesAutoresizingMaskIntoConstraints = false
         picker.target = self
@@ -1018,6 +1100,9 @@ final class ExportFormatAccessoryView: NSView {
         picker.selectedSegment = ExportFormat.allCases.firstIndex(of: selectedFormat) ?? 0
         picker.setAccessibilityLabel("Export format")
         picker.setAccessibilityHelp("Choose TIFF, JPEG, PNG, or HEIF for the exported image")
+        // Naming controls are created before the picker selection is applied. Refresh now so the
+        // initial example uses the remembered format's extension as soon as the panel opens.
+        naming?.refreshExample()
 
         metadataCheckbox.state = .on
         metadataCheckbox.target = self
@@ -1050,43 +1135,75 @@ final class ExportFormatAccessoryView: NSView {
         sharpeningStrength.selectItem(at: 1)
         sharpeningStrength.setAccessibilityLabel("Output sharpening strength")
 
-        let formatStack = NSStackView(views: [label, picker])
-        formatStack.orientation = .horizontal
-        formatStack.alignment = .centerY
-        formatStack.spacing = 8
-        let photosStack = NSStackView(views: [photosCheckbox, albumField])
-        photosStack.orientation = .horizontal
-        photosStack.alignment = .centerY
-        photosStack.spacing = 8
-        let privacyStack = NSStackView(views: [metadataCheckbox, locationCheckbox])
-        privacyStack.orientation = .vertical
-        privacyStack.alignment = .leading
-        privacyStack.spacing = 2
-        let sharpeningLabel = NSTextField(labelWithString: "Output sharpening:")
-        let sharpeningStack = NSStackView(views: [sharpeningLabel, sharpeningMedium, sharpeningStrength])
-        sharpeningStack.orientation = .horizontal
-        sharpeningStack.alignment = .centerY
-        sharpeningStack.spacing = 8
-        let stack = NSStackView(views: [formatStack, privacyStack, photosStack, sharpeningStack])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 8
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(stack)
+        albumField.translatesAutoresizingMaskIntoConstraints = false
+        albumField.widthAnchor.constraint(greaterThanOrEqualToConstant: 220).isActive = true
+        sharpeningMedium.setAccessibilityHelp("Output medium the sharpening is tuned for")
+        sharpeningStrength.setAccessibilityHelp("How strongly to sharpen for the chosen medium")
+
+        // One label column (trailing-aligned) and one control column, grouped into sections.
+        var rows: [[NSView]] = [
+            [Self.rowLabel("Format:"), picker],
+            [Self.separator()],
+            [Self.rowLabel("Metadata:"), metadataCheckbox],
+            [NSGridCell.emptyContentView, locationCheckbox],
+            [Self.separator()],
+            [Self.rowLabel("Photos:"), photosCheckbox],
+            [Self.rowLabel("Album:"), albumField],
+            [Self.separator()],
+            [Self.rowLabel("Sharpen for:"), sharpeningMedium],
+            [Self.rowLabel("Amount:"), sharpeningStrength],
+        ]
+        if let naming {
+            rows += [
+                [Self.separator()],
+                [Self.rowLabel("Prefix:"), naming.prefixField],
+                [Self.rowLabel("Suffix:"), naming.suffixField],
+                [NSGridCell.emptyContentView, naming.lookCheckbox],
+                [Self.rowLabel("Example:"), naming.exampleLabel],
+            ]
+        }
+        let grid = NSGridView(views: rows)
+        grid.translatesAutoresizingMaskIntoConstraints = false
+        grid.columnSpacing = 8
+        grid.rowSpacing = 8
+        grid.column(at: 0).xPlacement = .trailing
+        grid.column(at: 1).xPlacement = .leading
+        for index in 0..<grid.numberOfRows {
+            let row = grid.row(at: index)
+            row.yPlacement = .center
+            if grid.cell(atColumnIndex: 0, rowIndex: index).contentView is NSBox {
+                row.mergeCells(in: NSRange(location: 0, length: 2))
+                row.topPadding = 4
+                row.bottomPadding = 4
+            }
+        }
+        // Tighten the two checkboxes that belong to one group.
+        grid.row(at: 3).topPadding = -4
+        addSubview(grid)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-            stack.topAnchor.constraint(equalTo: topAnchor),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            grid.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
+            grid.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
+            grid.topAnchor.constraint(equalTo: topAnchor, constant: 12),
+            grid.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
+            widthAnchor.constraint(greaterThanOrEqualToConstant: 420),
         ])
+    }
+
+    private static func rowLabel(_ title: String) -> NSTextField {
+        let label = NSTextField(labelWithString: title)
+        label.alignment = .right
+        label.setContentHuggingPriority(.required, for: .horizontal)
+        return label
+    }
+
+    private static func separator() -> NSBox {
+        let box = NSBox()
+        box.boxType = .separator
+        return box
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
-    }
-
-    override var intrinsicContentSize: NSSize {
-        NSSize(width: 480, height: 142)
     }
 
     var selectedFormat: ExportFormat {
@@ -1094,6 +1211,20 @@ final class ExportFormatAccessoryView: NSView {
         guard ExportFormat.allCases.indices.contains(index) else { return .jpeg }
         return ExportFormat.allCases[index]
     }
+
+    /// The naming choice; the default policy when the accessory has no naming controls.
+    var filenamePolicy: ExportFilenamePolicy { naming?.policy ?? .sourceNameWithLook }
+
+    /// Test seam: type into the naming fields as a user would.
+    func setNaming(prefix: String, suffix: String, appendsLook: Bool) {
+        guard let naming else { return }
+        naming.prefixField.stringValue = prefix
+        naming.suffixField.stringValue = suffix
+        naming.lookCheckbox.state = appendsLook ? .on : .off
+        naming.refreshExample()
+    }
+
+    var namingExample: String? { naming?.exampleLabel.stringValue }
 
     var photosOptions: PhotosExportOptions? {
         guard photosCheckbox.state == .on else { return nil }
@@ -1120,6 +1251,7 @@ final class ExportFormatAccessoryView: NSView {
     func exportOptions(destination: ExportDestination) -> ExportOptions {
         ExportOptions(
             format: selectedFormat,
+            filenamePolicy: filenamePolicy,
             destination: destination,
             metadata: metadataPolicy,
             location: locationPolicy,
@@ -1139,6 +1271,7 @@ final class ExportFormatAccessoryView: NSView {
     }
 
     @objc private func selectionChanged() {
+        naming?.refreshExample()
         onSelectionChanged?(selectedFormat)
     }
 
@@ -1158,13 +1291,18 @@ final class ExportFormatAccessoryView: NSView {
 /// A non-colliding `base.ext` URL inside `folder`, appending " 2", " 3", …
 /// when a file of that name already exists. Free function (not `@MainActor`)
 /// so it can be called from the off-actor batch export task.
-func uniqueExportURL(in folder: URL, base: String, ext: String) -> URL {
+func uniqueExportURL(
+    in folder: URL, base: String, ext: String, reservedPaths: Set<String> = []
+) -> URL {
     let fm = FileManager.default
-    var candidate = folder.appendingPathComponent("\(base).\(ext)")
-    var n = 2
-    while fm.fileExists(atPath: candidate.path) {
-        candidate = folder.appendingPathComponent("\(base) \(n).\(ext)")
-        n += 1
+    var number = 1
+    while true {
+        let name = number == 1 ? "\(base).\(ext)" : "\(base) \(number).\(ext)"
+        let candidate = folder.appendingPathComponent(name)
+        let path = candidate.standardizedFileURL.path
+        if !fm.fileExists(atPath: path), !reservedPaths.contains(path) {
+            return candidate
+        }
+        number += 1
     }
-    return candidate
 }

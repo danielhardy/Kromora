@@ -58,14 +58,64 @@ enum ExportDestination: Codable, Sendable, Equatable {
     case folder(URL)
 }
 
-/// Naming policy shared by single and batch exports.
-enum ExportFilenamePolicy: String, Codable, CaseIterable, Sendable, Equatable {
-    case sourceName
-    case sourceNameWithLook
+/// Naming policy shared by single and batch exports: `‹prefix›‹source›[_‹Look›]‹suffix›`.
+///
+/// Prefix and suffix are user text, so they are sanitized on the way in (see `sanitized(_:)`) and
+/// the stored values are always filesystem-safe. A policy encodes as an object; the original
+/// string-enum spellings (`"sourceName"`, `"sourceNameWithLook"`) still decode.
+struct ExportFilenamePolicy: Codable, Sendable, Equatable {
+    let appendsLook: Bool
+    let prefix: String
+    let suffix: String
+
+    init(appendsLook: Bool = true, prefix: String = "", suffix: String = "") {
+        self.appendsLook = appendsLook
+        self.prefix = Self.sanitized(prefix)
+        self.suffix = Self.sanitized(suffix)
+    }
+
+    static let sourceName = ExportFilenamePolicy(appendsLook: false)
+    static let sourceNameWithLook = ExportFilenamePolicy(appendsLook: true)
+
+    /// Removes characters that cannot appear in a filename component (path separators, colons,
+    /// control characters) and leading dots, then trims surrounding whitespace. May return "".
+    static func sanitized(_ text: String) -> String {
+        let illegal = CharacterSet(charactersIn: "/:\\").union(.controlCharacters)
+        var result = text.unicodeScalars.filter { !illegal.contains($0) }
+            .reduce(into: "") { $0.unicodeScalars.append($1) }
+        result = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        while result.hasPrefix(".") { result.removeFirst() }
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
     func baseName(source: String, look: String?) -> String {
-        guard self == .sourceNameWithLook, let look, !look.isEmpty else { return source }
-        return source + "_" + look.replacingOccurrences(of: " ", with: "_")
+        var name = source
+        if appendsLook, let look, !look.isEmpty {
+            name += "_" + look.replacingOccurrences(of: " ", with: "_")
+        }
+        return prefix + name + suffix
+    }
+
+    private enum CodingKeys: String, CodingKey { case appendsLook, prefix, suffix }
+
+    init(from decoder: Decoder) throws {
+        if let legacy = try? decoder.singleValueContainer().decode(String.self) {
+            switch legacy {
+            case "sourceName": self = .sourceName
+            case "sourceNameWithLook": self = .sourceNameWithLook
+            default:
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: decoder.codingPath, debugDescription: "Unknown filename policy \(legacy)"
+                ))
+            }
+            return
+        }
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            appendsLook: try values.decodeIfPresent(Bool.self, forKey: .appendsLook) ?? true,
+            prefix: try values.decodeIfPresent(String.self, forKey: .prefix) ?? "",
+            suffix: try values.decodeIfPresent(String.self, forKey: .suffix) ?? ""
+        )
     }
 }
 

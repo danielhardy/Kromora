@@ -27,6 +27,44 @@ final class ExportOptionsTests: TempDirectoryTestCase {
         XCTAssertEqual(batch.photos, single.photos)
     }
 
+    @MainActor
+    func testAccessoryControlsMapToExportOptionsAndLayOutWithAutoLayout() throws {
+        let accessory = ExportFormatAccessoryView(selectedFormat: .tiff)
+        accessory.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThanOrEqual(accessory.fittingSize.width, 420)
+        XCTAssertGreaterThan(accessory.fittingSize.height, 0)
+
+        func descendants(of view: NSView) -> [NSView] {
+            view.subviews + view.subviews.flatMap(descendants(of:))
+        }
+        let views = descendants(of: accessory)
+        func button(_ title: String) throws -> NSButton {
+            try XCTUnwrap(views.compactMap { $0 as? NSButton }.first { $0.title == title })
+        }
+        let field = try XCTUnwrap(views.compactMap { $0 as? NSTextField }.first { $0.isEditable })
+        let folder = URL(fileURLWithPath: "/tmp/out", isDirectory: true)
+
+        var options = accessory.exportOptions(destination: .folder(folder))
+        XCTAssertEqual(options.format, .tiff)
+        XCTAssertEqual(options.metadata, .preserve)
+        XCTAssertEqual(options.location, .exclude)
+        XCTAssertNil(options.photos)
+        XCTAssertFalse(field.isEnabled)
+
+        try button("Also add to Photos").performClick(nil)
+        XCTAssertTrue(field.isEnabled)
+        field.stringValue = "Edits"
+        try button("Include location metadata (GPS)").performClick(nil)
+        options = accessory.exportOptions(destination: .folder(folder))
+        XCTAssertEqual(options.photos, PhotosExportOptions(albumName: "Edits"))
+        XCTAssertEqual(options.location, .include)
+
+        try button("Preserve camera metadata (EXIF/TIFF)").performClick(nil)
+        options = accessory.exportOptions(destination: .folder(folder))
+        XCTAssertEqual(options.metadata, .strip)
+        XCTAssertEqual(options.location, .exclude)
+    }
+
     func testDefaultsAreFullSizeHighQualityAndSessionCompatible() throws {
         let options = ExportOptions.default
 
