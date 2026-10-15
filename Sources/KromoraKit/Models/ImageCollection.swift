@@ -391,8 +391,21 @@ final class ImageCollectionPresentationModel {
         let oldState: PhotoAssetLibraryState
         let activeIDBefore: PhotoAssetID?
     }
-    /// One entry per user action: a batch over a multi-selection undoes together.
-    private var cullingUndoStack: [[CullingChange]] = []
+    /// The pre-change rating and flag of a selected photo that had no loaded row.
+    struct UnloadedCullingChange: Sendable, Equatable {
+        let assetID: PortablePhotoAssetID
+        let rating: Int
+        let flag: PhotoFlag
+    }
+    private struct CullingGroup {
+        var changes: [CullingChange]
+        var unloaded: [UnloadedCullingChange] = []
+    }
+    /// One entry per user action: a batch over a multi-selection undoes together, including
+    /// selected photos outside the loaded window.
+    private var cullingUndoStack: [CullingGroup] = []
+    /// Unloaded photos the last undo restored; the owner writes them through the catalog.
+    private(set) var lastUndoneUnloadedChanges: [UnloadedCullingChange] = []
     private(set) var lastCullingAssetID: PhotoAssetID?
     /// Every photo the last culling action changed, for catalog persistence.
     private(set) var lastCullingAssetIDs: [PhotoAssetID] = []
@@ -546,9 +559,20 @@ final class ImageCollectionPresentationModel {
         return finishCullingBatch(group)
     }
 
+    /// Attach the old state of unloaded photos changed by the culling action that just ran, so
+    /// the same undo step restores them. Joins the action's group when loaded rows changed too.
+    func recordUnloadedCullingChanges(_ changes: [UnloadedCullingChange], joiningLoadedChange: Bool) {
+        guard !changes.isEmpty else { return }
+        if joiningLoadedChange, !cullingUndoStack.isEmpty {
+            cullingUndoStack[cullingUndoStack.count - 1].unloaded += changes
+        } else {
+            pushCullingGroup(CullingGroup(changes: [], unloaded: changes))
+        }
+    }
+
     private func finishCullingBatch(_ group: [CullingChange]) -> Bool {
         guard !group.isEmpty else { return false }
-        pushCullingGroup(group)
+        pushCullingGroup(CullingGroup(changes: group))
         lastCullingAssetIDs = group.map(\.itemID)
         lastCullingAssetID = group.last?.itemID
         invalidateCollectionProjection(notify: true)
@@ -595,14 +619,20 @@ final class ImageCollectionPresentationModel {
 
     @discardableResult
     func undoLastCullingChange() -> Bool {
-        guard let group = cullingUndoStack.popLast(), let first = group.first else { return false }
+        lastUndoneUnloadedChanges = []
+        guard let entry = cullingUndoStack.popLast() else { return false }
+        let group = entry.changes
+        lastUndoneUnloadedChanges = entry.unloaded
         var restored: [PhotoAssetID] = []
         for change in group {
             guard let index = items.firstIndex(where: { $0.id == change.itemID }) else { continue }
             items[index].asset.libraryState = change.oldState
             restored.append(change.itemID)
         }
-        guard !restored.isEmpty else { return false }
+        guard let first = group.first, !restored.isEmpty else {
+            lastCullingAssetIDs = []
+            return !entry.unloaded.isEmpty
+        }
         lastCullingAssetIDs = restored
         lastCullingAssetID = restored.last
         invalidateCollectionProjection(notify: true)
@@ -809,8 +839,9 @@ final class ImageCollectionPresentationModel {
         }
         items.removeAll { ids.contains($0.id) }
         cullingUndoStack = cullingUndoStack.compactMap { group in
-            let kept = group.filter { !ids.contains($0.itemID) }
-            return kept.isEmpty ? nil : kept
+            var kept = group
+            kept.changes = group.changes.filter { !ids.contains($0.itemID) }
+            return kept.changes.isEmpty && kept.unloaded.isEmpty ? nil : kept
         }
         portableTotalCount = portableTotalCount.map { max(0, $0 - removed.count) }
         invalidateCollectionProjection()
@@ -1065,9 +1096,11 @@ final class ImageCollectionPresentationModel {
         items.forEach { $0.presentationChangeLedger = ledger }
     }
     private func recordCullingChange(itemID: PhotoAssetID, oldState: PhotoAssetLibraryState) {
-        pushCullingGroup([.init(itemID: itemID, oldState: oldState, activeIDBefore: selection.activeID)])
+        pushCullingGroup(CullingGroup(changes: [
+            .init(itemID: itemID, oldState: oldState, activeIDBefore: selection.activeID)
+        ]))
     }
-    private func pushCullingGroup(_ group: [CullingChange]) {
+    private func pushCullingGroup(_ group: CullingGroup) {
         cullingUndoStack.append(group)
         if cullingUndoStack.count > 100 { cullingUndoStack.removeFirst() }
     }

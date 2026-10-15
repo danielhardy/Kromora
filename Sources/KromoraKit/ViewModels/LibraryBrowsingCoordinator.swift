@@ -589,7 +589,9 @@ final class LibraryBrowsingCoordinator {
         let name = collection.selectedItem?.displayName
         let previousIndex = collection.selectedIndex
         let loadedChanged = collection.setFlagForSelection(flag, advance: advance)
-        let unloadedChanged = persistUnloadedLibraryState(unloaded) { _ in (nil, flag) }
+        let unloadedChanged = persistUnloadedLibraryState(
+            unloaded, joiningLoadedChange: loadedChanged
+        ) { _ in (nil, flag) }
         let changed = loadedChanged || unloadedChanged
         if loadedChanged { persistPortableLibraryStateIfNeeded() }
         if changed {
@@ -613,7 +615,9 @@ final class LibraryBrowsingCoordinator {
         let targetCount = collection.cullingTargetIDs.count + unloaded.count
         let loadedChanged = collection.setRatingForSelection(rating)
         let clamped = min(max(rating, 0), 5)
-        let unloadedChanged = persistUnloadedLibraryState(unloaded) { _ in (clamped, nil) }
+        let unloadedChanged = persistUnloadedLibraryState(
+            unloaded, joiningLoadedChange: loadedChanged
+        ) { _ in (clamped, nil) }
         let changed = loadedChanged || unloadedChanged
         if loadedChanged { persistPortableLibraryStateIfNeeded() }
         if changed {
@@ -630,21 +634,41 @@ final class LibraryBrowsingCoordinator {
     @discardableResult
     func undoCullingChange() -> Bool {
         let changed = collection.undoLastCullingChange()
-        if changed { persistPortableLibraryStateIfNeeded() }
-        return changed
+        guard changed else { return false }
+        persistPortableLibraryStateIfNeeded()
+        restoreUnloadedLibraryState(collection.lastUndoneUnloadedChanges)
+        return true
+    }
+
+    private func restoreUnloadedLibraryState(_ changes: [ImageCollection.UnloadedCullingChange]) {
+        guard let library, !changes.isEmpty else { return }
+        let size = type(of: library).bulkSelectionChunkSize
+        for start in stride(from: 0, to: changes.count, by: size) {
+            let updates = changes[start..<min(changes.count, start + size)].map {
+                PortableLibrarySession.LibraryStateUpdate(
+                    assetID: $0.assetID, rating: $0.rating, flag: $0.flag
+                )
+            }
+            library.enqueueLibraryStateUpdates(updates) { [weak self] error in
+                self?.destination?.presentLibraryError(
+                    "Kromora could not update the library catalog: \(error.localizedDescription)"
+                )
+            }
+        }
     }
 
     /// Apply a culling change to selected photos that have no loaded row. Their current rating and
     /// flag come from the index summary, one bounded chunk at a time; only photos whose value
     /// changes are queued. They go through the same coalesced, off-main write and failure handler
-    /// as loaded rows. Unloaded rows have no in-memory state, so the session undo covers the
-    /// loaded rows only.
+    /// as loaded rows. Their previous state joins the action's undo group.
     private func persistUnloadedLibraryState(
-        _ ids: [PortablePhotoAssetID], newValue: (PhotoAsset) -> (rating: Int?, flag: PhotoFlag?)
+        _ ids: [PortablePhotoAssetID], joiningLoadedChange: Bool, newValue: (PhotoAsset) -> (rating: Int?, flag: PhotoFlag?)
     ) -> Bool {
         guard let library, !ids.isEmpty else { return false }
         var changed = false
+        var joining = joiningLoadedChange
         library.forEachBrowsingAssetChunk(forIDs: ids) { assets in
+            var undo: [ImageCollection.UnloadedCullingChange] = []
             let updates = assets.compactMap { asset -> PortableLibrarySession.LibraryStateUpdate? in
                 let assetID = asset.source.portableIdentity.assetID
                 // The index summary lags queued writes; merge with the newest known state.
@@ -655,10 +679,13 @@ final class LibraryBrowsingCoordinator {
                 let rating = value.rating ?? currentRating
                 let flag = value.flag ?? currentFlag
                 guard rating != currentRating || flag != currentFlag else { return nil }
+                undo.append(.init(assetID: assetID, rating: currentRating, flag: currentFlag))
                 return .init(assetID: assetID, rating: rating, flag: flag)
             }
             guard !updates.isEmpty else { return }
             changed = true
+            collection.recordUnloadedCullingChanges(undo, joiningLoadedChange: joining)
+            joining = true
             library.enqueueLibraryStateUpdates(updates) { [weak self] error in
                 self?.destination?.presentLibraryError(
                     "Kromora could not update the library catalog: \(error.localizedDescription)"

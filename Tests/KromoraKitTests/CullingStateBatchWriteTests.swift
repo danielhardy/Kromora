@@ -282,6 +282,62 @@ final class CullingStateBatchWriteTests: TempDirectoryTestCase {
         await viewModel.shutdown()
     }
 
+    /// KRMA-1019: one undo restores loaded and unloaded selected photos.
+    func testUndoRestoresUnloadedSelectionRatingAndFlag() async throws {
+        let packageURL = tempDirectory.appendingPathComponent("Undo.kromoralibrary")
+        let indexURL = tempDirectory.appendingPathComponent("UndoIndex/LibraryIndex.store")
+        let session = try PortableLibrarySession(
+            at: packageURL, indexURL: indexURL, pageSize: 2, scheduler: ImageWorkScheduler()
+        )
+        let urls = try (0..<3).map { ordinal in
+            try Fixtures.writeJPEG(
+                width: 16 + ordinal, height: 12, orientation: 1,
+                named: "undo-\(ordinal).jpg", in: tempDirectory
+            )
+        }
+        let imported = try session.importURLs(urls).imported.map(\.assetID)
+        XCTAssertEqual(imported.count, 3)
+        // Give one photo a distinct starting state so undo must restore per-photo values.
+        session.enqueueLibraryStateUpdates(
+            [.init(assetID: imported[2], rating: 2, flag: .reject)], onFailure: { _ in }
+        )
+        let seeded = await session.flushPendingLibraryState()
+        XCTAssertEqual(seeded, .success)
+
+        let viewModel = makeAppViewModel(portableLibrarySession: session)
+        XCTAssertEqual(viewModel.collection.items.count, 2)
+        viewModel.selectAllInGrid()
+
+        XCTAssertTrue(viewModel.setFocusedRating(4))
+        XCTAssertTrue(viewModel.setFocusedFlag(.pick))
+        let afterChange = try await reopenedAfterFlush(session, packageURL)
+        for id in imported { XCTAssertEqual(afterChange[id]?.0, 4) }
+
+        XCTAssertTrue(viewModel.undoCullingChange())
+        let afterFlagUndo = try await reopenedAfterFlush(session, packageURL)
+        XCTAssertEqual(afterFlagUndo[imported[2]]?.1, PhotoFlag.reject.rawValue)
+        for id in imported.prefix(2) { XCTAssertNotEqual(afterFlagUndo[id]?.1, PhotoFlag.pick.rawValue) }
+        XCTAssertEqual(afterFlagUndo[imported[2]]?.0, 4)
+
+        XCTAssertTrue(viewModel.undoCullingChange())
+        let restored = try await reopenedAfterFlush(session, packageURL)
+        XCTAssertEqual(restored[imported[2]]?.0, 2)
+        XCTAssertEqual(restored[imported[2]]?.1, PhotoFlag.reject.rawValue)
+        for id in imported.prefix(2) {
+            XCTAssertEqual(restored[id]?.0, 0)
+            XCTAssertNotEqual(restored[id]?.1, PhotoFlag.pick.rawValue)
+        }
+        XCTAssertFalse(viewModel.undoCullingChange(), "only two actions were recorded")
+        await viewModel.shutdown()
+    }
+
+    private func reopenedAfterFlush(_ session: PortableLibrarySession, _ packageURL: URL) async throws
+        -> [PortablePhotoAssetID: (Int?, String?)]
+    {
+        _ = await session.flushPendingLibraryState()
+        return try reopenedStates(packageURL)
+    }
+
     func testInlineFallbackWithoutScheduler() async throws {
         let (session, packageURL, ids) = try makeSession(assetCount: 4)
         session.enqueueLibraryStateUpdates(updates(ids, rating: 2, flag: .pick)) { _ in
