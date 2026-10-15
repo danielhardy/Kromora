@@ -510,14 +510,26 @@ final class ExportCoordinator {
             return
         }
         isPresentingSheet = true
-        let formatPicker = ExportFormatAccessoryView(
-            selectedFormat: lastUsedFormat,
-            batchNaming: (lastUsedFilenamePolicy, items[0].name, lut?.name)
-        )
         let directoryURL = defaultFolderURL?()
         Task { [weak self] in
             guard let self else { return }
             defer { self.isPresentingSheet = false }
+            let firstItem = items[0]
+            let exampleLook: String?
+            do {
+                let resolution = try await self.resolvedDocument(
+                    for: firstItem, assetID: firstItem.assetID, fallback: document
+                )
+                exampleLook = try self.resolvedLUT(
+                    for: firstItem, resolution: resolution, fallback: lut
+                )?.name
+            } catch {
+                exampleLook = nil
+            }
+            let formatPicker = ExportFormatAccessoryView(
+                selectedFormat: self.lastUsedFormat,
+                batchNaming: (self.lastUsedFilenamePolicy, firstItem.name, exampleLook)
+            )
             let chosen = await self.sheets.chooseOpenURLs { panel in
                 panel.title = "Choose Export Folder"
                 panel.prompt = "Export Here"

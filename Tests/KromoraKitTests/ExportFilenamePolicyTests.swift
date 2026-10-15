@@ -3,6 +3,13 @@ import XCTest
 
 final class ExportFilenamePolicyTests: TempDirectoryTestCase {
 
+    private func makeLUT(_ name: String) throws -> CubeLUT {
+        let url = try Fixtures.writeCube(
+            Fixtures.identityCubeText(size: 2), named: "\(name).cube", in: tempDirectory
+        )
+        return try CubeLUT(url: url)
+    }
+
     func testPrefixAndSuffixCompose() {
         XCTAssertEqual(
             ExportFilenamePolicy(appendsLook: false, prefix: "Wedding_").baseName(source: "DSC1", look: nil),
@@ -102,6 +109,29 @@ final class ExportFilenamePolicyTests: TempDirectoryTestCase {
             batchNaming: (.sourceName, "DSC01305", nil)
         )
         XCTAssertEqual(accessory.namingExample, "DSC01305.\(ExportFormat.tiff.fileExtension)")
+    }
+
+    @MainActor
+    func testBatchPanelExampleUsesFirstItemsLookInsteadOfFallbackLook() async throws {
+        let firstLook = try makeLUT("First Look")
+        let fallbackLook = try makeLUT("Fallback Look")
+        let item = ExportCoordinator.BatchItem(
+            url: nil, data: Data(), name: "DSC01305", document: EditDocument(), lut: firstLook
+        )
+        let sheets = FakeSheets()
+        let coordinator = ExportCoordinator(photosDelivery: nil, sheets: sheets)
+
+        coordinator.batchExportDialog(items: [item], document: EditDocument(), lut: fallbackLook)
+
+        for _ in 0..<100 where sheets.openCalls == 0 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(sheets.openCalls, 1)
+        let accessory = try XCTUnwrap(
+            sheets.lastOpenPanel?.accessoryView as? ExportFormatAccessoryView
+        )
+        let lookComponent = firstLook.name.replacingOccurrences(of: " ", with: "_")
+        XCTAssertEqual(accessory.namingExample, "DSC01305_\(lookComponent).jpg")
     }
 
     @MainActor
