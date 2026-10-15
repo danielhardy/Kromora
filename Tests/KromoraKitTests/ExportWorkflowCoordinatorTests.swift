@@ -412,20 +412,36 @@ final class ExportWorkflowCoordinatorTests: XCTestCase {
         withExtendedLifetime((window, destination)) {}
     }
 
-    func testShareWithoutAnchorNeverFallsBackToTheKeyWindow() throws {
+    func testShareWithoutAnchorFallsBackToTheKeyWindow() throws {
         let root = try makeShareRoot()
         let (workflow, destination, window) = makeMultiShare(engine: FakeRenderEngine(), root: root)
         workflow.shareAnchorView = nil
-        var presented = false
-        workflow.showPicker = { _, _, _ in presented = true }
+        var presentedIn: NSView?
+        workflow.showPicker = { _, _, view in presentedIn = view }
         window.makeKeyAndOrderFront(nil)
         defer { window.orderOut(nil) }
+        try XCTSkipIf(NSApplication.shared.keyWindow !== window, "Window did not become key")
 
         workflow.shareDialog()
 
-        XCTAssertFalse(presented)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
-        XCTAssertEqual(destination.statuses.last, "Share unavailable: no window to present the sharing menu")
+        XCTAssertTrue(presentedIn === window.contentView)
+        XCTAssertNotEqual(destination.statuses.last, "Share unavailable: no window to present the sharing menu")
+    }
+
+    func testDetachedAnchorFallsBackToTheKeyWindow() throws {
+        let root = try makeShareRoot()
+        let (workflow, _, window) = makeMultiShare(engine: FakeRenderEngine(), root: root)
+        let anchor = try XCTUnwrap(workflow.shareAnchorView)
+        anchor.removeFromSuperview()
+        var presentedIn: NSView?
+        workflow.showPicker = { _, _, view in presentedIn = view }
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        try XCTSkipIf(NSApplication.shared.keyWindow !== window, "Window did not become key")
+
+        workflow.shareDialog()
+
+        XCTAssertTrue(presentedIn === window.contentView)
     }
 
     func testPickerDismissalAndShareServiceTerminalCallbacksReleaseTheirExports() {

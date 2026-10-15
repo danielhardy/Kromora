@@ -444,7 +444,11 @@ final class ExportWorkflowCoordinator {
     }
 
     private func presentSharePicker(for items: [Any], in directory: URL) {
-        guard let view = shareAnchorView, view.window != nil else {
+        // Prefer the toolbar control; fall back to the key window so a missing anchor never
+        // discards a share that is ready to present.
+        let fallback = NSApp.keyWindow?.contentView ?? NSApp.mainWindow?.contentView
+        let anchor = shareAnchorView.flatMap { $0.window != nil ? $0 : nil }
+        guard let view = anchor ?? fallback else {
             removeShareExport(at: directory)
             destination?.setExportStatus("Share unavailable: no window to present the sharing menu")
             return
