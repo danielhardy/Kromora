@@ -29,16 +29,20 @@ final class VirtualCopyMetadataCoordinator {
         self.reader = reader
     }
 
-    /// Reads the record with a detached package read. Missing or invalid records are unavailable.
+    /// Reads the record off the main actor. Missing or invalid records are unavailable.
     static func packageReader(_ package: PortableLibraryPackage) -> Reader {
         { assetID in
-            await Task.detached(priority: .utility) {
-                guard let record = try? package.readAssetRecord(for: assetID) else {
-                    return VirtualCopyPresentation.unknown
-                }
-                return .available(copyOf: record.copyOfAssetID)
-            }.value
+            await readPresentation(package, assetID)
         }
+    }
+
+    @concurrent private static func readPresentation(
+        _ package: PortableLibraryPackage, _ assetID: PortablePhotoAssetID
+    ) async -> VirtualCopyPresentation {
+        guard let record = try? package.readAssetRecord(for: assetID) else {
+            return .unknown
+        }
+        return .available(copyOf: record.copyOfAssetID)
     }
 
     var sourceDescription: String? {
