@@ -86,7 +86,7 @@ final class MenuCommandTests: XCTestCase {
         }
     }
 
-    func testBatchExportMenuUsesOriginalsLabelAndExistingRoute() throws {
+    func testSelectedPhotoExportMenuUsesAccurateLabelAndPreservesOriginalBundleRoute() throws {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent() // KromoraKitTests
             .deletingLastPathComponent() // Tests
@@ -98,6 +98,11 @@ final class MenuCommandTests: XCTestCase {
 
         XCTAssertTrue(menuCommands.contains("Button(\"Export Selected Photos…\") { run(.exportSelected) }"))
         XCTAssertTrue(menuCommands.contains(".keyboardShortcut(\"e\", modifiers: [.command, .shift])"))
+        XCTAssertTrue(
+            menuCommands.contains(
+                "Button(\"Export Original + Settings Bundle…\") { run(.exportOriginalWithSettings) }"
+            )
+        )
         XCTAssertFalse(menuCommands.contains("Button(\"Export Selected...\")"))
     }
 
