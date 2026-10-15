@@ -135,11 +135,11 @@ private struct PhotosReviewThumbnail: View {
                 Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
             case .loading:
                 placeholder { ProgressView().controlSize(.small) }
-            case .failed:
+            case .failed(let failure):
                 placeholder {
                     Image(systemName: "exclamationmark.triangle").foregroundStyle(.secondary)
                 }
-                .help("Thumbnail unavailable")
+                .help(failure.helpText)
                 .onTapGesture(count: 2) { retry() }
             }
         }

@@ -26,6 +26,14 @@ final class PhotosThumbnailLoaderTests: XCTestCase {
         guard case .failed(.assetUnavailable) = await unavailable.load("a") else { return XCTFail("expected unavailable") }
     }
 
+    func testAccessDeniedIsDistinctAndActionable() async {
+        let loader = PhotosThumbnailLoader(provider: Provider { _ in throw PhotosThumbnailFailure.accessDenied })
+        guard case .failed(let failure) = await loader.load("a"), failure == .accessDenied else {
+            return XCTFail("expected accessDenied")
+        }
+        XCTAssertTrue(failure.helpText.contains("System Settings"))
+    }
+
     @MainActor
     func testModelExposesLoadingLoadedAndFailedStates() async {
         let image = NSImage(size: NSSize(width: 4, height: 4))

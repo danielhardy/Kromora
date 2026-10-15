@@ -17,9 +17,24 @@ enum PhotosThumbnailState {
 
 enum PhotosThumbnailFailure: Error, Equatable {
     case missingIdentifier
+    case accessDenied
     case assetUnavailable
     case cancelled
     case failed(String)
+
+    /// Tooltip for a failed tile, naming the actionable cause when there is one.
+    var helpText: String {
+        switch self {
+        case .accessDenied:
+            "Kromora needs access to your Photos library to show thumbnails. Allow it in System Settings > Privacy & Security > Photos, then double-click to retry."
+        case .missingIdentifier, .assetUnavailable:
+            "Thumbnail unavailable. Double-click to retry."
+        case .cancelled:
+            "Thumbnail loading was cancelled. Double-click to retry."
+        case .failed(let reason):
+            "Thumbnail failed: \(reason). Double-click to retry."
+        }
+    }
 }
 
 /// Produces a thumbnail for a Photos local identifier. Tests inject fakes; the app uses
@@ -76,6 +91,13 @@ struct PhotoKitThumbnailProvider: PhotosThumbnailProviding {
     static let targetSize = CGSize(width: 256, height: 192)
 
     func thumbnail(for localIdentifier: String) async throws -> NSImage {
+        // PhotosPicker's out-of-process access does not authorize PhotoKit: without read access,
+        // `fetchAssets` silently returns an empty result. Ask once, then fail with an actionable error.
+        var status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        if status == .notDetermined {
+            status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+        }
+        guard status == .authorized || status == .limited else { throw PhotosThumbnailFailure.accessDenied }
         guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [localIdentifier], options: nil).firstObject
         else { throw PhotosThumbnailFailure.assetUnavailable }
         let options = PHImageRequestOptions()
