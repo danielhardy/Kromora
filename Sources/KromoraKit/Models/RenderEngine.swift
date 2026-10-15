@@ -1649,6 +1649,8 @@ actor RenderEngine: RenderEngining {
                                     detail: "layer=developedSource")
             nextDevelopedSourceFlightToken &+= 1
             let token = nextDevelopedSourceFlightToken
+            // Shared by concurrent callers and cancelled independently of any one of them, so the
+            // flight stays a stored detached task rather than a structured `@concurrent` call.
             let task = Task.detached(priority: .userInitiated) { () -> CIImage? in
                 guard !Task.isCancelled else { return nil }
                 return RenderPipeline.developedSource(
@@ -1688,12 +1690,18 @@ actor RenderEngine: RenderEngining {
             return image
         }
 
-        return await Task.detached(priority: .userInitiated) { () -> CIImage? in
-            guard !Task.isCancelled else { return nil }
-            return RenderPipeline.developedSource(
-                source, rawDevelop: rawDevelop, scale: scale, rotation: rotation
-            )
-        }.value
+        return await Self.developSource(source, rawDevelop: rawDevelop, scale: scale, rotation: rotation)
+    }
+
+    /// Runs the decode off the engine actor. The returned `CIImage` is immutable and `Sendable`;
+    /// every `CIFilter` and `CIContext` stays inside the actor.
+    @concurrent private static func developSource(
+        _ source: ImageSource, rawDevelop: RAWDevelopSettings, scale: RenderScale, rotation: ImageRotation
+    ) async -> CIImage? {
+        guard !Task.isCancelled else { return nil }
+        return RenderPipeline.developedSource(
+            source, rawDevelop: rawDevelop, scale: scale, rotation: rotation
+        )
     }
 
     private struct MaskPayloadWork: Sendable {

@@ -35,28 +35,31 @@ enum OriginalSettingsBundle {
         destination: URL,
         locationMetadataIncluded: Bool
     ) async throws {
-        try await withCancellableDetachedTask {
-            try createSynchronously(
-                source: source,
-                sourceName: sourceName,
-                document: document,
-                destination: destination,
-                locationMetadataIncluded: locationMetadataIncluded
-            )
-        }
+        try await createOffActor(
+            source: source,
+            sourceName: sourceName,
+            document: document,
+            destination: destination,
+            locationMetadataIncluded: locationMetadataIncluded
+        )
     }
 
-    /// Detached I/O does not inherit cancellation from the job that awaits it. Forward cancellation
-    /// explicitly so shutdown can stop bundle creation at its next cooperative checkpoint.
-    static func withCancellableDetachedTask<Value: Sendable>(
-        operation: @escaping @Sendable () throws -> Value
-    ) async throws -> Value {
-        let worker = Task.detached(priority: .userInitiated, operation: operation)
-        return try await withTaskCancellationHandler {
-            try await worker.value
-        } onCancel: {
-            worker.cancel()
-        }
+    /// Runs the synchronous bundle write on the global executor. `@concurrent` keeps the caller's
+    /// cancellation, so shutdown stops bundle creation at its next cooperative checkpoint.
+    @concurrent private static func createOffActor(
+        source: ImageSource,
+        sourceName: String,
+        document: EditDocument,
+        destination: URL,
+        locationMetadataIncluded: Bool
+    ) async throws {
+        try createSynchronously(
+            source: source,
+            sourceName: sourceName,
+            document: document,
+            destination: destination,
+            locationMetadataIncluded: locationMetadataIncluded
+        )
     }
 
     private static func createSynchronously(

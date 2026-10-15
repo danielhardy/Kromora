@@ -23,19 +23,15 @@ struct LibraryMembershipMatcher: Sendable {
         self.init(knownHashes: Set(try PortablePackageImportCatalog(package: package).existingHashes.keys))
     }
 
-    /// Loads the catalog on a detached task that is cancelled with the caller. The catalog read
-    /// itself is synchronous, so cancellation is honored before it starts and the caller is
-    /// released immediately rather than waiting for the read to finish.
+    /// Loads the catalog off the calling actor. The catalog read itself is synchronous, so
+    /// cancellation is honored before it starts.
     static func loader(for package: PortableLibraryPackage) -> @Sendable () async throws -> LibraryMembershipMatcher {
         { try await load(from: package) }
     }
 
-    static func load(from package: PortableLibraryPackage) async throws -> LibraryMembershipMatcher {
-        let work = Task.detached(priority: .utility) {
-            try Task.checkCancellation()
-            return try LibraryMembershipMatcher(package: package)
-        }
-        return try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
+    @concurrent static func load(from package: PortableLibraryPackage) async throws -> LibraryMembershipMatcher {
+        try Task.checkCancellation()
+        return try LibraryMembershipMatcher(package: package)
     }
 
     var isEmpty: Bool { knownHashes.isEmpty }
