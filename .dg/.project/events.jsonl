@@ -21969,3 +21969,6 @@
 {"id":"evt_mvad5smf_6u8or5","type":"issue.updated","ts":"2026-10-16T02:43:49.671Z","actor":"human","issue_id":"KRMA-1032","payload":{"before":{"status":"backlog","order":"zzzy"},"after":{"status":"backlog","order":"zzzy"},"fields":["body"]}}
 {"id":"evt_mv9yo8oj_ynlpxp","type":"issue.created","ts":"2026-10-15T19:58:16.051Z","actor":"codex","issue_id":"KRMA-1033","payload":{"title":"Unify photo export into one selection-aware workflow"}}
 {"id":"evt_mv9yo8zi_z87qpv","type":"issue.updated","ts":"2026-10-15T19:58:16.446Z","actor":"human","issue_id":"KRMA-1033","payload":{"before":{"status":"backlog","order":"zzzy"},"after":{"status":"backlog","order":"zzzy"},"fields":["body"]}}
+{"id":"evt_mv9yqq24_dump57","type":"issue.created","ts":"2026-10-15T20:00:11.884Z","actor":"codex","issue_id":"KRMA-1034","payload":{"title":"Anchor the Share picker to its toolbar button"}}
+{"id":"evt_mv9yqqd2_b6hs3q","type":"issue.updated","ts":"2026-10-15T20:00:12.278Z","actor":"human","issue_id":"KRMA-1034","payload":{"before":{"status":"backlog","order":"y"},"after":{"status":"backlog","order":"y"},"fields":["body"]}}
+{"id":"evt_mv9yr4ml_ub90fw","type":"issue.moved","ts":"2026-10-15T20:00:30.765Z","actor":"human","issue_id":"KRMA-1034","payload":{"before":{"status":"backlog","order":"y"},"after":{"status":"ready","order":"y"},"fields":["status","order"]}}
