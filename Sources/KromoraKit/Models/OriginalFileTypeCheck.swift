@@ -40,6 +40,14 @@ enum OriginalFileTypeCheck {
         let container = container(of: data)
         let isRAWName = ImageDecoder.rawExtensions.contains(ext)
 
+        // TIFF is only a container: ordinary TIFF photos and camera RAWs share the same byte-order
+        // header. Confirm TIFF-based files with the same ImageIO/CIRAWFilter path used by the
+        // editor before accepting a RAW extension.
+        if isRAWName, container == .tiffBased, ImageSource.kind(forData: data) != .raw {
+            return "\(name) holds TIFF image data, not RAW. Photos supplied an edited or rendered "
+                + "copy instead of the original, so it was not imported."
+        }
+
         let detected: String
         switch container {
         case .jpeg: detected = "JPEG"

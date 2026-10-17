@@ -752,14 +752,15 @@ final class PhotosImportTests: TempDirectoryTestCase {
 
 final class OriginalFileTypeCheckTests: XCTestCase {
     private let jpeg = Data([0xFF, 0xD8, 0xFF, 0xE0, 0, 0x10] + Array("JFIF".utf8) + [0, 1, 1, 0])
-    private let tiffRAW = Data([0x49, 0x49, 0x2A, 0x00, 8, 0, 0, 0, 0, 0, 0, 0])
+    private let tiffContainer = Data([0x49, 0x49, 0x2A, 0x00, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0])
 
     func testJPEGBytesUnderRAWNameAreRejected() {
         XCTAssertNotNil(OriginalFileTypeCheck.mismatchReason(name: "DSC00160.ARW", data: jpeg))
     }
 
-    func testTIFFBasedRAWUnderRAWNameIsAccepted() {
-        XCTAssertNil(OriginalFileTypeCheck.mismatchReason(name: "DSC00160.ARW", data: tiffRAW))
+    func testTIFFContainerUnderRAWNameIsRejectedWhenItIsNotRecognizedAsRAW() {
+        XCTAssertEqual(ImageSource.kind(forData: tiffContainer), .standard)
+        XCTAssertNotNil(OriginalFileTypeCheck.mismatchReason(name: "DSC00160.ARW", data: tiffContainer))
     }
 
     func testJPEGNameWithJPEGBytesIsAcceptedAndPNGNameIsNot() {
