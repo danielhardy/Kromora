@@ -1,6 +1,7 @@
 import Foundation
 import Photos
 import PhotosUI
+import Synchronization
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -25,10 +26,14 @@ struct PhotosImportProgress: Equatable, Sendable {
     var failed: Int
     var currentName: String?
     var phase: Phase
+    /// Byte progress (0...1) of the item currently transferring, when the provider reports it,
+    /// such as while an iCloud original downloads. Nil between items and for local transfers.
+    var transferFraction: Double?
 
     var fraction: Double {
         guard total > 0 else { return 1 }
-        return min(1, Double(processed) / Double(total))
+        let current = phase == .transferring ? (transferFraction ?? 0) : 0
+        return min(1, (Double(processed) + current) / Double(total))
     }
 }
 
@@ -51,6 +56,12 @@ protocol PhotosImportProviding: AnyObject {
     /// The asset's capture date, used to name items whose original filename is unavailable.
     func captureDate(for selection: PhotosImportSelection) -> Date?
     func transferData(for selection: PhotosImportSelection) async throws -> Data?
+    /// Like `transferData(for:)`, reporting the item's transfer fraction (0...1) as it advances.
+    /// Providers deliver monotonic, bounded updates on the main actor; the default reports none.
+    func transferData(
+        for selection: PhotosImportSelection,
+        progress: @escaping @MainActor @Sendable (Double) -> Void
+    ) async throws -> Data?
     /// Transfers the original for review inspection. A provider may keep the transferred file so
     /// the import's later `transferData` reuses it instead of fetching the original again.
     func inspectionData(for selection: PhotosImportSelection) async throws -> Data?
@@ -61,6 +72,12 @@ protocol PhotosImportProviding: AnyObject {
 
 extension PhotosImportProviding {
     func captureDate(for selection: PhotosImportSelection) -> Date? { nil }
+    func transferData(
+        for selection: PhotosImportSelection,
+        progress: @escaping @MainActor @Sendable (Double) -> Void
+    ) async throws -> Data? {
+        try await transferData(for: selection)
+    }
     func inspectionData(for selection: PhotosImportSelection) async throws -> Data? {
         try await transferData(for: selection)
     }
@@ -102,6 +119,13 @@ final class PhotosPickerImportProvider: PhotosImportProviding {
     /// Consumes a transfer retained by review when there is one; the file is unlinked immediately
     /// and the mapping keeps it readable, so nothing outlives the import.
     func transferData(for selection: PhotosImportSelection) async throws -> Data? {
+        try await transferData(for: selection, progress: { _ in })
+    }
+
+    func transferData(
+        for selection: PhotosImportSelection,
+        progress: @escaping @MainActor @Sendable (Double) -> Void
+    ) async throws -> Data? {
         if let entry = retained.removeValue(forKey: selection.ordinal) {
             retainedBytes -= entry.bytes
             defer { try? FileManager.default.removeItem(at: entry.url) }
@@ -113,7 +137,7 @@ final class PhotosPickerImportProvider: PhotosImportProviding {
         let directory = Self.scratchDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let file = directory.appendingPathComponent("original")
-        try await Self.writeOriginal(resource, to: file)
+        try await Self.writeOriginal(resource, to: file, progress: progress)
         return try Data(contentsOf: file, options: .mappedIfSafe)
     }
 
@@ -180,11 +204,26 @@ final class PhotosPickerImportProvider: PhotosImportProviding {
     }
 
     /// Streams the original to `file`, allowing iCloud download.
-    private static func writeOriginal(_ resource: PHAssetResource, to file: URL) async throws {
+    /// `progress` is throttled to whole-percent steps and delivered on the main actor.
+    private static func writeOriginal(
+        _ resource: PHAssetResource, to file: URL,
+        progress: @escaping @MainActor @Sendable (Double) -> Void = { _ in }
+    ) async throws {
         try FileManager.default.createDirectory(
             at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         let options = PHAssetResourceRequestOptions()
         options.isNetworkAccessAllowed = true
+        let lastPercent = Mutex(-1)
+        options.progressHandler = { fraction in
+            let percent = Int((min(1, max(0, fraction)) * 100).rounded(.down))
+            let advanced = lastPercent.withLock { last in
+                guard percent > last else { return false }
+                last = percent
+                return true
+            }
+            guard advanced else { return }
+            Task { @MainActor in progress(Double(percent) / 100) }
+        }
         do {
             try await PHAssetResourceManager.default().writeData(for: resource, toFile: file, options: options)
         } catch {
@@ -314,7 +353,10 @@ final class PhotosImportCoordinator {
                 )
 
                 do {
-                    guard let data = try await provider.transferData(for: selection) else {
+                    let data = try await provider.transferData(for: selection) { [weak self] fraction in
+                        self?.updateTransfer(fraction, operationID: currentOperationID)
+                    }
+                    guard let data else {
                         transferInterval.end()
                         guard self.isCurrent(currentOperationID), !Task.isCancelled else {
                             wasCancelled = true
@@ -408,9 +450,27 @@ final class PhotosImportCoordinator {
         guard var progress else { return }
         progress.phase = phase
         progress.currentName = name
+        progress.transferFraction = nil
         self.progress = progress
         onProgress?(progress)
         onStatus?("\(phase.label) \(name)  \(progress.processed)/\(progress.total)…")
+    }
+
+    /// Records the current item's transfer fraction. Late or out-of-order updates (from a finished,
+    /// cancelled, or superseded item) are ignored and the value never moves backwards.
+    func updateTransfer(_ fraction: Double, operationID: UUID? = nil) {
+        if let operationID, !isCurrent(operationID) { return }
+        guard var progress, progress.phase == .transferring, !Task.isCancelled else { return }
+        let clamped = min(1, max(0, fraction))
+        guard clamped > (progress.transferFraction ?? -1) else { return }
+        progress.transferFraction = clamped
+        self.progress = progress
+        onProgress?(progress)
+        let percent = Int((clamped * 100).rounded(.down))
+        onStatus?(
+            "Transferring \(progress.currentName ?? "")  \(percent)%  "
+                + "\(progress.processed)/\(progress.total)…"
+        )
     }
 
     func append(_ item: ImageCollection.PhotoImportItem, ordinal: Int) {
@@ -437,6 +497,7 @@ final class PhotosImportCoordinator {
         }
         progress.currentName = item.name
         progress.phase = .transferring
+        progress.transferFraction = nil
         self.progress = progress
         onProgress?(progress)
         let label: String
@@ -477,6 +538,7 @@ final class PhotosImportCoordinator {
         }
         progress.currentName = name
         progress.phase = .transferring
+        progress.transferFraction = nil
         self.progress = progress
         onProgress?(progress)
         onStatus?(

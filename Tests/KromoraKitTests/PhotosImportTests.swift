@@ -12,6 +12,10 @@ private final class TestPhotosImportProvider: PhotosImportProviding {
     var requestedOrdinals: [Int] = []
     var blockingOrdinal: Int?
     var ignoresCancellation = false
+    /// Transfer fractions reported per ordinal before the response resolves.
+    var progressScript: [Int: [Double]] = [:]
+    /// When set, the provider pauses on this ordinal after reporting its script.
+    var progressPauseOrdinal: Int?
 
     init(
         names: [Int: String?] = [:],
@@ -23,6 +27,15 @@ private final class TestPhotosImportProvider: PhotosImportProviding {
 
     func originalFilename(for selection: PhotosImportSelection) -> String? {
         names[selection.ordinal] ?? nil
+    }
+
+    func transferData(
+        for selection: PhotosImportSelection,
+        progress: @escaping @MainActor @Sendable (Double) -> Void
+    ) async throws -> Data? {
+        for fraction in progressScript[selection.ordinal] ?? [] { progress(fraction) }
+        if selection.ordinal == progressPauseOrdinal { try await Task.sleep(for: .seconds(30)) }
+        return try await transferData(for: selection)
     }
 
     func transferData(for selection: PhotosImportSelection) async throws -> Data? {
@@ -226,6 +239,92 @@ final class PhotosImportTests: TempDirectoryTestCase {
 
         let fallback = try XCTUnwrap(viewModel.collection.items.first?.displayName)
         XCTAssertTrue(fallback.hasPrefix("Photo 20"), "fallback derives from a timestamp, not an ordinal: \(fallback)")
+    }
+
+    func testTransferProgressIsSurfacedPerItemAndMonotonic() async throws {
+        let data = try Data(contentsOf: Fixtures.writeJPEG(
+            width: 32, height: 24, orientation: 1, named: "progress.jpg", in: tempDirectory
+        ))
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let coordinator = PhotosImportCoordinator(destination: viewModel)
+        let provider = TestPhotosImportProvider(
+            names: [0: "Cloud.jpg"], responses: [0: .success(data)]
+        )
+        provider.progressScript = [0: [0.25, 0.1, 0.5, 2.0]]
+        var seen: [Double] = []
+        var overall: [Double] = []
+        coordinator.onProgress = { progress in
+            guard let progress, let fraction = progress.transferFraction else { return }
+            seen.append(fraction)
+            overall.append(progress.fraction)
+        }
+
+        coordinator.start(
+            selections: [PhotosImportSelection(ordinal: 0, localIdentifier: "photos.cloud")],
+            provider: provider
+        )
+        try await waitForCoordinator(coordinator)
+
+        XCTAssertEqual(seen, [0.25, 0.5, 1.0], "regressions are dropped and values are clamped")
+        XCTAssertEqual(overall, [0.25, 0.5, 1.0])
+        XCTAssertNil(coordinator.progress)
+    }
+
+    func testTransferProgressResetsBetweenItemsAndFailureStillCompletesLaterItems() async throws {
+        let data = try Data(contentsOf: Fixtures.writeJPEG(
+            width: 32, height: 24, orientation: 1, named: "progress2.jpg", in: tempDirectory
+        ))
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let coordinator = PhotosImportCoordinator(destination: viewModel)
+        let provider = TestPhotosImportProvider(
+            names: [0: "Fails.jpg", 1: "Next.jpg"],
+            responses: [0: .failure(.unavailable), 1: .success(data)]
+        )
+        provider.progressScript = [0: [0.6], 1: [0.3]]
+        var snapshots: [(name: String?, fraction: Double?)] = []
+        coordinator.onProgress = { progress in
+            if let progress { snapshots.append((progress.currentName, progress.transferFraction)) }
+        }
+
+        coordinator.start(
+            selections: (0..<2).map { PhotosImportSelection(ordinal: $0, localIdentifier: "p.\($0)") },
+            provider: provider
+        )
+        try await waitForCoordinator(coordinator)
+
+        XCTAssertEqual(coordinator.failures.map(\.name), ["Fails.jpg"])
+        XCTAssertEqual(viewModel.collection.items.map(\.displayName), ["Next.jpg"])
+        XCTAssertTrue(snapshots.contains { $0.name == "Fails.jpg" && $0.fraction == 0.6 })
+        XCTAssertTrue(snapshots.contains { $0.name == "Next.jpg" && $0.fraction == nil })
+        XCTAssertTrue(snapshots.contains { $0.name == "Next.jpg" && $0.fraction == 0.3 })
+    }
+
+    func testCancelledTransferKeepsEarlierItemAndStopsProgress() async throws {
+        let data = try Data(contentsOf: Fixtures.writeJPEG(
+            width: 32, height: 24, orientation: 1, named: "progress3.jpg", in: tempDirectory
+        ))
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let coordinator = PhotosImportCoordinator(destination: viewModel)
+        let provider = TestPhotosImportProvider(
+            names: [0: "Kept.jpg", 1: "Downloading.jpg"],
+            responses: [0: .success(data), 1: .success(data)]
+        )
+        provider.progressScript = [1: [0.4]]
+        provider.progressPauseOrdinal = 1
+        var lastFraction: Double?
+        coordinator.onProgress = { lastFraction = $0?.transferFraction ?? lastFraction }
+
+        coordinator.start(
+            selections: (0..<2).map { PhotosImportSelection(ordinal: $0, localIdentifier: "p.\($0)") },
+            provider: provider
+        )
+        try await waitUntil("the download to report progress") { lastFraction == 0.4 }
+        coordinator.cancel()
+        try await waitForCoordinator(coordinator)
+
+        XCTAssertTrue(coordinator.wasCancelled)
+        XCTAssertEqual(viewModel.collection.items.map(\.displayName), ["Kept.jpg"])
+        XCTAssertNil(coordinator.progress)
     }
 
     func testCoordinatorCancellationFinishesWithoutDiscardingEarlierItem() async throws {
