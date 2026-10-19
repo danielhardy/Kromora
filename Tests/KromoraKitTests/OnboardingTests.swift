@@ -47,8 +47,14 @@ final class OnboardingTests: XCTestCase {
         XCTAssertFalse(defaults.bool(forKey: FirstRunOnboarding.hasSeenWelcomeKey))
         XCTAssertEqual(defaults.string(forKey: "unrelated"), "keep")
 
-        // Dismissing the replayed welcome persists completion again (ContentView.onDismiss).
-        defaults.set(true, forKey: FirstRunOnboarding.hasSeenWelcomeKey)
-        XCTAssertTrue(defaults.bool(forKey: FirstRunOnboarding.hasSeenWelcomeKey))
+        XCTAssertTrue(FirstRunOnboarding.shouldPresentWelcome(in: defaults))
+
+        // ContentView presents on appear via shouldPresentWelcome and calls markWelcomeSeen on dismiss.
+        FirstRunOnboarding.markWelcomeSeen(in: defaults)
+        XCTAssertFalse(FirstRunOnboarding.shouldPresentWelcome(in: defaults))
+        XCTAssertEqual(defaults.string(forKey: "unrelated"), "keep")
+
+        FirstRunOnboarding.reset(in: defaults)
+        XCTAssertTrue(FirstRunOnboarding.shouldPresentWelcome(in: defaults))
     }
 }

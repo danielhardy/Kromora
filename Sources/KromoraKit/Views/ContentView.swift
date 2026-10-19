@@ -17,7 +17,6 @@ public struct ContentView: View {
     @Bindable private var chrome: ChromePresentationState
     @Bindable private var libraryPresentation: LibraryPresentationState
     @State private var photosSelection: [PhotosPickerItem] = []
-    @AppStorage(FirstRunOnboarding.hasSeenWelcomeKey) private var hasSeenWelcome = false
     @State private var isWelcomePresented = false
     @State private var isTourPresented = false
     @State private var isShortcutReferencePresented = false
@@ -89,7 +88,7 @@ public struct ContentView: View {
                 PhotosImportReviewView(review: viewModel.photosImportReview)
             }
             .modifier(SelectiveCopySheetModifier(viewModel: viewModel))
-            .sheet(isPresented: $isWelcomePresented, onDismiss: { hasSeenWelcome = true }) {
+            .sheet(isPresented: $isWelcomePresented, onDismiss: { FirstRunOnboarding.markWelcomeSeen() }) {
                 WelcomeView(
                     canImportIntoLibrary: viewModel.canImportIntoPortableLibrary,
                     onImport: {
@@ -130,7 +129,7 @@ public struct ContentView: View {
             }
             .onAppear {
                 viewModel.refreshRemovableMedia()
-                if !hasSeenWelcome { isWelcomePresented = true }
+                if FirstRunOnboarding.shouldPresentWelcome() { isWelcomePresented = true }
             }
             .keyboardSurface(router: keyboardRouter, viewModel: viewModel)
             .modifier(MenuCommandReceivers(viewModel: viewModel))
