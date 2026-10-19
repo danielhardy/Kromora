@@ -58,6 +58,9 @@ final class FocusedSceneValueTests: TempDirectoryTestCase {
         func persistInactiveClipboardDocument(
             _ document: EditDocument, for reference: EditSourceReference
         ) {}
+        func loadClipboardBase(for reference: EditSourceReference) async -> EditDocumentLoadResult {
+            EditDocumentLoadResult(document: EditDocument(), found: false, status: .ready)
+        }
         func flushClipboardPersistence() {}
     }
 

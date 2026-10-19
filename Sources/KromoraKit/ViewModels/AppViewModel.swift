@@ -1230,7 +1230,14 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
             self?.persistenceFailureMessage = message
             self?.statusMessage = message
         }
+        editorDocument.pinnedAssetIDs = { [weak self] in
+            guard let self else { return [] }
+            return Set([self.activeAssetID, self.sourceSession.activeRequest?.assetID].compactMap { $0 })
+        }
+        editorDocument.isDirty = { [weak self] in self?.persistence.isDirty($0) ?? true }
         persistence.onDurableWrite = { [weak self] reference in
+            // Dirty state is already updated: an older acknowledgement leaves a newer queued edit pinned.
+            self?.editorDocument.evictIfNeeded()
             guard self?.activeSourceReference == reference else { return }
             self?.refreshDurableEditHistory()
         }
@@ -2194,7 +2201,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         let session = editorDocument.session(for: assetID)
         document = session?.document ?? EditDocument()
         comparisonBaselineDocument = document.comparisonBaseline
-        editorDocument.activate(session: session)
+        editorDocument.activate(session: session, for: assetID)
         if let session {
             collection.setPresentedCrop(
                 session.document.crop, rotation: session.document.rotation, for: assetID)
@@ -2330,6 +2337,8 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
             hadInMemorySession: session != nil,
             persistenceBarrier: persistenceBarrier
         )
+        // The request now pins its asset; trim whatever the previous selection left over budget.
+        editorDocument.evictIfNeeded()
     }
 
     private func presentProvisionalCandidate(
@@ -3781,7 +3790,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
     private func adoptRestoredEditRevision(_ restored: EditDocument, priorDocuments: [EditDocument]) {
         if let activeAssetID {
             editorDocument.adoptHistoryPosition(restored, priorDocuments: priorDocuments, for: activeAssetID)
-            editorDocument.activate(session: editorDocument.session(for: activeAssetID))
+            editorDocument.activate(session: editorDocument.session(for: activeAssetID), for: activeAssetID)
         }
         applyHistoryDocument(restored, persist: false)
     }
@@ -4232,6 +4241,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         editorDocument.commit(document: document, for: activeAssetID)
 
         queuePersistence(document, for: activeSourceReference, reportsStatus: true, force: force)
+        editorDocument.evictIfNeeded()
     }
 
     /// Serialize disk snapshots in edit order. This is shared with multi-photo paste because a
@@ -4362,6 +4372,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         persistence.onStatusChange = nil
         persistence.onFailure = nil
         persistence.onDurableWrite = nil
+        editClipboardWorkflow.stop()
         photosImportReview.shutdown()
         photosImportCoordinator.onStatus = nil
         photosImportCoordinator.destination = nil
@@ -5002,6 +5013,11 @@ extension AppViewModel: EditClipboardDestination {
     func persistInactiveClipboardDocument(_ document: EditDocument, for reference: EditSourceReference) {
         requestEditedThumbnail(for: reference.assetID, priority: .visibleGrid, force: true)
         queuePersistence(document, for: reference, reportsStatus: false, force: true)
+        // Persistence now knows the snapshot, so the destination's session is pinned as dirty.
+        editorDocument.evictIfNeeded()
+    }
+    func loadClipboardBase(for reference: EditSourceReference) async -> EditDocumentLoadResult {
+        await editStore.load(for: reference)
     }
     func flushClipboardPersistence() { requestPersistenceFlush() }
 }

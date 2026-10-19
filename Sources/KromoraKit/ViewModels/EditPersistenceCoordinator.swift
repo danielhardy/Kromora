@@ -50,6 +50,10 @@ final class EditPersistenceCoordinator {
     var pendingCount: Int { pending.count }
     var peakPendingCount: Int { peakPending }
 
+    /// True while any snapshot for the asset is queued, in flight, or retained after a failed
+    /// save. An acknowledgement of an older snapshot leaves a newer queued one dirty.
+    func isDirty(_ assetID: PhotoAssetID) -> Bool { pending[assetID] != nil }
+
     /// Queue the newest value for an asset. The latest snapshot wins, while a force request (used
     /// for multi-photo paste and termination) is sticky until its snapshot is durable.
     func enqueue(

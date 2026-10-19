@@ -405,6 +405,7 @@ final class CopyPasteTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.collection.selectedIndices, [0, 1, 2, 3])
 
         viewModel.pasteEdits()
+        await viewModel.editClipboardWorkflow.waitForPendingPaste()
 
         for item in viewModel.collection.items {
             XCTAssertEqual(

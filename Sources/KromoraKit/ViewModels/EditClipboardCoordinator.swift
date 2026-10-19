@@ -23,6 +23,9 @@ protocol EditClipboardDestination: AnyObject {
     func activateClipboardAsset(_ assetID: PhotoAssetID)
     func setClipboardStatus(_ message: String)
     func persistInactiveClipboardDocument(_ document: EditDocument, for reference: EditSourceReference)
+    /// The durable edit for a destination with no resident session. Paste applies to this base so
+    /// a category-limited paste never replaces the saved categories with neutral values.
+    func loadClipboardBase(for reference: EditSourceReference) async -> EditDocumentLoadResult
     func flushClipboardPersistence()
 }
 
@@ -40,6 +43,7 @@ final class EditClipboardCoordinator {
     @ObservationIgnored weak var destination: (any EditClipboardDestination)?
     @ObservationIgnored private let editor: EditorDocumentCoordinator
     @ObservationIgnored private let settings: KromoraSettings
+    @ObservationIgnored private var pasteTask: Task<Void, Never>?
 
     init(
         editor: EditorDocumentCoordinator,
@@ -118,26 +122,96 @@ final class EditClipboardCoordinator {
 
         destination.endUndoGrouping()
         var pastedCount = 0
+        var deferred: [EditClipboardTarget] = []
         for target in targets {
-            let reference = target.sourceReference
-            if destination.clipboardActiveSourceReference == reference {
-                // Selection can advance before source preparation finishes. Restore the session
-                // that owns the displayed source, rather than trusting the selected active ID.
-                destination.activateClipboardAsset(reference.assetID)
-                editor.activate(session: editor.session(for: reference.assetID))
-                applyToActiveDocument(clipboard, isRAW: target.isRAW, destination: destination)
-            } else {
-                let updated = clipboard.applying(
-                    to: editor.session(for: reference.assetID)?.document ?? EditDocument(),
-                    destinationIsRAW: target.isRAW, categories: clipboardCategories
-                )
-                guard editor.apply(updated, to: reference.assetID) else { continue }
-                destination.persistInactiveClipboardDocument(updated, for: reference)
+            switch pasteOrDefer(target, clipboard: clipboard, destination: destination) {
+            case .pasted: pastedCount += 1
+            case .unchanged: break
+            case .needsDurableBase: deferred.append(target)
             }
-            pastedCount += 1
         }
-        destination.setClipboardStatus(pasteCompletionMessage(photoCount: pastedCount))
+        guard !deferred.isEmpty else {
+            finishPaste(pastedCount: pastedCount, skipped: [], destination: destination)
+            return
+        }
+        pasteTask = Task { [weak self] in
+            var pasted = pastedCount
+            var skipped: [String] = []
+            for target in deferred {
+                guard let self, let destination = self.destination else { return }
+                let reference = target.sourceReference
+                let result = await destination.loadClipboardBase(for: reference)
+                guard !Task.isCancelled else { return }
+                guard result.isUsableForPrefetch else {
+                    skipped.append(reference.url?.lastPathComponent ?? reference.assetID.description)
+                    continue
+                }
+                // A session may have appeared (or the photo become active) while the read was
+                // in flight; the resident value is newer than the durable one.
+                switch self.pasteOrDefer(
+                    target, clipboard: clipboard, destination: destination,
+                    durableBase: result.found ? result.document : EditDocument()
+                ) {
+                case .pasted: pasted += 1
+                case .unchanged, .needsDurableBase: break
+                }
+            }
+            guard let self, let destination = self.destination else { return }
+            self.finishPaste(pastedCount: pasted, skipped: skipped, destination: destination)
+        }
+    }
+
+    private enum PasteOutcome { case pasted, unchanged, needsDurableBase }
+
+    /// Paste to one target. With no resident session and no `durableBase`, the target needs an
+    /// asynchronous durable read first; a neutral or active-photo base is never substituted.
+    private func pasteOrDefer(
+        _ target: EditClipboardTarget, clipboard: EditClipboardPayload,
+        destination: any EditClipboardDestination, durableBase: EditDocument? = nil
+    ) -> PasteOutcome {
+        let reference = target.sourceReference
+        if destination.clipboardActiveSourceReference == reference {
+            // Selection can advance before source preparation finishes. Restore the session
+            // that owns the displayed source, rather than trusting the selected active ID.
+            destination.activateClipboardAsset(reference.assetID)
+            editor.activate(session: editor.session(for: reference.assetID), for: reference.assetID)
+            applyToActiveDocument(clipboard, isRAW: target.isRAW, destination: destination)
+            return .pasted
+        }
+        let base: EditDocument
+        if let resident = editor.session(for: reference.assetID)?.document {
+            base = resident
+        } else if let durableBase {
+            base = durableBase
+        } else {
+            return .needsDurableBase
+        }
+        let updated = clipboard.applying(
+            to: base, destinationIsRAW: target.isRAW, categories: clipboardCategories)
+        guard editor.apply(updated, to: reference.assetID, durableBase: base) else { return .unchanged }
+        destination.persistInactiveClipboardDocument(updated, for: reference)
+        return .pasted
+    }
+
+    private func finishPaste(
+        pastedCount: Int, skipped: [String], destination: any EditClipboardDestination
+    ) {
+        var message = pasteCompletionMessage(photoCount: pastedCount)
+        if !skipped.isEmpty {
+            message += "; skipped \(skipped.count) whose saved edit could not be read: "
+                + skipped.joined(separator: ", ")
+        }
+        destination.setClipboardStatus(message)
         destination.flushClipboardPersistence()
+    }
+
+    /// Suspends until a paste waiting on durable reads has finished.
+    func waitForPendingPaste() async { await pasteTask?.value }
+
+    /// Abandon a paste still waiting on durable reads; called by the owner during shutdown.
+    func stop() {
+        pasteTask?.cancel()
+        pasteTask = nil
     }
 
     private func applyToActiveDocument(

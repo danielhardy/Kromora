@@ -1,7 +1,24 @@
 # Editor-session retention policy
 
-Decision record for KRMA-1059. Implementation is KRMA-1060; the 16 GB soak is KRMA-1064. Nothing in
-this document is implemented yet except the read-only diagnostics noted under Evidence.
+Decision record for KRMA-1059, implemented by KRMA-1060; the 16 GB soak is KRMA-1064.
+
+## Implemented (KRMA-1060)
+
+`EditorDocumentCoordinator` holds one entry per photo (`session`, `revision`, cached document cost,
+recency tick); the `sessionRevisions` side dictionary is gone. `maximumResidentSessions` (32) and
+`maximumResidentSessionBytes` (192 MiB) are init parameters. `pinnedAssetIDs` and `isDirty` are
+closures wired by `AppViewModel` (active asset plus `SourceSessionCoordinator.activeRequest`;
+`EditPersistenceCoordinator.isDirty`). `evictIfNeeded()` runs after `saveActiveDocument` queues
+persistence, after `beginLoad`, after an inactive paste is queued, and from `onDurableWrite`; it
+is not run at shutdown. `peakResidentSessions` and `evictionDeferrals` are the observability
+counters. `EditClipboardCoordinator.pasteEdits` loads the durable document for a non-resident
+destination before applying and skips and reports a photo whose saved edit cannot be read.
+Cost lives in `EditDocument.estimatedRetentionBytes`. Tests: `EditorSessionEvictionTests`,
+`EditClipboardCoordinatorTests`, and the plateau case in `EditorSessionRetentionProbeTests`.
+
+Not covered by an automated test: full `AppViewModel` navigation-while-saving and
+begin-load-then-paste scenarios (7 and 8) rely on the pin closures above and the existing
+`StoredEditAdoptionTests` fences rather than a new end-to-end test.
 
 ## Problem
 

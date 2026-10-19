@@ -39,6 +39,11 @@ final class EditClipboardCoordinatorTests: TempDirectoryTestCase {
         func persistInactiveClipboardDocument(_ document: EditDocument, for reference: EditSourceReference) {
             persisted.append((document, reference))
         }
+        var durableBases: [PhotoAssetID: EditDocumentLoadResult] = [:]
+        func loadClipboardBase(for reference: EditSourceReference) async -> EditDocumentLoadResult {
+            durableBases[reference.assetID]
+                ?? EditDocumentLoadResult(document: EditDocument(), found: false, status: .ready)
+        }
         func flushClipboardPersistence() { flushes += 1 }
     }
 
@@ -185,7 +190,7 @@ final class EditClipboardCoordinatorTests: TempDirectoryTestCase {
         XCTAssertEqual(destination.status, "Pasted edits to 2 photos; retouch sources resolve per photo")
     }
 
-    func testBatchCanPasteUnopenedPhotoWithoutActiveSourceAndSkipsNoOpWrites() {
+    func testBatchCanPasteUnopenedPhotoWithoutActiveSourceAndSkipsNoOpWrites() async {
         let (workflow, destination, _) = makeWorkflow()
         destination.clipboardDocument.light.exposure = 0.6
         workflow.copyAllEdits()
@@ -194,14 +199,61 @@ final class EditClipboardCoordinatorTests: TempDirectoryTestCase {
         destination.clipboardActiveDestinationIsRAW = nil
         destination.clipboardSelectedTargets = [EditClipboardTarget(sourceReference: unopened, isRAW: false)]
         workflow.pasteEdits()
+        await workflow.waitForPendingPaste()
         XCTAssertEqual(destination.editor.session(for: unopened.assetID)?.document.light.exposure, 0.6)
         XCTAssertEqual(destination.documentUpdates, 0)
         XCTAssertEqual(destination.persisted.count, 1)
         let revision = destination.editor.revision(for: unopened.assetID)
         workflow.pasteEdits()
+        await workflow.waitForPendingPaste()
         XCTAssertEqual(destination.persisted.count, 1)
         XCTAssertEqual(destination.editor.revision(for: unopened.assetID), revision)
         XCTAssertEqual(destination.status, "Pasted edits; retouch sources resolve per photo")
         XCTAssertEqual(destination.flushes, 2)
+    }
+
+    /// KRMA-1060: a category-limited paste to a non-resident photo applies to its saved edit.
+    func testPasteToNonResidentPhotoUsesDurableBaseAndKeepsUndoAtSavedState() async {
+        let (workflow, destination, _) = makeWorkflow()
+        destination.clipboardDocument.light.exposure = 0.6
+        workflow.presentSelectiveCopyDialog()
+        workflow.selectiveCopyCategories = [.light]
+        workflow.confirmSelectiveCopy()
+        let target = reference("saved.png")
+        var saved = EditDocument()
+        saved.color.saturation = 33
+        destination.durableBases[target.assetID] =
+            EditDocumentLoadResult(document: saved, found: true, status: .ready)
+        destination.clipboardHasCopySource = false
+        destination.clipboardActiveDestinationIsRAW = nil
+        destination.clipboardSelectedTargets = [EditClipboardTarget(sourceReference: target, isRAW: false)]
+
+        workflow.pasteEdits()
+        await workflow.waitForPendingPaste()
+
+        let pasted = destination.persisted.first?.document
+        XCTAssertEqual(pasted?.light.exposure, 0.6)
+        XCTAssertEqual(pasted?.color.saturation, 33, "saved categories survive a limited paste")
+        var history = destination.editor.session(for: target.assetID)?.history
+        XCTAssertEqual(history?.undo(current: pasted ?? EditDocument()), saved)
+    }
+
+    func testPasteSkipsAndReportsPhotoWhoseSavedEditCannotBeRead() async {
+        let (workflow, destination, _) = makeWorkflow()
+        destination.clipboardDocument.light.exposure = 0.6
+        workflow.copyAllEdits()
+        let target = reference("corrupt.png")
+        destination.durableBases[target.assetID] = EditDocumentLoadResult(
+            document: EditDocument(), found: false, status: .corrupt("bad json"))
+        destination.clipboardHasCopySource = false
+        destination.clipboardActiveDestinationIsRAW = nil
+        destination.clipboardSelectedTargets = [EditClipboardTarget(sourceReference: target, isRAW: false)]
+
+        workflow.pasteEdits()
+        await workflow.waitForPendingPaste()
+
+        XCTAssertNil(destination.editor.session(for: target.assetID))
+        XCTAssertTrue(destination.persisted.isEmpty)
+        XCTAssertTrue(destination.status.contains("skipped 1"), destination.status)
     }
 }

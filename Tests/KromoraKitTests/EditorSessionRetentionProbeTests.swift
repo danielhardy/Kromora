@@ -123,4 +123,20 @@ final class EditorSessionRetentionProbeTests: XCTestCase {
         XCTAssertEqual(coordinator.retainedSessionCount, 0)
         XCTAssertEqual(coordinator.retainedHistoryEntryCount, 0)
     }
+
+    /// KRMA-1060: with a budget, clean inactive photos plateau instead of growing linearly.
+    func testBoundedRetentionPlateausForCleanInactivePhotos() throws {
+        let perDocument = heavyDocument(seed: 1).estimatedRetentionBytes
+        let budget = perDocument * 12
+        let coordinator = EditorDocumentCoordinator(
+            maximumResidentSessions: 3, maximumResidentSessionBytes: budget)
+        coordinator.isDirty = { _ in false }
+        for index in 0..<20 {
+            populate(coordinator, photo: index, depth: 2)
+            coordinator.evictIfNeeded()
+            XCTAssertLessThanOrEqual(coordinator.retainedSessionCount, 3)
+            XCTAssertLessThanOrEqual(coordinator.estimatedResidentBytes, budget)
+        }
+        XCTAssertEqual(coordinator.peakResidentSessions, 4, "one new photo past the cap before each pass")
+    }
 }
