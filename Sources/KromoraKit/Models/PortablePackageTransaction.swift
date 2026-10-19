@@ -579,6 +579,12 @@ struct PortablePackageTransactionFile: Codable, Equatable, Sendable {
         case staged
         case started
         case published
+        /// Rollback chose to restore the backup and is about to (or did) move it back. A backup
+        /// that is gone while this state is recorded was consumed by that restore, so the target
+        /// is the restored original and must never be deleted as a published replacement.
+        case restoring
+        /// Rollback finished with this file. Later retries skip it.
+        case restored
     }
 
     let relativePath: String
@@ -681,6 +687,16 @@ struct PortablePackageTransactionJournal: Codable, Equatable, Sendable {
         try c.encode(state, forKey: .state)
     }
 }
+
+/// Test seam: the points inside a file restore where rollback can be interrupted.
+enum PortablePackageRollbackPoint: Equatable, Sendable {
+    case beforeRestoringMarker(path: String)
+    case afterRestoringMarker(path: String)
+    case afterRestoreMove(path: String)
+    case afterRestoredMarker(path: String)
+}
+
+typealias PortablePackageRollbackHook = @Sendable (PortablePackageRollbackPoint) throws -> Void
 
 struct PortablePackageRecoveryReport: Equatable, Sendable {
     let recoveredTransactionIDs: [UUID]
@@ -979,7 +995,7 @@ struct PortablePackageTransaction {
             byteCount: byteCount, checksum: file.stagedChecksum, usedClonefile: false)
     }
 
-    mutating func abort(now: Date = Date()) throws {
+    mutating func abort(now: Date = Date(), rollbackHook: PortablePackageRollbackHook? = nil) throws {
         guard journal.state != .committed else {
             throw PortablePackageTransactionError.transactionAlreadyCommitted
         }
@@ -987,15 +1003,16 @@ struct PortablePackageTransaction {
         // over and already replayed this transaction, so serialize the rollback and verify that
         // this lease still owns the lock before applying the cached journal a second time.
         try lease.withOwnershipFence(at: now) {
-            try Self.rollback(journal, packageRoot: packageRoot)
+            try Self.rollback(
+                journal, packageRoot: packageRoot, journalURL: journalURL, hook: rollbackHook)
             cleanupCommittedArtifacts()
         }
     }
 
     /// Retries journal recovery after an abort I/O error without racing an expired takeover.
-    func recoverWhileOwner(now: Date = Date()) throws {
+    func recoverWhileOwner(now: Date = Date(), rollbackHook: PortablePackageRollbackHook? = nil) throws {
         try lease.withOwnershipFence(at: now) {
-            _ = try Self.recover(at: packageRoot)
+            _ = try Self.recover(at: packageRoot, rollbackHook: rollbackHook)
         }
     }
 
@@ -1193,7 +1210,9 @@ struct PortablePackageTransaction {
     /// Replays all uncommitted journals by restoring previous files and removing staging. A
     /// committed journal is only cleanup work, so recovery remains safe after a post-commit crash.
     @discardableResult
-    static func recover(at packageRoot: URL) throws -> PortablePackageRecoveryReport {
+    static func recover(
+        at packageRoot: URL, rollbackHook: PortablePackageRollbackHook? = nil
+    ) throws -> PortablePackageRecoveryReport {
         let fm = FileManager.default
         try validateRecoveryRoots(packageRoot: packageRoot)
         let transactionsURL = try packageURL("Recovery/Transactions", in: packageRoot)
@@ -1221,7 +1240,8 @@ struct PortablePackageTransaction {
             }
             for (url, journal) in journals {
                 if journal.state != .committed {
-                    try rollback(journal, packageRoot: packageRoot)
+                    try rollback(
+                        journal, packageRoot: packageRoot, journalURL: url, hook: rollbackHook)
                     recovered.append(journal.transactionID)
                 }
                 try? fm.removeItem(at: packageRoot.appendingPathComponent(journal.stagingDirectory))
@@ -1254,21 +1274,47 @@ struct PortablePackageTransaction {
         try? FileManager.default.removeItem(at: journalURL)
     }
 
-    private static func rollback(_ journal: PortablePackageTransactionJournal, packageRoot: URL)
-        throws
-    {
+    /// Rolls back an uncommitted journal. Every step is safe to repeat after an interruption: a
+    /// replaced file records `restoring` before its backup moves back, so a retry that finds the
+    /// backup gone and the target present knows the target is the restored original. Progress is
+    /// persisted to `journalURL`; the journal is kept until the caller removes it after success.
+    private static func rollback(
+        _ original: PortablePackageTransactionJournal, packageRoot: URL, journalURL: URL,
+        hook: PortablePackageRollbackHook?
+    ) throws {
         let fm = FileManager.default
-        for file in journal.files.reversed() {
+        var journal = original
+        for index in journal.files.indices.reversed() {
+            let file = journal.files[index]
+            if file.publicationState == .restored { continue }
             let target = try packageURL(file.relativePath, in: packageRoot)
             let staged = try packageURL(file.stagingPath, in: packageRoot)
             if let backup = try backupURL(file.backupPath, journal: journal, packageRoot: packageRoot) {
                 if fm.fileExists(atPath: backup.path) {
-                    if fm.fileExists(atPath: target.path) { try? fm.removeItem(at: target) }
+                    try hook?(.beforeRestoringMarker(path: file.relativePath))
+                    journal.files[index].publicationState = .restoring
+                    try writeDurably(PackageJSONCoder.encode(journal), to: journalURL)
+                    try hook?(.afterRestoringMarker(path: file.relativePath))
+                    if fm.fileExists(atPath: target.path) { try fm.removeItem(at: target) }
                     try fm.createDirectory(
                         at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
                     try fm.moveItem(at: backup, to: target)
                     try fullSyncDirectory(target.deletingLastPathComponent())
-                } else if file.publicationState == .published, fm.fileExists(atPath: target.path) {
+                    try hook?(.afterRestoreMove(path: file.relativePath))
+                    journal.files[index].publicationState = .restored
+                    try writeDurably(PackageJSONCoder.encode(journal), to: journalURL)
+                    try hook?(.afterRestoredMarker(path: file.relativePath))
+                } else if file.publicationState == .restoring {
+                    // The backup was consumed by an interrupted restore; the target is the
+                    // original. Never delete it.
+                    journal.files[index].publicationState = .restored
+                    try writeDurably(PackageJSONCoder.encode(journal), to: journalURL)
+                } else if file.publicationState == .published, fm.fileExists(atPath: target.path),
+                    try isPublishedReplacement(target, of: file)
+                {
+                    // No backup was ever consumed for this file, and the target is the staged
+                    // replacement. A journal from an older rollback may have restored the
+                    // original without recording it; those bytes do not match and are kept.
                     try fm.removeItem(at: target)
                 }
             } else if file.publicationState == .published
@@ -1277,7 +1323,6 @@ struct PortablePackageTransaction {
             {
                 try fm.removeItem(at: target)
             }
-            if !fm.fileExists(atPath: staged.path) { continue }
         }
         for removal in journal.removals.reversed() {
             guard let backup = try backupURL(removal.backupPath, journal: journal, packageRoot: packageRoot)
@@ -1466,6 +1511,14 @@ struct PortablePackageTransaction {
         if path == "Derived/Thumbnails/index.json" { return 3 }
         if path == "manifest.json" { return 3 }
         return 1
+    }
+
+    private static func isPublishedReplacement(
+        _ target: URL, of file: PortablePackageTransactionFile
+    ) throws -> Bool {
+        guard isRegularFile(at: target) else { return false }
+        let digest = try hashFile(at: target, chunkSize: 1 << 20, isCancelled: { false })
+        return digest.byteCount == file.byteCount && digest.checksum == file.stagedChecksum
     }
 
     private static func isRegularFile(at url: URL) -> Bool {
