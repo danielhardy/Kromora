@@ -187,3 +187,6 @@ Photos import reads the original `PHAssetResource` (`.alternatePhoto` RAW for RA
 magic number: a mismatch (for example JPEG bytes named `.ARW`) is flagged in the review sheet and
 skipped at import with a per-item message, never stored as an original. Files imported before this
 check can be re-imported from Photos; originals are not rewritten automatically.
+`PortableLibraryPackage.scanOriginalFileTypes()` is the read-only diagnostic for them: it reads each
+embedded original's leading bytes (the whole file only for a RAW-named TIFF header), and lists the
+affected asset, the detected format, and re-import guidance. It never hashes, rewrites, or deletes.

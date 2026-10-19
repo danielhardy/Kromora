@@ -35,6 +35,31 @@ enum OriginalFileTypeCheck {
 
     /// A user-facing reason when `name`'s extension cannot describe `data`, else nil.
     static func mismatchReason(name: String, data: Data) -> String? {
+        guard let mismatch = mismatch(name: name, data: data) else { return nil }
+        if mismatch.isRAWName {
+            return "\(name) holds \(mismatch.detected) image data, not RAW. Photos supplied an edited or "
+                + "rendered copy instead of the original, so it was not imported."
+        }
+        return "\(name) holds \(mismatch.detected) data that does not match its file extension."
+    }
+
+    struct Mismatch: Equatable, Sendable {
+        /// The positively identified format: "JPEG", "PNG", "HEIF", or "TIFF".
+        let detected: String
+        /// The extension claims RAW, so the bytes are a non-RAW rendition.
+        let isRAWName: Bool
+    }
+
+    /// Whether classifying `name` needs more than the leading bytes: TIFF is a RAW container too,
+    /// so a RAW-named TIFF-header file is only confirmed by ImageIO over the whole file.
+    static func needsFullData(name: String, head: Data) -> Bool {
+        let ext = (name as NSString).pathExtension.lowercased()
+        return ImageDecoder.rawExtensions.contains(ext) && container(of: head) == .tiffBased
+    }
+
+    /// The positively identified incompatibility between `name`'s extension and `data`, else nil.
+    /// `data` may be only the leading bytes unless `needsFullData(name:head:)` is true.
+    static func mismatch(name: String, data: Data) -> Mismatch? {
         let ext = (name as NSString).pathExtension.lowercased()
         guard !ext.isEmpty else { return nil }
         let container = container(of: data)
@@ -44,8 +69,7 @@ enum OriginalFileTypeCheck {
         // header. Confirm TIFF-based files with the same ImageIO/CIRAWFilter path used by the
         // editor before accepting a RAW extension.
         if isRAWName, container == .tiffBased, ImageSource.kind(forData: data) != .raw {
-            return "\(name) holds TIFF image data, not RAW. Photos supplied an edited or rendered "
-                + "copy instead of the original, so it was not imported."
+            return Mismatch(detected: "TIFF", isRAWName: true)
         }
 
         let detected: String
@@ -55,17 +79,14 @@ enum OriginalFileTypeCheck {
         case .isoBase(let isCanonRAW): detected = isCanonRAW ? "" : "HEIF"
         case .tiffBased, .otherRAW, .unknown: detected = ""
         }
+        guard !detected.isEmpty else { return nil }
 
-        if isRAWName {
-            guard !detected.isEmpty else { return nil }
-            return "\(name) holds \(detected) image data, not RAW. Photos supplied an edited or "
-                + "rendered copy instead of the original, so it was not imported."
-        }
+        if isRAWName { return Mismatch(detected: detected, isRAWName: true) }
         let expected: [String: Set<String>] = [
             "JPEG": ["jpg", "jpeg"], "PNG": ["png"], "HEIF": ["heic", "heif"],
         ]
-        if !detected.isEmpty, let allowed = expected[detected], !allowed.contains(ext) {
-            return "\(name) holds \(detected) data that does not match its file extension."
+        if let allowed = expected[detected], !allowed.contains(ext) {
+            return Mismatch(detected: detected, isRAWName: false)
         }
         return nil
     }
