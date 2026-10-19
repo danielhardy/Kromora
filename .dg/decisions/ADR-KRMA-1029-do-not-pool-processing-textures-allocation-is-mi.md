@@ -46,7 +46,7 @@ The returned image's holders do not tell the engine when they let go, and the en
 
 ## Test (window-independent)
 
-A deterministic fake: a pool over a counting texture factory, acquire N leases, retain some in stand-in owners, drop others, attach fences with controllable completion, and assert (1) a texture ID is never returned by `acquire` while its lease is alive or its fence outstanding, (2) cancel and throw paths release, (3) closed pool discards returns. A real-Metal variant writes a sentinel through a retained lease, churns acquisitions, and verifies the sentinel is unchanged.
+A deterministic, window-free test uses a pool over a counting texture factory and the same `LeasedImage` wrapper used by production owners. Retain wrapper copies in holder slots matching `PreviewSurface.image`, `lastValidImage`, `retainedCompleteImage`, `PreviewPublicationCoordinator.lastPresentedVisibleImage`, a pending histogram, and a canonical-write task. Drop them in different orders and attach controllable command-buffer fences; assert a texture ID is never reacquired until the final wrapper reference is gone and every fence completes. Also exercise cancel, throw, memory-pressure eviction, and closed-pool returns. A real-Metal variant writes a sentinel through a retained lease, churns acquisitions, and verifies the sentinel is unchanged.
 
 ## Follow-ups
 
