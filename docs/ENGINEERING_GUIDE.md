@@ -234,6 +234,20 @@ preview texture's output encoding. The tag persists across SwiftUI view updates 
 can color-match the canvas to the display, keeping it consistent with color-managed thumbnails and
 exports on Display P3 screens.
 
+**Camera sources and the sRGB canvas (KRMA-1045, 2026-10-19).** iPhone 17 Pro DNG/HEIC and Sony
+ILCE-7CR ARW files all report a Display P3 profile through ImageIO/Core Image; for RAW this is the
+space `CIRAWFilter` develops into, not an embedded ICC profile. The decoder keeps that wide-gamut
+data (extended-range floats) and the pipeline converts it to `WorkingSpace.current`, so the source
+profile is handled correctly; only the final sRGB encode (and `CIColorCubeWithColorSpace`, whose
+domain is [0, 1]) clips out-of-sRGB colour. On the local fixtures about 1-13% of pixels differ by
+more than 2/255 from a P3 render and 0.02-3% by more than 8/255 (worst: saturated iPhone HEIC/DNG
+frames, max about 50/255). Decision: keep the colour-managed sRGB canvas for the Instagram-first
+MVP; the loss is real but confined to saturated regions, and sRGB is the delivery target. A P3
+migration must move `WorkingSpace.current`, derived-LUT fitting (`RecipeExtractor`, pinned to
+sRGB), LUT interpolation, frame signatures/caches, thumbnails, and export tagging together, with
+preview/export parity tests; it is not a one-constant change. HDR/EDR and soft proofing remain
+separate. Hardware (colorimeter) validation was not performed.
+
 `LatestPreviewFrameStore` keeps the latest presented 2048 px preview of each asset. Three value types
 define what a stored frame means:
 
