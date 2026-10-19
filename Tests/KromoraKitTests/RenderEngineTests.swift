@@ -573,7 +573,8 @@ final class RenderEngineTests: TempDirectoryTestCase {
             XCTAssertEqual(exif[kCGImagePropertyExifDateTimeOriginal] as? String, "2026:09:02 12:34:56", format.rawValue)
             XCTAssertEqual(tiff[kCGImagePropertyTIFFMake] as? String, "Kromora", format.rawValue)
             XCTAssertEqual(tiff[kCGImagePropertyTIFFModel] as? String, "Test Body", format.rawValue)
-            XCTAssertEqual(tiff[kCGImagePropertyTIFFSoftware] as? String, "Kromora Tests", format.rawValue)
+            XCTAssertEqual(tiff[kCGImagePropertyTIFFSoftware] as? String,
+                           ExportAttribution().editorIdentity, format.rawValue)
             let latitude = try XCTUnwrap(gps[kCGImagePropertyGPSLatitude] as? Double)
             let longitude = try XCTUnwrap(gps[kCGImagePropertyGPSLongitude] as? Double)
             XCTAssertEqual(latitude, 43.6150, accuracy: 0.0001, format.rawValue)
@@ -699,6 +700,85 @@ final class RenderEngineTests: TempDirectoryTestCase {
             XCTAssertNil(tiff?[kCGImagePropertyTIFFModel], format.rawValue)
             XCTAssertNil(gps?[kCGImagePropertyGPSLatitude], format.rawValue)
             XCTAssertNil(gps?[kCGImagePropertyGPSLongitude], format.rawValue)
+        }
+    }
+
+    func testAttributionIsDerivedFromBundleVersionAndBuild() {
+        XCTAssertEqual(
+            ExportAttribution(infoDictionary: [
+                "CFBundleShortVersionString": "1.2", "CFBundleVersion": "45",
+            ]).editorIdentity,
+            "Kromora 1.2 (45)"
+        )
+        XCTAssertEqual(ExportAttribution(infoDictionary: [:]).editorIdentity, "Kromora")
+    }
+
+    func testPreservedExportsCarryEditorAttributionInTIFFAndXMP() async throws {
+        let url = try Fixtures.writeJPEG(
+            named: "attribution-source.jpg", in: tempDirectory,
+            tiff: [kCGImagePropertyTIFFMake: "Kromora", kCGImagePropertyTIFFSoftware: "Camera FW 1"]
+        )
+        let source = ImageSource(url: url, nativeExtent: CGSize(width: 64, height: 48))
+        let identity = ExportAttribution().editorIdentity
+
+        for format in ExportFormat.allCases {
+            let result = try await RenderEngine().encode(
+                source: source, document: EditDocument(), lut: nil,
+                options: ExportOptions(format: format, metadata: .preserve)
+            )
+            let imageSource = try XCTUnwrap(CGImageSourceCreateWithData(result as CFData, nil))
+            let properties = try XCTUnwrap(
+                CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [CFString: Any]
+            )
+            let tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any]
+            let png = properties[kCGImagePropertyPNGDictionary] as? [CFString: Any]
+            if format == .png {
+                XCTAssertEqual(
+                    png?[kCGImagePropertyPNGSoftware] as? String,
+                    identity,
+                    format.rawValue
+                )
+            } else {
+                XCTAssertEqual(
+                    tiff?[kCGImagePropertyTIFFSoftware] as? String,
+                    identity,
+                    format.rawValue
+                )
+            }
+            if format != .png {
+                XCTAssertEqual(tiff?[kCGImagePropertyTIFFMake] as? String, "Kromora", format.rawValue)
+            }
+
+            let xmp = try XCTUnwrap(CGImageSourceCopyMetadataAtIndex(imageSource, 0, nil))
+            let tag = try XCTUnwrap(
+                CGImageMetadataCopyTagWithPath(xmp, nil, "xmp:CreatorTool" as CFString),
+                format.rawValue
+            )
+            XCTAssertEqual(CGImageMetadataTagCopyValue(tag) as? String, identity, format.rawValue)
+        }
+    }
+
+    func testStrippedExportsOmitEditorAttribution() async throws {
+        let url = try Fixtures.writeJPEG(named: "attribution-strip.jpg", in: tempDirectory)
+        let source = ImageSource(url: url, nativeExtent: CGSize(width: 64, height: 48))
+        for format in ExportFormat.allCases {
+            let result = try await RenderEngine().encode(
+                source: source, document: EditDocument(), lut: nil,
+                options: ExportOptions(format: format, metadata: .strip)
+            )
+            let imageSource = try XCTUnwrap(CGImageSourceCreateWithData(result as CFData, nil))
+            let properties = try XCTUnwrap(
+                CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [CFString: Any]
+            )
+            let tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any]
+            let png = properties[kCGImagePropertyPNGDictionary] as? [CFString: Any]
+            XCTAssertNil(tiff?[kCGImagePropertyTIFFSoftware], format.rawValue)
+            XCTAssertNil(png?[kCGImagePropertyPNGSoftware], format.rawValue)
+            let xmp = CGImageSourceCopyMetadataAtIndex(imageSource, 0, nil)
+            XCTAssertNil(
+                xmp.flatMap { CGImageMetadataCopyTagWithPath($0, nil, "xmp:CreatorTool" as CFString) },
+                format.rawValue
+            )
         }
     }
 

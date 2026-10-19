@@ -1273,6 +1273,7 @@ actor RenderEngine: RenderEngining {
     private func exportMetadata(for request: RenderRequest) -> [CFString: Any]? {
         let policy = request.exportOptions?.metadata ?? .preserve
         guard policy == .preserve else { return nil }
+        let attribution = ExportAttribution().editorIdentity
         let locationPolicy = request.exportOptions?.location ?? .exclude
 
         let source: CGImageSource?
@@ -1282,12 +1283,8 @@ actor RenderEngine: RenderEngining {
         case .data(let data):
             source = CGImageSourceCreateWithData(data as CFData, nil)
         }
-        guard let source,
-              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
-                as? [CFString: Any]
-        else {
-            return nil
-        }
+        let properties = source.flatMap { CGImageSourceCopyPropertiesAtIndex($0, 0, nil) }
+            as? [CFString: Any] ?? [:]
 
         var dictionaryKeys: [CFString] = [
             kCGImagePropertyTIFFDictionary,
@@ -1311,7 +1308,17 @@ actor RenderEngine: RenderEngining {
                 metadata[key] = dictionary
             }
         }
-        return metadata.isEmpty ? nil : metadata
+
+        // Kromora rendered this output, so its identity replaces any source `Software` value.
+        var tiff = metadata[kCGImagePropertyTIFFDictionary] as? [CFString: Any] ?? [:]
+        tiff[kCGImagePropertyTIFFSoftware] = attribution
+        metadata[kCGImagePropertyTIFFDictionary] = tiff
+        metadata[kCGImagePropertyPNGDictionary] = [kCGImagePropertyPNGSoftware: attribution]
+
+        let xmp = CGImageMetadataCreateMutable()
+        CGImageMetadataSetValueWithPath(xmp, nil, "xmp:CreatorTool" as CFString, attribution as CFString)
+        metadata[kCGImageDestinationMetadata] = xmp
+        return metadata
     }
 
     // MARK: - Cache
