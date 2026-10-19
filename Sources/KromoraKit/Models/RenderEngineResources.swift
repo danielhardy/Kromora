@@ -83,9 +83,15 @@ final class RenderEngineResources {
         let scale = CGFloat(longEdge) / max(extent.width, extent.height)
         let width = max(1, Int((extent.width * scale).rounded()))
         let height = max(1, Int((extent.height * scale).rounded()))
+        // Scale each axis to the rounded pixel size so the scaled extent is exactly
+        // `width` x `height`. A single uniform scale leaves the last row/column only partially
+        // covered when `extent * scale` rounds up; JPEG encoding drops that partial alpha and it
+        // presents as a light line on the stored first frame (KRMA-1042).
         let scaled = image.transformed(by: CGAffineTransform(
             translationX: -extent.minX, y: -extent.minY
-        )).transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        )).transformed(by: CGAffineTransform(
+            scaleX: CGFloat(width) / extent.width, y: CGFloat(height) / extent.height
+        ))
         let target = CGRect(x: 0, y: 0, width: width, height: height)
         return context.createCGImage(
             scaled, from: target, format: .RGBA8, colorSpace: space.cgColorSpace
