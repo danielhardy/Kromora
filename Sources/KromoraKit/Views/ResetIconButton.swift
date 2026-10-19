@@ -60,8 +60,7 @@ struct ResetIconButton: View {
         case .semanticLink:
             Button(title, action: action)
                 .font(.callout)
-                .buttonStyle(.link)
-                .tint(KromoraTheme.primaryAccent)
+                .buttonStyle(SemanticLinkButtonStyle())
         }
     }
 }
@@ -105,6 +104,30 @@ struct InspectorIconButtonStyle: ButtonStyle {
         private var circle: Color {
             if isActive { return KromoraTheme.primaryAccent.opacity(hovered ? 0.32 : 0.2) }
             return Color.primary.opacity(hovered ? 0.12 : 0)
+        }
+    }
+}
+
+/// A compact, unfilled link in the primary accent. The system `.link` style takes its colour from
+/// the system accent and ignores `.tint`, so the foreground is set explicitly here. Hover underlines
+/// the title; press dims it.
+struct SemanticLinkButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        LinkBody(configuration: configuration)
+    }
+
+    private struct LinkBody: View {
+        let configuration: ButtonStyleConfiguration
+        @Environment(\.isEnabled) private var isEnabled
+        @State private var isHovering = false
+
+        var body: some View {
+            configuration.label
+                .foregroundStyle(KromoraTheme.primaryAccent)
+                .underline(isHovering && isEnabled)
+                .opacity(isEnabled ? (configuration.isPressed ? 0.7 : 1) : 0.4)
+                .contentShape(Rectangle())
+                .onHover { isHovering = $0 }
         }
     }
 }
