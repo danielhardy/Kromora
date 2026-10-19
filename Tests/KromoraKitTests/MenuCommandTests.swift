@@ -220,20 +220,30 @@ final class MenuCommandTests: XCTestCase {
         let cropControls = try XCTUnwrap(
             contentView.range(of: "private struct CropToolbarControls")
         ).lowerBound
-        let cropSource = String(contentView[cropControls...])
+        let cropDeclaration = contentView[cropControls...]
+        let cropEnd = try XCTUnwrap(cropDeclaration.range(of: "\n}\n\n// The File menu")).upperBound
+        let cropSource = String(cropDeclaration[..<cropEnd])
         let cancelIndex = try XCTUnwrap(cropSource.range(of: "Label(\"Cancel\", systemImage: \"xmark\")"))
         let doneIndex = try XCTUnwrap(cropSource.range(of: "Label(\"Done\", systemImage: \"checkmark\")"))
         XCTAssertLessThan(cancelIndex.lowerBound, doneIndex.lowerBound, "Cancel comes first, then Done")
         XCTAssertFalse(cropSource.contains("Label(\"Undo\""), "Crop toolbar has no Undo button")
         XCTAssertFalse(cropSource.contains("viewModel.undo()"))
-        XCTAssertEqual(
-            cropSource.components(separatedBy: ".glassProminent").count - 1, 1,
-            "Done is the only primary button in the crop action group"
-        )
-        XCTAssertEqual(
-            cropSource.components(separatedBy: ".tint(nil)").count - 1, 1,
-            "Cancel resets the window accent; only Done keeps it"
-        )
+        let buttonSources = cropSource.components(separatedBy: "\n        Button {").dropFirst()
+        XCTAssertEqual(buttonSources.count, 2, "Crop has exactly Cancel and Done buttons")
+        let cancelButton = try XCTUnwrap(buttonSources.first)
+        let doneButton = try XCTUnwrap(buttonSources.dropFirst().first)
+        XCTAssertTrue(cancelButton.contains("viewModel.cancelCrop()"), "Cancel discards the draft")
+        XCTAssertTrue(doneButton.contains("viewModel.commitCrop()"), "Done commits the draft")
+        XCTAssertTrue(cancelButton.contains(".accessibilityLabel(\"Cancel\")"))
+        XCTAssertTrue(doneButton.contains(".accessibilityLabel(\"Done\")"))
+        XCTAssertTrue(cancelButton.contains(".help(\"Cancel the current crop (Escape)\")"))
+        XCTAssertTrue(doneButton.contains(".help(\"Apply the crop and return to Edit (Return)\")"))
+        XCTAssertTrue(cancelButton.contains(".disabled(!hasImage)"))
+        XCTAssertTrue(doneButton.contains(".disabled(!hasImage)"))
+        XCTAssertTrue(cancelButton.contains(".tint(nil)"), "Cancel uses secondary styling")
+        XCTAssertFalse(doneButton.contains(".tint(nil)"), "Done retains the copper accent")
+        XCTAssertFalse(cancelButton.contains(".buttonStyle(.glassProminent)"))
+        XCTAssertTrue(doneButton.contains(".buttonStyle(.glassProminent)"), "Done is the only primary action")
 
         let cropInspector = try String(
             contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/CropInspectorView.swift"),
