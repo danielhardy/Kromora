@@ -16,10 +16,10 @@ final class RetouchQualityEvaluationTests: TempDirectoryTestCase {
 
     /// Minimum passing rows (of `backgrounds × defects in the class`) per shipping class and mode.
     /// Initialised at the KRMA-1003 passing counts and raised by KRMA-1004 (dust/speck 5/5/5 → 10/11/10,
-    /// hair/fibre Heal and Clone 1 → 2). Raise a floor when a repair improves it; never lower one.
+    /// hair/fibre Heal and Clone 1 → 2) and KRMA-1062 (automatic hair/fibre Heal 0 → 3). Raise a floor when a repair improves it; never lower one.
     private static let shippingFloors: [String: [String: Int]] = [
         "dust/speck": ["Heal": 10, "Heal (auto)": 11, "Clone": 10],
-        "hair/fibre": ["Heal": 2, "Heal (auto)": 0, "Clone": 2],
+        "hair/fibre": ["Heal": 2, "Heal (auto)": 3, "Clone": 2],
     ]
 
     private static let shippingModes = ["Heal", "Heal (auto)", "Clone"]

@@ -64,11 +64,14 @@ final class RetouchCameraScaleDiagnosticsTests: XCTestCase {
                 for scale in Self.proxyScales {
                     let proxy = Self.proxy(of: fixture, scale: scale)
                     let spot = Self.spot(for: fixture)
-                    let coarse = RetouchSourcePicker.candidates(for: spot, among: [spot], in: proxy, limit: 24)
+                    // Production snaps the proxy pick to whole source pixels before refinement.
+                    let coarse = RetouchSourcePicker.snapped(
+                        RetouchSourcePicker.candidates(for: spot, among: [spot], in: proxy, limit: 24),
+                        sourceWidth: fixture.width, sourceHeight: fixture.height)
                     guard let top = coarse.first else {
                         // No candidate: the spot keeps no source and the defect is left in place.
                         let labels = scale < 1
-                            ? ["coarse", "coarse snapped", "refined (shipped origin)", "refined (top-down origin)"]
+                            ? ["coarse", "coarse snapped", "refined (shipped origin)"]
                             : ["coarse"]
                         for label in labels {
                             outcomes.append(try render(fixture, input, label: "Auto s=\(scale) \(label)",
@@ -84,7 +87,7 @@ final class RetouchCameraScaleDiagnosticsTests: XCTestCase {
                                           y: Self.pixels(top.offset, fixture).y.rounded())
                     outcomes.append(try render(fixture, input, label: "Auto s=\(scale) coarse snapped",
                                                mode: .heal, pixelOffset: snapped))
-                    for (name, topDown) in [("shipped origin", false), ("top-down origin", true)] {
+                    for (name, topDown) in [("shipped origin", true)] {
                         let refined = Self.refine(coarse, fixture: fixture, spot: spot, topDownOrigin: topDown)
                         guard let best = refined.first else { continue }
                         outcomes.append(try render(fixture, input, label: "Auto s=\(scale) refined (\(name))",
@@ -125,10 +128,11 @@ final class RetouchCameraScaleDiagnosticsTests: XCTestCase {
             let matching = rows.filter { $0.1.label == label }
             print("CAMERA TOTAL \(label): \(matching.filter { $0.1.failed.isEmpty }.count)/\(matching.count) pass")
         }
-        // Declared per-case target for KRMA-1062: automatic Heal repairs every supported case at both
-        // declared proxy scales with a whole-pixel source. Reported, not yet asserted.
-        for (fixture, outcome) in rows where outcome.label.hasPrefix("Auto s=0.") && outcome.label.hasSuffix("coarse snapped") {
-            print("TARGET \(fixture.name) \(outcome.label): \(outcome.failed.isEmpty ? "met" : "NOT met")")
+        // KRMA-1062 acceptance: the shipped automatic path (whole-pixel coarse pick, then top-down
+        // full-resolution refinement) repairs every supported case at both declared proxy scales.
+        for (fixture, outcome) in rows where outcome.label.hasPrefix("Auto s=0.") && outcome.label.hasSuffix("(shipped origin)") {
+            XCTAssertTrue(outcome.failed.isEmpty, "\(fixture.name) \(outcome.label): \(outcome.failed.joined(separator: ","))")
+            XCTAssertFalse(outcome.sourceTouchesDefect, "\(fixture.name) \(outcome.label)")
         }
 
         let perCase = Set(rows.map(\.1.label)).count
@@ -148,7 +152,7 @@ final class RetouchCameraScaleDiagnosticsTests: XCTestCase {
     /// refinement) at each declared scale.
     private static let manualFloors: [String: Int] = [
         "Manual Heal": 13, "Manual Clone": 14,
-        "Auto s=0.57 refined (shipped origin)": 10, "Auto s=0.17 refined (shipped origin)": 9,
+        "Auto s=0.57 refined (shipped origin)": 16, "Auto s=0.17 refined (shipped origin)": 16,
     ]
 
     // MARK: Helpers
@@ -257,8 +261,8 @@ final class RetouchCameraScaleDiagnosticsTests: XCTestCase {
 
     /// Mirrors `RenderEngine.pickRetouchSource`'s full-resolution refinement: the crop is chosen in
     /// Core Image (y-up) coordinates by `analysisCropBounds`, rendered top row first, and wrapped in a
-    /// `RetouchAnalysisRegion`. `topDownOrigin` selects the y origin: the shipped code passes the
-    /// y-up `crop.minY`; the alternative passes the top-down row index of the crop's first row.
+    /// `RetouchAnalysisRegion`. `topDownOrigin` selects the y origin: the shipped code (KRMA-1062)
+    /// passes the top-down row index of the crop's first row.
     private static func refine(
         _ coarse: [RetouchSourceCandidate], fixture: Fixture, spot: RetouchSpot, topDownOrigin: Bool
     ) -> [RetouchSourceCandidate] {

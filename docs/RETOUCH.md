@@ -263,3 +263,37 @@ path 10 at 0.57 and 9 at 0.17); KRMA-1062 turns the targets into assertions.
 - `RenderEngine.retouchAnalysisCrop`: pass the top-down origin (`sourceHeight - crop.maxY`) to
   `RetouchAnalysisRegion`.
 - Keep the stress-only wires and 60 px removal out of scope.
+
+## Automatic Heal hair repair correction (KRMA-1062)
+
+Measured 2026-10-19 on the same generated fixtures, seeds, and unchanged limits as KRMA-1061
+(`RetouchQualityEvaluationTests`, `RetouchCameraScaleDiagnosticsTests`; serial lane, real Core Image).
+Generated-fixture results only; camera-image acceptance is KRMA-1063.
+
+Changes, at the boundaries KRMA-1061 identified:
+
+- `RetouchSourcePicker.valid` now tests the translated stroke *path* (resampled at half the brush radius,
+  spatially hashed) against the destination stroke and every other visible spot, instead of the whole
+  stroke bounding box. A single dab reproduces the previous box test; a long hair now keeps clean
+  sources. `score` judges the match around anchors spread along a long stroke and ignores ring samples
+  that lie on the stroke's own path. Selection stays deterministic for a persisted recipe.
+- `RetouchSourcePicker.snapped` rounds the proxy pick to whole source pixels in
+  `RenderEngine.pickRetouchSource`, so Core Image copies the fill without resampling grain.
+- `RenderEngine.retouchAnalysisCrop` passes the top-down origin (`extent.maxY - crop.maxY`).
+
+| Measure | Before | After |
+|---|---:|---:|
+| Shipping hair/fibre automatic Heal (96 × 72, 6 rows) | 0/6 | 3/6 (foliage, water, brick) |
+| Shipping dust/speck Heal / auto Heal / Clone (of 12) | 10 / 11 / 10 | 10 / 11 / 10 |
+| Shipping hair/fibre Heal / Clone (of 6) | 2 / 2 | 2 / 2 |
+| Camera-scale shipped auto path, proxy 0.57 (of 16) | 10 | 16 |
+| Camera-scale shipped auto path, proxy 0.17 (of 16) | 9 | 16 |
+
+The shipping automatic hair floor is now 3/6, and both camera-scale shipped-path rows are asserted at
+16/16 with no source touching the defect.
+
+Remaining limitations: sky, cloud, and skin 96 × 72 hair rows still fail for every source (the fixture
+brush has no margin over the hair, a fixture limit, not a picker one). Manual Heal on sky soft dust and
+on some foliage dust/speck still fails (blend, not on the automatic hair path). The coarse, unrefined
+proxy pick at 0.17 still misses sky soft dust; the shipped path refines it. Real-camera sign-off is not
+claimed until KRMA-1063 is recorded.

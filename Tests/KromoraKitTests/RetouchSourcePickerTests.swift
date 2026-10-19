@@ -81,6 +81,51 @@ final class RetouchSourcePickerTests: XCTestCase {
         }
     }
 
+    /// KRMA-1062: a hair spanning most of the frame used to leave no candidate because the whole
+    /// stroke bounding box was excluded. Placements must clear the stroke's path, not its box.
+    func testLongStrokeKeepsCandidatesThatClearItsPathAndOtherSpots() throws {
+        let proxy = makeProxy(width: 96, height: 72)
+        let hair = makeStroke(from: CGPoint(x: 0.2, y: 0.3), to: CGPoint(x: 0.8, y: 0.45), radius: 0.03)
+        let other = makeSpot(x: 0.5, y: 0.85, radius: 0.04)
+        let first = RetouchSourcePicker.candidates(for: hair, among: [hair, other], in: proxy)
+        XCTAssertFalse(first.isEmpty, "a long hair must still find clean sources")
+        XCTAssertEqual(first, RetouchSourcePicker.candidates(for: hair, among: [hair, other], in: proxy))
+        let radius = 0.03 * 72
+        for candidate in first {
+            // Every translated path point stays clear of the original path and the other spot.
+            for t in stride(from: 0.0, through: 1.0, by: 0.05) {
+                let x = (0.2 + 0.6 * t) * 96, y = (0.3 + 0.15 * t) * 72
+                let moved = CGPoint(x: x + candidate.offset.dx * 96, y: y - candidate.offset.dy * 72)
+                for u in stride(from: 0.0, through: 1.0, by: 0.01) {
+                    let px = (0.2 + 0.6 * u) * 96, py = (0.3 + 0.15 * u) * 72
+                    XCTAssertGreaterThan(hypot(moved.x - px, moved.y - py), radius * 1.4,
+                                         "source crosses the destination stroke")
+                }
+                XCTAssertTrue(abs(moved.x - 0.5 * 96) > radius || abs(moved.y - 0.85 * 72) > radius,
+                              "source lands on the other spot")
+            }
+        }
+    }
+
+    func testSnappedOffsetsAreWholeSourcePixelsAndScaleWithSourceSize() {
+        let raw = [RetouchSourceCandidate(offset: CGVector(dx: -0.0253, dy: 0.1037), score: 1)]
+        for (w, h) in [(6000, 4000), (1800, 1200)] {
+            let snapped = RetouchSourcePicker.snapped(raw, sourceWidth: w, sourceHeight: h)
+            let dx = snapped[0].offset.dx * CGFloat(w), dy = snapped[0].offset.dy * CGFloat(h)
+            XCTAssertEqual(dx, dx.rounded(), accuracy: 1e-6)
+            XCTAssertEqual(dy, dy.rounded(), accuracy: 1e-6)
+            XCTAssertLessThanOrEqual(abs(snapped[0].offset.dx - raw[0].offset.dx), 0.5 / CGFloat(w) + 1e-9)
+        }
+    }
+
+    private func makeStroke(from a: CGPoint, to b: CGPoint, radius: Double) -> RetouchSpot {
+        let samples = (0...12).map { i -> BrushSample in
+            let t = CGFloat(i) / 12
+            return BrushSample(point: CGPoint(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t))
+        }
+        return RetouchSpot(mode: .heal, region: RetouchRegion(samples: samples, radius: radius))
+    }
+
     private func makeSpot(x: CGFloat, y: CGFloat, radius: Double) -> RetouchSpot {
         RetouchSpot(mode: .heal,
                     region: RetouchRegion(samples: [BrushSample(point: CGPoint(x: x, y: y))], radius: radius))

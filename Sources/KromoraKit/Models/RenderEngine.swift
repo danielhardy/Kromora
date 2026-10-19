@@ -604,9 +604,11 @@ actor RenderEngine: RenderEngining {
                 space: .current, interactive: false, thumbnail: false
               ),
               let proxy = retouchProxy(image: image, fingerprint: source.cacheFingerprint) else { return nil }
-        let coarse = RetouchSourcePicker.candidates(
-            for: spot, among: settings.spots, in: proxy, limit: max(rank + 1, 24),
-            cancellation: { Task.isCancelled }
+        let coarse = RetouchSourcePicker.snapped(
+            RetouchSourcePicker.candidates(
+                for: spot, among: settings.spots, in: proxy, limit: max(rank + 1, 24),
+                cancellation: { Task.isCancelled }),
+            sourceWidth: Int(source.nativeExtent.width), sourceHeight: Int(source.nativeExtent.height)
         )
         let cropCandidates = coarse.filter {
             hypot(Double($0.offset.dx * source.nativeExtent.width), Double($0.offset.dy * source.nativeExtent.height))
@@ -652,7 +654,7 @@ actor RenderEngine: RenderEngining {
         let proxy = RetouchAnalysisProxy.fromRGBA8(Data(bytes), width: width, height: height)
         guard proxy.isUsable else { return nil }
         return RetouchAnalysisRegion(sourceWidth: Int(image.extent.width), sourceHeight: Int(image.extent.height),
-                                     originX: Int(crop.minX), originY: Int(crop.minY), proxy: proxy)
+                                     originX: Int(crop.minX), originY: Int(image.extent.integral.maxY - crop.maxY), proxy: proxy)
     }
 
     /// The app's engine. One instance, therefore one actor-owned processing context and queue.
