@@ -535,7 +535,7 @@ final class PreviewPresentationCoordinator {
         )
         let geometry = PresentedGeometry(
             crop: request.document.crop, rotation: request.document.rotation,
-            orientedAspectRatio: Double(extent.width / extent.height)
+            orientedAspectRatio: Self.persistedAspectRatio(rendered: extent, request: request)
         )
         canonicalWriteTasks[identity.assetID]?.cancel()
         let store = self.store
@@ -567,6 +567,23 @@ final class PreviewPresentationCoordinator {
         }
     }
 
+    /// The aspect the settled canvas fits: the planner's fractional crop extent. The rendered
+    /// extent is snapped to whole pixels, so its aspect can differ by up to a pixel; persisting
+    /// it made the stored first frame sit about 1 px off the settled render (KRMA-1042). The
+    /// rendered aspect is kept when no plan exists or the two disagree by more than that rounding.
+    static func persistedAspectRatio(rendered: CGRect, request: RenderRequest) -> Double {
+        let renderedAspect = Double(rendered.width / rendered.height)
+        guard let planned = request.presentationImageExtent,
+              planned.width > 1, planned.height > 1,
+              planned.width.isFinite, planned.height.isFinite else { return renderedAspect }
+        let plannedAspect = Double(planned.width / planned.height)
+        let longAxis = max(rendered.width, rendered.height)
+        let shortAxis = min(rendered.width, rendered.height)
+        // One rendered pixel on the short axis is the largest rounding the snap can introduce.
+        let tolerance = renderedAspect * (1 / Double(shortAxis) + 1 / Double(longAxis))
+        return abs(plannedAspect - renderedAspect) <= tolerance ? plannedAspect : renderedAspect
+    }
+
     /// Persist one idle-warmed canonical preview without publishing it to a canvas surface. The
     /// store admission checks the encoded size against its low-water mark before accepting bytes.
     func writeCanonicalForWarmer(_ image: CIImage, for request: RenderRequest) async -> Bool {
@@ -589,7 +606,7 @@ final class PreviewPresentationCoordinator {
                 ),
                 geometry: PresentedGeometry(
                     crop: request.document.crop, rotation: request.document.rotation,
-                    orientedAspectRatio: Double(extent.width / extent.height)
+                    orientedAspectRatio: Self.persistedAspectRatio(rendered: extent, request: request)
                 ),
                 rasterColorSpace: raster.rasterColorSpace,
                 perceptualDigest: raster.perceptualDigest, presentedAt: Date(),

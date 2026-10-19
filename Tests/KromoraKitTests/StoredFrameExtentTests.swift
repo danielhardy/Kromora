@@ -43,4 +43,38 @@ final class StoredFrameExtentTests: XCTestCase {
         )
         XCTAssertEqual(size, CGSize(width: 2048, height: 1366))
     }
+
+    // The settled canvas fits the planner's fractional crop extent, not the whole-pixel-snapped
+    // rendered extent, so the persisted aspect must come from the plan.
+    private func request(planned: CGRect?) -> RenderRequest {
+        RenderRequest(
+            source: ImageSource(data: Data(), nativeExtent: CGSize(width: 6000, height: 4000)),
+            document: EditDocument(), targetSize: CGSize(width: 1000, height: 600),
+            presentationImageExtent: planned, quality: .preview, output: .raster
+        )
+    }
+
+    func testPersistedAspectPrefersPlannedExtentOverSnappedRender() {
+        let rendered = CGRect(x: 0, y: 0, width: 1000, height: 562)
+        let planned = CGRect(x: 0, y: 0, width: 1000.4, height: 562.6)
+        let aspect = PreviewPresentationCoordinator.persistedAspectRatio(
+            rendered: rendered, request: request(planned: planned)
+        )
+        XCTAssertEqual(aspect, Double(planned.width / planned.height), accuracy: 1e-12)
+    }
+
+    func testPersistedAspectFallsBackWithoutPlanOrOnLargeDisagreement() {
+        let rendered = CGRect(x: 0, y: 0, width: 1000, height: 562)
+        let renderedAspect = Double(1000.0 / 562.0)
+        XCTAssertEqual(
+            PreviewPresentationCoordinator.persistedAspectRatio(
+                rendered: rendered, request: request(planned: nil)
+            ), renderedAspect, accuracy: 1e-12
+        )
+        XCTAssertEqual(
+            PreviewPresentationCoordinator.persistedAspectRatio(
+                rendered: rendered, request: request(planned: CGRect(x: 0, y: 0, width: 800, height: 800))
+            ), renderedAspect, accuracy: 1e-12
+        )
+    }
 }
