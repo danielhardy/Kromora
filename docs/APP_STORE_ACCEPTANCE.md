@@ -11,7 +11,26 @@ window in A4.
 
 The exact behavior of selected-file grants, file drops, Photos authorization, signed resources,
 bookmarks, and TestFlight installation can only be confirmed on the packaged app. This checklist
-records observations; it does not claim that those checks have already been run.
+records observations; it does not claim that those checks have already been run. Revising these
+instructions is not an acceptance pass: every row stays **Not run** until a tester records real
+evidence in the Results template. The real signed-app pass is tracked in KRMA-1016 and the live
+local/iCloud Photos confirmation in KRMA-1040.
+
+### Export routes under test
+
+The routes differ in grants, destination type, and overwrite behavior, so the cases below do not
+treat them as interchangeable:
+
+| Route | Menu / shortcut | Destination and naming | Existing destination |
+| --- | --- | --- | --- |
+| Ordinary edited export (one photo or many) | **File > Export…** (⌘S) | Step 1 "Export 1 Photo" / "Export N Photos" setup sheet (format, quality, filename prefix/suffix/Look, optional **Also add to Photos**), then Step 2 folder chooser (**Export Here**). The explicit Library selection is exported, or the active photo when nothing is selected. Default name is `‹source›_‹Look›.‹ext›`. | Never replaced. A colliding name gets a numeric suffix: `name 2.ext`, `name 3.ext`. |
+| Edit in External Editor | **File > Edit in External Editor…** (⌥⌘E) | Save panel for one TIFF (`‹name›_external.tiff`); the TIFF opens in the default TIFF editor and is imported back as a new library item. | Not replaced: the file is created exclusively, so an existing path fails and the prior file is untouched. |
+| Derived Look | **File > Derive Look from JPG…** | Save panel for one `.cube`. | Replaced by staging a hidden `.tmp` copy beside the destination and renaming it over the old file; a failure must leave the prior file. |
+| Original + Settings Bundle | **File > Export Original + Settings Bundle…** (⌥⌘B) | Metadata confirmation, then a folder chooser (**Export Bundle**); writes `‹name›.‹bundle extension›` inside it. | Existing bundle is not replaced. |
+| Photos delivery | **Also add to Photos** in the export setup sheet | Runs after the disk file is committed; uses PhotoKit. | Not applicable; the disk file is independent of the Photos result. |
+
+Share (toolbar Share, single or multi-selection) renders to app-owned temporary files and is not a
+sandbox file-grant case; it is exercised by KRMA-1048 for memory, not here.
 
 ## 1. Prepare and identify the build
 
@@ -73,7 +92,7 @@ records observations; it does not claim that those checks have already been run.
    - A Finder-accessible output folder outside Pictures, with a sentinel file whose contents and
      SHA-256 hash are recorded before collision tests.
    - A disposable RAW with a neighboring `.xmp` (or camera sidecar) and another neighboring file.
-   - A small disposable Photos library selection for PhotosPicker and Photos export checks.
+   - A small disposable Photos library selection for the Photos import and export checks, including a RAW+JPEG pair and, for A32, an iCloud-only photo whose original is not downloaded.
    - Record the SHA-256 of at least one source photo before import, for the end-to-end original
      integrity check.
 5. Before launching Kromora, start log capture in Terminal and leave it running in a separate
@@ -104,7 +123,7 @@ functional cases populate that profile. The signature and resource checks A1–A
 
 | ID | Action and UI path / command | Expected result |
 | --- | --- | --- |
-| A30 | In the clean test account, import the copied photo set from outside Pictures (**Import > Import Folder…**). In Library, pick one frame (`P`) and reject another (`X`); open the picked frame in Edit (`E`), make an adjustment and commit it, then switch on **Comparison view** (or press `V`). Export the edited photo with **File > Export…** (⌘S) to the disposable output folder. Quit and relaunch Kromora. Reopen the library and verify the cull states, edit, comparison workflow, and exported image. Compare the source-photo hash with the pre-import hash. | Import, cull, edit, comparison, relaunch, and export all work in the signed sandboxed app. The chosen/rejected states and committed edit remain attached to the correct photo; the export is readable; and the input original still matches its pre-import SHA-256. |
+| A30 | In the clean test account, import the copied photo set from outside Pictures (**Import > Import Folder…**). In Library, pick one frame (`P`) and reject another (`X`); open the picked frame in Edit (`E`), make an adjustment and commit it, then switch on **Comparison view** (or press `V`). Export the edited photo with **File > Export…** (⌘S): keep the default settings in Step 1 (**Continue**), choose the disposable output folder in Step 2 (**Export Here**). Quit and relaunch Kromora. Reopen the library and verify the cull states, edit, comparison workflow, and exported image. Compare the source-photo hash with the pre-import hash. | Import, cull, edit, comparison, relaunch, and export (setup sheet, folder chooser, generated filename) all work in the signed sandboxed app. The chosen/rejected states and committed edit remain attached to the correct photo; the export is readable; and the input original still matches its pre-import SHA-256. |
 
 ### Build, sandbox, and packaged resources
 
@@ -118,7 +137,7 @@ functional cases populate that profile. The signature and resource checks A1–A
 
 | ID | Action and UI path / command | Expected result |
 | --- | --- | --- |
-| A4 | After all cases A1–A30 finish, stop the log capture started in preparation with Control-C. Review `$HOME/Desktop/Kromora-sandbox.log` for denials during the full pass; correlate any record with its timestamp and case. | The log file is retained. There are no sandbox denial records attributable to Kromora. Attach any matching denial excerpt and mark the affected case Fail. |
+| A4 | After all cases A1–A32 finish, stop the log capture started in preparation with Control-C. Review `$HOME/Desktop/Kromora-sandbox.log` for denials during the full pass; correlate any record with its timestamp and case. | The log file is retained. There are no sandbox denial records attributable to Kromora. Attach any matching denial excerpt and mark the affected case Fail. |
 | A5 | In the app's **Import** toolbar menu choose **Open Image…** (or **File > Open Image…**). Select one image outside Pictures; repeat with multiple images. Cancel one open-panel attempt, then perform a successful open/import again. | Selected files import into the library and can be opened. Cancel leaves no partial or misleading library item. Repeating after cancellation succeeds. |
 | A6 | Choose **Import > Import Folder…**. Select the nested fixture folder outside Pictures. Repeat once, cancel during a sufficiently large import, then test source-read failure with a duplicate fixture: in Terminal run `chmod 000 "$HOME/Desktop/Kromora Sandbox Acceptance/Fixtures/Nested/unreadable.jpg"`, import its folder with readable siblings, and restore the copy using `chmod 600 "$HOME/Desktop/Kromora Sandbox Acceptance/Fixtures/Nested/unreadable.jpg"`. Optionally repeat with a corrupt/unsupported copy. | Supported images in nested folders import. Cancellation stops cleanly without a false success or stranded partial item. An unreadable/corrupt source produces a clear failure or skip and does not prevent valid files from remaining usable. Restore the test fixture permissions and confirm a subsequent folder import works. |
 | A7 | In Finder, drag a copied image file onto the app's preview window, then drag a copied folder onto it. Separately drag an image from Photos onto the preview to exercise Photos' file-promise drop. | Each supported drop follows the import flow and the imported image opens from the package. No sandbox denial or unexplained access error occurs. |
@@ -129,39 +148,49 @@ functional cases populate that profile. The signature and resource checks A1–A
 
 ### Photos authorization and delivery
 
-PhotosPicker import and PhotoKit delivery are separate paths. **Import > Import from Photos…** uses
-the system picker and should not request broad Photos-library authorization. The export dialog's
-**Also add to Photos** option uses PhotoKit and is the path for testing allow, deny, restricted, and
-limited access. Use a fresh disposable macOS account for the first prompt; change later states in
+The picker and PhotoKit are both involved, and their authorization is separate from file grants.
+**Import > Import from Photos…** presents the system `PhotosPicker`, but Kromora then retrieves each
+selected **original** (the RAW of a RAW+JPEG pair, never the edited rendition) through PhotoKit
+(`PHAssetResourceManager`), and Photos thumbnails also use PhotoKit. When access is undetermined
+the app requests **read/write** Photos authorization at that point; a picker selection alone does not
+authorize PhotoKit. The export setup sheet's **Also add to Photos** option is a third path that uses
+the same authorization to create the asset and, optionally, an album. Do not expect picker-only
+access, and do not treat a picker selection as proof of PhotoKit authorization.
+
+Use a fresh disposable macOS account for the first prompt; change later states in
 **Apple menu > System Settings > Privacy & Security > Photos** and relaunch Kromora after changing
-access. Do not treat a PhotosPicker selection as proof of PhotoKit authorization.
+access. Record the macOS-reported authorization state with each result. A12 and A31 cover import
+authorization, A32 original transfer, and A13–A16 export delivery.
 
 | ID | Action and UI path / command | Expected result |
 | --- | --- | --- |
-| A12 | Choose **Import > Import from Photos…**, select a known photo, and import it. Observe whether a broad Photos permission alert appears. | The system Photos picker presents the selection, the selected item imports, and this picker-mediated import does not ask for broad Photos-library access. |
-| A13 | From a selected/editable photo choose **File > Export…** (⌘S), select an output outside Pictures, enable **Also add to Photos**, and confirm. On the first run, allow the system Photos prompt. Verify the saved file in Finder and the new item in Photos; if choosing an album is offered, try a new test album. | The rendered file is saved to the chosen folder and the asset appears in Photos. If album organization is requested, it succeeds with adequate access or reports a clear album warning without undoing the saved Photos asset or disk export. |
-| A14 | Set Kromora's Photos access to **Deny** in System Settings. Repeat A13 with a new output filename. | The Photos attempt fails with understandable recovery text, while the rendered disk export remains complete and usable. No partial disk export is left behind. |
+| A12 | On a fresh account, choose **Import > Import from Photos…** (⇧⌘I), select a known photo, and import it. Observe when the system Photos authorization prompt appears and allow full access. | The picker presents the selection; Kromora then requests Photos read/write authorization if undetermined, and after it is allowed the selected original imports into the library. Verify the imported file is the camera original (for a RAW+JPEG pair, the RAW), not an edited rendition. |
+| A13 | From a selected/editable photo choose **File > Export…** (⌘S). In Step 1 enable **Also add to Photos** (optionally enter a **Photos album name**), choose **Continue**, then pick an output folder outside Pictures in Step 2 and **Export Here**. If Photos was not already authorized by A12, allow the system prompt. Verify the saved file in Finder and the new item in Photos. | The rendered file is saved to the chosen folder and the asset appears in Photos. If album organization is requested, it succeeds with adequate access or reports a clear album warning without undoing the saved Photos asset or disk export. |
+| A14 | Set Kromora's Photos access to **Deny** in System Settings. Repeat A13 using a new output folder (or the same folder; the numeric collision suffix keeps the earlier file). | The Photos attempt fails with understandable recovery text, while the rendered disk export remains complete and usable. No partial disk export is left behind. |
 | A15 | If the OS/test account can provide **Restricted** Photos authorization (for example, an account managed by policy), repeat the Photos delivery action and record the authorization state shown by the app/system. | Delivery is refused or restricted with a clear explanation; any already committed disk export remains usable. If the test Mac cannot enter this state, record N/A and why. |
 | A16 | If macOS offers **Limited** / selected-items Photos access, grant limited access and repeat A13. If the UI supports selecting the test photo, exercise delivery with a photo outside that selection too. | Record the system access mode. The rendered disk file remains saved. The newly exported asset may be added to Photos; album lookup/update may report a restriction warning. The operation does not present or enumerate unrelated library items. Record whether limited mode was actually available on this macOS version. |
+| A31 | With Photos access set to **Deny** in System Settings (then, if the OS offers them, **Restricted** and **Limited**), relaunch Kromora and run **Import > Import from Photos…** with a photo inside and, for Limited, a photo outside the limited selection. | Denied or restricted: the import reports "Kromora does not have access to Photos…" with the System Settings recovery path, imports nothing for that item, and creates no partial library item. Limited: a photo outside the allowed set reports that it is outside the set Kromora may access and suggests Full Access; a photo inside it imports. Later selections in the same import still proceed. Record N/A with macOS version and reason for any state the Mac cannot enter. |
+| A32 | Import from Photos one photo whose original is stored locally and one that is iCloud-only (optimized storage, original not downloaded), then a RAW+JPEG pair, with the network available. Repeat the iCloud-only photo with the network disabled and once cancelling during the transfer. KRMA-1040 owns the live confirmation; record results there as well. | The local original imports without a download. The iCloud-only original downloads with visible progress and then imports; the imported bytes match the original (compare the `Original` file in the package with an exported original from Photos). Offline, or after cancel, the item reports "The original could not be retrieved from Photos or iCloud…" or stops cleanly, with no partial item and no leftover scratch file, and later imports still work. |
 
 ### Export, collision, cleanup, and repeated access
 
 Use only the disposable external output folder at
-`$HOME/Desktop/Kromora Sandbox Acceptance/Exports`. Before each collision case, make a backup copy
-of the destination sentinel and record its hash with
-`shasum -a 256 "$HOME/Desktop/Kromora Sandbox Acceptance/Exports/sentinel.jpg"`. Afterward,
-compare both the file contents and hash. Inspect for leftover staging files with
+`$HOME/Desktop/Kromora Sandbox Acceptance/Exports`. Ordinary export names its files from the source
+name, the Look, and the setup sheet's prefix/suffix, so a collision fixture is made by exporting once
+and keeping that file: record its name and `shasum -a 256`, back it up, and run the same export
+again. Afterward compare the original file's contents and hash. Inspect for leftover staging files
+(hidden `.‹name›.‹uuid›.partial` files beside a folder export) with
 `find "$HOME/Desktop/Kromora Sandbox Acceptance/Exports" -name '*.partial' -print`.
+`sentinel.jpg` from preparation may also be used, but only as a name target: set the setup sheet's
+filename controls to produce exactly that name.
 
-| ID | Action and UI path / command | Expected result |
-| --- | --- | --- |
-| A17 | Export one rendered image using **File > Export…** (⌘S) to a new destination outside Pictures. Repeat to a different new destination. | Both writes, including the sibling `.partial` staging write and final move, succeed. No `.partial` remains after completion; the next save also works. |
-| A18 | Repeat A17 using the exact path `$HOME/Desktop/Kromora Sandbox Acceptance/Exports/sentinel.jpg`. Compare `shasum -a 256` before/after and inspect the app's message. | A single rendered export does not replace the existing file; the sentinel hash/content is unchanged, the conflict is explained, and no staging file remains. |
-| A19 | Select multiple library items and choose **File > Export…** (⌘S). Export to the external folder with a name that already exists; cancel a separate batch while it is running. | Existing files are preserved and new colliding outputs receive numeric suffixes. Cancellation reports/stops cleanly and removes temporary/partial output; another batch succeeds afterward. |
+| A17 | Export one photo with **File > Export…** (⌘S): Step 1 setup (keep or change format), **Continue**, Step 2 choose a new folder outside Pictures, **Export Here**. Repeat to a different new folder, and once with Step 2 cancelled and once using **Back** to return to Step 1 before exporting. | The setup sheet reads "Export 1 Photo"; the file is written to the chosen folder with the generated name, through the hidden `.partial` staging file and final move. Cancelling either step writes nothing; **Back** keeps the Step 1 choices. No `.partial` remains and the next export works. |
+| A18 | Export the same photo again to the same folder with identical settings (so the generated name already exists), then once more. Compare `shasum -a 256` of the first file before and after, and read the status message. | The first file's hash and content are unchanged. The second and third exports are written as `name 2.ext` and `name 3.ext`; no existing file is replaced, and no staging file remains. |
+| A19 | Select multiple library items (include two with the same source name) and choose **File > Export…** (⌘S). Step 1 reads "Export N Photos"; choose the external folder that already holds a matching name. In a separate batch, cancel while it is running. | Existing files are preserved and new colliding outputs receive numeric suffixes in selection order. Cancellation reports the exported/not-started counts, stops cleanly, and removes temporary/partial output; another batch succeeds afterward. |
 | A20 | Generate and save a Look to a new `.cube` destination, then save another generated Look. Also use **File > Derive Look from JPG…** with the disposable RAW/JPG pair and save the derived Look outside Pictures. Repeat each flow to new paths. | New generated and derived Looks save at the selected destination, show a clear result, and repeated panel-selected writes still work. No `.partial` or temporary output remains. |
 | A21 | For the derived Look only, first save to a disposable existing destination and record its contents. Then test an external sandbox destination (a folder outside the container chosen in the Save panel), and, if a safe, reproducible failure can be induced on throwaway files (for example a read-only destination directory), repeat and inspect the prior destination. Do not use a valuable file. | On successful save, the existing file is replaced with the new cube. `DeriveCoordinator.performSave` stages a hidden `.tmp` copy in the destination directory and then renames it over the destination (KRMA-819), so a failed copy or rename must leave the previous file intact and no `.tmp` residue; record the observed result. A lost prior file is a failure, not a pass. If no safe failure can be induced, mark Not run and state why. |
-| A22 | Choose **File > Export Original + Settings Bundle…** (⌥⌘B), write a new bundle outside Pictures, and repeat. Repeat with a path that already exists; try cancellation or a safe write failure with a throwaway destination. | A new bundle is complete and opens/contains the source original and settings. Existing bundle destination is not replaced; failure/cancellation leaves no partial bundle, and a later write succeeds. |
-| A23 | Export a Look and an image to an external destination three times each, closing the dialogs normally between attempts. | Each operation succeeds or reports its own clear destination error; repeated operations do not start failing from unreleased file access. Record the specific file/destination and whether a sandbox denial appeared. |
+| A22 | Choose **File > Export Original + Settings Bundle…** (⌥⌘B), confirm the metadata prompt (**Keep Original Metadata**), pick a folder outside Pictures (**Export Bundle**), and repeat to another folder. Repeat into a folder that already holds the bundle name; try cancellation or a safe write failure with a throwaway destination. | A new bundle is complete and opens/contains the source original and settings. Existing bundle destination is not replaced; failure/cancellation leaves no partial bundle, and a later write succeeds. |
+| A23 | Export a Look and an image (**File > Export…** folder export) to an external destination three times each, and run **File > Edit in External Editor…** to a new `.tiff` path twice plus once onto an existing `.tiff` path (the existing file must be left untouched and the failure explained). Close dialogs normally between attempts. | Each operation succeeds or reports its own clear destination error; repeated operations do not start failing from unreleased file access. Record the specific file/destination and whether a sandbox denial appeared. |
 
 ### Package, indexes, caches, and relaunch
 
@@ -238,11 +267,13 @@ A27  |
 A28  |
 A29  |
 A30  |
+A31  |
+A32  |
 
 Effective entitlement output (attach full `codesign -d --entitlements :-` output):
 Activity Monitor Sandbox value and process PID:
 Output sentinel hash before/after:
-Photos access states available and exercised:
+Photos access states available and exercised (import: A12/A31; delivery: A13–A16):
 TestFlight version/build and update result:
 
 Sandbox denial log excerpt (paste matching lines with timestamps and case IDs; write
@@ -255,7 +286,7 @@ Open defects / DispatchGraph issue IDs:
 ## Source cross-check
 
 - [App Store sandbox audit](APP_STORE_SANDBOX_AUDIT.md), section 1 runtime cases: A5–A10 and
-  A17–A23; section 2 runtime cases: A13–A26. Section 3's packaged resource-bundle uncertainty:
+  A17–A23; section 2 runtime cases: A13–A26, with Photos import authorization and original transfer in A12 and A31–A32. Section 3's packaged resource-bundle uncertainty:
   A2. Signed entitlement verification: A1 and A27.
 - Mac App Store release success criteria:
   Release build/archive and TestFlight upload/install: A1 and A27–A28; sandbox launch, imports,

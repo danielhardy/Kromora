@@ -36,8 +36,9 @@ The repository evidence supports this answer for the current macOS app:
   [README](../README.md#L1-L14)).
 - Kromora is a local, package-backed photo workflow: accepted imports are copied into the library
   package ([product scope](PRODUCT_SCOPE.md#L20-L35), [storage policy](STORAGE_POLICY.md)).
-  Photos imports are user-selected through PhotosPicker; Photos authorization is used for optional
-  export delivery and album placement ([sandbox audit, protected resources](APP_STORE_SANDBOX_AUDIT.md#L322-L328),
+  Photos imports are user-selected through PhotosPicker, and Kromora then uses PhotoKit read/write
+  authorization to retrieve the selected originals (including iCloud downloads), show Photos
+  thumbnails, and optionally deliver exports and place albums ([sandbox audit, protected resources](APP_STORE_SANDBOX_AUDIT.md#L322-L328),
   [Info.plist usage description](../App/Info.plist#L34-L41)).
 - Apple's answers cover collection by the app and its third-party partners across platforms. Apple
   says to select “No, we do not collect data from this app” when neither the app nor its partners
@@ -94,16 +95,19 @@ category choice with additional guidelines ([Apple age-rating guidance](https://
 > Kromora is a local Mac photo editor and does not require an account. On first launch, choose the
 > bundled sample-photo option to populate a library, or import a JPEG or a RAW file from disk. Photos
 > import is optional; use the file picker or bundled samples to review the core workflow without
-> Photos authorization. Saving an export to Photos is also optional; disk export remains available.
-> Open an imported photo to review its non-destructive editing workflow and export. In the Look
+> Photos authorization. If you do import from Photos, macOS asks Kromora for Photos access so it
+> can fetch the original files of the photos you pick. Saving an export to Photos is also optional;
+> disk export remains available. Open an imported photo to review its non-destructive editing
+> workflow, then choose File > Export, pick the output settings, and choose a folder. In the Look
 > control, choose a bundled Starter Look; no external LUT file is needed.
 
 This path follows the welcome options and local Library → Edit → Export flow ([onboarding](ONBOARDING.md#L3-L18),
 [product scope](PRODUCT_SCOPE.md#L20-L35)). The bundled starter photographs are listed as CC0 1.0
 assets ([sample-photo manifest](../Sources/KromoraKit/Resources/SamplePhotos/manifest.json#L1-L20)).
-PhotosPicker transfers only selected items without broad Photos authorization; PhotoKit access is
-used for Photos delivery, which can be skipped when testing disk export ([sandbox audit](APP_STORE_SANDBOX_AUDIT.md#L326-L328),
-[App Store acceptance](APP_STORE_ACCEPTANCE.md#L132-L145)).
+PhotosPicker selects the items to import, but retrieving their originals goes through PhotoKit, so
+the first Photos import (and any Photos delivery) prompts for Photos read/write access; both can be
+skipped when testing the local workflow and disk export ([sandbox audit](APP_STORE_SANDBOX_AUDIT.md#L326-L328),
+[App Store acceptance](APP_STORE_ACCEPTANCE.md#photos-authorization-and-delivery)).
 The no-account note is an inference from this local workflow and the audit's finding that the app
 has no app-initiated network requests; confirm the release build still has no sign-in dependency
 ([product scope](PRODUCT_SCOPE.md#L20-L35), [sandbox audit](APP_STORE_SANDBOX_AUDIT.md#L294-L306)).
@@ -176,9 +180,9 @@ keeps those files out of commits ([realworldtest rules](../realworldtest/README.
 - Configure the distribution signing certificate and provisioning profile for the account. The
   release build uses the Xcode signing and entitlement process ([Packaging](PACKAGING.md#L17-L31)).
 - Archive the Release scheme, validate and upload in Xcode Organizer, then wait for App Store Connect
-  processing ([App Store acceptance A27](APP_STORE_ACCEPTANCE.md#L174-L179)).
+  processing ([App Store acceptance A27](APP_STORE_ACCEPTANCE.md#testflight-and-app-store-release-path)).
 - Create an internal TestFlight group, add authorized testers, and confirm the uploaded build installs
-  ([App Store acceptance A27–A28](APP_STORE_ACCEPTANCE.md#L174-L179)).
+  ([App Store acceptance A27–A28](APP_STORE_ACCEPTANCE.md#testflight-and-app-store-release-path)).
 - Enter the final metadata, privacy and age-rating answers, screenshot set, and encryption response in
   App Store Connect; submit the completed version for App Review ([Apple privacy guidance](https://developer.apple.com/help/app-store-connect/manage-app-information/manage-app-privacy/),
   [age-rating guidance](https://developer.apple.com/help/app-store-connect/manage-app-information/set-an-app-age-rating/)).

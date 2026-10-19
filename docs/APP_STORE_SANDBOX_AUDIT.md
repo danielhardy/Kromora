@@ -28,6 +28,17 @@ macOS grants at runtime; the required sandboxed checks are listed at the end of 
 > the October 4 recommendation below that no Photos entitlement was needed is superseded. The
 > entitlement's live sandbox behavior remains a separate qualification item in KRMA-1040.
 
+> **Disposition update (2026-10-19; documentation only, no new sandbox run).** The findings below
+> that describe PhotosPicker as the whole Photos import path ("does not request PhotoKit
+> authorization", `loadTransferable(Data.self)`), the single-image `NSSavePanel` export, and a
+> batch-only folder chooser are the 2026-10-04 observations and are superseded for current
+> behavior. Today `PhotosPickerImportProvider` requests PhotoKit read/write authorization when it is
+> undetermined and fetches the original resource, `PhotoKitThumbnailProvider` does the same for
+> thumbnails, and **File > Export…** uses a setup sheet plus a folder chooser for one or many
+> photos; the save panel remains for Edit in External Editor, Look saves, and the derived Look.
+> The current runtime checks are in [`APP_STORE_ACCEPTANCE.md`](APP_STORE_ACCEPTANCE.md) (A12–A19,
+> A31–A32); none has been run for this update.
+
 ## 1. Import, open, and persistent file access
 
 ### Entitlements and system panels
@@ -356,7 +367,8 @@ Do not add `NSCameraUsageDescription`, `NSMicrophoneUsageDescription`, `NSLocati
 `NSAppleEventsUsageDescription`: there are no corresponding capture, location, address-book,
 calendar, or automation API calls in app sources. Do not add
 `NSPhotoLibraryAddUsageDescription` for the current read/write PhotoKit flow, and do not treat
-PhotosPicker as requiring broad Photos authorization.
+PhotosPicker as the whole Photos import path: selected originals are retrieved through PhotoKit
+read/write authorization (see the 2026-10-19 disposition update above).
 
 ### Required-reason API inventory
 
