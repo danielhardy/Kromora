@@ -59,17 +59,82 @@ final class CanonicalPreviewRasterEdgeCoverageTests: XCTestCase {
             (CGSize(width: 3001, height: 1687), 2048),
         ]
         for (size, longEdge) in cases {
-            let ramp = CIImage(color: CIColor(red: 1, green: 1, blue: 1))
-                .cropped(to: CGRect(origin: .zero, size: size))
+            let ramp = try TestImages.gradient(width: Int(size.width), height: Int(size.height))
             let scale = CGFloat(longEdge) / max(size.width, size.height)
             let raster = try XCTUnwrap(RenderEngineResources.canonicalPreviewRaster(
                 from: ramp, space: .current, longEdge: longEdge
             ))
-            XCTAssertEqual(raster.width, Int((size.width * scale + 1e-4).rounded(.down)), "\(size)")
-            XCTAssertEqual(raster.height, Int((size.height * scale + 1e-4).rounded(.down)), "\(size)")
+            let width = Int((size.width * scale + 1e-4).rounded(.down))
+            let height = Int((size.height * scale + 1e-4).rounded(.down))
+            XCTAssertEqual(raster.width, width, "\(size)")
+            XCTAssertEqual(raster.height, height, "\(size)")
             XCTAssertLessThanOrEqual(Double(raster.width), Double(size.width * scale) + 1e-3)
             XCTAssertLessThanOrEqual(Double(raster.height), Double(size.height * scale) + 1e-3)
             XCTAssertEqual(max(raster.width, raster.height), longEdge, "\(size)")
+
+            let extent = ramp.extent.integral
+            let expectedImage = ramp
+                .transformed(by: CGAffineTransform(
+                    translationX: -extent.minX, y: -extent.minY
+                ))
+                .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+            let context = RenderEngineResources.makeOneShotContext(
+                workingColorSpace: WorkingSpace.current.cgColorSpace
+            )
+            let expected = try XCTUnwrap(context.createCGImage(
+                expectedImage,
+                from: CGRect(x: 0, y: 0, width: width, height: height),
+                format: .RGBA8,
+                colorSpace: WorkingSpace.current.cgColorSpace
+            ))
+            XCTAssertEqual(
+                try Pixels.bytes(of: CIImage(cgImage: raster)),
+                try Pixels.bytes(of: CIImage(cgImage: expected)),
+                "the raster must use the same uniform scale as the settled image (\(size))"
+            )
+        }
+    }
+
+    func testCanonicalRasterCoverageForFractional16By9Crop() throws {
+        let sourceSize = CGSize(width: 517, height: 331)
+        let source = try TestImages.gradient(
+            width: Int(sourceSize.width), height: Int(sourceSize.height)
+        )
+        let crop = CropAdjustments(
+            normalizedRect: CGRect(x: 0.103, y: 0.117, width: 0.797, height: 0.7),
+            aspectRatio: .sixteenToNine,
+            orientation: .landscape
+        )
+        let rawCrop = CGRect(
+            x: crop.normalizedRect!.minX * sourceSize.width,
+            y: crop.normalizedRect!.minY * sourceSize.height,
+            width: crop.normalizedRect!.width * sourceSize.width,
+            height: crop.normalizedRect!.height * sourceSize.height
+        )
+        XCTAssertNotEqual(rawCrop.minX, rawCrop.minX.rounded())
+        XCTAssertNotEqual(rawCrop.minY, rawCrop.minY.rounded())
+        XCTAssertNotEqual(rawCrop.maxX, rawCrop.maxX.rounded())
+        XCTAssertNotEqual(rawCrop.maxY, rawCrop.maxY.rounded())
+
+        let cropped = RenderPipeline.applyCrop(crop, to: source)
+        XCTAssertEqual(cropped.extent.width / cropped.extent.height, 16.0 / 9.0, accuracy: 0.01)
+        let raster = try XCTUnwrap(RenderEngineResources.canonicalPreviewRaster(
+            from: cropped, space: .current, longEdge: 1001
+        ))
+        XCTAssertEqual(raster.width, 1001)
+        XCTAssertEqual(raster.height, 562)
+
+        let bytes = try Pixels.bytes(of: CIImage(cgImage: raster))
+        let width = raster.width
+        let height = raster.height
+        func alpha(_ x: Int, _ y: Int) -> UInt8 { bytes[(y * width + x) * 4 + 3] }
+        for x in 0..<width {
+            XCTAssertEqual(alpha(x, 0), 255, "top edge x=\(x)")
+            XCTAssertEqual(alpha(x, height - 1), 255, "bottom edge x=\(x)")
+        }
+        for y in 0..<height {
+            XCTAssertEqual(alpha(0, y), 255, "left edge y=\(y)")
+            XCTAssertEqual(alpha(width - 1, y), 255, "right edge y=\(y)")
         }
     }
 }
