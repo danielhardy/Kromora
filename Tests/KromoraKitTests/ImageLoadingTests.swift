@@ -1,6 +1,7 @@
 import XCTest
 import CoreImage
 import ImageIO
+import SwiftUI
 @testable import KromoraKit
 
 /// Regression coverage for B1 — EXIF orientation being ignored on every non-RAW
@@ -169,7 +170,11 @@ final class ImageLoadingTests: TempDirectoryTestCase {
                 kCGImagePropertyGPSLongitudeRef: "W",
             ]
         )
-        XCTAssertEqual(ImageMetadata.read(from: validURL).coarseLocation, "≈44° N, 116° W")
+        let validMetadata = ImageMetadata.read(from: validURL)
+        let validCoordinate = try XCTUnwrap(validMetadata.gpsCoordinate)
+        XCTAssertEqual(validMetadata.coarseLocation, "≈44° N, 116° W")
+        XCTAssertEqual(validCoordinate.latitude, 43.615, accuracy: 1e-9)
+        XCTAssertEqual(validCoordinate.longitude, -116.2023, accuracy: 1e-9)
 
         let invalidURL = try Fixtures.writeJPEG(
             named: "invalid-gps.jpg", in: tempDirectory,
@@ -250,4 +255,97 @@ final class ImageLoadingTests: TempDirectoryTestCase {
     // that decision is made: `RenderPipelineTests.testPreviewScaleFitsTheBoxAndFullDoesNot` and
     // `testPreviewLargerThanTheSourceDoesNotUpscale`, plus
     // `RenderEngineTests.testScaleIsTheOnlyDifferenceBetweenPreviewAndFull` at the rasterizer.
+}
+
+final class GPSCoordinateTests: XCTestCase {
+    private func gps(
+        _ lat: Double,
+        _ latRef: String?,
+        _ lon: Double,
+        _ lonRef: String?
+    ) -> [CFString: Any] {
+        var d: [CFString: Any] = [
+            kCGImagePropertyGPSLatitude: lat,
+            kCGImagePropertyGPSLongitude: lon,
+        ]
+        if let latRef { d[kCGImagePropertyGPSLatitudeRef] = latRef }
+        if let lonRef { d[kCGImagePropertyGPSLongitudeRef] = lonRef }
+        return d
+    }
+
+    func testEachHemisphereYieldsSignedCoordinateAndLabels() throws {
+        let cases: [(Double, String, Double, String, Double, Double, String, String)] = [
+            (37.7749, "N", 122.4194, "W", 37.7749, -122.4194, "37.77490° N", "122.41940° W"),
+            (33.8688, "S", 151.2093, "E", -33.8688, 151.2093, "33.86880° S", "151.20930° E"),
+            (10, "S", 20, "W", -10, -20, "10.00000° S", "20.00000° W"),
+            (10, "N", 20, "E", 10, 20, "10.00000° N", "20.00000° E"),
+        ]
+        for c in cases {
+            let coordinate = try XCTUnwrap(GPSCoordinate(gps: gps(c.0, c.1, c.2, c.3)))
+            XCTAssertEqual(coordinate.latitude, c.4, accuracy: 1e-9)
+            XCTAssertEqual(coordinate.longitude, c.5, accuracy: 1e-9)
+            XCTAssertEqual(coordinate.latitudeLabel, c.6)
+            XCTAssertEqual(coordinate.longitudeLabel, c.7)
+        }
+    }
+
+    func testMissingRefsFallBackToValueSign() throws {
+        let coordinate = try XCTUnwrap(GPSCoordinate(gps: gps(-12.5, nil, -70.25, nil)))
+        XCTAssertEqual(coordinate.latitudeLabel, "12.50000° S")
+        XCTAssertEqual(coordinate.longitudeLabel, "70.25000° W")
+    }
+
+    func testInvalidOrMissingCoordinatesAreRejected() {
+        XCTAssertNil(GPSCoordinate(gps: gps(91, "N", 10, "E")))
+        XCTAssertNil(GPSCoordinate(gps: gps(10, "N", 181, "E")))
+        XCTAssertNil(GPSCoordinate(gps: gps(.nan, "N", 10, "E")))
+        XCTAssertNil(GPSCoordinate(gps: gps(10, "X", 20, "E")))
+        XCTAssertNil(GPSCoordinate(gps: gps(10, "N", 20, "Q")))
+        XCTAssertNil(GPSCoordinate(gps: [kCGImagePropertyGPSLatitude: 10.0]))
+        XCTAssertNil(GPSCoordinate(gps: [:]))
+    }
+
+    func testLocationSectionOnlyExistsWithValidGPS() {
+        XCTAssertNil(ImageMetadata().sections.first { $0.title == "Location" })
+        var m = ImageMetadata()
+        m.gpsCoordinate = GPSCoordinate(latitude: 1, longitude: 2)
+        XCTAssertEqual(
+            m.sections.first { $0.title == "Location" }?.rows.map(\.label),
+            ["Latitude", "Longitude"]
+        )
+        XCTAssertEqual(PhotoAssetMetadata(imageMetadata: m), PhotoAssetMetadata.empty)
+    }
+
+    @MainActor
+    func testLocationCardHostsMapAndMonospacedSelectableCoordinates() throws {
+        let card = InfoLocationCard(
+            coordinate: try XCTUnwrap(GPSCoordinate(latitude: 37.7749, longitude: -122.4194))
+        )
+        let host = NSHostingView(rootView: card)
+        host.frame = NSRect(x: 0, y: 0, width: 280, height: 220)
+        host.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(host.fittingSize.height, 120)
+
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent(
+                "Sources/KromoraKit/Views/InfoInspectorView.swift"
+            ),
+            encoding: .utf8
+        )
+        let cardStart = try XCTUnwrap(source.range(of: "struct InfoLocationCard: View {"))
+        let cardSource = String(source[cardStart.lowerBound...])
+
+        // SwiftUI's opaque child tree does not expose these modifier values to the test host.
+        // Keep structural assertions alongside the host check so the important presentation
+        // behavior cannot disappear while the card still occupies space.
+        XCTAssertTrue(cardSource.contains("Map("))
+        XCTAssertTrue(cardSource.contains("Marker(\"\", coordinate: position)"))
+        XCTAssertTrue(cardSource.contains("Text(coordinate.latitudeLabel)"))
+        XCTAssertTrue(cardSource.contains("Text(coordinate.longitudeLabel)"))
+        XCTAssertTrue(cardSource.contains(".monospaced()"))
+        XCTAssertTrue(cardSource.contains(".textSelection(.enabled)"))
+        XCTAssertTrue(source.contains("let coordinate = viewModel.info.metadata.gpsCoordinate"))
+    }
 }

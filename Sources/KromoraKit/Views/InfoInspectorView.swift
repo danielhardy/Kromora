@@ -1,3 +1,4 @@
+import MapKit
 import SwiftUI
 
 /// Docked inspector pane: a pinned histogram above the selected editor surface.
@@ -476,8 +477,13 @@ struct InfoInspectorView: View {
                         isExpanded: metadataExpansion(for: section.id)
                     ) {
                         VStack(alignment: .leading, spacing: 6) {
-                            ForEach(section.rows) { row in
-                                metadataRow(row)
+                            if section.title == "Location",
+                               let coordinate = viewModel.info.metadata.gpsCoordinate {
+                                InfoLocationCard(coordinate: coordinate)
+                            } else {
+                                ForEach(section.rows) { row in
+                                    metadataRow(row)
+                                }
                             }
                         }
                         .padding(.top, InspectorStyle.sectionContentInset)
@@ -779,5 +785,42 @@ private struct HistogramSourceBadge: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(Color.primary.opacity(0.08), in: Capsule())
+    }
+}
+
+/// Compact map preview pinned at the photo's embedded GPS position, with selectable monospaced
+/// latitude/longitude beneath. It never requests the user's location or reverse-geocodes; the
+/// pin and values render even when map imagery cannot load.
+struct InfoLocationCard: View {
+    let coordinate: GPSCoordinate
+
+    private var position: CLLocationCoordinate2D {
+        CLLocationCoordinate2D(latitude: coordinate.latitude, longitude: coordinate.longitude)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Map(
+                initialPosition: .region(
+                    MKCoordinateRegion(
+                        center: position,
+                        latitudinalMeters: 2_000, longitudinalMeters: 2_000)),
+                interactionModes: []
+            ) {
+                Marker("", coordinate: position)
+            }
+            .mapControlVisibility(.hidden)
+            .id(coordinate)
+            .frame(height: 120)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .accessibilityLabel("Map of photo location")
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(coordinate.latitudeLabel)
+                Text(coordinate.longitudeLabel)
+            }
+            .font(InspectorStyle.fieldValue.monospaced())
+            .textSelection(.enabled)
+        }
     }
 }

@@ -47,7 +47,9 @@ struct ImageMetadata: Codable, Sendable, Equatable {
     var software: String?
 
     // MARK: Location
-    var coordinates: String?    // "37.7749° N, 122.4194° W"
+    /// Validated numeric position of the loaded photo, for the Info panel's map. Session-only
+    /// display state: it is never copied into `PhotoAssetMetadata` or the library index.
+    var gpsCoordinate: GPSCoordinate?
     /// One-degree grid cell (~110 km) for Library filtering, e.g. "≈38° N, 122° W". Empty when
     /// the file carries no GPS; the precise coordinates are never copied into the index.
     var coarseLocation: String = ""
@@ -114,7 +116,8 @@ struct ImageMetadata: Codable, Sendable, Equatable {
             ("Software", software),
         ])
         section("Location", [
-            ("Coordinates", coordinates),
+            ("Latitude", gpsCoordinate?.latitudeLabel),
+            ("Longitude", gpsCoordinate?.longitudeLabel),
         ])
 
         return result
@@ -137,6 +140,56 @@ struct ImageMetadata: Codable, Sendable, Equatable {
         guard let w = pixelWidth, let h = pixelHeight, w > 0, h > 0 else { return nil }
         let mp = Double(w * h) / 1_000_000
         return "\(w) × \(h)  (\(String(format: "%.1f", mp)) MP)"
+    }
+}
+
+// MARK: - GPS
+
+/// A valid embedded GPS position. ImageIO reports magnitudes with separate N/S and E/W reference
+/// letters, so the sign comes from the reference when present.
+struct GPSCoordinate: Codable, Sendable, Hashable {
+    let latitude: Double
+    let longitude: Double
+
+    /// Nil unless both values are finite and within ±90° / ±180°.
+    init?(latitude: Double, longitude: Double) {
+        guard latitude.isFinite, longitude.isFinite,
+              abs(latitude) <= 90, abs(longitude) <= 180 else { return nil }
+        self.latitude = latitude
+        self.longitude = longitude
+    }
+
+    init?(gps: [CFString: Any]) {
+        guard let lat = gps[kCGImagePropertyGPSLatitude] as? Double,
+              let lon = gps[kCGImagePropertyGPSLongitude] as? Double else { return nil }
+        let latRef = (gps[kCGImagePropertyGPSLatitudeRef] as? String)?.uppercased()
+        let lonRef = (gps[kCGImagePropertyGPSLongitudeRef] as? String)?.uppercased()
+
+        let latitude: Double
+        switch latRef {
+        case "N": latitude = abs(lat)
+        case "S": latitude = -abs(lat)
+        case nil: latitude = lat
+        default: return nil
+        }
+
+        let longitude: Double
+        switch lonRef {
+        case "E": longitude = abs(lon)
+        case "W": longitude = -abs(lon)
+        case nil: longitude = lon
+        default: return nil
+        }
+
+        self.init(latitude: latitude, longitude: longitude)
+    }
+
+    var latitudeLabel: String {
+        String(format: "%.5f° %@", abs(latitude), latitude >= 0 ? "N" : "S")
+    }
+
+    var longitudeLabel: String {
+        String(format: "%.5f° %@", abs(longitude), longitude >= 0 ? "E" : "W")
     }
 }
 
@@ -233,7 +286,7 @@ extension ImageMetadata {
         m.software  = trimmed(tiff[kCGImagePropertyTIFFSoftware] as? String)
 
         // Location
-        m.coordinates = formatGPS(gps)
+        m.gpsCoordinate = GPSCoordinate(gps: gps)
         m.coarseLocation = coarseLocationCell(gps) ?? ""
 
         return m
@@ -317,14 +370,6 @@ extension ImageMetadata {
         let latRef = (gps[kCGImagePropertyGPSLatitudeRef] as? String) ?? (lat >= 0 ? "N" : "S")
         let lonRef = (gps[kCGImagePropertyGPSLongitudeRef] as? String) ?? (lon >= 0 ? "E" : "W")
         return "≈\(Int(abs(lat).rounded()))° \(latRef), \(Int(abs(lon).rounded()))° \(lonRef)"
-    }
-
-    private static func formatGPS(_ gps: [CFString: Any]) -> String? {
-        guard let lat = gps[kCGImagePropertyGPSLatitude] as? Double,
-              let lon = gps[kCGImagePropertyGPSLongitude] as? Double else { return nil }
-        let latRef = (gps[kCGImagePropertyGPSLatitudeRef] as? String) ?? (lat >= 0 ? "N" : "S")
-        let lonRef = (gps[kCGImagePropertyGPSLongitudeRef] as? String) ?? (lon >= 0 ? "E" : "W")
-        return String(format: "%.5f° %@, %.5f° %@", abs(lat), latRef, abs(lon), lonRef)
     }
 
     private static func exposureProgramLabel(_ v: Int?) -> String? {
