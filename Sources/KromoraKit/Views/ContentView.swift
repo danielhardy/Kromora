@@ -570,18 +570,18 @@ struct EditorSidebarToolbarButton: View {
     }
 }
 
-/// Crop owns the window toolbar while its draft is open. Undo and Redo use the normal document
-/// history; applying a history state re-seeds the transient draft before a later Save. Save is the
-/// only control that keeps the window accent; Cancel and Undo reset the inherited tint.
+/// Crop owns the window toolbar while its draft is open: Cancel, then Done. Done is the only
+/// control that keeps the window accent; Cancel resets the inherited tint. Undo stays available
+/// through Edit > Undo and Cmd-Z, which re-seed the draft from the restored history state.
 private struct CropToolbarControls: View {
     let viewModel: AppViewModel
     let hasImage: Bool
     let glassNamespace: Namespace.ID
 
     var body: some View {
-        // An explicit row: the three glass buttons are unioned into one capsule, and without a
+        // An explicit row: the glass buttons are unioned into one capsule, and without a
         // stack of their own the toolbar and GlassEffectContainer are free to lay them out
-        // vertically, which draws one tall pill that hides Save and Cancel.
+        // vertically, which draws one tall pill that hides the buttons.
         HStack(spacing: 10) {
             buttons
         }
@@ -589,17 +589,6 @@ private struct CropToolbarControls: View {
 
     @ViewBuilder
     private var buttons: some View {
-        Button {
-            viewModel.commitCrop()
-        } label: {
-            Label("Save", systemImage: "checkmark")
-        }
-        .buttonStyle(.glassProminent)
-        .accessibilityLabel("Save")
-        .help("Apply the crop and return to Edit (Return)")
-        .disabled(!hasImage)
-        .glassEffectUnion(id: "crop", namespace: glassNamespace)
-
         Button {
             viewModel.cancelCrop()
         } label: {
@@ -612,14 +601,14 @@ private struct CropToolbarControls: View {
         .glassEffectUnion(id: "crop", namespace: glassNamespace)
 
         Button {
-            viewModel.undo()
+            viewModel.commitCrop()
         } label: {
-            Label("Undo", systemImage: "arrow.uturn.backward")
+            Label("Done", systemImage: "checkmark")
         }
-        .accessibilityLabel("Undo")
-        .help("Undo the last committed edit")
-        .tint(nil)
-        .disabled(!hasImage || !viewModel.canUndo)
+        .buttonStyle(.glassProminent)
+        .accessibilityLabel("Done")
+        .help("Apply the crop and return to Edit (Return)")
+        .disabled(!hasImage)
         .glassEffectUnion(id: "crop", namespace: glassNamespace)
     }
 }

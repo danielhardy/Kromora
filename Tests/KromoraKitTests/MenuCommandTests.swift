@@ -217,13 +217,22 @@ final class MenuCommandTests: XCTestCase {
         XCTAssertTrue(contentView.contains(".buttonStyle(.glass)"))
         XCTAssertTrue(contentView.contains(".buttonStyle(.glassProminent)"))
         XCTAssertFalse(contentView.contains("#available(macOS 26.0"))
-        XCTAssertTrue(contentView.contains("Label(\"Save\", systemImage: \"checkmark\")"))
-        XCTAssertTrue(contentView.contains("Label(\"Cancel\", systemImage: \"xmark\")"))
-        XCTAssertTrue(contentView.contains("Label(\"Undo\", systemImage: \"arrow.uturn.backward\")"))
-        XCTAssertTrue(contentView.contains(".disabled(!hasImage || !viewModel.canUndo)"))
+        let cropControls = try XCTUnwrap(
+            contentView.range(of: "private struct CropToolbarControls")
+        ).lowerBound
+        let cropSource = String(contentView[cropControls...])
+        let cancelIndex = try XCTUnwrap(cropSource.range(of: "Label(\"Cancel\", systemImage: \"xmark\")"))
+        let doneIndex = try XCTUnwrap(cropSource.range(of: "Label(\"Done\", systemImage: \"checkmark\")"))
+        XCTAssertLessThan(cancelIndex.lowerBound, doneIndex.lowerBound, "Cancel comes first, then Done")
+        XCTAssertFalse(cropSource.contains("Label(\"Undo\""), "Crop toolbar has no Undo button")
+        XCTAssertFalse(cropSource.contains("viewModel.undo()"))
         XCTAssertEqual(
-            contentView.components(separatedBy: ".tint(nil)").count - 1, 3,
-            "Cancel, Undo and the Import/Export pill reset the window accent; only Save keeps it"
+            cropSource.components(separatedBy: ".glassProminent").count - 1, 1,
+            "Done is the only primary button in the crop action group"
+        )
+        XCTAssertEqual(
+            cropSource.components(separatedBy: ".tint(nil)").count - 1, 1,
+            "Cancel resets the window accent; only Done keeps it"
         )
 
         let cropInspector = try String(
