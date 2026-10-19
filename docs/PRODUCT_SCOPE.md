@@ -69,6 +69,9 @@ Retouch targets small defects. Dust detection presents suggestions; it is not a 
 pass. See [Retouch recipes and quality evidence](RETOUCH.md). Auto is renderer-evaluated and may
 leave a photo unchanged. See [Auto policy](AUTO_EXPOSURE_POLICY.md).
 
+Virtual copies are independent library assets that each store their own full copy of the original,
+so the original's size is added to the library for every virtual copy.
+
 ## Post-MVP boundaries
 
 These are explicit boundaries, not promised roadmap items. Reconsider them only through a new

@@ -173,6 +173,12 @@ and an interrupted open continues at the remaining shards. Coarse location is a 
 rounded on-device; precise GPS is never copied into the index. The field definitions are in
 [`LIBRARY_PACKAGE_FORMAT.md`](LIBRARY_PACKAGE_FORMAT.md). The package format version does not change.
 
+## Virtual copy originals
+
+A virtual copy stores its own full copy of the original under its own `Assets/<shard>/<asset>/Original/`,
+so each copy adds the original's size to the package. Shared originals between a source and its
+virtual copies are not planned for the MVP.
+
 ## Photos originals
 
 Photos import reads the original `PHAssetResource` (`.alternatePhoto` RAW for RAW+JPEG pairs, else

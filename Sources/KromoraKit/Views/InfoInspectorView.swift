@@ -280,7 +280,7 @@ struct InfoInspectorView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(viewModel.isCreatingVirtualCopy)
-                    .help("Create an independent library copy with its own edits and history")
+                    .help("Create an independent library copy with its own edits and history. A virtual copy stores its own full copy of the original, so the original's size is added to the library for each copy.")
                 }
                 HStack(spacing: 6) {
                     TextField("Snapshot name", text: $snapshotName)
