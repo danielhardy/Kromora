@@ -467,7 +467,7 @@ public struct ContentView: View {
             .background(ShareAnchorView(workflow: viewModel.exportWorkflow))
             .disabled(!viewModel.toolbarPhotoActionsAvailable)
             // ⌘S remains bound only to the File ▸ Export menu item.
-            .help("Export the graded image (⌘S)")
+            .help("Export selected photos or the active photo (⌘S)")
         }
         .controlGroupStyle(.navigation)
         .labelStyle(.iconOnly)

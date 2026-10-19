@@ -95,7 +95,7 @@ Legend for expected results:
 | Show original (hold) | Space or ⌘\ | Edit | surface | runs | runs | runs | activates | types | runs | suppressed |
 | Toggle comparison | V | Edit | menu key, view | runs | runs | runs | runs | types | runs | suppressed |
 | Toggle capture information overlay | I | Edit | menu key, view | runs | runs | runs | runs | types | runs | suppressed |
-| Export edited photo | ⌘S | Edit | standardMenu | runs (menu) | runs (menu) | runs (menu) | runs (menu) | menu/field default | runs (menu) | suppressed or sheet default |
+| Export selected photos or active photo | ⌘S | Library and Edit | standardMenu | runs (menu) | runs (menu) | runs (menu) | runs (menu) | menu/field default | runs (menu) | suppressed or sheet default |
 | Crop | C | Edit | menu key, tools | runs | runs | runs | runs | types | runs | suppressed |
 | Apply or cancel crop | Return / Esc | Crop | surface | runs | runs | runs | runs (Return/Space on button activates it) | types | runs | suppressed |
 | Previous photo / rotate left / smaller brush | [ | Edit | menu key, tools | runs | runs | runs | runs | types | runs | suppressed |

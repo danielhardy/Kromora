@@ -43,6 +43,12 @@ final class KeyboardShortcutCatalogTests: TempDirectoryTestCase {
         XCTAssertEqual(Set(KeyboardShortcutCatalog.all.map(\.action)).count, KeyboardShortcutCatalog.all.count)
     }
 
+    func testUnifiedExportShortcutIsDocumentedForLibraryAndEdit() throws {
+        let export = try XCTUnwrap(KeyboardShortcutCatalog.all.first { $0.keys == "⌘S" })
+        XCTAssertEqual(export.action, "Export selected photos or active photo")
+        XCTAssertEqual(export.area, "Library and Edit")
+    }
+
     func testMenuKeysAvoidCommandOptionAndControlSoTextFieldsAndTheSystemKeepThem() {
         for (spec, _, modifiers, _) in menuSpecs {
             XCTAssertTrue(modifiers.isSubset(of: .shift), spec.action)

@@ -139,7 +139,10 @@ enum KeyboardShortcutCatalog {
         ),
         menuKey("Toggle comparison", .view, "v", .toggleComparison, area: "Edit", display: "V"),
         menuKey("Toggle capture information overlay", .view, "i", .toggleCaptureOverlay, area: "Edit", display: "I"),
-        .init(action: "Export edited photo", keys: "⌘S", area: "Edit", delivery: .standardMenu),
+        .init(
+            action: "Export selected photos or active photo", keys: "⌘S", area: "Library and Edit",
+            delivery: .standardMenu
+        ),
         // Crop and tools
         menuKey("Crop", .tools, "c", .toggleCrop, area: "Edit", display: "C"),
         .init(action: "Apply or cancel crop", keys: "Return / Esc", area: "Crop", delivery: .surface([KeyInput(.return), KeyInput(.escape)])),

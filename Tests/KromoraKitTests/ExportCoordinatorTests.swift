@@ -880,6 +880,33 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.exportTargetRequest.items.count, 2)
     }
 
+    func testExportTargetUsesTheActivePhotoWhenSelectionIsEmpty() async throws {
+        let libraryFolder = tempDirectory.appendingPathComponent("active-export-target")
+        try FileManager.default.createDirectory(
+            at: libraryFolder, withIntermediateDirectories: true)
+        let urls = try ["one", "active", "three"].map {
+            try Fixtures.writeGradientPNG(
+                width: 40, height: 24, named: "\($0).png", in: libraryFolder)
+        }
+        let package = makeEditPackageFixture()
+        for url in urls { try package.register(url) }
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine(), editStore: package.store())
+        viewModel.collection.setSourceFolder(libraryFolder)
+        try await waitUntil { viewModel.collection.items.count == urls.count }
+
+        let activeIndex = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.url == urls[1] })
+        let activeID = viewModel.collection.items[activeIndex].id
+        viewModel.openImage(url: urls[1])
+        try await waitUntil { viewModel.exportRequest != nil }
+
+        // Deselect the active Library row while keeping the open Edit document active.
+        viewModel.collection.select(at: activeIndex)
+        viewModel.collection.select(at: activeIndex, modifiers: [.command])
+        XCTAssertTrue(viewModel.collection.selection.selectedIDs.isEmpty)
+
+        XCTAssertEqual(viewModel.exportTargetRequest.items.compactMap(\.assetID), [activeID])
+    }
+
     func testAcceptedFolderSheetRunsTheBatch() async throws {
         let sheets = FakeSheets()
         let folder = try destinationFolder()
