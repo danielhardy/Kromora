@@ -51,20 +51,42 @@ protocol PhotosImportProviding: AnyObject {
     /// The asset's capture date, used to name items whose original filename is unavailable.
     func captureDate(for selection: PhotosImportSelection) -> Date?
     func transferData(for selection: PhotosImportSelection) async throws -> Data?
+    /// Transfers the original for review inspection. A provider may keep the transferred file so
+    /// the import's later `transferData` reuses it instead of fetching the original again.
+    func inspectionData(for selection: PhotosImportSelection) async throws -> Data?
+    /// Drops any retained review transfers except the given ordinals. Review calls it on cancel
+    /// (keeping none) and on confirm (keeping the chosen items).
+    func discardRetainedTransfers(keeping ordinals: Set<Int>)
 }
 
 extension PhotosImportProviding {
     func captureDate(for selection: PhotosImportSelection) -> Date? { nil }
+    func inspectionData(for selection: PhotosImportSelection) async throws -> Data? {
+        try await transferData(for: selection)
+    }
+    func discardRetainedTransfers(keeping ordinals: Set<Int>) {}
 }
 
 /// The PhotosUI/Photos implementation of the provider boundary. Filename lookup intentionally
 /// remains here because it is provider metadata, not durable collection policy.
 @MainActor
 final class PhotosPickerImportProvider: PhotosImportProviding {
+    /// Review keeps at most this many bytes of transferred originals on disk; later items are
+    /// inspected and discarded, then transferred again if imported.
+    static let retainedByteLimit: Int64 = 2 << 30
+
     private let items: [PhotosPickerItem]
+    private let retainedDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("KromoraPhotosReview-\(UUID().uuidString)", isDirectory: true)
+    private var retained: [Int: (url: URL, bytes: Int64)] = [:]
+    private var retainedBytes: Int64 = 0
 
     init(items: [PhotosPickerItem]) {
         self.items = items
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: retainedDirectory)
     }
 
     func originalFilename(for selection: PhotosImportSelection) -> String? {
@@ -77,11 +99,60 @@ final class PhotosPickerImportProvider: PhotosImportProviding {
             .firstObject?.creationDate
     }
 
+    /// Consumes a transfer retained by review when there is one; the file is unlinked immediately
+    /// and the mapping keeps it readable, so nothing outlives the import.
     func transferData(for selection: PhotosImportSelection) async throws -> Data? {
+        if let entry = retained.removeValue(forKey: selection.ordinal) {
+            retainedBytes -= entry.bytes
+            defer { try? FileManager.default.removeItem(at: entry.url) }
+            if let data = try? Data(contentsOf: entry.url, options: .mappedIfSafe) { return data }
+        }
         guard let resource = Self.originalResource(for: selection) else {
             throw PhotosOriginalError.noOriginalResource
         }
-        return try await Self.readOriginal(resource)
+        let directory = Self.scratchDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("original")
+        try await Self.writeOriginal(resource, to: file)
+        return try Data(contentsOf: file, options: .mappedIfSafe)
+    }
+
+    func inspectionData(for selection: PhotosImportSelection) async throws -> Data? {
+        if let entry = retained[selection.ordinal],
+            let data = try? Data(contentsOf: entry.url, options: .mappedIfSafe)
+        {
+            return data
+        }
+        guard let resource = Self.originalResource(for: selection) else {
+            throw PhotosOriginalError.noOriginalResource
+        }
+        try FileManager.default.createDirectory(at: retainedDirectory, withIntermediateDirectories: true)
+        let file = retainedDirectory.appendingPathComponent(String(selection.ordinal))
+        do {
+            try await Self.writeOriginal(resource, to: file)
+            try Task.checkCancellation()
+        } catch {
+            try? FileManager.default.removeItem(at: file)
+            throw error
+        }
+        let bytes = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
+        let data = try Data(contentsOf: file, options: .mappedIfSafe)
+        if retainedBytes + bytes <= Self.retainedByteLimit {
+            retained[selection.ordinal] = (file, bytes)
+            retainedBytes += bytes
+        } else {
+            try? FileManager.default.removeItem(at: file)
+        }
+        return data
+    }
+
+    func discardRetainedTransfers(keeping ordinals: Set<Int>) {
+        for (ordinal, entry) in retained where !ordinals.contains(ordinal) {
+            try? FileManager.default.removeItem(at: entry.url)
+            retained[ordinal] = nil
+            retainedBytes -= entry.bytes
+        }
+        if retained.isEmpty { try? FileManager.default.removeItem(at: retainedDirectory) }
     }
 
     /// The camera original, never an edited rendition. A RAW+JPEG pair exposes the RAW as
@@ -101,13 +172,17 @@ final class PhotosPickerImportProvider: PhotosImportProviding {
         return resources.first(where: { $0.type == .photo })
     }
 
-    /// Streams the original to a temporary file, allowing iCloud download, and returns its bytes.
-    private static func readOriginal(_ resource: PHAssetResource) async throws -> Data {
+    private static func scratchDirectory() -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("KromoraPhotosImport-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let file = directory.appendingPathComponent("original")
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
+    /// Streams the original to `file`, allowing iCloud download.
+    private static func writeOriginal(_ resource: PHAssetResource, to file: URL) async throws {
+        try FileManager.default.createDirectory(
+            at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         let options = PHAssetResourceRequestOptions()
         options.isNetworkAccessAllowed = true
         do {
@@ -116,7 +191,6 @@ final class PhotosPickerImportProvider: PhotosImportProviding {
             throw PhotosOriginalError.unavailable(error.localizedDescription)
         }
         try Task.checkCancellation()
-        return try Data(contentsOf: file, options: .mappedIfSafe)
     }
 }
 
@@ -309,6 +383,7 @@ final class PhotosImportCoordinator {
                 }
             }
 
+            provider.discardRetainedTransfers(keeping: [])
             guard self.isCurrent(currentOperationID) else { return }
             wasCancelled = wasCancelled || Task.isCancelled
             self.finish(cancelled: wasCancelled, operationID: currentOperationID)

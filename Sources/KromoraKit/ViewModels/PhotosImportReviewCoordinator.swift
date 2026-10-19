@@ -6,7 +6,8 @@ import Foundation
 ///
 /// The package does not record Photos local identifiers, so membership is the same content-digest
 /// rule `PortablePackageImporter` applies. Each item is transferred and hashed one at a time off
-/// the main actor, progressively and cancellably; a later import transfers only what is confirmed.
+/// the main actor, progressively and cancellably; a transfer is kept only while it is under the retention bound, so the import reuses it for
+/// confirmed items and cancelling or deselecting discards it.
 @MainActor
 @Observable
 final class PhotosImportReviewCoordinator {
@@ -82,7 +83,8 @@ final class PhotosImportReviewCoordinator {
     func confirm() {
         let chosen = selectedItems.map(\.selection)
         guard !chosen.isEmpty, let provider else { return }
-        close()
+        let kept = Set(chosen.map(\.ordinal))
+        close(keeping: kept, provider: provider)
         onImport?(chosen, provider)
     }
 
@@ -96,8 +98,9 @@ final class PhotosImportReviewCoordinator {
         libraryMatcherLoader = nil
     }
 
-    private func close() {
+    private func close(keeping ordinals: Set<Int> = [], provider retiring: (any PhotosImportProviding)? = nil) {
         stopChecking()
+        (retiring ?? provider)?.discardRetainedTransfers(keeping: ordinals)
         reviewID = UUID()
         isPresented = false
         provider = nil
@@ -136,7 +139,7 @@ final class PhotosImportReviewCoordinator {
     private static func inspect(
         _ item: Item, provider: any PhotosImportProviding, matcher: LibraryMembershipMatcher?
     ) async -> (isMember: Bool, mismatch: String?) {
-        guard let data = try? await provider.transferData(for: item.selection) else { return (false, nil) }
+        guard let data = try? await provider.inspectionData(for: item.selection) else { return (false, nil) }
         let mismatch = OriginalFileTypeCheck.mismatchReason(name: item.name, data: data)
         guard let matcher, !matcher.isEmpty else { return (false, mismatch) }
         return (await contains(data, in: matcher), mismatch)

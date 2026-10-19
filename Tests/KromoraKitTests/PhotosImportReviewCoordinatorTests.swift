@@ -19,6 +19,37 @@ private final class ReviewPhotosProvider: PhotosImportProviding {
     }
 }
 
+/// Mirrors the production provider's retention contract: review transfers are kept for the
+/// import to consume, and `originalFetches` counts full-original transfers.
+@MainActor
+private final class RetainingPhotosProvider: PhotosImportProviding {
+    let payloads: [Int: Data]
+    private(set) var originalFetches: [Int: Int] = [:]
+    private(set) var retained: [Int: Data] = [:]
+
+    init(payloads: [Int: Data]) { self.payloads = payloads }
+
+    func originalFilename(for selection: PhotosImportSelection) -> String? {
+        "IMG_\(selection.ordinal).HEIC"
+    }
+
+    func transferData(for selection: PhotosImportSelection) async throws -> Data? {
+        if let data = retained.removeValue(forKey: selection.ordinal) { return data }
+        originalFetches[selection.ordinal, default: 0] += 1
+        return payloads[selection.ordinal]
+    }
+
+    func inspectionData(for selection: PhotosImportSelection) async throws -> Data? {
+        originalFetches[selection.ordinal, default: 0] += 1
+        retained[selection.ordinal] = payloads[selection.ordinal]
+        return payloads[selection.ordinal]
+    }
+
+    func discardRetainedTransfers(keeping ordinals: Set<Int>) {
+        retained = retained.filter { ordinals.contains($0.key) }
+    }
+}
+
 @MainActor
 final class PhotosImportReviewCoordinatorTests: XCTestCase {
     private func selections(_ count: Int) -> [PhotosImportSelection] {
@@ -76,6 +107,39 @@ final class PhotosImportReviewCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(imported.map(\.ordinal), [1])
         XCTAssertFalse(review.isPresented)
+    }
+
+    func testConfirmedItemIsTransferredOnceAndDeselectedItemsAreDiscarded() async throws {
+        let provider = RetainingPhotosProvider(payloads: [
+            0: Data(repeating: 1, count: 64), 1: Data(repeating: 2, count: 64),
+        ])
+        let review = PhotosImportReviewCoordinator()
+        review.libraryMatcherLoader = { LibraryMembershipMatcher(knownHashes: []) }
+        var handed: [PhotosImportSelection] = []
+        review.onImport = { selections, _ in handed = selections }
+
+        review.begin(selections: selections(2), provider: provider)
+        try await waitUntil { !review.isChecking }
+        review.toggle(review.items[0])
+        review.confirm()
+
+        XCTAssertEqual(Set(provider.retained.keys), [1], "the deselected item's transfer is dropped")
+        let data = try await provider.transferData(for: handed[0])
+        XCTAssertEqual(data, Data(repeating: 2, count: 64))
+        XCTAssertEqual(provider.originalFetches[1], 1, "a confirmed item is fetched once")
+        XCTAssertTrue(provider.retained.isEmpty)
+    }
+
+    func testCancellingReviewDiscardsRetainedTransfers() async throws {
+        let provider = RetainingPhotosProvider(payloads: [0: Data(repeating: 1, count: 64)])
+        let review = PhotosImportReviewCoordinator()
+        review.libraryMatcherLoader = { LibraryMembershipMatcher(knownHashes: []) }
+        review.begin(selections: selections(1), provider: provider)
+        try await waitUntil { !review.isChecking }
+        XCTAssertEqual(provider.retained.count, 1)
+
+        review.cancel()
+        XCTAssertTrue(provider.retained.isEmpty)
     }
 
     func testLateResultsDoNotUndoAnExplicitChoice() async throws {
