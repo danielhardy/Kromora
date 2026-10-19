@@ -88,7 +88,7 @@ enum RetouchCameraScaleFixtures {
             stroke = [CGPoint(x: center.x - 80, y: center.y - 22), CGPoint(x: center.x - 30, y: center.y + 4),
                       CGPoint(x: center.x + 25, y: center.y + 22), CGPoint(x: center.x + 80, y: center.y + 18)]
         case "long hair":
-            // A fibre lying across most of the frame: its bounding box covers about 60% of the crop.
+            // A fibre lying across most of the frame: its bounding box spans 73% of the crop width.
             defectRadius = 1.6
             stroke = [CGPoint(x: 240, y: 230), CGPoint(x: 700, y: 420), CGPoint(x: 1150, y: 680),
                       CGPoint(x: 1560, y: 1010)]

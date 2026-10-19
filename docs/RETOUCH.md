@@ -184,8 +184,8 @@ real-camera coverage, use local RAW fixtures in `realworldtest/` or another fixt
 Measured 2026-10-19 with `swift test --no-parallel --filter RetouchCameraScaleDiagnosticsTests`
 (serial lane; real Core Image and the production `RetouchRenderer`/`RetouchSourcePicker`). The suite
 generates sixteen 1800 × 1200 crops (native pixel pitch, the size of a 1:1 region of a 24 MP frame):
-sky, foliage, skin, and a soft-edged ridge, each with a 3 px hair, a 160 px-wide "long hair" crossing
-about 60% of the frame, a 7 px soft dust disc, and a 5 px hard speck. Fixtures are generated from fixed
+sky, foliage, skin, and a soft-edged ridge, each with a 3 px hair, a long hair crossing about 73% of
+the crop width, a 7 px soft dust disc, and a 5 px hard speck. Fixtures are generated from fixed
 coordinates and seed 658, with a known clean reference, and graded with the same per-background limits
 as the 96 × 72 corpus (`RetouchQualityMetrics`). The brush covers each defect with a 1.5 px margin.
 Automatic sources are picked at declared proxy scales: 1.0 (native), 0.57 (the production 1024 px
@@ -219,11 +219,11 @@ long hair 0/4 and 0/4. Manual Heal passes hair 4/4, long hair 4/4, soft dust 2/4
    leaves no placement. On every 96 × 72 hair row the picker returns **zero** candidates, the spot keeps no
    source, and the render is unchanged (luma shift −0.09 to −0.22 is the untouched hair). The same
    happens for the camera-scale long hair on all four backgrounds at every proxy scale. The sources exist:
-   on the 96 × 72 rows there are 44 whole-pixel, defect-free, in-frame placements per background, and on
-   foliage and water (where manual Heal already passes) all 44 pass every limit. On the other four
-   backgrounds not even a defect-free source passes, because the fixture brush has no margin over the
-   hair; that is a fixture limit, not a picker one. Manual Heal and automatic Heal with a defect-free
-   source repair the camera-scale long hair on all four backgrounds.
+   on the 96 × 72 rows the 6 px-grid oracle finds 44 defect-free, in-frame whole-pixel placements per
+   background. On foliage and water (where manual Heal already passes), all 44 pass every limit. On
+   the other four backgrounds not even a defect-free source passes, because the fixture brush has no
+   margin over the hair; that is a fixture limit, not a picker one. Manual Heal and automatic Heal
+   with a defect-free source repair the camera-scale long hair on all four backgrounds.
 2. **Source ranking is not the limiting factor.** At camera scale the ranked list holds 24 defect-free
    sources for every case and the first passing rank is 0 on 10 of 12 cases (rank 1 on edge hair, rank 3 on
    skin hair); no case contaminates its own source.
