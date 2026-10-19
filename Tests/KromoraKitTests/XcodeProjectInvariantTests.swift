@@ -11,6 +11,12 @@ final class XcodeProjectInvariantTests: XCTestCase {
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     }
 
+    func testSandboxEntitlementsAllowPhotoKit() throws {
+        guard let text = readText(at: packageRoot.appendingPathComponent("App/Kromora.entitlements")) else { return }
+        XCTAssertTrue(text.contains("com.apple.security.personal-information.photos-library"),
+                      "PhotoKit is denied in the sandbox without the Photos library entitlement.")
+    }
+
     func testXcodeSourcesBuildPhaseContainsOnlyTheAppLauncher() throws {
         guard let project = readText(at: xcodeProjectURL) else { return }
         guard

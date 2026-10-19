@@ -914,4 +914,19 @@ private final class MismatchDestination: PhotosImportDestination {
     }
     func recordPhotosImportFailureDestination(name: String, ordinal: Int?, reason: String) {}
     func finishPhotosImportDestination(summary: ImportOutcomeSummary) { summaries.append(summary) }
+
+    func testOriginalLookupNamesTheFirstFailingBoundary() {
+        func failure(_ authorized: Bool, limited: Bool = false, id: Bool = true,
+                     asset: Bool = true, resource: Bool = true) -> PhotosOriginalError? {
+            PhotosOriginalError.lookupFailure(
+                authorized: authorized, limited: limited, hasIdentifier: id,
+                assetFound: asset, resourceFound: resource)
+        }
+        XCTAssertEqual(failure(false, asset: false), .accessDenied)
+        XCTAssertEqual(failure(true, limited: true, asset: false), .assetNotFound(limitedAccess: true))
+        XCTAssertEqual(failure(true, id: false, asset: false), .assetNotFound(limitedAccess: false))
+        XCTAssertEqual(failure(true, resource: false), .noOriginalResource)
+        XCTAssertNil(failure(true))
+        XCTAssertTrue(PhotosOriginalError.accessDenied.localizedDescription.contains("System Settings"))
+    }
 }

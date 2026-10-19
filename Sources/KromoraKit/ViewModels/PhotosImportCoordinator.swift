@@ -120,9 +120,7 @@ final class PhotosPickerImportProvider: PhotosImportProviding {
         progress: @escaping @MainActor @Sendable (Double) -> Void
     ) async throws -> Data? {
         if let data = cache.consume(ordinal: selection.ordinal) { return data }
-        guard let resource = Self.originalResource(for: selection) else {
-            throw PhotosOriginalError.noOriginalResource
-        }
+        let resource = try await Self.resolveOriginalResource(for: selection)
         let directory = Self.scratchDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let file = directory.appendingPathComponent("original")
@@ -132,9 +130,7 @@ final class PhotosPickerImportProvider: PhotosImportProviding {
 
     func inspectionData(for selection: PhotosImportSelection) async throws -> Data? {
         try await cache.inspect(ordinal: selection.ordinal) { file in
-            guard let resource = Self.originalResource(for: selection) else {
-                throw PhotosOriginalError.noOriginalResource
-            }
+            let resource = try await Self.resolveOriginalResource(for: selection)
             try await Self.writeOriginal(resource, to: file)
         }
     }
@@ -150,6 +146,10 @@ final class PhotosPickerImportProvider: PhotosImportProviding {
         guard let identifier = selection.localIdentifier,
             let asset = PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil).firstObject
         else { return nil }
+        return originalResource(of: asset)
+    }
+
+    private static func originalResource(of asset: PHAsset) -> PHAssetResource? {
         let resources = PHAssetResource.assetResources(for: asset)
             .filter { !$0.originalFilename.isEmpty }
         if let raw = resources.first(where: {
@@ -158,6 +158,29 @@ final class PhotosPickerImportProvider: PhotosImportProviding {
             return raw
         }
         return resources.first(where: { $0.type == .photo })
+    }
+
+    /// Looks the original up, naming the first failing boundary: PhotoKit authorization, asset
+    /// lookup, or the asset having no original resource. The picker's private access does not
+    /// authorize PhotoKit, so an unauthorized fetch silently returns nothing (KRMA-991).
+    private static func resolveOriginalResource(
+        for selection: PhotosImportSelection
+    ) async throws -> PHAssetResource {
+        var status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        if status == .notDetermined {
+            status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+        }
+        let asset = selection.localIdentifier.flatMap {
+            PHAsset.fetchAssets(withLocalIdentifiers: [$0], options: nil).firstObject
+        }
+        let resource = asset.flatMap(originalResource(of:))
+        if let failure = PhotosOriginalError.lookupFailure(
+            authorized: status == .authorized || status == .limited,
+            limited: status == .limited,
+            hasIdentifier: selection.localIdentifier != nil,
+            assetFound: asset != nil, resourceFound: resource != nil
+        ) { throw failure }
+        return resource!
     }
 
     private static func scratchDirectory() -> URL {
@@ -273,11 +296,28 @@ final class PhotosReviewTransferCache {
 }
 
 enum PhotosOriginalError: LocalizedError, Equatable {
+    case accessDenied
+    case assetNotFound(limitedAccess: Bool)
     case noOriginalResource
     case unavailable(String)
 
+    /// The first failing lookup boundary, or nil when the original resource was found.
+    static func lookupFailure(
+        authorized: Bool, limited: Bool, hasIdentifier: Bool, assetFound: Bool, resourceFound: Bool
+    ) -> Self? {
+        guard authorized else { return .accessDenied }
+        guard hasIdentifier, assetFound else { return .assetNotFound(limitedAccess: limited) }
+        return resourceFound ? nil : .noOriginalResource
+    }
+
     var errorDescription: String? {
         switch self {
+        case .accessDenied:
+            return "Kromora does not have access to Photos. Allow it in System Settings > Privacy & Security > Photos, then import again."
+        case .assetNotFound(let limited):
+            return limited
+                ? "This photo is outside the set Kromora may access. Choose Full Access in System Settings > Privacy & Security > Photos, then import again."
+                : "Photos could not find this item. It may have been deleted or is not available in the system photo library."
         case .noOriginalResource:
             return "Photos has no original file for this item, so it was not imported."
         case .unavailable(let detail):
