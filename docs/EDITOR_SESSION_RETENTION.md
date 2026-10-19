@@ -66,12 +66,19 @@ sessions, but only eligible ones are evicted (below), so the resident set can ex
 
 ### Accounting
 
-Cost of a session = `(1 + undoCount + redoCount) × documentCost`, where `documentCost` is a
-deterministic estimate: a fixed 4 KiB shell plus `MemoryLayout<BrushSample>.stride` per brush and
-retouch sample (and per other variable-length recipe array). It deliberately ignores copy-on-write
-sharing, so it over-counts and never under-counts. It is computed when the session is stored
-(`commit`, `apply`, `adopt*`) and kept in the entry, never by scanning on read. No encoding on the
-main actor.
+Cost of a session = `(1 + undoCount + redoCount + (isGrouping ? 1 : 0)) × documentCost`. The extra
+document is the undo point held by an open gesture group. `documentCost` is a deterministic
+value-payload estimate: a fixed 4 KiB shell, `count × MemoryLayout<Element>.stride` for each
+variable-length collection recursively in the document and its recipes (including brush strokes,
+brush and retouch samples, local layers/components, adjustment nodes, retouch spots, and eye
+corrections), plus the UTF-8 byte count of retained strings. Do not encode the document or charge
+array capacity. This estimate deliberately takes no copy-on-write discount, but it is not an upper
+bound on allocated memory or RSS: allocator and array-capacity overhead are not captured. The 192
+MiB limit is an estimated recipe-payload threshold, not a process-memory guarantee. Compute the
+estimate when the session is stored (`commit`, `apply`, `adopt*`) and keep it in the entry; never
+scan sessions or encode documents on a read. Also refresh the active session's cached cost when
+`activeHistory` enters or leaves grouping; count its `groupingStart` document while the group is
+open, even before another document commit occurs.
 
 Recency is a monotonic tick stamped on `activate`, `commit`, `apply` and `adopt*`. Plain
 `session(for:)` reads (thumbnails, admission, export) do not touch recency, so background readers
@@ -91,9 +98,14 @@ A session is **ineligible** (pinned) when any holds:
    value snapshots** at accept time (`BatchItem.document`, the pasted `EditDocument` queued via
    `persistInactiveClipboardDocument`), so they need no pin; the dirty rule already covers paste.
 
-Eviction runs after each store into the coordinator and on every write acknowledgement
-(`persistence.onDurableWrite`), removes eligible sessions in ascending recency until both budgets
-hold or none remain eligible, and never touches `nextRevision`.
+Mutation methods do not evict inline. Run eviction after the caller has registered any accepted
+edit snapshot with persistence, after source-request pinning is established in `beginLoad`, and on
+every write acknowledgement (`persistence.onDurableWrite`) after pending/dirty state is updated.
+This order is required for inactive paste: `EditorDocumentCoordinator.apply` updates the session
+before `persistInactiveClipboardDocument` queues its forced write. The first eviction pass must
+come after that enqueue, so the dirty pin is already visible. Eviction removes eligible sessions
+in ascending recency until both budgets hold or none remain eligible, and never touches
+`nextRevision`.
 
 ### Over-budget behavior
 
@@ -152,9 +164,10 @@ photo and report it).
 ## Integration points for KRMA-1060
 
 - `EditorDocumentCoordinator`: inject the budget; store `(session, revision, cost, tick)` in one
-  entry; add `isEvictable` inputs (`pinnedAssetIDs: () -> Set<PhotoAssetID>`,
-  `isDirty: (PhotoAssetID) -> Bool`) as closures so the coordinator stays value-only; add
-  `evictIfNeeded()`; keep `removeSession(s)` for deletion.
+  entry; track the active asset so grouping-start cost can be charged to its pinned session; refresh
+  that cost on `beginGrouping`/`endGrouping`; add `isEvictable` inputs
+  (`pinnedAssetIDs: () -> Set<PhotoAssetID>`, `isDirty: (PhotoAssetID) -> Bool`) as closures so the
+  coordinator stays value-only; add `evictIfNeeded()`; keep `removeSession(s)` for deletion.
 - `EditPersistenceCoordinator`: add `func isDirty(_ assetID: PhotoAssetID) -> Bool`.
 - `AppViewModel`: wire the closures; call `editorDocument.evictIfNeeded()` from
   `persistence.onDurableWrite` and after `beginLoad`; supply the request-pinned asset set from
@@ -172,7 +185,8 @@ Inject `maximumResidentSessions = 3` and a small byte budget; use fake persisten
    bytes never exceed the budget after eviction; the probe's generated heavy documents trip the byte
    budget before the count budget.
 2. **Active undo continuity:** the active photo stays resident past the budget, `canUndo`/`undo`
-   work, and an open `beginGrouping` survives eviction passes.
+   work, and an open `beginGrouping` survives eviction passes with its grouping-start document
+   reflected in the estimated byte total.
 3. **Cold reopen parity:** evict a clean photo, reopen through `SourceSessionCoordinator`; the
    document equals the durable record, `hadInMemorySession` is false, undo is empty, and export of the
    evicted photo uses the durable document identically to the pre-eviction live one.
@@ -188,8 +202,10 @@ Inject `maximumResidentSessions = 3` and a small byte budget; use fake persisten
    read lands; `changedInMemory` is true and the stored document is not adopted. A load that
    began before eviction cannot see its asset evicted.
 9. **Batch paste:** paste to N > budget inactive photos including non-resident ones; every
-   destination persists base-plus-pasted values (durable base for non-resident), none is evicted
-   before its write acknowledges, and a failed base read skips and reports that photo.
+   destination persists base-plus-pasted values (durable base for non-resident). Gate the writes
+   and assert each updated session remains resident from persistence enqueue until its write
+   acknowledges; a failed write remains pinned. A failed durable-base read skips and reports that
+   photo.
 10. **Deletion and shutdown:** deleting a resident photo removes its session; shutdown with dirty
     resident sessions flushes them and evicts nothing.
 11. **Revision monotonicity:** after evict and reopen, new revisions are strictly greater than every
