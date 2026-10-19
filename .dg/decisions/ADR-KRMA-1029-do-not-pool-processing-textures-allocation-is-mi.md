@@ -17,7 +17,7 @@ Decision (KRMA-1029): do not pool processing textures. Keep per-render allocatio
 | preview 2560x1707 rgba16f | 0.0038 ms | 0.0074 ms |
 | preview 3840x2560 rgba16f | 0.0062 ms | 0.0119 ms |
 
-A slider-drag frame at 60 Hz is 16.7 ms, so allocation is under 0.05% of the budget. Caveat: this times the API call, not first-use page-in on the GPU. If an Instruments Metal System Trace later shows first-touch cost on large previews, revisit. No such profile exists today, and a pool would need to beat a few microseconds while adding a correctness hazard (stale pixels, torn reads).
+A slider-drag frame at 60 Hz is 16.7 ms. The largest median is 0.0062 ms (about 0.04% of that budget); the largest p95 is 0.0119 ms (under 0.08%). Caveat: this times the API call, not first-use page-in on the GPU. If an Instruments Metal System Trace later shows first-touch cost on large previews, revisit. No such profile exists today, and a pool would need to beat a few microseconds while adding a correctness hazard (stale pixels, torn reads).
 
 ## Owners that can read a texture after `render` returns
 
