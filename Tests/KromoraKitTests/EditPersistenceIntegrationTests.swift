@@ -348,32 +348,39 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         XCTAssertEqual(writeCount, 1)
     }
 
-    func testLongGestureCheckpointsIntermediateSnapshotsBeforeMouseUp() async throws {
-        let imageURL = try Fixtures.writeGradientPNG(
-            width: 32, height: 24, named: "long-gesture.png", in: tempDirectory
-        )
+    func testLongGestureCheckpointsIntermediateSnapshotsBeforeFinalFlush() async throws {
+        let imageURL = tempDirectory.appendingPathComponent("long-gesture.png")
         let container = makeEditPackageFixture()
         try container.register(imageURL)
         let store = container.store()
-        let viewModel = makeAppViewModel(engine: FakeRenderEngine(), editStore: store)
-        viewModel.openImage(url: imageURL)
-        try await waitUntil("the long-gesture image") { viewModel.sourceImage != nil }
-        try registerLoadedPhotos(in: viewModel, url: imageURL, with: container)
+        let reference = EditSourceReference(assetID: .file(imageURL), url: imageURL)
+        let gate = CheckpointGate()
+        let coordinator = EditPersistenceCoordinator(store: store, waitForCheckpoint: { await gate.wait() })
 
-        viewModel.beginUndoGrouping()
-        for value in [0.1, 0.2, 0.3] {
-            viewModel.updateDocument { $0.adjustments = [.exposure(ev: value)] }
-            try await Task.sleep(for: .milliseconds(300))
+        // Each checkpoint is released explicitly, so scheduling load cannot change the count.
+        for (index, value) in [0.1, 0.2, 0.3].enumerated() {
+            coordinator.enqueue(
+                EditDocument(adjustments: [.exposure(ev: value)]), for: reference, reportsStatus: false
+            )
+            try await pollUntil("checkpoint \(index + 1) to be waiting") { await gate.waiterCount == 1 }
+            await gate.release()
+            try await pollUntil("intermediate write \(index + 1)") { await store.writeCount == index + 1 }
         }
 
-        let intermediateWriteCount = await store.writeCount
-        XCTAssertGreaterThan(intermediateWriteCount, 1)
-        viewModel.endUndoGrouping()
-        let flushResult = await viewModel.flushPendingWrites()
+        // A snapshot queued after the last checkpoint is only durable via the final flush.
+        coordinator.enqueue(
+            EditDocument(adjustments: [.exposure(ev: 0.4)]), for: reference, reportsStatus: false
+        )
+        try await pollUntil("the final checkpoint wait") { await gate.waiterCount == 1 }
+        let beforeFlush = await store.writeCount
+        XCTAssertEqual(beforeFlush, 3)
+        let flushResult = await coordinator.flush()
         XCTAssertEqual(flushResult, .success)
-        XCTAssertEqual(viewModel.pendingPersistenceCount, 0)
+        XCTAssertEqual(coordinator.pendingCount, 0)
         let finalWriteCount = await store.writeCount
-        XCTAssertGreaterThanOrEqual(finalWriteCount, 2)
+        XCTAssertEqual(finalWriteCount, 4)
+        let restored = await store.load(for: reference)
+        XCTAssertEqual(restored.document.adjustments, [.exposure(ev: 0.4)])
     }
 
     func testMissingSourceStillReportsAnActionableLoadError() async throws {
@@ -413,4 +420,31 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         try await waitUntil("the prepared source") { viewModel.sourceImage != nil }
         XCTAssertEqual(viewModel.document.adjustments, [.exposure(ev: 0.9)])
     }
+}
+
+/// Manually released stand-in for the persistence checkpoint interval. A cancelled waiter returns
+/// immediately, matching `Task.sleep` as used by the production worker.
+private actor CheckpointGate {
+    private var waiters: [UUID: CheckedContinuation<Void, Never>] = [:]
+    var waiterCount: Int { waiters.count }
+
+    func wait() async {
+        let id = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if Task.isCancelled { continuation.resume() } else { waiters[id] = continuation }
+            }
+        } onCancel: {
+            Task { await self.cancel(id) }
+        }
+    }
+
+    func release() {
+        for (id, continuation) in waiters {
+            waiters[id] = nil
+            continuation.resume()
+        }
+    }
+
+    private func cancel(_ id: UUID) { waiters.removeValue(forKey: id)?.resume() }
 }

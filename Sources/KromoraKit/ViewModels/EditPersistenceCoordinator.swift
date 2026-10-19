@@ -18,7 +18,11 @@ final class EditPersistenceCoordinator {
 
     private static let checkpoint: Duration = .milliseconds(250)
 
+    /// Suspends between checkpoint writes; returns early when the worker is cancelled.
+    typealias CheckpointWait = @Sendable () async -> Void
+
     let store: EditDocumentStore
+    private let waitForCheckpoint: CheckpointWait
     private var task: Task<PersistenceFlushResult, Never>?
     private var generation = 0
     private var pending: [PhotoAssetID: PendingSnapshot] = [:]
@@ -32,8 +36,15 @@ final class EditPersistenceCoordinator {
     /// view model's status-bar policy.
     var onFailure: ((String) -> Void)?
 
-    init(store: EditDocumentStore) {
+    /// `waitForCheckpoint` is a test seam; production keeps the real 250 ms interval.
+    init(
+        store: EditDocumentStore,
+        waitForCheckpoint: @escaping CheckpointWait = {
+            try? await Task.sleep(for: EditPersistenceCoordinator.checkpoint)
+        }
+    ) {
         self.store = store
+        self.waitForCheckpoint = waitForCheckpoint
     }
 
     var pendingCount: Int { pending.count }
@@ -72,7 +83,7 @@ final class EditPersistenceCoordinator {
         task = Task { [weak self] in
             _ = await previous?.value
             guard let self else { return .cancelled }
-            if !force { try? await Task.sleep(for: Self.checkpoint) }
+            if !force { await self.waitForCheckpoint() }
             return await self.drain(generation: workerGeneration)
         }
     }
@@ -105,7 +116,7 @@ final class EditPersistenceCoordinator {
                 return .failure(message)
             }
             if !snapshot.force, !pending.isEmpty {
-                try? await Task.sleep(for: Self.checkpoint)
+                await waitForCheckpoint()
             }
         }
         return Task.isCancelled ? .cancelled : .success
