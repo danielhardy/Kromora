@@ -3,8 +3,9 @@
 > **Dated evidence (reviewed at commit `b78b888c`, 2026-10-04).** The `File.swift:line` citations
 > below describe that checkout; at least one (`KromoraSettingsView.swift:244-260`) now points past
 > the end of its file. Treat the conclusions as the 2026-10-04 review and re-verify any citation
-> against current source before relying on it. The entitlement set it analyses is unchanged
-> (see [`PACKAGING.md`](PACKAGING.md)).
+> against current source before relying on it. The five-key entitlement set and Photos conclusions
+> below describe the 2026-10-04 implementation; the current production set is in
+> [`PACKAGING.md`](PACKAGING.md).
 
 This document records a source review of Kromora's App Sandbox access paths. Section 1 references
 the code reviewed for KRMA-783; section 2 references the write/output paths reviewed for KRMA-784.
@@ -20,6 +21,12 @@ macOS grants at runtime; the required sandboxed checks are listed at the end of 
 > sandboxed run. Several file and line citations have drifted, and the old `ExportCoordinator` /
 > `AppViewModel` export paths have since moved (for example the bundle and Share workflow now lives in
 > `ExportWorkflowCoordinator`). Re-verify a citation against current source before relying on it.
+
+> **Disposition update (2026-10-19; source review).** KRMA-1040 added direct PhotoKit access for
+> selected-photo original retrieval, Photos thumbnails, and Photos delivery. The current app
+> therefore requires `com.apple.security.personal-information.photos-library` for those paths;
+> the October 4 recommendation below that no Photos entitlement was needed is superseded. The
+> entitlement's live sandbox behavior remains a separate qualification item in KRMA-1040.
 
 ## 1. Import, open, and persistent file access
 
@@ -390,9 +397,9 @@ API guidance](https://developer.apple.com/documentation/bundleresources/app-priv
 | `com.apple.security.assets.pictures.read-write` | Keep enabled. | The default library package, default exports, and app-owned Looks live under Pictures. |
 | `com.apple.security.network.client` | Do not declare. | No app-owned network request is part of the current product; user-opened browser links use the system browser. |
 
-Thus, the minimal final set is the five retained entitlements above; the network-client entitlement
-is not part of that set. No Photos entitlement is needed because PhotosPicker and PhotoKit use their
-system-mediated selection/authorization paths.
+Thus, as of 2026-10-04, the minimal set was the five retained entitlements above; the network-client
+entitlement was not part of that set. The later PhotoKit paths and Photos library entitlement are
+documented in the disposition update above and in the current contract in [`PACKAGING.md`](PACKAGING.md).
 
 ### Usage strings and linked follow-ups
 
