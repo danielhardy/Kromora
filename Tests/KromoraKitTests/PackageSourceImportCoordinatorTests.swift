@@ -14,6 +14,7 @@ final class PackageSourceImportCoordinatorTests: XCTestCase {
         var opened: [PortablePhotoAssetID] = []
         var outcomes: [(summary: ImportOutcomeSummary, prefix: String)] = []
         var statuses: [String] = []
+        var openedURLs: [URL] = []
         var errors: [String] = []
         var mediaFinishes: [(summary: ImportOutcomeSummary, operationID: UUID)] = []
         var mediaCancels = 0
@@ -35,7 +36,10 @@ final class PackageSourceImportCoordinatorTests: XCTestCase {
         func openImages(
             urls: [URL], operationID: UUID,
             completion: @escaping @MainActor (ImportOutcomeSummary?) -> Void
-        ) { completion(nil) }
+        ) {
+            openedURLs.append(contentsOf: urls)
+            completion(nil)
+        }
         func finishMediaImport(_ summary: ImportOutcomeSummary, operationID: UUID) {
             mediaFinishes.append((summary, operationID))
             onTerminal?()
@@ -50,7 +54,12 @@ final class PackageSourceImportCoordinatorTests: XCTestCase {
         let coordinator: PackageSourceImportCoordinator
     }
 
-    private func makeHarness(withPackage: Bool = true) throws -> Harness {
+    private func makeHarness(
+        withPackage: Bool = true,
+        receivePromises: @escaping @MainActor ([NSFilePromiseReceiver], URL) async -> ImageDrop.PromiseReceiveResult = {
+            _, _ in .init(urls: [], failures: [])
+        }
+    ) throws -> Harness {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("kromora-source-import-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -67,7 +76,7 @@ final class PackageSourceImportCoordinatorTests: XCTestCase {
         let destination = Destination()
         let coordinator = PackageSourceImportCoordinator(
             imports: imports, destination: destination,
-            receivePromises: { _, _ in .init(urls: [], failures: []) }
+            receivePromises: receivePromises
         )
         return Harness(
             directory: directory, imports: imports, destination: destination,
@@ -212,6 +221,23 @@ final class PackageSourceImportCoordinatorTests: XCTestCase {
         XCTAssertEqual(
             h.destination.statuses.last,
             "Photos drop complete — 0 imported, 0 duplicate, 0 skipped, 0 failed")
+    }
+
+    func testPhotosDropRefusesRenderedJPEGUnderRAWName() async throws {
+        let scratch = try Fixtures.makeTempDirectory("PhotosDropMismatch")
+        addTeardownBlock { try? FileManager.default.removeItem(at: scratch) }
+        let fake = scratch.appendingPathComponent("IMG_1558.DNG")
+        try Data([0xFF, 0xD8, 0xFF, 0xE0, 0, 0x10, 0x4A, 0x46, 0x49, 0x46, 0, 1]).write(to: fake)
+        let good = scratch.appendingPathComponent("IMG_1.jpg")
+        try Data([0xFF, 0xD8, 0xFF, 0xE0, 0, 0x10, 0x4A, 0x46, 0x49, 0x46, 0, 1]).write(to: good)
+        let h = try makeHarness(receivePromises: { _, _ in .init(urls: [fake, good], failures: []) })
+
+        await awaitTerminal(h.destination) { h.coordinator.importDroppedPromises([]) }
+
+        XCTAssertEqual(h.destination.openedURLs, [good])
+        let summary = try XCTUnwrap(h.destination.outcomes.last?.summary)
+        XCTAssertEqual(summary.failed, 1)
+        XCTAssertTrue(summary.failureReasons.first?.contains("IMG_1558.DNG") == true)
     }
 
     private static func supported(in folder: URL) -> [URL] {

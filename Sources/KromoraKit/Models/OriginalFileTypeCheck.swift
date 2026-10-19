@@ -90,4 +90,22 @@ enum OriginalFileTypeCheck {
         }
         return nil
     }
+
+    /// A user-facing reason when the file at `url` holds bytes its extension cannot describe, else
+    /// nil. Reads only the leading bytes unless a TIFF-header RAW name needs the whole file.
+    /// Unreadable files return nil so the ordinary import path reports the read failure.
+    static func mismatchReason(forFileAt url: URL) -> String? {
+        let name = url.lastPathComponent
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let head = try? handle.read(upToCount: 16) else { return nil }
+        let data: Data
+        if needsFullData(name: name, head: head) {
+            guard let whole = try? Data(contentsOf: url, options: .mappedIfSafe) else { return nil }
+            data = whole
+        } else {
+            data = head
+        }
+        return mismatchReason(name: name, data: data)
+    }
 }

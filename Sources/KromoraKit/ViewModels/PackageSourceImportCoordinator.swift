@@ -224,7 +224,19 @@ final class PackageSourceImportCoordinator {
                 return
             }
 
-            let result = await self.receivePromises(receivers, directory)
+            let received = await self.receivePromises(receivers, directory)
+            // Photos redeems an edited RAW as a rendered JPEG under the original RAW name
+            // (KRMA-1031); refuse it rather than store it as the original.
+            var urls: [URL] = []
+            var failures = received.failures
+            for url in received.urls {
+                if let reason = OriginalFileTypeCheck.mismatchReason(forFileAt: url) {
+                    failures.append(reason)
+                } else {
+                    urls.append(url)
+                }
+            }
+            let result = ImageDrop.PromiseReceiveResult(urls: urls, failures: failures)
             guard self.imports.isCurrent(operationID), let destination = self.destination else {
                 ImageDrop.purgeDropDirectories()
                 return
