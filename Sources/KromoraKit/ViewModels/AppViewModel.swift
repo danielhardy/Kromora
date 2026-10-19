@@ -1024,6 +1024,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         sheets: any SheetPresenting = AppKitSheetPresenter(),
         fileDropActionPolicy: FileDropActionPolicy = FileDropActionPolicy(),
         leaseRecoveryConfirmer: (any PortablePackageLeaseRecoveryConfirming)? = nil,
+        persistenceCheckpointWait: EditPersistenceCoordinator.CheckpointWait? = nil,
         settings injectedSettings: KromoraSettings? = nil,
         portableLibrarySession injectedPortableLibrarySession: PortableLibrarySession? = nil,
         asynchronousPortableLibraryIndexLoading: Bool = false,
@@ -1114,7 +1115,9 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
             editor: self.editorDocument, settings: self.settings
         )
         self.workScheduler = packageIOScheduler
-        self.persistence = EditPersistenceCoordinator(store: effectiveEditStore)
+        self.persistence = EditPersistenceCoordinator(
+            store: effectiveEditStore, waitForCheckpoint: persistenceCheckpointWait
+        )
         // Look thumbnails have a bounded, independent thumbnail lane. Sharing the editor's lane
         // would let a burst of filmstrip/grid work evict a row's continuation before it can return.
         self.lookPreviewCoordinator = LookPreviewCoordinator(

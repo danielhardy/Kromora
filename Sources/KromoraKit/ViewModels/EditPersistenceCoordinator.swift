@@ -39,12 +39,12 @@ final class EditPersistenceCoordinator {
     /// `waitForCheckpoint` is a test seam; production keeps the real 250 ms interval.
     init(
         store: EditDocumentStore,
-        waitForCheckpoint: @escaping CheckpointWait = {
-            try? await Task.sleep(for: EditPersistenceCoordinator.checkpoint)
-        }
+        waitForCheckpoint: CheckpointWait? = nil
     ) {
         self.store = store
-        self.waitForCheckpoint = waitForCheckpoint
+        self.waitForCheckpoint = waitForCheckpoint ?? {
+            try? await Task.sleep(for: EditPersistenceCoordinator.checkpoint)
+        }
     }
 
     var pendingCount: Int { pending.count }

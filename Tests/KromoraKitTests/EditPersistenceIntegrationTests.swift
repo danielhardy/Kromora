@@ -349,34 +349,43 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
     }
 
     func testLongGestureCheckpointsIntermediateSnapshotsBeforeFinalFlush() async throws {
-        let imageURL = tempDirectory.appendingPathComponent("long-gesture.png")
+        let imageURL = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "long-gesture.png", in: tempDirectory
+        )
         let container = makeEditPackageFixture()
         try container.register(imageURL)
         let store = container.store()
-        let reference = EditSourceReference(assetID: .file(imageURL), url: imageURL)
         let gate = CheckpointGate()
-        let coordinator = EditPersistenceCoordinator(store: store, waitForCheckpoint: { await gate.wait() })
+        let viewModel = makeAppViewModel(
+            engine: FakeRenderEngine(), editStore: store,
+            persistenceCheckpointWait: { await gate.wait() }
+        )
+        viewModel.openImage(url: imageURL)
+        try await waitUntil("the long-gesture image") { viewModel.sourceImage != nil }
+        try registerLoadedPhotos(in: viewModel, url: imageURL, with: container)
+        let reference = try XCTUnwrap(viewModel.admissionActiveSourceReference)
 
+        viewModel.beginUndoGrouping()
         // Each checkpoint is released explicitly, so scheduling load cannot change the count.
         for (index, value) in [0.1, 0.2, 0.3].enumerated() {
-            coordinator.enqueue(
-                EditDocument(adjustments: [.exposure(ev: value)]), for: reference, reportsStatus: false
-            )
+            viewModel.updateDocument { $0.adjustments = [.exposure(ev: value)] }
             try await pollUntil("checkpoint \(index + 1) to be waiting") { await gate.waiterCount == 1 }
             await gate.release()
             try await pollUntil("intermediate write \(index + 1)") { await store.writeCount == index + 1 }
         }
 
-        // A snapshot queued after the last checkpoint is only durable via the final flush.
-        coordinator.enqueue(
-            EditDocument(adjustments: [.exposure(ev: 0.4)]), for: reference, reportsStatus: false
-        )
+        let intermediateWriteCount = await store.writeCount
+        XCTAssertGreaterThan(intermediateWriteCount, 1, "intermediate checkpoints must be durable before mouse-up")
+
+        // The last drag value is only durable after the undo group ends and forces its final snapshot.
+        viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.4)] }
         try await pollUntil("the final checkpoint wait") { await gate.waiterCount == 1 }
         let beforeFlush = await store.writeCount
         XCTAssertEqual(beforeFlush, 3)
-        let flushResult = await coordinator.flush()
+        viewModel.endUndoGrouping()
+        let flushResult = await viewModel.flushPendingWrites()
         XCTAssertEqual(flushResult, .success)
-        XCTAssertEqual(coordinator.pendingCount, 0)
+        XCTAssertEqual(viewModel.pendingPersistenceCount, 0)
         let finalWriteCount = await store.writeCount
         XCTAssertEqual(finalWriteCount, 4)
         let restored = await store.load(for: reference)

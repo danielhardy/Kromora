@@ -800,6 +800,7 @@ class TempDirectoryTestCase: XCTestCase {
         sheets: any SheetPresenting = FakeSheets(),
         fileDropActionPolicy: FileDropActionPolicy = FileDropActionPolicy(),
         leaseRecoveryConfirmer: (any PortablePackageLeaseRecoveryConfirming)? = nil,
+        persistenceCheckpointWait: EditPersistenceCoordinator.CheckpointWait? = nil,
         packageOpener: any PackageOpening = PortablePackageOpener()
     ) -> AppViewModel {
         let isolatedPreferences: UserDefaults
@@ -834,6 +835,7 @@ class TempDirectoryTestCase: XCTestCase {
             sheets: sheets,
             fileDropActionPolicy: fileDropActionPolicy,
             leaseRecoveryConfirmer: leaseRecoveryConfirmer,
+            persistenceCheckpointWait: persistenceCheckpointWait,
             portableLibrarySession: portableLibrarySession,
             asynchronousPortableLibraryIndexLoading: asynchronousPortableLibraryIndexLoading,
             defersLibraryOpen: defersLibraryOpen,
