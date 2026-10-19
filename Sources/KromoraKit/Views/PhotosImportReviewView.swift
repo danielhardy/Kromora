@@ -59,6 +59,12 @@ struct PhotosImportReviewView: View {
                     .help("Hide photos that are already in the library")
                     .accessibilityLabel("Hide photos already in library")
             }
+            if !review.uninspected.isEmpty {
+                Label("\(review.uninspected.count) not checked", systemImage: "exclamationmark.triangle")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .help("Too many originals to check at once. Photos already in the library or with a mismatched file type are not flagged for these items.")
+            }
             if review.isChecking {
                 ProgressView().controlSize(.small)
                 Text("Checking library… \(review.checked)/\(review.items.count)")
@@ -100,6 +106,14 @@ struct PhotosImportReviewView: View {
                             .background(.regularMaterial, in: Capsule())
                             .padding(6)
                             .help(reason)
+                    } else if review.uninspected.contains(item.id) {
+                        Label("Not checked", systemImage: "questionmark.circle")
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.regularMaterial, in: Capsule())
+                            .padding(6)
+                            .help("Library membership and file type were not checked for this item.")
                     } else if isInLibrary {
                         Label("In library", systemImage: "checkmark.seal")
                             .font(.caption2.weight(.semibold))
@@ -119,7 +133,9 @@ struct PhotosImportReviewView: View {
         .help(item.name)
         .accessibilityLabel(item.name)
         .accessibilityValue(
-            (isInLibrary ? "Already in library, " : "") + (isSelected ? "Selected" : "Not selected")
+            (isInLibrary ? "Already in library, " : "")
+                + (review.uninspected.contains(item.id) ? "Not checked for duplicates, " : "")
+                + (isSelected ? "Selected" : "Not selected")
         )
     }
 }

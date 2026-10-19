@@ -21,6 +21,9 @@ final class PhotosImportReviewCoordinator {
     private(set) var inLibrary: Set<String> = []
     /// Items whose original bytes do not match their filename; the import will skip them.
     private(set) var mismatched: [String: String] = [:]
+    /// Items review did not inspect because the retained-transfer budget was spent. Library
+    /// membership and filename/type checks never ran for them; the import still transfers them once.
+    private(set) var uninspected: Set<String> = []
     private(set) var checked = 0
     private(set) var isChecking = false
     private(set) var selection = MediaVolumeSelectionModel()
@@ -55,6 +58,7 @@ final class PhotosImportReviewCoordinator {
         }
         inLibrary = []
         mismatched = [:]
+        uninspected = []
         checked = 0
         hidesInLibrary = false
         selection = MediaVolumeSelectionModel()
@@ -107,6 +111,7 @@ final class PhotosImportReviewCoordinator {
         items = []
         inLibrary = []
         mismatched = [:]
+        uninspected = []
         selection = MediaVolumeSelectionModel()
     }
 
@@ -138,11 +143,25 @@ final class PhotosImportReviewCoordinator {
     /// failure, and the review must not claim membership it cannot prove.
     private static func inspect(
         _ item: Item, provider: any PhotosImportProviding, matcher: LibraryMembershipMatcher?
-    ) async -> (isMember: Bool, mismatch: String?) {
-        guard let data = try? await provider.inspectionData(for: item.selection) else { return (false, nil) }
+    ) async -> InspectionResult {
+        let data: Data?
+        do {
+            data = try await provider.inspectionData(for: item.selection)
+        } catch {
+            return InspectionResult()
+        }
+        guard let data else { return InspectionResult(wasSkipped: true) }
         let mismatch = OriginalFileTypeCheck.mismatchReason(name: item.name, data: data)
-        guard let matcher, !matcher.isEmpty else { return (false, mismatch) }
-        return (await contains(data, in: matcher), mismatch)
+        guard let matcher, !matcher.isEmpty else { return InspectionResult(mismatch: mismatch) }
+        return InspectionResult(isMember: await contains(data, in: matcher), mismatch: mismatch)
+    }
+
+    /// `wasSkipped` means the provider declined to transfer (budget spent), which is distinct from
+    /// an inspection that completed or failed.
+    private struct InspectionResult {
+        var isMember = false
+        var mismatch: String?
+        var wasSkipped = false
     }
 
     @concurrent private static func contains(_ data: Data, in matcher: LibraryMembershipMatcher) async -> Bool {
@@ -151,8 +170,12 @@ final class PhotosImportReviewCoordinator {
 
     /// Tags a match and drops it from the default selection. An item the user already clicked
     /// keeps its state, so a late result never undoes a deliberate choice.
-    private func record(_ item: Item, result: (isMember: Bool, mismatch: String?)) {
+    private func record(_ item: Item, result: InspectionResult) {
         checked += 1
+        if result.wasSkipped {
+            uninspected.insert(item.id)
+            return
+        }
         if let reason = result.mismatch {
             mismatched[item.id] = reason
             selection.deselectDefaults([item.id])

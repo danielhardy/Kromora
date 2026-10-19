@@ -50,6 +50,36 @@ private final class RetainingPhotosProvider: PhotosImportProviding {
     }
 }
 
+/// Inspects only the first `budget` items, then declines like a spent retention budget.
+@MainActor
+private final class BudgetedPhotosProvider: PhotosImportProviding {
+    let payloads: [Int: Data]
+    let budget: Int
+    private var inspected = 0
+    private(set) var originalFetches: [Int: Int] = [:]
+
+    init(payloads: [Int: Data], budget: Int) {
+        self.payloads = payloads
+        self.budget = budget
+    }
+
+    func originalFilename(for selection: PhotosImportSelection) -> String? {
+        "IMG_\(selection.ordinal).HEIC"
+    }
+
+    func transferData(for selection: PhotosImportSelection) async throws -> Data? {
+        originalFetches[selection.ordinal, default: 0] += 1
+        return payloads[selection.ordinal]
+    }
+
+    func inspectionData(for selection: PhotosImportSelection) async throws -> Data? {
+        guard inspected < budget else { return nil }
+        inspected += 1
+        originalFetches[selection.ordinal, default: 0] += 1
+        return payloads[selection.ordinal]
+    }
+}
+
 @MainActor
 final class PhotosImportReviewCoordinatorTests: XCTestCase {
     private func selections(_ count: Int) -> [PhotosImportSelection] {
@@ -90,6 +120,29 @@ final class PhotosImportReviewCoordinatorTests: XCTestCase {
         XCTAssertEqual(review.selectedItems.map(\.selection.ordinal), [0, 1, 3])
         review.hidesInLibrary = true
         XCTAssertEqual(review.visibleItems.map(\.selection.ordinal), [1, 3])
+    }
+
+    func testItemsBeyondTheRetentionBudgetAreMarkedUninspected() async throws {
+        let known = Data(repeating: 1, count: 128)
+        let provider = BudgetedPhotosProvider(
+            payloads: [0: known, 1: Data(repeating: 2, count: 64), 2: known], budget: 2)
+        let review = PhotosImportReviewCoordinator()
+        let hash = LibraryMembershipMatcher.contentHash(of: known)
+        review.libraryMatcherLoader = { LibraryMembershipMatcher(knownHashes: [hash]) }
+        var handed: [PhotosImportSelection] = []
+        review.onImport = { selections, _ in handed = selections }
+
+        review.begin(selections: selections(3), provider: provider)
+        try await waitUntil { !review.isChecking }
+
+        XCTAssertEqual(review.uninspected, ["2"], "the duplicate past the budget was never checked")
+        XCTAssertEqual(review.inLibrary, ["0"])
+        XCTAssertTrue(review.mismatched.isEmpty)
+        XCTAssertEqual(review.selectedItems.map(\.selection.ordinal), [1, 2], "unchecked items stay selected")
+
+        review.confirm()
+        XCTAssertEqual(handed.map(\.ordinal), [1, 2])
+        XCTAssertEqual(provider.originalFetches[2], nil, "review did not transfer the skipped item")
     }
 
     func testImportHandsOnlyConfirmedSelectionsToTheImporter() async throws {
