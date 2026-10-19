@@ -688,11 +688,33 @@ struct PortablePackageTransactionJournal: Codable, Equatable, Sendable {
     }
 }
 
-/// Test seam: the points inside a file restore where rollback can be interrupted.
+/// Test seam: the points inside rollback where recovery can be interrupted.
+enum PortablePackageRollbackEntry: Equatable, Sendable {
+    case file
+    case move
+    case removal
+}
+
+enum PortablePackageRollbackDirectory: Equatable, Sendable {
+    case from
+    case to
+}
+
 enum PortablePackageRollbackPoint: Equatable, Sendable {
+    case beforeJournalCleanup(transactionID: UUID)
     case beforeRestoringMarker(path: String)
     case afterRestoringMarker(path: String)
-    case afterRestoreMove(path: String)
+    case beforeRestoreTargetRemoval(path: String)
+    case afterRestoreTargetRemoval(path: String)
+    case beforeRestoreMove(entry: PortablePackageRollbackEntry, path: String)
+    case afterRestoreMove(entry: PortablePackageRollbackEntry, path: String)
+    case beforeRestoreDirectorySync(
+        entry: PortablePackageRollbackEntry, directory: PortablePackageRollbackDirectory,
+        path: String)
+    case afterRestoreDirectorySync(
+        entry: PortablePackageRollbackEntry, directory: PortablePackageRollbackDirectory,
+        path: String)
+    case beforeRestoredMarker(path: String)
     case afterRestoredMarker(path: String)
 }
 
@@ -1243,6 +1265,7 @@ struct PortablePackageTransaction {
                     try rollback(
                         journal, packageRoot: packageRoot, journalURL: url, hook: rollbackHook)
                     recovered.append(journal.transactionID)
+                    try rollbackHook?(.beforeJournalCleanup(transactionID: journal.transactionID))
                 }
                 try? fm.removeItem(at: packageRoot.appendingPathComponent(journal.stagingDirectory))
                 try? fm.removeItem(at: url)
@@ -1295,33 +1318,60 @@ struct PortablePackageTransaction {
                     journal.files[index].publicationState = .restoring
                     try writeDurably(PackageJSONCoder.encode(journal), to: journalURL)
                     try hook?(.afterRestoringMarker(path: file.relativePath))
-                    if fm.fileExists(atPath: target.path) { try fm.removeItem(at: target) }
+                    if fm.fileExists(atPath: target.path) {
+                        try hook?(.beforeRestoreTargetRemoval(path: file.relativePath))
+                        try fm.removeItem(at: target)
+                        try hook?(.afterRestoreTargetRemoval(path: file.relativePath))
+                    }
                     try fm.createDirectory(
                         at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try hook?(.beforeRestoreMove(entry: .file, path: file.relativePath))
                     try fm.moveItem(at: backup, to: target)
-                    try fullSyncDirectory(target.deletingLastPathComponent())
-                    try hook?(.afterRestoreMove(path: file.relativePath))
+                    try hook?(.afterRestoreMove(entry: .file, path: file.relativePath))
+                    try syncRollbackRenameDirectories(
+                        from: backup, to: target, entry: .file, path: file.relativePath, hook: hook)
+                    try hook?(.beforeRestoredMarker(path: file.relativePath))
                     journal.files[index].publicationState = .restored
                     try writeDurably(PackageJSONCoder.encode(journal), to: journalURL)
                     try hook?(.afterRestoredMarker(path: file.relativePath))
-                } else if file.publicationState == .restoring {
-                    // The backup was consumed by an interrupted restore; the target is the
-                    // original. Never delete it.
+                } else if file.publicationState == .restoring
+                    || file.publicationState == .published
+                {
+                    guard fm.fileExists(atPath: target.path) else {
+                        throw PortablePackageTransactionError.journalCorrupt(
+                            "restored file '\(file.relativePath)' and its backup are both missing")
+                    }
+                    // A restoring marker with a consumed backup identifies an interrupted restore.
+                    // Older journals have no marker, and identical old/new bytes are ambiguous;
+                    // preserve the target rather than risk deleting the last committed file.
+                    try syncRollbackRenameDirectories(
+                        from: backup, to: target, entry: .file, path: file.relativePath, hook: hook)
+                    try hook?(.beforeRestoredMarker(path: file.relativePath))
                     journal.files[index].publicationState = .restored
                     try writeDurably(PackageJSONCoder.encode(journal), to: journalURL)
-                } else if file.publicationState == .published, fm.fileExists(atPath: target.path),
-                    try isPublishedReplacement(target, of: file)
+                    try hook?(.afterRestoredMarker(path: file.relativePath))
+                } else if file.publicationState == .started, !fm.fileExists(atPath: target.path)
                 {
-                    // No backup was ever consumed for this file, and the target is the staged
-                    // replacement. A journal from an older rollback may have restored the
-                    // original without recording it; those bytes do not match and are kept.
-                    try fm.removeItem(at: target)
+                    // The journal says publication started, but neither the staged file, target,
+                    // nor its expected backup remains. Retain the journal for diagnosis/retry.
+                    throw PortablePackageTransactionError.journalCorrupt(
+                        "published file '\(file.relativePath)' and its backup are both missing")
                 }
             } else if file.publicationState == .published
-                || (file.publicationState == .started && !fm.fileExists(atPath: staged.path)),
-                fm.fileExists(atPath: target.path)
+                || (file.publicationState == .started && !fm.fileExists(atPath: staged.path))
             {
-                try fm.removeItem(at: target)
+                if fm.fileExists(atPath: target.path) {
+                    try hook?(.beforeRestoreTargetRemoval(path: file.relativePath))
+                    try fm.removeItem(at: target)
+                    try hook?(.afterRestoreTargetRemoval(path: file.relativePath))
+                }
+                try syncRollbackDirectory(
+                    target.deletingLastPathComponent(), entry: .file, directory: .to,
+                    path: file.relativePath, hook: hook)
+                try hook?(.beforeRestoredMarker(path: file.relativePath))
+                journal.files[index].publicationState = .restored
+                try writeDurably(PackageJSONCoder.encode(journal), to: journalURL)
+                try hook?(.afterRestoredMarker(path: file.relativePath))
             }
         }
         for removal in journal.removals.reversed() {
@@ -1329,11 +1379,29 @@ struct PortablePackageTransaction {
             else { continue }
             let target = try packageURL(removal.relativePath, in: packageRoot)
             if fm.fileExists(atPath: backup.path) {
-                if fm.fileExists(atPath: target.path) { try? fm.removeItem(at: target) }
+                if fm.fileExists(atPath: target.path) {
+                    try hook?(.beforeRestoreTargetRemoval(path: removal.relativePath))
+                    try fm.removeItem(at: target)
+                    try hook?(.afterRestoreTargetRemoval(path: removal.relativePath))
+                }
                 try fm.createDirectory(
                     at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try hook?(.beforeRestoreMove(entry: .removal, path: removal.relativePath))
                 try fm.moveItem(at: backup, to: target)
-                try fullSyncDirectory(target.deletingLastPathComponent())
+                try hook?(.afterRestoreMove(entry: .removal, path: removal.relativePath))
+                try syncRollbackRenameDirectories(
+                    from: backup, to: target, entry: .removal,
+                    path: removal.relativePath, hook: hook)
+            } else if removal.publicationState != .staged {
+                guard fm.fileExists(atPath: target.path) else {
+                    throw PortablePackageTransactionError.journalCorrupt(
+                        "removed path '\(removal.relativePath)' and its backup are both missing")
+                }
+                // A retry after the backup rename sees the source restored and backup absent.
+                // Sync both entries again before recovery is allowed to discard the journal.
+                try syncRollbackRenameDirectories(
+                    from: backup, to: target, entry: .removal,
+                    path: removal.relativePath, hook: hook)
             }
         }
         for move in journal.moves.reversed() {
@@ -1341,13 +1409,50 @@ struct PortablePackageTransaction {
             let target = try packageURL(move.targetPath, in: packageRoot)
             // If the process stopped after rename but before the journal state was flushed, the
             // filesystem is the source of truth: target exists and source does not.
-            if fm.fileExists(atPath: target.path) && !fm.fileExists(atPath: source.path) {
+            if move.publicationState != .staged,
+                fm.fileExists(atPath: target.path), !fm.fileExists(atPath: source.path)
+            {
                 try fm.createDirectory(
                     at: source.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try hook?(.beforeRestoreMove(entry: .move, path: move.sourcePath))
                 try fm.moveItem(at: target, to: source)
-                try fullSyncDirectory(source.deletingLastPathComponent())
+                try hook?(.afterRestoreMove(entry: .move, path: move.sourcePath))
+                try syncRollbackRenameDirectories(
+                    from: target, to: source, entry: .move, path: move.sourcePath, hook: hook)
+            } else if move.publicationState != .staged,
+                fm.fileExists(atPath: source.path), !fm.fileExists(atPath: target.path)
+            {
+                // A prior attempt already renamed the target back. Re-sync both directory entries
+                // so a failed durability call cannot be mistaken for a completed rollback.
+                try syncRollbackRenameDirectories(
+                    from: target, to: source, entry: .move, path: move.sourcePath, hook: hook)
+            } else if move.publicationState != .staged,
+                !fm.fileExists(atPath: source.path), !fm.fileExists(atPath: target.path)
+            {
+                throw PortablePackageTransactionError.journalCorrupt(
+                    "moved path '\(move.sourcePath)' and its target are both missing")
             }
         }
+    }
+
+    private static func syncRollbackRenameDirectories(
+        from: URL, to: URL, entry: PortablePackageRollbackEntry, path: String,
+        hook: PortablePackageRollbackHook?
+    ) throws {
+        try syncRollbackDirectory(
+            to.deletingLastPathComponent(), entry: entry, directory: .to, path: path, hook: hook)
+        try syncRollbackDirectory(
+            from.deletingLastPathComponent(), entry: entry, directory: .from, path: path, hook: hook)
+    }
+
+    private static func syncRollbackDirectory(
+        _ directoryURL: URL, entry: PortablePackageRollbackEntry,
+        directory: PortablePackageRollbackDirectory, path: String,
+        hook: PortablePackageRollbackHook?
+    ) throws {
+        try hook?(.beforeRestoreDirectorySync(entry: entry, directory: directory, path: path))
+        try fullSyncDirectory(directoryURL)
+        try hook?(.afterRestoreDirectorySync(entry: entry, directory: directory, path: path))
     }
 
     /// Resolves a journalled backup location. The current writer records some backups as absolute
@@ -1511,14 +1616,6 @@ struct PortablePackageTransaction {
         if path == "Derived/Thumbnails/index.json" { return 3 }
         if path == "manifest.json" { return 3 }
         return 1
-    }
-
-    private static func isPublishedReplacement(
-        _ target: URL, of file: PortablePackageTransactionFile
-    ) throws -> Bool {
-        guard isRegularFile(at: target) else { return false }
-        let digest = try hashFile(at: target, chunkSize: 1 << 20, isCancelled: { false })
-        return digest.byteCount == file.byteCount && digest.checksum == file.stagedChecksum
     }
 
     private static func isRegularFile(at url: URL) -> Bool {
