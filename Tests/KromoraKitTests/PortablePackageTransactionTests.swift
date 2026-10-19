@@ -720,6 +720,191 @@ final class PortablePackageTransactionTests: TempDirectoryTestCase {
         try lease.release()
     }
 
+    // MARK: Journal path validation (KRMA-1052)
+
+    /// Installs an already-expired lease, so the production opener's takeover path runs recovery.
+    private func openExpiredPackage(_ packageURL: URL) throws -> Result<OpenedPackage, Error> {
+        let lease = try acquireRemoteLease(at: packageURL, duration: 10)
+        let lockURL = packageURL.appendingPathComponent("manifest.lock")
+        let lockBefore = try Data(contentsOf: lockURL)
+        return try withExtendedLifetime(lease) {
+            let result = Result {
+                try PortablePackageOpener.openBlocking(
+                    at: packageURL, asynchronousIndexLoading: true, confirmTakeover: { _ in true })
+            }
+            if case .failure = result {
+                // A rejected journal must not clear or replace the writer state.
+                XCTAssertEqual(try Data(contentsOf: lockURL), lockBefore)
+            }
+            return result
+        }
+    }
+
+    private func writeJournal(
+        _ journal: PortablePackageTransactionJournal, named name: String? = nil,
+        in packageURL: URL
+    ) throws {
+        let directory = packageURL.appendingPathComponent("Recovery/Transactions")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try PackageJSONCoder.encode(journal).write(
+            to: directory.appendingPathComponent(name ?? "\(journal.transactionID.uuidString).json"))
+    }
+
+    private func makeSentinel(named name: String) throws -> URL {
+        let directory = tempDirectory.appendingPathComponent(name)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data("keep".utf8).write(to: directory.appendingPathComponent("sentinel.txt"))
+        return directory
+    }
+
+    private func assertRejected(
+        _ result: Result<OpenedPackage, Error>, packageURL: URL, sentinel: URL,
+        file: StaticString = #filePath, line: UInt = #line
+    ) throws {
+        guard case .failure(let error) = result else {
+            return XCTFail("recovery accepted a malformed journal", file: file, line: line)
+        }
+        XCTAssertTrue(
+            error is PortablePackageTransactionError, "unexpected error \(error)",
+            file: file, line: line)
+        XCTAssertEqual(
+            try String(
+                contentsOf: sentinel.appendingPathComponent("sentinel.txt"), encoding: .utf8),
+            "keep", file: file, line: line)
+        XCTAssertEqual(
+            Self.journalCount(packageURL.appendingPathComponent("Recovery/Transactions")), 1,
+            "rejected journal must be retained as evidence", file: file, line: line)
+    }
+
+    private func journal(
+        staging: String, files: [PortablePackageTransactionFile] = [],
+        id: UUID = UUID()
+    ) -> PortablePackageTransactionJournal {
+        PortablePackageTransactionJournal(
+            transactionID: id, packageID: nil, createdAt: now, stagingDirectory: staging,
+            files: files, state: .committed)
+    }
+
+    func testRecoveryRejectsStagingDirectoryTraversalWithoutDeletingSibling() throws {
+        let packageURL = try makePackage()
+        let sibling = try makeSentinel(named: "UnrelatedSibling")
+        try writeJournal(journal(staging: "../UnrelatedSibling"), in: packageURL)
+        try assertRejected(try openExpiredPackage(packageURL), packageURL: packageURL, sentinel: sibling)
+    }
+
+    func testRecoveryRejectsCanonicalAssetsAsStagingDirectory() throws {
+        let packageURL = try makePackage()
+        let assets = packageURL.appendingPathComponent("Assets")
+        try FileManager.default.createDirectory(at: assets, withIntermediateDirectories: true)
+        try Data("keep".utf8).write(to: assets.appendingPathComponent("sentinel.txt"))
+        try writeJournal(journal(staging: "Assets"), in: packageURL)
+        try assertRejected(try openExpiredPackage(packageURL), packageURL: packageURL, sentinel: assets)
+    }
+
+    func testRecoveryRejectsStagingDirectoryOfAnotherTransaction() throws {
+        let packageURL = try makePackage()
+        let other = UUID()
+        let staging = packageURL.appendingPathComponent("Recovery/Staging/\(other.uuidString)")
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        try Data("keep".utf8).write(to: staging.appendingPathComponent("sentinel.txt"))
+        try writeJournal(journal(staging: "Recovery/Staging/\(other.uuidString)"), in: packageURL)
+        try assertRejected(try openExpiredPackage(packageURL), packageURL: packageURL, sentinel: staging)
+    }
+
+    func testRecoveryRejectsJournalFileNamedForAnotherTransaction() throws {
+        let packageURL = try makePackage()
+        let sibling = try makeSentinel(named: "UnrelatedSibling")
+        let value = journal(staging: "Recovery/Staging/\(UUID().uuidString)")
+        try writeJournal(value, named: "\(UUID().uuidString).json", in: packageURL)
+        try assertRejected(try openExpiredPackage(packageURL), packageURL: packageURL, sentinel: sibling)
+    }
+
+    func testRecoveryRejectsBackupPathsOutsideTheTransaction() throws {
+        let sibling = try makeSentinel(named: "UnrelatedSibling")
+        for backup in [
+            sibling.appendingPathComponent("sentinel.txt").path,
+            "Assets/sentinel.txt",
+            "../UnrelatedSibling/sentinel.txt",
+        ] {
+            let packageURL = try makePackage()
+            let id = UUID()
+            let file = PortablePackageTransactionFile(
+                relativePath: "State/a.txt",
+                stagingPath: "Recovery/Staging/\(id.uuidString)/State/a.txt", backupPath: backup,
+                byteCount: 0, stagedChecksum: "", publicationState: .published)
+            var value = journal(staging: "Recovery/Staging/\(id.uuidString)", files: [file], id: id)
+            value.state = .publishing
+            try writeJournal(value, in: packageURL)
+            try assertRejected(
+                try openExpiredPackage(packageURL), packageURL: packageURL, sentinel: sibling)
+        }
+    }
+
+    func testRecoveryRejectsCleanupTargetsInRecoveryStorage() throws {
+        let packageURL = try makePackage()
+        let sibling = try makeSentinel(named: "UnrelatedSibling")
+        let id = UUID()
+        let file = PortablePackageTransactionFile(
+            relativePath: "Recovery/Transactions",
+            stagingPath: "Recovery/Staging/\(id.uuidString)/x", backupPath: nil,
+            byteCount: 0, stagedChecksum: "", publicationState: .published)
+        try writeJournal(
+            journal(staging: "Recovery/Staging/\(id.uuidString)", files: [file], id: id),
+            in: packageURL)
+        try assertRejected(try openExpiredPackage(packageURL), packageURL: packageURL, sentinel: sibling)
+    }
+
+    func testRecoveryRejectsSymlinkedStagingRootWithoutDeletingTarget() throws {
+        let packageURL = try makePackage()
+        let sibling = try makeSentinel(named: "UnrelatedSibling")
+        let recovery = packageURL.appendingPathComponent("Recovery")
+        try FileManager.default.createDirectory(at: recovery, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(
+            at: recovery.appendingPathComponent("Staging"), withDestinationURL: sibling)
+        // A journal makes the retained-evidence assertion meaningful.
+        try writeJournal(journal(staging: "Recovery/Staging/\(UUID().uuidString)"), in: packageURL)
+        try assertRejected(try openExpiredPackage(packageURL), packageURL: packageURL, sentinel: sibling)
+    }
+
+    func testRecoveryRejectsSymlinkedStagingDirectoryInsidePackage() throws {
+        let packageURL = try makePackage()
+        let assets = packageURL.appendingPathComponent("Assets")
+        try FileManager.default.createDirectory(at: assets, withIntermediateDirectories: true)
+        try Data("keep".utf8).write(to: assets.appendingPathComponent("sentinel.txt"))
+        let id = UUID()
+        let staging = packageURL.appendingPathComponent("Recovery/Staging")
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(
+            at: staging.appendingPathComponent(id.uuidString), withDestinationURL: assets)
+        try writeJournal(
+            journal(staging: "Recovery/Staging/\(id.uuidString)", id: id), in: packageURL)
+        try assertRejected(try openExpiredPackage(packageURL), packageURL: packageURL, sentinel: assets)
+    }
+
+    func testRecoveryValidatesEveryJournalBeforeReplayingAny() throws {
+        let packageURL = try makePackage()
+        let sibling = try makeSentinel(named: "UnrelatedSibling")
+        let stateURL = packageURL.appendingPathComponent("State/a.txt")
+        try FileManager.default.createDirectory(
+            at: stateURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("published".utf8).write(to: stateURL)
+        let id = UUID()
+        let file = PortablePackageTransactionFile(
+            relativePath: "State/a.txt", stagingPath: "Recovery/Staging/\(id.uuidString)/State/a.txt",
+            backupPath: nil, byteCount: 0, stagedChecksum: "", publicationState: .published)
+        var good = journal(staging: "Recovery/Staging/\(id.uuidString)", files: [file], id: id)
+        good.state = .publishing
+        try writeJournal(good, in: packageURL)
+        try writeJournal(journal(staging: "../UnrelatedSibling"), in: packageURL)
+        guard case .failure = try openExpiredPackage(packageURL) else {
+            return XCTFail("expected rejection")
+        }
+        XCTAssertEqual(try String(contentsOf: stateURL, encoding: .utf8), "published")
+        XCTAssertEqual(Self.journalCount(packageURL.appendingPathComponent("Recovery/Transactions")), 2)
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: sibling.appendingPathComponent("sentinel.txt").path))
+    }
+
     private func makePackage() throws -> URL {
         let url = tempDirectory.appendingPathComponent(
             "Library-\(UUID().uuidString).kromoralibrary")

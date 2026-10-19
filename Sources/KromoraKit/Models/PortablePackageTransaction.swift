@@ -31,6 +31,7 @@ enum PortablePackageTransactionError: Error, Equatable, CustomStringConvertible 
     case moveSourceMissing(String)
     case moveDestinationExists(String)
     case invalidRemovalPath(String)
+    case unsafeJournal(String)
 
     var description: String {
         switch self {
@@ -57,6 +58,8 @@ enum PortablePackageTransactionError: Error, Equatable, CustomStringConvertible 
             return "Transaction move destination already exists: '\(path)'"
         case .invalidRemovalPath(let path):
             return "Only quarantined package paths may be permanently removed: '\(path)'"
+        case .unsafeJournal(let reason):
+            return "Refusing to recover package transaction journal; no files were changed: \(reason)"
         }
     }
 }
@@ -1192,14 +1195,18 @@ struct PortablePackageTransaction {
     @discardableResult
     static func recover(at packageRoot: URL) throws -> PortablePackageRecoveryReport {
         let fm = FileManager.default
-        let transactionsURL = packageRoot.appendingPathComponent("Recovery/Transactions")
-        let stagingRoot = packageRoot.appendingPathComponent("Recovery/Staging")
+        try validateRecoveryRoots(packageRoot: packageRoot)
+        let transactionsURL = try packageURL("Recovery/Transactions", in: packageRoot)
+        let stagingRoot = try packageURL("Recovery/Staging", in: packageRoot)
         var recovered: [UUID] = []
         if fm.fileExists(atPath: transactionsURL.path) {
             let urls = try fm.contentsOfDirectory(
                 at: transactionsURL, includingPropertiesForKeys: nil
             )
             .filter { $0.pathExtension == "json" }
+            // Decode and validate every journal before the first replay or cleanup, so a malformed
+            // journal cannot be reached after other journals have already been applied.
+            var journals: [(url: URL, journal: PortablePackageTransactionJournal)] = []
             for url in urls {
                 let journal: PortablePackageTransactionJournal
                 do {
@@ -1207,6 +1214,10 @@ struct PortablePackageTransaction {
                 } catch {
                     throw PortablePackageTransactionError.journalCorrupt(url.lastPathComponent)
                 }
+                try validate(journal, fileName: url.lastPathComponent, packageRoot: packageRoot)
+                journals.append((url, journal))
+            }
+            for (url, journal) in journals {
                 if journal.state != .committed {
                     try rollback(journal, packageRoot: packageRoot)
                     recovered.append(journal.transactionID)
@@ -1248,8 +1259,7 @@ struct PortablePackageTransaction {
         for file in journal.files.reversed() {
             let target = try packageURL(file.relativePath, in: packageRoot)
             let staged = try packageURL(file.stagingPath, in: packageRoot)
-            if let backupPath = file.backupPath {
-                let backup = URL(fileURLWithPath: backupPath)
+            if let backup = try backupURL(file.backupPath, journal: journal, packageRoot: packageRoot) {
                 if fm.fileExists(atPath: backup.path) {
                     if fm.fileExists(atPath: target.path) { try? fm.removeItem(at: target) }
                     try fm.createDirectory(
@@ -1268,8 +1278,8 @@ struct PortablePackageTransaction {
             if !fm.fileExists(atPath: staged.path) { continue }
         }
         for removal in journal.removals.reversed() {
-            guard let backupPath = removal.backupPath else { continue }
-            let backup = URL(fileURLWithPath: backupPath)
+            guard let backup = try backupURL(removal.backupPath, journal: journal, packageRoot: packageRoot)
+            else { continue }
             let target = try packageURL(removal.relativePath, in: packageRoot)
             if fm.fileExists(atPath: backup.path) {
                 if fm.fileExists(atPath: target.path) { try? fm.removeItem(at: target) }
@@ -1290,6 +1300,94 @@ struct PortablePackageTransaction {
                 try fm.moveItem(at: target, to: source)
                 try fullSyncDirectory(source.deletingLastPathComponent())
             }
+        }
+    }
+
+    /// Resolves a journalled backup location. The current writer records some backups as absolute
+    /// paths under the package root, so those remain valid; every backup must still sit below its
+    /// own transaction's `Backups` directory.
+    private static func backupURL(
+        _ backupPath: String?, journal: PortablePackageTransactionJournal, packageRoot: URL
+    ) throws -> URL? {
+        guard let backupPath else { return nil }
+        var relative = backupPath
+        if backupPath.hasPrefix("/") {
+            let roots = [
+                packageRoot.standardizedFileURL.path,
+                packageRoot.resolvingSymlinksInPath().standardizedFileURL.path,
+            ]
+            guard let prefix = roots.first(where: { backupPath.hasPrefix($0 + "/") }) else {
+                throw PortablePackageTransactionError.unsafeJournal(
+                    "backup path '\(backupPath)' is outside the package")
+            }
+            relative = String(backupPath.dropFirst(prefix.count + 1))
+        }
+        guard relative.hasPrefix("\(journal.stagingDirectory)/Backups/") else {
+            throw PortablePackageTransactionError.unsafeJournal(
+                "backup path '\(backupPath)' is outside the transaction's backup directory")
+        }
+        return try packageURL(relative, in: packageRoot)
+    }
+
+    private static func requireNotSymbolicLink(_ relativePath: String, packageRoot: URL) throws {
+        let url = try packageURL(relativePath, in: packageRoot)
+        if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink == true {
+            throw PortablePackageTransactionError.unsafeJournal(
+                "'\(relativePath)' is a symbolic link")
+        }
+    }
+
+    private static func validateRecoveryRoots(packageRoot: URL) throws {
+        for path in ["Recovery", "Recovery/Transactions", "Recovery/Staging"] {
+            try requireNotSymbolicLink(path, packageRoot: packageRoot)
+        }
+    }
+
+    /// Checks every path a journal can direct recovery to touch, before recovery touches any.
+    private static func validate(
+        _ journal: PortablePackageTransactionJournal, fileName: String, packageRoot: URL
+    ) throws {
+        func unsafe(_ reason: String) -> PortablePackageTransactionError {
+            .unsafeJournal("\(fileName): \(reason)")
+        }
+        let id = journal.transactionID.uuidString
+        guard fileName == "\(id).json" else { throw unsafe("file name does not match transaction \(id)") }
+        let expectedStaging = "Recovery/Staging/\(id)"
+        guard journal.stagingDirectory == expectedStaging else {
+            throw unsafe("staging directory '\(journal.stagingDirectory)' is not '\(expectedStaging)'")
+        }
+        try requireNotSymbolicLink(expectedStaging, packageRoot: packageRoot)
+        if let packageID = journal.packageID,
+            let data = try? Data(contentsOf: packageRoot.appendingPathComponent("manifest.json")),
+            let manifest = try? PackageJSONCoder.decode(PortablePackageManifest.self, from: data),
+            manifest.libraryID != packageID
+        {
+            throw unsafe("journal belongs to a different package")
+        }
+        func requireCanonicalOrQuarantine(_ path: String) throws {
+            guard !path.hasPrefix("Recovery/") || path.hasPrefix("Recovery/Quarantine/") else {
+                throw unsafe("path '\(path)' targets recovery storage")
+            }
+            _ = try packageURL(path, in: packageRoot)
+        }
+        for file in journal.files {
+            try requireCanonicalOrQuarantine(file.relativePath)
+            guard file.stagingPath.hasPrefix(expectedStaging + "/") else {
+                throw unsafe("staged path '\(file.stagingPath)' is outside the transaction")
+            }
+            _ = try packageURL(file.stagingPath, in: packageRoot)
+            _ = try backupURL(file.backupPath, journal: journal, packageRoot: packageRoot)
+        }
+        for move in journal.moves {
+            for path in [move.sourcePath, move.targetPath] {
+                guard !path.hasPrefix("Recovery/Transactions/"), !path.hasPrefix("Recovery/Staging/")
+                else { throw unsafe("move path '\(path)' targets recovery storage") }
+                _ = try packageURL(path, in: packageRoot)
+            }
+        }
+        for removal in journal.removals {
+            try requireCanonicalOrQuarantine(removal.relativePath)
+            _ = try backupURL(removal.backupPath, journal: journal, packageRoot: packageRoot)
         }
     }
 
