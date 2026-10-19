@@ -2281,10 +2281,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
                     assetID: assetID, identity: presentationIdentity,
                     generation: presentationGeneration,
                     perceptualDigest: candidate.metadata.perceptualDigest,
-                    nativeExtent: CGSize(
-                        width: candidate.metadata.pixelWidth,
-                        height: candidate.metadata.pixelHeight
-                    )
+                    nativeExtent: Self.storedFramePresentationExtent(candidate.metadata)
                 )
             } else {
                 self.present(release)
@@ -2339,6 +2336,23 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         )
         // The request now pins its asset; trim whatever the previous selection left over budget.
         editorDocument.evictIfNeeded()
+    }
+
+    /// The stored raster keeps only whole pixels, so its own pixel aspect can differ from the
+    /// cropped photo's true aspect by up to one stored pixel. Declaring the persisted oriented
+    /// aspect on the raster's long axis gives the first frame the same fit rect as the settled
+    /// render, so the photo does not shift by a pixel when the render replaces it (KRMA-1042).
+    static func storedFramePresentationExtent(_ metadata: PresentationFrameMetadata) -> CGSize {
+        let width = CGFloat(metadata.pixelWidth), height = CGFloat(metadata.pixelHeight)
+        let aspect = CGFloat(metadata.geometry.orientedAspectRatio)
+        guard aspect.isFinite, aspect > 0 else { return CGSize(width: width, height: height) }
+        // Only correct a sub-pixel disagreement; a larger one means the frame is not this crop's.
+        if width >= height {
+            let corrected = width / aspect
+            return abs(corrected - height) <= 1 ? CGSize(width: width, height: corrected) : CGSize(width: width, height: height)
+        }
+        let corrected = height * aspect
+        return abs(corrected - width) <= 1 ? CGSize(width: corrected, height: height) : CGSize(width: width, height: height)
     }
 
     private func presentProvisionalCandidate(
