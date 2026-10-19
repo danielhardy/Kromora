@@ -292,61 +292,6 @@ final class ExportCoordinator {
 
     // MARK: - Single export
 
-    /// Ask for a destination, then export. `suggestedBaseName` is the stem; the
-    /// extension comes from the current format.
-    func exportDialog(
-        source: ImageSource,
-        assetID: PhotoAssetID? = nil,
-        document: EditDocument,
-        lut: CubeLUT?,
-        suggestedBaseName: String
-    ) {
-        guard !isPresentingSheet else { return }
-        guard !isExporting else {
-            onStatus?(ExportJobBusyError().localizedDescription + " Wait for it to finish.")
-            return
-        }
-        isPresentingSheet = true
-        let formatPicker = ExportFormatAccessoryView(selectedFormat: lastUsedFormat)
-        let directoryURL = defaultFolderURL?()
-        Task { [weak self] in
-            guard let self else { return }
-            defer { self.isPresentingSheet = false }
-            let chosen = await self.sheets.chooseSaveURL { panel in
-                panel.title = "Export"
-                panel.nameFieldStringValue =
-                    suggestedBaseName + "." + formatPicker.selectedFormat.fileExtension
-                panel.directoryURL = directoryURL
-                panel.allowedContentTypes = [formatPicker.selectedFormat.utType]
-                formatPicker.onSelectionChanged = { [weak panel] format in
-                    panel?.nameFieldStringValue = suggestedBaseName + "." + format.fileExtension
-                    panel?.allowedContentTypes = [format.utType]
-                }
-                panel.accessoryView = formatPicker
-            }
-            guard let url = chosen else { return }
-            self.performExportFromDialog(
-                source: source, assetID: assetID, document: document, lut: lut,
-                formatPicker: formatPicker, url: url
-            )
-        }
-    }
-
-    private func performExportFromDialog(
-        source: ImageSource, assetID: PhotoAssetID?, document: EditDocument, lut: CubeLUT?,
-        formatPicker: ExportFormatAccessoryView, url: URL
-    ) {
-        performExport(
-            source: source,
-            assetID: assetID,
-            document: document,
-            lut: lut,
-            options: formatPicker.exportOptions(destination: .file(url)),
-            to: url,
-            access: .systemGranted(for: url)
-        )
-    }
-
     /// Encode `document` over `source` at full resolution and write it to `url`.
     /// Panel-free, so tests can drive it directly.
     ///
@@ -529,7 +474,10 @@ final class ExportCoordinator {
                 batchNaming: (self.lastUsedFilenamePolicy, firstItem.name, exampleLook)
             )
             let chosen = await self.sheets.chooseOpenURLs { panel in
-                panel.title = "Choose Export Folder"
+                panel.title = items.count == 1 ? "Export 1 Photo" : "Export \(items.count) Photos"
+                panel.message = items.count == 1
+                    ? "Choose a folder for the exported photo."
+                    : "Choose a folder for \(items.count) exported photos."
                 panel.prompt = "Export Here"
                 panel.canChooseFiles = false
                 panel.canChooseDirectories = true

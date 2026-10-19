@@ -854,39 +854,30 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
 
     // MARK: - Sheet seam
 
-    func testAcceptedSaveSheetExportsToTheChosenURL() async throws {
-        let sheets = FakeSheets()
-        let destination = tempDirectory.appendingPathComponent("sheet.jpg")
-        sheets.saveURL = destination
-        let coordinator = ExportCoordinator(sheets: sheets)
-        coordinator.onError = { XCTFail("unexpected error: \($0)") }
+    func testExportTargetNeverWidensToTheCollection() async throws {
+        let libraryFolder = tempDirectory.appendingPathComponent("target-library")
+        try FileManager.default.createDirectory(
+            at: libraryFolder, withIntermediateDirectories: true)
+        let urls = try ["one", "two", "three"].map {
+            try Fixtures.writeGradientPNG(
+                width: 40, height: 24, named: "\($0).png", in: libraryFolder)
+        }
+        let package = makeEditPackageFixture()
+        for url in urls { try package.register(url) }
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine(), editStore: package.store())
+        XCTAssertTrue(viewModel.exportTargetRequest.items.isEmpty, "nothing selected or open")
+        viewModel.collection.setSourceFolder(libraryFolder)
+        try await waitUntil { viewModel.collection.items.count == urls.count }
 
-        coordinator.exportDialog(
-            source: try makeSource(), document: EditDocument(), lut: nil, suggestedBaseName: "sheet"
+        viewModel.collection.select(at: 1)
+        XCTAssertEqual(
+            viewModel.exportTargetRequest.items.map(\.name),
+            [viewModel.collection.items[1].displayName]
         )
 
-        try await waitUntil { FileManager.default.fileExists(atPath: destination.path) && !coordinator.isExporting }
-        XCTAssertEqual(sheets.saveCalls, 1)
-    }
-
-    func testCancelledSaveSheetLeavesTheCoordinatorIdleAndReusable() async throws {
-        let sheets = FakeSheets()
-        let coordinator = ExportCoordinator(sheets: sheets)
-        let source = try makeSource()
-
-        coordinator.exportDialog(
-            source: source, document: EditDocument(), lut: nil, suggestedBaseName: "x"
-        )
-        try await waitUntil { sheets.saveCalls == 1 }
-        await Task.yield()
-        XCTAssertFalse(coordinator.isExporting)
-
-        // A cancelled sheet must not wedge the re-entrancy guard.
-        coordinator.exportDialog(
-            source: source, document: EditDocument(), lut: nil, suggestedBaseName: "x"
-        )
-        try await waitUntil { sheets.saveCalls == 2 }
-        XCTAssertFalse(coordinator.isExporting)
+        viewModel.collection.select(at: 0)
+        viewModel.collection.select(at: 2, modifiers: [.command])
+        XCTAssertEqual(viewModel.exportTargetRequest.items.count, 2)
     }
 
     func testAcceptedFolderSheetRunsTheBatch() async throws {

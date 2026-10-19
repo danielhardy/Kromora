@@ -104,7 +104,6 @@ final class KeyboardCommandRouter {
         guard let vm = viewModel, MenuCommandAvailability(vm).isEnabled(command) else { return }
         switch command {
         case .export: vm.exportDialog()
-        case .exportSelected: vm.exportSelectedDialog()
         case .editInExternalEditor: vm.editInExternalEditor()
         case .exportOriginalWithSettings: vm.exportOriginalWithSettings()
         case .resetPhoto: vm.resetPhoto()

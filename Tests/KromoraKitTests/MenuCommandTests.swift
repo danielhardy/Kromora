@@ -96,8 +96,9 @@ final class MenuCommandTests: XCTestCase {
             encoding: .utf8
         )
 
-        XCTAssertTrue(menuCommands.contains("Button(\"Export Selected Photos…\") { run(.exportSelected) }"))
-        XCTAssertTrue(menuCommands.contains(".keyboardShortcut(\"e\", modifiers: [.command, .shift])"))
+        XCTAssertTrue(menuCommands.contains("Button(\"Export…\") { run(.export) }"))
+        XCTAssertFalse(menuCommands.contains("Export Selected Photos"))
+        XCTAssertFalse(menuCommands.contains(".keyboardShortcut(\"e\", modifiers: [.command, .shift])"))
         XCTAssertTrue(
             menuCommands.contains(
                 "Button(\"Export Original + Settings Bundle…\") { run(.exportOriginalWithSettings) }"
@@ -309,7 +310,7 @@ final class MenuCommandTests: XCTestCase {
     func testNoPhotoDisablesEveryPhotoCommandButNotPaste() {
         let a = MenuCommandAvailability()
         for command: MenuCommand in [
-            .export, .exportSelected, .editInExternalEditor, .exportOriginalWithSettings,
+            .export, .editInExternalEditor, .exportOriginalWithSettings,
             .resetPhoto, .selectiveCopy, .copyAllEdits, .pasteEdits, .saveLook, .deleteSelectedPhotos,
         ] {
             XCTAssertFalse(a.isEnabled(command), "\(command)")
@@ -319,7 +320,7 @@ final class MenuCommandTests: XCTestCase {
     func testOpenPhotoEnablesPhotoCommands() {
         let a = MenuCommandAvailability(hasPhoto: true, selectionCount: 1, canPaste: true)
         for command: MenuCommand in [
-            .export, .exportSelected, .editInExternalEditor, .exportOriginalWithSettings,
+            .export, .editInExternalEditor, .exportOriginalWithSettings,
             .resetPhoto, .selectiveCopy, .copyAllEdits, .pasteEdits, .saveLook,
         ] {
             XCTAssertTrue(a.isEnabled(command), "\(command)")
@@ -331,16 +332,15 @@ final class MenuCommandTests: XCTestCase {
     func testGridWithSelectionEnablesBatchCommands() {
         let a = MenuCommandAvailability(isGrid: true, selectionCount: 3, canPaste: true)
         XCTAssertTrue(a.isEnabled(.deleteSelectedPhotos))
-        XCTAssertTrue(a.isEnabled(.exportSelected))
+        XCTAssertTrue(a.isEnabled(.export), "the explicit selection is the export target")
         XCTAssertTrue(a.isEnabled(.pasteEdits))
-        XCTAssertFalse(a.isEnabled(.export))
         XCTAssertFalse(a.isEnabled(.resetPhoto))
     }
 
     func testGridWithoutSelectionDisablesEverything() {
         let a = MenuCommandAvailability(isGrid: true, selectionCount: 0, canPaste: true)
         XCTAssertFalse(a.isEnabled(.deleteSelectedPhotos))
-        XCTAssertFalse(a.isEnabled(.exportSelected))
+        XCTAssertFalse(a.isEnabled(.export))
         XCTAssertFalse(a.isEnabled(.pasteEdits))
     }
 

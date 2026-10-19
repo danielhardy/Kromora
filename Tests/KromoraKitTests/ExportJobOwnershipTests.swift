@@ -190,7 +190,7 @@ final class ExportJobOwnershipTests: TempDirectoryTestCase {
         var availability = MenuCommandAvailability(hasPhoto: true, selectionCount: 1)
         XCTAssertTrue(availability.isEnabled(.export))
         availability.isExportBusy = true
-        for command in [MenuCommand.export, .exportSelected, .editInExternalEditor, .exportOriginalWithSettings] {
+        for command in [MenuCommand.export, .editInExternalEditor, .exportOriginalWithSettings] {
             XCTAssertFalse(availability.isEnabled(command), "\(command)")
         }
         XCTAssertTrue(availability.isEnabled(.resetPhoto))

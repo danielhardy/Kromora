@@ -5,7 +5,6 @@ import Foundation
 /// nothing to act on is disabled rather than silently doing nothing.
 enum MenuCommand: Equatable, Sendable {
     case export
-    case exportSelected
     case editInExternalEditor
     case exportOriginalWithSettings
     case resetPhoto
@@ -84,14 +83,14 @@ struct MenuCommandAvailability: Equatable, Sendable {
     func isEnabled(_ command: MenuCommand) -> Bool {
         guard isLibraryReady else { return false }
         return switch command {
-        case .export, .editInExternalEditor, .exportOriginalWithSettings:
+        case .export:
+            (selectionCount > 0 || hasPhoto) && !isExportBusy
+        case .editInExternalEditor, .exportOriginalWithSettings:
             hasPhoto && !isExportBusy
         case .resetPhoto, .selectiveCopy, .copyAllEdits, .saveLook:
             hasPhoto
         case .pasteEdits:
             canPaste && (hasPhoto || selectionCount > 0)
-        case .exportSelected:
-            (selectionCount > 0 || hasPhoto) && !isExportBusy
         case .deleteSelectedPhotos:
             isGrid && selectionCount > 0
         }

@@ -4069,7 +4069,6 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
     func editInExternalEditor() { exportWorkflow.editInExternalEditor() }
     func exportOriginalWithSettings() { exportWorkflow.exportOriginalWithSettings() }
     func batchExportDialog() { exportWorkflow.batchExportDialog() }
-    func exportSelectedDialog() { exportWorkflow.exportSelectedDialog() }
 
     /// What ⌘S would export, without running a panel. Internal for headless assertions.
     var exportRequest: ExportWorkflowCoordinator.SingleRequest? { exportSingleRequest }
@@ -4079,7 +4078,18 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         makeBatchExportRequest(from: collection.items)
     }
 
-    /// The panel-free request used by Export Selected Photos; never widened to the whole collection.
+    /// The panel-free request behind Export and Share: exactly the explicit Library selection, or
+    /// the active photo as a one-photo job when nothing is explicitly selected. Never widened to
+    /// the whole collection.
+    var exportTargetRequest: ExportWorkflowCoordinator.BatchRequest {
+        if !collection.selection.selectedIDs.isEmpty { return selectedBatchExportRequest }
+        guard let id = activeAssetID ?? collection.selection.activeID else {
+            return makeBatchExportRequest(from: [])
+        }
+        return makeBatchExportRequest(from: collection.items.filter { $0.id == id })
+    }
+
+    /// The panel-free request used by an explicit selection; never widened to the whole collection.
     var selectedBatchExportRequest: ExportWorkflowCoordinator.BatchRequest {
         makeBatchExportRequest(from: collection.selectedItems, unloaded: unloadedSelectedAssets(action: "export"))
     }
@@ -4999,7 +5009,7 @@ extension AppViewModel: ExportWorkflowDestination {
     var exportSourceName: String { sourceName }
 
     func exportBatchRequest(selectedOnly: Bool) -> ExportBatchRequest {
-        selectedOnly ? selectedBatchExportRequest : batchExportRequest
+        selectedOnly ? exportTargetRequest : batchExportRequest
     }
 
     func setExportStatus(_ message: String) { statusMessage = message }

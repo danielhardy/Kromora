@@ -99,7 +99,6 @@ final class ExportWorkflowCoordinator {
     }
 
     /// Share the active photo, or every selected photo when the selection has more than one item.
-    /// File ▸ Export remains the single-photo save-panel command.
     func shareDialog() {
         guard let destination, !refusedWhileBusy() else { return }
         switch Self.shareDialogMode(for: destination.exportSelectionCount) {
@@ -108,21 +107,18 @@ final class ExportWorkflowCoordinator {
         }
     }
 
-    /// Export the open image at full resolution. It exports `document`, not the display request —
-    /// holding Space to compare must not change what ⌘S writes.
+    /// The one edited-image export: the explicit Library selection, or the active photo when
+    /// nothing is selected. Each photo renders from its own edit and Look into a chosen folder, so
+    /// one photo and many share the same options. Holding Space to compare never changes it.
     func exportDialog() {
         guard !refusedWhileBusy() else { return }
-        guard let destination, let request = destination.exportSingleRequest else {
-            self.destination?.setExportStatus("Open an image first")
+        guard let destination else { return }
+        let request = destination.exportBatchRequest(selectedOnly: true)
+        guard !request.items.isEmpty else {
+            destination.setExportStatus("Open an image first")
             return
         }
-        export.exportDialog(
-            source: request.source,
-            assetID: destination.exportActiveAssetID,
-            document: request.document,
-            lut: request.lut,
-            suggestedBaseName: request.baseName
-        )
+        export.batchExportDialog(items: request.items, document: request.document, lut: request.lut)
     }
 
     /// Render a full-resolution TIFF for the system's default TIFF editor. The active source remains
@@ -233,17 +229,6 @@ final class ExportWorkflowCoordinator {
     func batchExportDialog() {
         guard let destination, !refusedWhileBusy() else { return }
         let request = destination.exportBatchRequest(selectedOnly: false)
-        export.batchExportDialog(items: request.items, document: request.document, lut: request.lut)
-    }
-
-    /// Export exactly the library selection. Selection and edit focus are separate in the grid model.
-    func exportSelectedDialog() {
-        guard let destination, !refusedWhileBusy() else { return }
-        let request = destination.exportBatchRequest(selectedOnly: true)
-        guard !request.items.isEmpty else {
-            destination.setExportStatus("Select at least one photo to export")
-            return
-        }
         export.batchExportDialog(items: request.items, document: request.document, lut: request.lut)
     }
 

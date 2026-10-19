@@ -115,12 +115,12 @@ final class ExportWorkflowCoordinatorTests: XCTestCase {
 
     func testSelectedExportAndShareRequireSelectionAndUseSelectedRequest() {
         let (workflow, destination) = makeWorkflow()
-        workflow.exportSelectedDialog()
+        workflow.exportDialog()
         destination.exportSelectionCount = 3
         workflow.shareDialog()
         XCTAssertEqual(destination.selectedOnlyCalls, [true, true])
         XCTAssertEqual(destination.statuses, [
-            "Select at least one photo to export", "Select at least one photo to share",
+            "Open an image first", "Select at least one photo to share",
         ])
     }
 
