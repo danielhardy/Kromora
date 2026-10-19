@@ -234,18 +234,27 @@ preview texture's output encoding. The tag persists across SwiftUI view updates 
 can color-match the canvas to the display, keeping it consistent with color-managed thumbnails and
 exports on Display P3 screens.
 
-**Camera sources and the sRGB canvas (KRMA-1045, 2026-10-19).** iPhone 17 Pro DNG/HEIC and Sony
-ILCE-7CR ARW files all report a Display P3 profile through ImageIO/Core Image; for RAW this is the
-space `CIRAWFilter` develops into, not an embedded ICC profile. The decoder keeps that wide-gamut
-data (extended-range floats) and the pipeline converts it to `WorkingSpace.current`, so the source
-profile is handled correctly; only the final sRGB encode (and `CIColorCubeWithColorSpace`, whose
-domain is [0, 1]) clips out-of-sRGB colour. On the local fixtures about 1-13% of pixels differ by
-more than 2/255 from a P3 render and 0.02-3% by more than 8/255 (worst: saturated iPhone HEIC/DNG
-frames, max about 50/255). Decision: keep the colour-managed sRGB canvas for the Instagram-first
-MVP; the loss is real but confined to saturated regions, and sRGB is the delivery target. A P3
-migration must move `WorkingSpace.current`, derived-LUT fitting (`RecipeExtractor`, pinned to
-sRGB), LUT interpolation, frame signatures/caches, thumbnails, and export tagging together, with
-preview/export parity tests; it is not a one-constant change. HDR/EDR and soft proofing remain
+**Camera sources and the sRGB canvas (KRMA-1045, 2026-10-19).** The local samples are five iPhone
+17 Pro DNGs, one 8-bit iPhone 17 Pro HEIC, and two Sony ILCE-7CR ARWs. ImageIO identifies the DNGs
+as Adobe RAW, the HEIC as HEIC, and the Sony files as Sony ARW; all report Display P3. For RAW,
+Display P3 is the developed `CIImage` color space, not an embedded ICC profile. The HEIC carries a
+Display P3 profile. Core Image color matches decoded inputs through its working space and into the
+requested output space. This preserves out-of-sRGB values in the floating-point graph, but writing
+to sRGB loses colors outside its gamut; a `CIColorCubeWithColorSpace` Look also has a bounded [0, 1]
+domain.
+
+For a repeatable comparison, each default RAW or HEIC decode was rendered at an 800 px long edge to
+Display P3 and sRGB. The sRGB RGBA8 raster was reopened with its sRGB tag and rendered back to P3;
+that round trip was compared with the direct P3 render, using the largest encoded RGB channel delta
+per pixel. Across these fixtures, 0-3.32% of pixels differed by more than 2/255, 0-1.22% by more
+than 8/255, and the maximum delta was 37/255. Converting the direct P3 pixels to linear sRGB found
+0% out-of-sRGB pixels in both Sony ARWs, 0-4.39% in the iPhone DNGs, and 1.81% in the HEIC. These
+are bounded, 8-bit pixel comparisons, not a calibrated display measurement. Decision: keep the
+color-managed sRGB canvas for the Instagram-first MVP so the preview matches the default sRGB
+delivery; a P3 canvas alone would show colors that the default export cannot retain. If the product
+adds a P3-preserving edit/output mode, migrate `WorkingSpace.current`, derived-LUT fitting
+(`RecipeExtractor`, pinned to sRGB), LUT interpolation, frame signatures/caches, thumbnails, and
+export tagging together, with preview/export parity tests. HDR/EDR and soft proofing remain
 separate. Hardware (colorimeter) validation was not performed.
 
 `LatestPreviewFrameStore` keeps the latest presented 2048 px preview of each asset. Three value types
