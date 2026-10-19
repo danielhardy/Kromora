@@ -150,7 +150,7 @@ Two different numbers come from this suite; do not conflate them.
 
 - **Stress report** (`testStressCorpusReportsCurrentHealAndCloneResults`): all 36 background/defect
   rows per mode, including wires and the 60 px broad-removal case that v1 does not support. It prints
-  pass counts (currently Heal 22/36, automatic Heal 11/36, Clone 21/36) and asserts only that the corpus
+  pass counts (currently Heal 22/36, automatic Heal 14/36, Clone 21/36) and asserts only that the corpus
   ran. It does not require any family to fail, so an improvement never breaks it.
 - **Shipping gate** (`testShippingGateHoldsSupportedClassFloors`): only the supported small-defect
   classes. `dust/speck` is 5 px soft dust plus hard speck (12 rows per mode); `hair/fibre` is 6 rows
@@ -286,6 +286,7 @@ Changes, at the boundaries KRMA-1061 identified:
 | Shipping hair/fibre automatic Heal (96 × 72, 6 rows) | 0/6 | 3/6 (foliage, water, brick) |
 | Shipping dust/speck Heal / auto Heal / Clone (of 12) | 10 / 11 / 10 | 10 / 11 / 10 |
 | Shipping hair/fibre Heal / Clone (of 6) | 2 / 2 | 2 / 2 |
+| Stress report Heal / auto Heal / Clone (of 36) | 22 / 11 / 21 | 22 / 14 / 21 |
 | Camera-scale shipped auto path, proxy 0.57 (of 16) | 10 | 16 |
 | Camera-scale shipped auto path, proxy 0.17 (of 16) | 9 | 16 |
 

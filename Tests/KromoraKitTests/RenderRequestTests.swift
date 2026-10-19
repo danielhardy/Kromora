@@ -146,6 +146,43 @@ final class RenderRequestTests: TempDirectoryTestCase {
         )
     }
 
+    func testAutomaticHealKeepsPreviewAndExportPixelsAligned() async throws {
+        let fixture = RetouchQualityFixtures.make(background: "foliage", defect: "hair/fibre")
+        let url = try Fixtures.writePNG(
+            fixture.damaged, named: "automatic-heal-hair.png", in: tempDirectory
+        )
+        let source = ImageSource(url: url, nativeExtent: CGSize(width: fixture.width, height: fixture.height))
+        let spot = RetouchSpot(
+            mode: .heal,
+            region: RetouchRegion(
+                samples: fixture.stroke.map { BrushSample(point: $0) }, radius: fixture.radius
+            )
+        )
+        let document = EditDocument(retouch: RetouchSettings(spots: [spot]))
+        let engine = RenderEngine()
+
+        let preview = try await engine.render(RenderRequest(
+            source: source, document: document, targetSize: source.nativeExtent,
+            quality: .preview, output: .raster
+        ))
+        let export = try await engine.render(RenderRequest(
+            source: source, document: document,
+            quality: .export, output: .encoded(format: .png, quality: 1)
+        ))
+        let neutral = try await engine.render(RenderRequest(
+            source: source, document: EditDocument(),
+            quality: .export, output: .encoded(format: .png, quality: 1)
+        ))
+
+        XCTAssertEqual(preview.extent, export.extent)
+        let previewPixels = try Pixels.bytes(of: try Pixels.decode(preview.data))
+        let exportPixels = try Pixels.bytes(of: try Pixels.decode(export.data))
+        let neutralPixels = try Pixels.bytes(of: try Pixels.decode(neutral.data))
+        assertPixelsEqual(previewPixels, exportPixels,
+                          "automatic Heal must resolve to the same normalized source in preview and export")
+        XCTAssertNotEqual(exportPixels, neutralPixels, "the generated hair fixture must be repaired")
+    }
+
     func testDehazeFullRangeKeepsPreviewAndExportGeometryAndPixelsAligned() async throws {
         let source = try makeSource()
         let engine = RenderEngine()
