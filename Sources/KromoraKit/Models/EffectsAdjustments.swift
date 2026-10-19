@@ -132,7 +132,7 @@ struct GrainAdjustments: Codable, Equatable, Sendable {
 
 }
 
-/// Capture-sharpening and noise cleanup applied after RAW decode and before the Look.
+/// Capture-sharpening and noise cleanup applied after the Look and global spatial effects.
 /// Values are image-relative and therefore behave consistently at preview and export sizes.
 struct DetailAdjustments: Codable, Equatable, Sendable {
     static let neutral = DetailAdjustments()

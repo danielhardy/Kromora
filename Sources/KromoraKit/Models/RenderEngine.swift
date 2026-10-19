@@ -184,8 +184,8 @@ struct RenderWorkStatistics: Sendable, Equatable {
     /// leave this at zero; the injected-context path deliberately increments it to prove the
     /// compatibility branch remains alive.
     let processingPrefixCPUReadbacks: Int
-    /// Number of processing-prefix command-buffer submissions. A downstream LUT/grain tick should
-    /// reuse the retained texture and therefore add no submissions.
+    /// Number of processing-prefix command-buffer submissions. A final-composition-only change,
+    /// such as grain, should reuse the retained texture and therefore add no submissions.
     let processingPrefixTextureSubmissions: Int
     let materializationBudgetSkips: Int
 }

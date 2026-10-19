@@ -37,8 +37,9 @@ enum RenderPipeline {
     /// GPU-backed Texture, Clarity, and Dehaze Effects stage. v12 adds the post-LUT vignette stage.
     /// v13 adds deterministic, resolution-aware post-LUT grain. v14 preserves the grain seed's
     /// full 32-bit entropy when passing it to the GPU kernel. v15 adds the post-LUT crop stage.
-    /// v16 formalizes the reusable pre-LUT prefix boundary. v17 bounds and sanitizes the Dehaze
-    /// output before it can be reused or presented. v18 applies the same finite-input and exact-
+    /// v16 formalizes the reusable prefix boundary (then pre-LUT, renamed graded in v36).
+    /// v17 bounds and sanitizes the Dehaze output before it can be reused or presented. v18 applies
+    /// the same finite-input and exact-
     /// extent contract to Clarity's spatial stage. v19 adds the ordered local-mask boundary.
     /// v20 evaluates the vignette as a destination-coordinate color kernel so tiled GPU evaluation
     /// cannot reinterpret the full-frame geometry through a sampler tile.
@@ -147,8 +148,8 @@ enum RenderPipeline {
         ))
     }
 
-    /// The graph from an **already-developed** source onwards — adjustments, LUT, then post-crop
-    /// composition effects.
+    /// The graph from an **already-developed** source onwards — Look, global adjustments, local
+    /// adjustments, then post-crop composition effects.
     ///
     /// Split out so a caller that already holds the developed image can skip the source stage.
     /// `RenderEngine` does exactly that, and it is not a micro-optimization: Core Image caches decoded
@@ -1078,8 +1079,8 @@ enum RenderPipeline {
         )?.cropped(to: extent) ?? image
     }
 
-    /// Apply the detail/atmosphere controls that belong before the LUT. Kept separate from the
-    /// convenience above so the full pipeline can place vignette after LUT exactly once.
+    /// Apply Texture, Clarity, and Dehaze to the current image. In the global graph these follow
+    /// the Look, Light, and Color stages and precede Detail and ordered adjustments.
     static func applySpatialEffects(_ effects: EffectsAdjustments, to image: CIImage) -> CIImage {
         applySpatialEffects(effects, to: image, spatialReferenceExtent: nil)
     }

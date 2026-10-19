@@ -557,8 +557,10 @@ final class RenderCacheTests: TempDirectoryTestCase {
 
         XCTAssertEqual(cached.width, fresh.width)
         XCTAssertEqual(cached.height, fresh.height)
-        assertPixelsEqual(try Pixels.bytes(of: cached), try Pixels.bytes(of: fresh), tolerance: 2,
-                          "a materialized prefix must preserve downstream LUT, crop, vignette, and grain")
+        assertPixelsEqual(
+            try Pixels.bytes(of: cached), try Pixels.bytes(of: fresh), tolerance: 2,
+            "a materialized graded prefix must preserve the Look and sliders before crop, vignette, and grain"
+        )
         let stats = await engine.cacheStatistics()
         XCTAssertEqual(stats.processingPrefix.hits, 1)
     }
@@ -611,7 +613,7 @@ final class RenderCacheTests: TempDirectoryTestCase {
         XCTAssertEqual(work.processingPrefixMaterializations, looks.count)
     }
 
-    func testNonLUTFallbackTest() async throws {
+    func testCandidatePreviewMatchesFullBuild() async throws {
         let source = try makeSource()
         let look = TestImages.warmLUT(name: "fallback")
         let base = EditDocument()
@@ -624,15 +626,15 @@ final class RenderCacheTests: TempDirectoryTestCase {
             look: look, targetSize: CGSize(width: 48, height: 32)
         )
 
-        let optimizedEngine = RenderEngine()
+        let lookPreviewEngine = RenderEngine()
         let fullEngine = RenderEngine()
-        let optimizedImage = await optimizedEngine.makeLookPreviewCGImage(request)
+        let lookPreviewImage = await lookPreviewEngine.makeLookPreviewCGImage(request)
         let fullImage = await fullEngine.makeCGImage(request.renderRequest)
-        let optimizedEntry = try XCTUnwrap(optimizedImage)
+        let lookPreviewEntry = try XCTUnwrap(lookPreviewImage)
         let fullEntry = try XCTUnwrap(fullImage)
         assertPixelsEqual(
-            try Pixels.bytes(of: optimizedEntry), try Pixels.bytes(of: fullEntry), tolerance: 1,
-            "a non-LUT candidate must match the full-build reference"
+            try Pixels.bytes(of: lookPreviewEntry), try Pixels.bytes(of: fullEntry), tolerance: 1,
+            "the Look candidate thumbnail must match the full render of its selected document"
         )
     }
 
