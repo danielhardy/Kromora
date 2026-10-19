@@ -34,4 +34,21 @@ final class OnboardingTests: XCTestCase {
             XCTAssertFalse(control.explanation.isEmpty, "Missing help for \(control.title)")
         }
     }
+
+    func testResetReplaysWelcomeWithoutTouchingOtherDefaults() {
+        let suiteName = "KromoraKitTests.Onboarding-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set("keep", forKey: "unrelated")
+        defaults.set(true, forKey: FirstRunOnboarding.hasSeenWelcomeKey)
+
+        FirstRunOnboarding.reset(in: defaults)
+
+        XCTAssertFalse(defaults.bool(forKey: FirstRunOnboarding.hasSeenWelcomeKey))
+        XCTAssertEqual(defaults.string(forKey: "unrelated"), "keep")
+
+        // Dismissing the replayed welcome persists completion again (ContentView.onDismiss).
+        defaults.set(true, forKey: FirstRunOnboarding.hasSeenWelcomeKey)
+        XCTAssertTrue(defaults.bool(forKey: FirstRunOnboarding.hasSeenWelcomeKey))
+    }
 }

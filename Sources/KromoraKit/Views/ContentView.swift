@@ -17,7 +17,7 @@ public struct ContentView: View {
     @Bindable private var chrome: ChromePresentationState
     @Bindable private var libraryPresentation: LibraryPresentationState
     @State private var photosSelection: [PhotosPickerItem] = []
-    @AppStorage("hasSeenWelcome") private var hasSeenWelcome = false
+    @AppStorage(FirstRunOnboarding.hasSeenWelcomeKey) private var hasSeenWelcome = false
     @State private var isWelcomePresented = false
     @State private var isTourPresented = false
     @State private var isShortcutReferencePresented = false

@@ -11,6 +11,7 @@ public struct KromoraSettingsView: View {
     @State private var exportTestMessage = ""
     @State private var editDatabaseURL: URL?
     @State private var libraryChooser: ActiveLibraryChooser
+    @State private var didResetOnboarding = false
 
     public init(
         settings: KromoraSettings,
@@ -131,6 +132,23 @@ public struct KromoraSettingsView: View {
             }
 
             librarySection
+
+            Section {
+                Button("Reset First-Run Experience") {
+                    FirstRunOnboarding.reset()
+                    didResetOnboarding = true
+                }
+                .accessibilityHint("Shows the welcome again the next time the main app opens")
+                if didResetOnboarding {
+                    Text("The welcome will appear the next time the main app opens.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Welcome")
+            } footer: {
+                Text("Replays the welcome and tour choices. Your library, edits, and other settings are not changed.")
+            }
 
             maskOverlaySection
 

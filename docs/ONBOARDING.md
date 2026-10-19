@@ -8,6 +8,11 @@ from Photos, or copy the bundled CC0 sample photos into the open library. The sa
 and source/license records live in `Sources/KromoraKit/Resources/SamplePhotos`; the manifest
 records the Wikimedia Commons page, creator, and CC0 1.0 license for each asset.
 
+Settings → Welcome → Reset First-Run Experience clears the persisted `hasSeenWelcome` flag so the
+welcome appears the next time the main app opens. The reset touches only that flag: the library,
+edit revisions, other Settings, and sample photos are unchanged, and samples are imported only if
+the user chooses that option again. Dismissing the welcome sets the flag again.
+
 The short Library/Edit/Export tour and searchable shortcut reference are available from the
 main-window toolbar. Guided Edit cards appear over the preview until dismissed. Each card applies
 one `EditDocument` adjustment with `AppViewModel.updateDocument`, so the regular history,
