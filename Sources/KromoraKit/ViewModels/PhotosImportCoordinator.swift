@@ -310,6 +310,7 @@ final class PhotosImportCoordinator {
     weak var destination: (any PhotosImportDestination)?
     private var task: Task<Void, Never>?
     private var operationID = UUID()
+    @ObservationIgnored private var activeTransferID: UUID?
     var onStatus: ((String) -> Void)?
     var onProgress: ((PhotosImportProgress?) -> Void)?
 
@@ -324,6 +325,7 @@ final class PhotosImportCoordinator {
         task?.cancel()
         let currentOperationID = UUID()
         operationID = currentOperationID
+        activeTransferID = nil
         failures = []
         wasCancelled = false
 
@@ -352,10 +354,15 @@ final class PhotosImportCoordinator {
                     )
                 )
 
+                let transferID = UUID()
+                self.activeTransferID = transferID
                 do {
                     let data = try await provider.transferData(for: selection) { [weak self] fraction in
-                        self?.updateTransfer(fraction, operationID: currentOperationID)
+                        self?.updateTransfer(
+                            fraction, operationID: currentOperationID, transferID: transferID
+                        )
                     }
+                    self.endTransfer(transferID)
                     guard let data else {
                         transferInterval.end()
                         guard self.isCurrent(currentOperationID), !Task.isCancelled else {
@@ -408,10 +415,12 @@ final class PhotosImportCoordinator {
                         operationID: currentOperationID
                     )
                 } catch is CancellationError {
+                    self.endTransfer(transferID)
                     transferInterval.end()
                     wasCancelled = true
                     break
                 } catch {
+                    self.endTransfer(transferID)
                     transferInterval.end()
                     guard self.isCurrent(currentOperationID), !Task.isCancelled else {
                         wasCancelled = true
@@ -458,8 +467,8 @@ final class PhotosImportCoordinator {
 
     /// Records the current item's transfer fraction. Late or out-of-order updates (from a finished,
     /// cancelled, or superseded item) are ignored and the value never moves backwards.
-    func updateTransfer(_ fraction: Double, operationID: UUID? = nil) {
-        if let operationID, !isCurrent(operationID) { return }
+    func updateTransfer(_ fraction: Double, operationID: UUID, transferID: UUID) {
+        guard isCurrent(operationID), activeTransferID == transferID else { return }
         guard var progress, progress.phase == .transferring, !Task.isCancelled else { return }
         let clamped = min(1, max(0, fraction))
         guard clamped > (progress.transferFraction ?? -1) else { return }
@@ -471,6 +480,10 @@ final class PhotosImportCoordinator {
             "Transferring \(progress.currentName ?? "")  \(percent)%  "
                 + "\(progress.processed)/\(progress.total)…"
         )
+    }
+
+    private func endTransfer(_ transferID: UUID) {
+        if activeTransferID == transferID { activeTransferID = nil }
     }
 
     func append(_ item: ImageCollection.PhotoImportItem, ordinal: Int) {
@@ -576,6 +589,7 @@ final class PhotosImportCoordinator {
     }
 
     func cancel() {
+        activeTransferID = nil
         task?.cancel()
     }
 

@@ -14,6 +14,7 @@ private final class TestPhotosImportProvider: PhotosImportProviding {
     var ignoresCancellation = false
     /// Transfer fractions reported per ordinal before the response resolves.
     var progressScript: [Int: [Double]] = [:]
+    var progressHandlers: [Int: @MainActor @Sendable (Double) -> Void] = [:]
     /// When set, the provider pauses on this ordinal after reporting its script.
     var progressPauseOrdinal: Int?
 
@@ -33,6 +34,7 @@ private final class TestPhotosImportProvider: PhotosImportProviding {
         for selection: PhotosImportSelection,
         progress: @escaping @MainActor @Sendable (Double) -> Void
     ) async throws -> Data? {
+        progressHandlers[selection.ordinal] = progress
         for fraction in progressScript[selection.ordinal] ?? [] { progress(fraction) }
         if selection.ordinal == progressPauseOrdinal { try await Task.sleep(for: .seconds(30)) }
         return try await transferData(for: selection)
@@ -309,7 +311,7 @@ final class PhotosImportTests: TempDirectoryTestCase {
             names: [0: "Kept.jpg", 1: "Downloading.jpg"],
             responses: [0: .success(data), 1: .success(data)]
         )
-        provider.progressScript = [1: [0.4]]
+        provider.progressScript = [0: [0.1], 1: [0.4]]
         provider.progressPauseOrdinal = 1
         var lastFraction: Double?
         coordinator.onProgress = { lastFraction = $0?.transferFraction ?? lastFraction }
@@ -319,7 +321,11 @@ final class PhotosImportTests: TempDirectoryTestCase {
             provider: provider
         )
         try await waitUntil("the download to report progress") { lastFraction == 0.4 }
+        provider.progressHandlers[0]?(0.8)
+        XCTAssertEqual(lastFraction, 0.4, "a late update from a prior item is ignored")
         coordinator.cancel()
+        provider.progressHandlers[1]?(0.8)
+        XCTAssertEqual(lastFraction, 0.4, "updates after cancellation are ignored")
         try await waitForCoordinator(coordinator)
 
         XCTAssertTrue(coordinator.wasCancelled)
