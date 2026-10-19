@@ -47,13 +47,7 @@ struct AppKitSheetPresenter: SheetPresenting {
         accessory.layoutSubtreeIfNeeded()
         accessory.setFrameSize(accessory.fittingSize)
         alert.accessoryView = accessory
-        if let window = hostWindow {
-            return await alert.beginSheetModal(for: window) == .alertFirstButtonReturn
-        }
-        NSApp.activate()
-        return await withCheckedContinuation { continuation in
-            continuation.resume(returning: alert.runModal() == .alertFirstButtonReturn)
-        }
+        return await presentConfirmation(alert)
     }
 
     func confirm(
@@ -64,6 +58,10 @@ struct AppKitSheetPresenter: SheetPresenting {
         alert.informativeText = informativeText
         alert.alertStyle = style
         buttons.forEach { alert.addButton(withTitle: $0) }
+        return await presentConfirmation(alert)
+    }
+
+    private func presentConfirmation(_ alert: NSAlert) async -> Bool {
         if let window = hostWindow {
             return await alert.beginSheetModal(for: window) == .alertFirstButtonReturn
         }
