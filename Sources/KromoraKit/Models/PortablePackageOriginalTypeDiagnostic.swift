@@ -49,20 +49,20 @@ enum PortablePackageOriginalTypeDiagnostic {
         var findings: [PortablePackageOriginalTypeFinding] = []
         for shard in PortableLibraryPackage.allShards {
             if isCancelled() { throw CancellationError() }
-            guard let membership = try? package.readMembershipShard(shard) else { continue }
+            let membership = try package.readMembershipShard(shard)
             for entry in membership.entries where !entry.isTombstone {
                 if isCancelled() { throw CancellationError() }
-                guard let url = try? package.verifiedEmbeddedSourceURL(
+                let url = try package.verifiedEmbeddedSourceURL(
                     for: entry.assetID, displayName: entry.summary.displayName
-                ), let handle = try? FileHandle(forReadingFrom: url) else { continue }
+                )
+                let handle = try FileHandle(forReadingFrom: url)
                 defer { try? handle.close() }
                 scanned += 1
                 let name = url.lastPathComponent
-                guard var data = try? handle.read(upToCount: headLength) else { continue }
+                var data = try handle.read(upToCount: headLength) ?? Data()
                 if OriginalFileTypeCheck.needsFullData(name: name, head: data) {
-                    try? handle.seek(toOffset: 0)
-                    guard let full = try? handle.readToEnd() else { continue }
-                    data = full
+                    try handle.seek(toOffset: 0)
+                    data = try handle.readToEnd() ?? Data()
                 }
                 guard let mismatch = OriginalFileTypeCheck.mismatch(name: name, data: data) else {
                     continue

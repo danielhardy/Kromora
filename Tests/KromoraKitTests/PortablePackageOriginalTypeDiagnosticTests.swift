@@ -76,6 +76,15 @@ final class PortablePackageOriginalTypeDiagnosticTests: TempDirectoryTestCase {
         }
     }
 
+    func testMissingOriginalFailsInsteadOfReturningPartialReport() throws {
+        let (package, ids) = try makePackage([("missing.jpg", jpegHead)])
+        let assetID = try XCTUnwrap(ids["missing.jpg"])
+        let url = try package.browsingOriginalURL(for: assetID, displayName: "missing.jpg")
+        try FileManager.default.removeItem(at: url)
+
+        XCTAssertThrowsError(try package.scanOriginalFileTypes())
+    }
+
     private func snapshot(_ root: URL) throws -> [String: Data] {
         var out: [String: Data] = [:]
         let e = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey])
