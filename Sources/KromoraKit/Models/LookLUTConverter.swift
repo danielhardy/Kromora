@@ -45,6 +45,13 @@ struct LUTSupportMatrix: Codable, Equatable, Sendable {
                 explanation: "RAW decoding and camera/source settings are not part of a global RGB LUT."
             ))
         }
+        if !document.lut.isIdentity {
+            entries.append(Entry(
+                id: "look", name: "Existing Look", disposition: .included,
+                explanation: "The resolved existing 3D Look is the base look: it is sampled first, and the stages below adjust it."
+            ))
+        }
+
         if !document.light.isIdentity {
             entries.append(Entry(
                 id: "light", name: "Light and tone", disposition: .included,
@@ -86,13 +93,6 @@ struct LUTSupportMatrix: Codable, Equatable, Sendable {
             entries.append(Entry(
                 id: "adjustment-\(index)", name: "Adjustment \(index + 1): \(node.displayName)", disposition: .included,
                 explanation: "Verified per-pixel adjustment stage; order is preserved."
-            ))
-        }
-
-        if !document.lut.isIdentity {
-            entries.append(Entry(
-                id: "look", name: "Existing Look", disposition: .included,
-                explanation: "The resolved existing 3D Look is composed into the sampled global transform."
             ))
         }
 

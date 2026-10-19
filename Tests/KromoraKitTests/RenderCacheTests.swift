@@ -425,7 +425,7 @@ final class RenderCacheTests: TempDirectoryTestCase {
         XCTAssertEqual(stats.developedSource.hits, 1)
         XCTAssertEqual(stats.processingPrefix.misses, 1)
         XCTAssertEqual(stats.processingPrefix.hits, 1,
-                       "grain-only edits must not rebuild the completed pre-LUT prefix")
+                       "grain-only edits must not rebuild the completed graded prefix")
     }
 
     func testRetouchEditMissesTheProcessingPrefixAndChangesPixels() async throws {
@@ -529,7 +529,7 @@ final class RenderCacheTests: TempDirectoryTestCase {
                 grain: GrainAdjustments(amount: 15)
             ),
             crop: CropAdjustments(normalizedRect: CGRect(x: 0.1, y: 0.15, width: 0.75, height: 0.7)),
-            lut: LUTSettings(lutID: lut.lutID, intensity: 0.35)
+            lut: LUTSettings(lutID: lut.lutID, intensity: 0.8)
         )
         let second = EditDocument(
             light: LightAdjustments(contrast: 25),
@@ -601,12 +601,14 @@ final class RenderCacheTests: TempDirectoryTestCase {
             }
         }
         let stats = await engine.cacheStatistics()
+        // Candidates share only the developed source: the Look heads the graded prefix, so each
+        // candidate builds (and materializes) its own.
         XCTAssertEqual(stats.thumbnailDevelopedSource.misses, 1)
         XCTAssertEqual(stats.thumbnailDevelopedSource.count, 1)
-        XCTAssertEqual(stats.processingPrefix.misses, 1)
-        XCTAssertEqual(stats.processingPrefix.count, 1)
+        XCTAssertEqual(stats.processingPrefix.misses, looks.count)
+        XCTAssertEqual(stats.processingPrefix.count, looks.count)
         let work = await engine.workStatistics()
-        XCTAssertEqual(work.processingPrefixMaterializations, 1)
+        XCTAssertEqual(work.processingPrefixMaterializations, looks.count)
     }
 
     func testNonLUTFallbackTest() async throws {
@@ -621,7 +623,6 @@ final class RenderCacheTests: TempDirectoryTestCase {
             source: source, baseDocument: base, candidateDocument: candidate,
             look: look, targetSize: CGSize(width: 48, height: 32)
         )
-        XCTAssertFalse(request.isLUTOnlyChange)
 
         let optimizedEngine = RenderEngine()
         let fullEngine = RenderEngine()

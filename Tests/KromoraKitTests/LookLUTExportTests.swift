@@ -20,6 +20,30 @@ final class LookLUTExportTests: TempDirectoryTestCase {
         XCTAssertTrue(matrix.omissionMessage?.contains("will be omitted") == true)
     }
 
+    func testSupportMatrixListsTheLookBeforeTheSlidersItIsAdjustedBy() {
+        let document = EditDocument(
+            light: LightAdjustments(exposure: 0.5),
+            adjustments: [.vibrance(amount: 0.4)],
+            lut: LUTSettings(lutID: LUTID(raw: "base"), intensity: 1)
+        )
+        let ids = LUTSupportMatrix.make(for: document).entries.map(\.id)
+        let look = ids.firstIndex(of: "look")
+        XCTAssertNotNil(look)
+        XCTAssertLessThan(look ?? .max, ids.firstIndex(of: "light") ?? 0)
+        XCTAssertLessThan(look ?? .max, ids.firstIndex(of: "adjustment-0") ?? 0)
+    }
+
+    func testLookPlusSlidersConversionVerifiesWithinTolerance() throws {
+        let lut = TestImages.warmLUT(size: 8, name: "base")
+        let document = EditDocument(
+            light: LightAdjustments(exposure: 0.4, contrast: 15),
+            color: ColorAdjustments(saturation: 10),
+            lut: LUTSettings(lutID: lut.lutID, intensity: 0.8)
+        )
+        let conversion = try LookLUTConverter.convert(document: document, lut: lut)
+        XCTAssertTrue(conversion.verification.passed)
+    }
+
     func testIdentityConversionProducesValidDocumentedCube() throws {
         let conversion = try LookLUTConverter.convert(document: EditDocument(), lut: nil, size: 2)
         XCTAssertEqual(conversion.cube.count, 8)

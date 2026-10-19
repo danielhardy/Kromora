@@ -71,8 +71,8 @@ protocol RenderEngining: EditedThumbnailRendering, Sendable {
     /// seam; `RenderEngine` overrides it to rasterize directly without encoded bytes.
     func makeThumbnailCGImage(_ request: RenderRequest) async -> sending CGImage?
 
-    /// Produce one Look-browser candidate. Production engines can reuse the candidate's shared
-    /// developed/pre-LUT prefix when the candidate differs from the base document only by LUT.
+    /// Produce one Look-browser candidate. Candidates render in the canvas order (Look, then
+    /// sliders) and share at most the developed source.
     func makeLookPreviewCGImage(_ request: LookPreviewRequest) async -> sending CGImage?
 
     /// Produce the presentation-only resolved alpha overlay for the masking workspace. This is a
@@ -928,8 +928,7 @@ actor RenderEngine: RenderEngining {
             image = try await buildImage(
                 request.source, request.candidateDocument, request.look,
                 renderRequest.renderScale, request.space,
-                quality: .thumbnail,
-                prefixDocument: request.isLUTOnlyChange ? request.baseDocument : nil
+                quality: .thumbnail
             )
         } catch {
             return nil
@@ -1421,8 +1420,7 @@ actor RenderEngine: RenderEngining {
         assetID: PhotoAssetID? = nil,
         requestRevision: UInt64 = 0,
         resolveSemanticMasks: Bool = true,
-        resolveRetouchFills: Bool = true,
-        prefixDocument: EditDocument? = nil
+        resolveRetouchFills: Bool = true
     ) async throws -> CIImage? {
         // Everything in this plan is value state. It is intentionally prepared before entering
         // the decoder/graph section so a future concurrent build worker can do this work without
@@ -1434,7 +1432,6 @@ actor RenderEngine: RenderEngining {
         )
         let maskIdentity = plan.maskIdentity
         let documentIdentity = plan.documentIdentity
-        let sharedPrefixDocument = prefixDocument ?? document
         noteMaskRequest(
             source: source, revision: requestRevision,
             maskIdentity: maskIdentity, documentIdentity: documentIdentity
@@ -1500,23 +1497,25 @@ actor RenderEngine: RenderEngining {
         let fullFrameExtent = effectivePlan.fullFrameExtent
         let includePostRenderWhiteBalance = effectivePlan.includePostRenderWhiteBalance
         let upstream: CIImage
-        if !scale.isFull, RenderPipeline.hasPreLUTWork(
-            sharedPrefixDocument, includePostRenderWhiteBalance: includePostRenderWhiteBalance
+        if !scale.isFull, RenderPipeline.hasPrefixWork(
+            document, lut: lut, includePostRenderWhiteBalance: includePostRenderWhiteBalance
         ) {
             upstream = await processingPrefix(
-                source: source, document: sharedPrefixDocument, developed: working, scale: scale,
+                source: source, document: document, lut: lut, developed: working, scale: scale,
                 sourceROI: processingROI,
                 spatialReferenceExtent: fullFrameExtent,
                 space: space, includePostRenderWhiteBalance: includePostRenderWhiteBalance,
                 quality: quality
-            ) ?? RenderPipeline.buildPreLUTImage(
-                developed: working, document: sharedPrefixDocument, toneCurveCache: toneCurveCache,
+            ) ?? RenderPipeline.buildGradedImage(
+                developed: working, document: document, lut: lut, space: space, lutCache: lutCache,
+                toneCurveCache: toneCurveCache,
                 includePostRenderWhiteBalance: includePostRenderWhiteBalance,
                 spatialReferenceExtent: fullFrameExtent
             )
         } else {
-            upstream = RenderPipeline.buildPreLUTImage(
-                developed: working, document: sharedPrefixDocument, toneCurveCache: toneCurveCache,
+            upstream = RenderPipeline.buildGradedImage(
+                developed: working, document: document, lut: lut, space: space, lutCache: lutCache,
+                toneCurveCache: toneCurveCache,
                 includePostRenderWhiteBalance: includePostRenderWhiteBalance,
                 spatialReferenceExtent: hasEarlyCrop ? fullFrameExtent : nil
             )
@@ -1544,7 +1543,7 @@ actor RenderEngine: RenderEngining {
         if !scale.isFull, resolveSemanticMasks,
            let cacheIdentity = resolvedMasks.cacheIdentity {
             localAdjusted = await postLocalProcessingPrefix(
-                source: source, document: document, localAdjusted: localAdjustedGraph,
+                source: source, document: document, lut: lut, localAdjusted: localAdjustedGraph,
                 scale: scale, sourceROI: processingROI, space: space,
                 includePostRenderWhiteBalance: includePostRenderWhiteBalance,
                 quality: quality, cacheIdentity: cacheIdentity
@@ -1553,7 +1552,7 @@ actor RenderEngine: RenderEngining {
             localAdjusted = localAdjustedGraph
         }
         let output = RenderStageFacade.buildFinalStages(
-            preLUT: localAdjusted, document: document, lut: lut, space: space, lutCache: lutCache,
+            graded: localAdjusted, document: document,
             grainSeed: RenderPipeline.grainSeed(for: source),
             applyCommittedCrop: !hasEarlyCrop,
             finalFrameExtent: finalFrameExtent
@@ -2247,6 +2246,7 @@ actor RenderEngine: RenderEngining {
     private func processingPrefix(
         source: ImageSource,
         document: EditDocument,
+        lut: CubeLUT?,
         developed: CIImage,
         scale: RenderScale,
         sourceROI: CGRect?,
@@ -2259,7 +2259,7 @@ actor RenderEngine: RenderEngining {
             source: RenderSourceFingerprint(source),
             developHash: RenderCacheHash.digest(document.rawDevelop),
             upstreamHash: prefixDocumentHash(
-                document, includePostRenderWhiteBalance: includePostRenderWhiteBalance
+                document, lut: lut, includePostRenderWhiteBalance: includePostRenderWhiteBalance
             ),
             scale: RenderScaleKey(scale, nativeExtent: source.nativeExtent),
             sourceROI: sourceROI,
@@ -2278,8 +2278,9 @@ actor RenderEngine: RenderEngining {
         KromoraObservability.event(.cacheMiss, source: source, quality: quality,
                                 detail: "layer=processingPrefix")
 
-        let prefix = RenderPipeline.buildPreLUTImage(
-            developed: developed, document: document, toneCurveCache: toneCurveCache,
+        let prefix = RenderPipeline.buildGradedImage(
+            developed: developed, document: document, lut: lut, space: space, lutCache: lutCache,
+            toneCurveCache: toneCurveCache,
             includePostRenderWhiteBalance: includePostRenderWhiteBalance,
             spatialReferenceExtent: spatialReferenceExtent
         )
@@ -2313,6 +2314,7 @@ actor RenderEngine: RenderEngining {
     private func postLocalProcessingPrefix(
         source: ImageSource,
         document: EditDocument,
+        lut: CubeLUT?,
         localAdjusted: CIImage,
         scale: RenderScale,
         sourceROI: CGRect?,
@@ -2325,7 +2327,7 @@ actor RenderEngine: RenderEngining {
             source: RenderSourceFingerprint(source),
             developHash: RenderCacheHash.digest(document.rawDevelop),
             upstreamHash: prefixDocumentHash(
-                document, includePostRenderWhiteBalance: includePostRenderWhiteBalance
+                document, lut: lut, includePostRenderWhiteBalance: includePostRenderWhiteBalance
             ),
             stage: .postLocal,
             localAdjustmentsHash: RenderCacheHash.digest(document.localAdjustments),
@@ -2373,6 +2375,7 @@ actor RenderEngine: RenderEngining {
 
     private func prefixDocumentHash(
         _ document: EditDocument,
+        lut: CubeLUT?,
         includePostRenderWhiteBalance: Bool
     ) -> String {
         let adjustments = includePostRenderWhiteBalance
@@ -2384,16 +2387,18 @@ actor RenderEngine: RenderEngining {
         // Retouch is already composited into the developed image this cache stores. Leaving it
         // out reused the pre-spot bitmap, so a heal or clone stayed invisible until a later
         // navigation missed the entry.
-        return RenderCacheHash.digest(
+        // The Look heads the prefix, so its settings and cube content are part of its identity.
+        let documentDigest = RenderCacheHash.digest(
             EditDocument(
                 version: document.version, rawDevelop: .neutral, light: document.light,
                 color: document.color,
                 effects: EffectsAdjustments(
                     texture: document.effects.texture, clarity: document.effects.clarity,
                     dehaze: document.effects.dehaze, detail: document.effects.detail
-                ), crop: .neutral, adjustments: adjustments, lut: .none,
+                ), crop: .neutral, adjustments: adjustments, lut: document.lut,
                 retouch: document.retouch
             ))
+        return documentDigest + ":" + (lut?.cacheFingerprint ?? "no-look")
     }
 
     // MARK: - The developed-source cache

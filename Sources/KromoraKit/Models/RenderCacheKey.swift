@@ -74,10 +74,10 @@ struct DevelopedSourceCacheKey: Hashable, Sendable {
 }
 
 /// The materialized prefix can stop either before local adjustments or immediately after them.
-/// LUT intensity/content and the composition effects below it remain common interactive edit
-/// targets in both cases.
+/// Both include the Look (the base look at the head of the chain), so its identity and intensity
+/// are part of `upstreamHash`; crop, vignette, and grain sit downstream and are not.
 enum ProcessingPrefixStage: String, Hashable, Sendable {
-    case preLUT
+    case graded
     case postLocal
 }
 
@@ -100,7 +100,7 @@ struct ProcessingPrefixCacheKey: Hashable, Sendable {
         source: RenderSourceFingerprint,
         developHash: String,
         upstreamHash: String,
-        stage: ProcessingPrefixStage = .preLUT,
+        stage: ProcessingPrefixStage = .graded,
         localAdjustmentsHash: String? = nil,
         maskResolutionState: String? = nil,
         maskPayloadVersion: String? = nil,

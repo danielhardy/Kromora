@@ -36,7 +36,7 @@ final class RenderEngineProcessingPrefixAcceptanceTests: TempDirectoryTestCase {
         XCTAssertTrue(hotPath.contains("bytesNoCopy:"))
     }
 
-    func testNoCPUUploadOnLUTTickTest() async throws {
+    func testNoCPUUploadOnDownstreamTickTest() async throws {
         try XCTSkipUnless(
             MTLCreateSystemDefaultDevice() != nil,
             "Metal is unavailable on this host"
@@ -53,25 +53,24 @@ final class RenderEngineProcessingPrefixAcceptanceTests: TempDirectoryTestCase {
             effects: EffectsAdjustments(texture: 20, grain: GrainAdjustments(amount: 70))
         )
 
-        _ = await engine.makeCGImage(request(source: source, document: prefix,
-                                             lut: TestImages.identityLUT(name: "first")))
+        let look = TestImages.warmLUT(name: "base-look")
+        _ = await engine.makeCGImage(request(source: source, document: prefix, lut: look))
         let beforeTick = await engine.workStatistics()
         XCTAssertEqual(beforeTick.processingPrefixCPUReadbacks, 0)
         XCTAssertEqual(beforeTick.processingPrefixTextureSubmissions, 1)
 
-        _ = await engine.makeCGImage(request(source: source, document: changed,
-                                             lut: TestImages.warmLUT(name: "second")))
+        _ = await engine.makeCGImage(request(source: source, document: changed, lut: look))
         let afterTick = await engine.workStatistics()
         XCTAssertEqual(
             afterTick.processingPrefixCPUReadbacks - beforeTick.processingPrefixCPUReadbacks,
             0,
-            "a LUT/grain-only tick must not allocate a CPU bitmap for the warm prefix"
+            "a grain-only tick must not allocate a CPU bitmap for the warm prefix"
         )
         XCTAssertEqual(
             afterTick.processingPrefixTextureSubmissions
                 - beforeTick.processingPrefixTextureSubmissions,
             0,
-            "a LUT/grain-only tick must not re-submit the cached prefix texture"
+            "a grain-only tick must not re-submit the cached prefix texture"
         )
 
         let cache = await engine.cacheStatistics()
@@ -245,6 +244,51 @@ final class RenderEngineProcessingPrefixAcceptanceTests: TempDirectoryTestCase {
         let cache = await engine.cacheStatistics()
         XCTAssertEqual(cache.processingPrefix.count, 0,
                        "an invalidated in-flight prefix must not be inserted after completion")
+    }
+
+    func testPrefixKeyDistinguishesLookIdentityAndIntensity() async throws {
+        let source = try makeSource()
+        let engine = RenderEngine()
+        let sliders = EditDocument(light: LightAdjustments(exposure: 0.25))
+        let warm = TestImages.warmLUT(name: "key-warm")
+        let identity = TestImages.identityLUT(name: "key-identity")
+        func document(_ look: CubeLUT?, _ intensity: Double) -> EditDocument {
+            var document = sliders
+            if let look { document.lut = LUTSettings(lutID: look.lutID, intensity: intensity) }
+            return document
+        }
+
+        _ = await engine.makeCGImage(request(source: source, document: document(warm, 1), lut: warm))
+        _ = await engine.makeCGImage(request(source: source, document: document(warm, 0.5), lut: warm))
+        _ = await engine.makeCGImage(request(source: source, document: document(identity, 1), lut: identity))
+        _ = await engine.makeCGImage(request(source: source, document: document(nil, 1)))
+
+        let cache = await engine.cacheStatistics()
+        XCTAssertEqual(cache.processingPrefix.hits, 0,
+                       "documents differing only by Look or intensity must never share a prefix")
+        XCTAssertEqual(cache.processingPrefix.misses, 4)
+        XCTAssertEqual(cache.processingPrefix.count, 4)
+    }
+
+    func testSliderAndIntensityChangesReuseTheDevelopedSource() async throws {
+        let source = try makeSource()
+        let engine = RenderEngine()
+        let look = TestImages.warmLUT(name: "reuse-warm")
+        func document(exposure: Double, intensity: Double) -> EditDocument {
+            EditDocument(
+                light: LightAdjustments(exposure: exposure),
+                lut: LUTSettings(lutID: look.lutID, intensity: intensity)
+            )
+        }
+
+        _ = await engine.makeCGImage(request(source: source, document: document(exposure: 0.2, intensity: 1), lut: look))
+        _ = await engine.makeCGImage(request(source: source, document: document(exposure: 0.6, intensity: 1), lut: look))
+        _ = await engine.makeCGImage(request(source: source, document: document(exposure: 0.6, intensity: 0.4), lut: look))
+
+        let cache = await engine.cacheStatistics()
+        XCTAssertEqual(cache.developedSource.misses, 1, "only the first render may decode the source")
+        XCTAssertEqual(cache.developedSource.hits, 2)
+        XCTAssertEqual(cache.processingPrefix.misses, 3, "each change re-runs the graph from the Look onward")
     }
 
     private func makeSource() throws -> ImageSource {

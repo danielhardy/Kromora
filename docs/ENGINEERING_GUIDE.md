@@ -72,13 +72,15 @@ including the master, per-channel, and parametric curves.
 
 `RenderPipeline` builds one lazy Core Image graph. `RenderEngine` evaluates that graph at the
 requested quality and output size; preview and export do not maintain separate edit logic. The
-pipeline handles source decoding/develop, orientation and rotation, global Light and Color,
-pre-Look detail effects, ordered adjustments, Looks, ordered local adjustments, crop, and
-post-crop composition effects. The exact order and cache invalidation version live with
+pipeline handles source decoding/develop, orientation and rotation, the Look, global Light and
+Color, detail effects, ordered adjustments, ordered local adjustments, crop, and post-crop
+composition effects. The Look is a base look: the sliders adjust its output rather than being
+re-graded by it. The Look and sliders form the graded prefix that the engine may materialize, so
+Look identity and intensity are part of the prefix cache identity. The exact order and cache invalidation version live with
 `RenderPipeline`; do not copy that volatile list into another document.
 
 Effects persist capture sharpening radius/amount/detail/masking and luminance/chroma noise reduction
-retention controls in the `detail` value. They run through the shared pre-Look Core Image graph;
+retention controls in the `detail` value. They run through the shared graded Core Image graph (after the Look);
 local mask layers can also scope sharpening, noise cleanup, and moiré softening. Export output
 sharpening is a separate delivery choice (screen, matte, or glossy, each low/standard/high) carried
 by `ExportOptions` and applied after sizing, so it does not change the edit document or preview.

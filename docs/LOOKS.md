@@ -7,6 +7,16 @@ Kromora's Look workflow supports text-based 3D LUTs, derives Looks from a RAW/JP
 13 read-only starter Looks. The parser and renderer are implemented in `CubeLUT`, `LUTLibrary`,
 and `RenderPipeline`; this document records the supported interchange contract.
 
+## Render order
+
+A Look is a **base look**. It is applied to the developed source (after RAW develop, retouch, and
+geometry), and Light, Color, Effects, Detail, and ordered adjustments then adjust the graded
+result, followed by local masks, crop, vignette, and grain. Dragging Exposure after picking a Look
+therefore moves the Look's output instead of feeding a fixed transform. Intensity is the same
+crossfade between the Look's input and graded output, now computed at the head of the chain.
+Documents saved before this order change render differently when they combine a Look with
+non-neutral sliders; the stored document is unchanged. Save as Look samples the same order.
+
 ## File support
 
 `.cube` files and plain-text `.look` files use the same 3D cube grammar. Proprietary binary or XML

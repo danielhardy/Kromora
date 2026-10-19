@@ -59,7 +59,10 @@ enum RenderPipeline {
     /// noise reduction independent filter passes; the previous max-based mapping made them aliases.
     /// v35 widens HSL mixer hue endpoints from ±30° to ±60° so channel Hue travel matches a
     /// more visible photographic shift (tracks share ``ColorMixerChannel.hueEndpointDegrees``).
-    static let pixelEpoch = 35
+    /// v36 moves the Look (LUT) to the head of the adjustment chain: it is now a base look that
+    /// Light, Color, Effects, Detail, and ordered adjustments adjust, rather than a final grade
+    /// applied over their output.
+    static let pixelEpoch = 36
 
     /// Build the graph for `document` over `source`.
     ///
@@ -180,56 +183,59 @@ enum RenderPipeline {
             ? applyingGeometry(document.crop, to: applyingRotation(document.rotation, to: retouchedSource))
             : retouchedSource
         let sourceSize = developed.extent.size
-        let adjusted = buildPreLUTImage(
-            developed: developed, document: document, toneCurveCache: toneCurveCache,
+        let adjusted = buildGradedImage(
+            developed: developed, document: document, lut: lut, space: space, lutCache: lutCache,
+            toneCurveCache: toneCurveCache,
             includePostRenderWhiteBalance: includePostRenderWhiteBalance,
             spatialReferenceExtent: spatialReferenceExtent
         )
         return buildImage(
-            preLUT: adjusted, document: document, lut: lut, space: space, lutCache: lutCache,
+            graded: adjusted, document: document,
             grainSeed: grainSeed, applyCommittedCrop: applyCommittedCrop,
             finalFrameExtent: finalFrameExtent, sourceSize: retouchSourceSize ?? sourceSize
         )
     }
 
-    /// Finish a graph from a completed or otherwise reusable pre-LUT image.
+    /// Finish a graph from a completed or otherwise reusable graded image (Look and sliders applied).
     static func buildImage(
-        preLUT: CIImage,
+        graded: CIImage,
         document: EditDocument,
-        lut: CubeLUT?,
-        space: WorkingSpace = .current,
-        lutCache: LUTFilterCache? = nil,
         grainSeed: UInt32 = 0,
         applyCommittedCrop: Bool = true,
         finalFrameExtent: CGRect? = nil,
         sourceSize: CGSize? = nil
     ) -> CIImage {
-        let lutAdjusted = applyLUT(document.lut, lut: lut, to: preLUT, space: space, cache: lutCache)
         // Crop is a composition stage: all look work above is evaluated over the source, while
         // vignette and grain below describe the final cropped frame. This also keeps preview,
         // comparison, and full-resolution export on one extent-changing path.
-        let cropped = applyCommittedCrop ? applyCrop(document.crop, to: lutAdjusted) : lutAdjusted
+        let cropped = applyCommittedCrop ? applyCrop(document.crop, to: graded) : graded
         let frame = finalFrameExtent ?? cropped.extent
         let vignetted = applyVignette(document.effects.vignette, to: cropped, frameExtent: frame)
         return applyGrain(document.effects.grain, to: vignetted, seed: grainSeed,
                           frameExtent: frame)
     }
 
-    /// Build the one intentionally materializable expensive prefix. Keeping it as one graph
-    /// preserves Core Image fusion within the prefix while allowing a caller to complete it once
-    /// and reuse the result when LUT/crop/vignette/grain changes.
-    static func buildPreLUTImage(
+    /// Build the one intentionally materializable expensive prefix: the Look applied to the
+    /// developed source, then the sliders that adjust it. Keeping it as one graph preserves Core
+    /// Image fusion within the prefix while allowing a caller to complete it once and reuse the
+    /// result when local layers/crop/vignette/grain change.
+    static func buildGradedImage(
         developed: CIImage,
         document: EditDocument,
+        lut: CubeLUT?,
+        space: WorkingSpace = .current,
+        lutCache: LUTFilterCache? = nil,
         toneCurveCache: ToneCurveFilterCache? = nil,
         includePostRenderWhiteBalance: Bool = true,
         spatialReferenceExtent: CGRect? = nil
     ) -> CIImage {
-        let lightAdjusted = applyLight(document.light, to: developed, cache: toneCurveCache)
+        // The Look is the base look: every slider below adjusts its output.
+        let looked = applyLUT(document.lut, lut: lut, to: developed, space: space, cache: lutCache)
+        let lightAdjusted = applyLight(document.light, to: looked, cache: toneCurveCache)
         let colorAdjusted = applyColor(document.color, to: lightAdjusted)
-        // Detail/atmosphere effects are pre-LUT. Vignette is deliberately held until after the LUT
-        // because it is a final composition effect and its mask must describe the post-crop frame.
-        let effectsAdjusted = applyPreLUTEffects(
+        // Vignette is deliberately held until after crop because it is a final composition effect
+        // and its mask must describe the post-crop frame.
+        let effectsAdjusted = applySpatialEffects(
             document.effects, to: colorAdjusted, spatialReferenceExtent: spatialReferenceExtent
         )
         let detailAdjusted = applyDetailControls(document.effects.detail, to: effectsAdjusted,
@@ -240,7 +246,7 @@ enum RenderPipeline {
         return applyAdjustments(adjustmentNodes, to: detailAdjusted)
     }
 
-    /// Apply ordered local layers after all existing global pre-LUT work. `masks` contains
+    /// Apply ordered local layers after all global work (the Look and the sliders). `masks` contains
     /// renderer-owned, already-composited soft alpha images; keeping resolution and Core Image
     /// types out of `LocalMaskResolving` makes this function usable for both preview and export.
     /// Each adjusted variant is derived from the layer's input, then blended back over that exact
@@ -266,7 +272,7 @@ enum RenderPipeline {
                 vibrance: layer.adjustments.vibrance,
                 saturation: layer.adjustments.saturation
             ), to: adjusted)
-            adjusted = applyPreLUTEffects(EffectsAdjustments(
+            adjusted = applySpatialEffects(EffectsAdjustments(
                 texture: layer.adjustments.texture,
                 clarity: layer.adjustments.clarity,
                 dehaze: layer.adjustments.dehaze
@@ -297,10 +303,13 @@ enum RenderPipeline {
 
     /// Only cache a prefix when it contains work beyond the developed source. A neutral prefix is
     /// intentionally left lazy so a normal image still benefits from Core Image's graph fusion.
-    static func hasPreLUTWork(
+    /// An active, resolved Look counts as work.
+    static func hasPrefixWork(
         _ document: EditDocument,
+        lut: CubeLUT?,
         includePostRenderWhiteBalance: Bool = true
     ) -> Bool {
+        if lut != nil, !document.lut.isIdentity { return true }
         let hasAdjustment = document.adjustments.contains { node in
             if !includePostRenderWhiteBalance, case .temperatureTint = node { return false }
             return !node.isIdentity
@@ -650,9 +659,9 @@ enum RenderPipeline {
         _ roi: CGRect, nativeExtent: CGSize, needsSpatialSupport: Bool
     ) -> CGRect {
         guard needsSpatialSupport, nativeExtent.width > 0, nativeExtent.height > 0 else { return roi }
-        // Clarity/Dehaze use the largest pre-LUT radius (2.8% of the full decoded shortest side).
+        // Clarity/Dehaze use the largest spatial radius (2.8% of the full decoded shortest side).
         // Include that support in the decode ROI so edge pixels match the uncropped graph; the
-        // final visible crop is restored after all shared pre-LUT/LUT stages.
+        // final visible crop is restored after all shared Look/slider stages.
         let margin = min(nativeExtent.width, nativeExtent.height) * 0.028
         return roi.insetBy(dx: -margin, dy: -margin)
             .intersection(CGRect(origin: .zero, size: nativeExtent))
@@ -1012,8 +1021,8 @@ enum RenderPipeline {
     /// performed before this stage, preview and export use the same photographic radius relative to
     /// the image rather than accidentally using the same number of pixels.
     static func applyEffects(_ effects: EffectsAdjustments, to image: CIImage) -> CIImage {
-        let preLUT = applyPreLUTEffects(effects, to: image)
-        let vignetted = applyVignette(effects.vignette, to: preLUT)
+        let spatial = applySpatialEffects(effects, to: image)
+        let vignetted = applyVignette(effects.vignette, to: spatial)
         return applyGrain(effects.grain, to: vignetted, seed: 0)
     }
 
@@ -1071,14 +1080,14 @@ enum RenderPipeline {
 
     /// Apply the detail/atmosphere controls that belong before the LUT. Kept separate from the
     /// convenience above so the full pipeline can place vignette after LUT exactly once.
-    static func applyPreLUTEffects(_ effects: EffectsAdjustments, to image: CIImage) -> CIImage {
-        applyPreLUTEffects(effects, to: image, spatialReferenceExtent: nil)
+    static func applySpatialEffects(_ effects: EffectsAdjustments, to image: CIImage) -> CIImage {
+        applySpatialEffects(effects, to: image, spatialReferenceExtent: nil)
     }
 
     /// Apply spatial effects to an ROI while retaining the full decoded frame as their scale
     /// reference. Recomputing these fractions from a small ROI would make a zoomed preview
     /// visibly diverge from the same pixels in a full-resolution export.
-    static func applyPreLUTEffects(
+    static func applySpatialEffects(
         _ effects: EffectsAdjustments,
         to image: CIImage,
         spatialReferenceExtent: CGRect?

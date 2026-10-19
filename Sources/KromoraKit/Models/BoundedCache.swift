@@ -20,7 +20,7 @@ struct RenderCacheConfiguration: Sendable, Equatable {
     /// consume an entry or a byte of the editor's developed-source budget.
     var thumbnailDevelopedSourceMaxEntries = 1
     var thumbnailDevelopedSourceMaxCostBytes = 16 * 1024 * 1024
-    /// Completed pre-LUT prefixes are larger than encoded previews, so they have their own budget.
+    /// Completed graded (Look plus slider) prefixes are larger than encoded previews, so they have their own budget.
     /// Keeping this separate prevents a LUT/grain drag from evicting the final preview working set.
     /// Materialized-prefix entries retain only a GPU texture and are charged at width*height*8;
     /// admission still reserves the conservative CPU+GPU peak needed while completing the graph.

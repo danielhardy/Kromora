@@ -269,10 +269,9 @@ struct RenderRequest: Sendable, Equatable {
 
 /// A bounded Look-browser request.
 ///
-/// The browser normally changes only `candidateDocument.lut`. Keeping the base document beside
-/// the candidate makes that contract explicit to the renderer: a LUT-only candidate may reuse the
-/// developed/pre-LUT prefix, while a bundled preset that changes any other document field must
-/// take the ordinary full-build path for that candidate.
+/// The browser normally changes only `candidateDocument.lut`. The Look is the base of the slider
+/// chain, so a candidate shares only the developed source with the base document; its graded
+/// prefix is built per candidate and matches what the canvas would show if that Look were chosen.
 struct LookPreviewRequest: Sendable, Equatable {
     let source: ImageSource
     let baseDocument: EditDocument
@@ -310,19 +309,6 @@ struct LookPreviewRequest: Sendable, Equatable {
         self.look = look
         self.targetSize = targetSize
         self.space = space
-    }
-
-    /// Conservative by design. The shared prefix boundary is below every document field except
-    /// the LUT: `version`, `rawDevelop`, `light`, `color`, every `effects` field, `crop`, ordered
-    /// `adjustments`, and `localAdjustments` all force the candidate's full build. This keeps
-    /// bundled tone/preset changes pixel-correct even if a future preset adds a field whose stage
-    /// ordering is not yet known to the browser.
-    var isLUTOnlyChange: Bool {
-        var base = baseDocument
-        var candidate = candidateDocument
-        base.lut = .none
-        candidate.lut = .none
-        return base == candidate
     }
 
     var renderRequest: RenderRequest {

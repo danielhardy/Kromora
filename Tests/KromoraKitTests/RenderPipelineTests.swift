@@ -273,9 +273,10 @@ final class RenderPipelineTests: TempDirectoryTestCase {
                 EditDocument.self, from: JSONEncoder().encode(document)
             )
 
-            let rendered = RenderPipeline.buildPreLUTImage(
+            let rendered = RenderPipeline.buildGradedImage(
                 developed: input,
                 document: reopenedDocument,
+                lut: nil,
                 spatialReferenceExtent: input.extent
             )
             let renderedEnergy = detailNoiseEnergy(detailPixels(rendered), chroma: chromaNoise)
@@ -842,6 +843,65 @@ final class RenderPipelineTests: TempDirectoryTestCase {
         // And the endpoints are not the same image — otherwise both assertions above could pass
         // against a pipeline that ignored the LUT entirely.
         assertPixelsDiffer(atZero, atOne, "the LUT must actually change the image")
+    }
+
+    /// A strongly non-linear cube (per-channel cubic, with a cross-channel term) so the order of
+    /// the Look and a tone edit is unmistakable in the bytes.
+    private func curvedLUT() -> CubeLUT {
+        let size = 8
+        var cube = [SIMD3<Float>]()
+        let denom = Float(size - 1)
+        for b in 0..<size {
+            for g in 0..<size {
+                for r in 0..<size {
+                    let (x, y, z) = (Float(r) / denom, Float(g) / denom, Float(b) / denom)
+                    cube.append(SIMD3(x * x * x, min(1, y * y + 0.2 * x * z), sqrt(z)))
+                }
+            }
+        }
+        return CubeLUT(cube: cube, size: size, name: "curved")
+    }
+
+    /// The Look is the base look: the render equals `sliders(Look(developed))` and measurably
+    /// differs from the previous `Look(sliders(developed))`.
+    func testLookIsAppliedBeforeTheSliders() throws {
+        let lut = curvedLUT()
+        let settings = LUTSettings(lutID: lut.lutID, intensity: 1)
+        let sliders = EditDocument(
+            light: LightAdjustments(exposure: 0.8, contrast: 25),
+            adjustments: [.vibrance(amount: 0.3)]
+        )
+        var combined = sliders
+        combined.lut = settings
+
+        let developed = try decodedSource()
+        let space = WorkingSpace.current
+        let cubeFilter = lut.makeFilter(space: space)
+        let looked = try XCTUnwrap(lut.apply(to: developed, intensity: 1, using: cubeFilter))
+        let expected = RenderPipeline.buildGradedImage(developed: looked, document: sliders, lut: nil)
+        let oldOrder = try XCTUnwrap(lut.apply(
+            to: RenderPipeline.buildGradedImage(developed: developed, document: sliders, lut: nil),
+            intensity: 1, using: cubeFilter))
+
+        let rendered = try Pixels.bytes(of: try build(combined, lut: lut))
+        assertPixelsEqual(rendered, try Pixels.bytes(of: expected),
+                          "sliders must adjust the Look's output: sliders(Look(developed))")
+        assertPixelsDiffer(rendered, try Pixels.bytes(of: oldOrder), byAtLeast: 4,
+                           "the previous Look(sliders(developed)) order must no longer be rendered")
+    }
+
+    /// With nothing on the other side of the Look, the order is irrelevant, so a Look-only document
+    /// must still equal the Look applied directly to the developed source.
+    func testLookOnlyDocumentMatchesTheLookAppliedDirectly() throws {
+        let lut = TestImages.warmLUT()
+        let document = EditDocument(lut: LUTSettings(lutID: lut.lutID, intensity: 0.6))
+        let developed = try decodedSource()
+        let direct = try XCTUnwrap(lut.apply(
+            to: developed, intensity: 0.6, using: lut.makeFilter(space: .current)))
+
+        assertPixelsEqual(try Pixels.bytes(of: try build(document, lut: lut)),
+                          try Pixels.bytes(of: direct),
+                          "a Look-only document must be just the Look")
     }
 
     func testIntermediateIntensityLandsBetweenTheEndpoints() throws {
