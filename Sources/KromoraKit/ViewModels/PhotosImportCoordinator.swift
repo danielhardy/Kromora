@@ -37,6 +37,9 @@ struct PhotosImportProgress: Equatable, Sendable {
 struct PhotosImportSelection: Equatable, Sendable {
     let ordinal: Int
     let localIdentifier: String?
+    /// The resolved display name, stamped by `PhotosImportNaming.resolve` so the review sheet and
+    /// the import agree. Nil until resolved.
+    var name: String? = nil
 }
 
 /// The small provider boundary needed by the import workflow. Production code adapts
@@ -45,7 +48,13 @@ struct PhotosImportSelection: Equatable, Sendable {
 @MainActor
 protocol PhotosImportProviding: AnyObject {
     func originalFilename(for selection: PhotosImportSelection) -> String?
+    /// The asset's capture date, used to name items whose original filename is unavailable.
+    func captureDate(for selection: PhotosImportSelection) -> Date?
     func transferData(for selection: PhotosImportSelection) async throws -> Data?
+}
+
+extension PhotosImportProviding {
+    func captureDate(for selection: PhotosImportSelection) -> Date? { nil }
 }
 
 /// The PhotosUI/Photos implementation of the provider boundary. Filename lookup intentionally
@@ -60,6 +69,12 @@ final class PhotosPickerImportProvider: PhotosImportProviding {
 
     func originalFilename(for selection: PhotosImportSelection) -> String? {
         Self.originalResource(for: selection)?.originalFilename
+    }
+
+    func captureDate(for selection: PhotosImportSelection) -> Date? {
+        guard let identifier = selection.localIdentifier else { return nil }
+        return PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil)
+            .firstObject?.creationDate
     }
 
     func transferData(for selection: PhotosImportSelection) async throws -> Data? {
@@ -199,6 +214,7 @@ final class PhotosImportCoordinator {
         failures = []
         wasCancelled = false
 
+        let selections = PhotosImportNaming.resolve(selections, provider: provider)
         begin(totalCount: selections.count)
 
         task = Task { @MainActor [weak self] in
@@ -212,8 +228,7 @@ final class PhotosImportCoordinator {
                     break
                 }
 
-                let name = provider.originalFilename(for: selection)
-                    ?? "Photo \(selection.ordinal + 1)"
+                let name = selection.name ?? "Photo \(selection.ordinal + 1)"
                 self.updatePhase(.transferring, name: name)
 
                 var transferInterval = KromoraSignpostInterval(

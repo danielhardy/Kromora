@@ -49,8 +49,8 @@ final class PhotosImportReviewCoordinator {
         let id = UUID()
         reviewID = id
         self.provider = provider
-        items = selections.map {
-            Item(selection: $0, name: provider.originalFilename(for: $0) ?? "Photo \($0.ordinal + 1)")
+        items = PhotosImportNaming.resolve(selections, provider: provider).map {
+            Item(selection: $0, name: $0.name ?? "")
         }
         inLibrary = []
         mismatched = [:]

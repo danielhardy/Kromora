@@ -224,7 +224,8 @@ final class PhotosImportTests: TempDirectoryTestCase {
         )
         try await waitForCoordinator(coordinator)
 
-        XCTAssertEqual(viewModel.collection.items.first?.displayName, "Photo 1")
+        let fallback = try XCTUnwrap(viewModel.collection.items.first?.displayName)
+        XCTAssertTrue(fallback.hasPrefix("Photo 20"), "fallback derives from a timestamp, not an ordinal: \(fallback)")
     }
 
     func testCoordinatorCancellationFinishesWithoutDiscardingEarlierItem() async throws {
@@ -296,7 +297,9 @@ final class PhotosImportTests: TempDirectoryTestCase {
         XCTAssertEqual(summary.imported, 1)
         XCTAssertEqual(summary.duplicates, 1)
         XCTAssertEqual(summary.failed, 1)
-        XCTAssertEqual(summary.failureReasons, ["Photo 3: package lease expired"])
+        let reason = try XCTUnwrap(summary.failureReasons.first)
+        XCTAssertEqual(summary.failureReasons.count, 1)
+        XCTAssertTrue(reason.hasPrefix("Photo 20") && reason.hasSuffix(" 3: package lease expired"), reason)
         XCTAssertEqual(destination.insertedOrdinals, [0])
     }
 
