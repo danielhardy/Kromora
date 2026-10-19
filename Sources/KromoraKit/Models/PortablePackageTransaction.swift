@@ -1208,6 +1208,8 @@ struct PortablePackageTransaction {
             // journal cannot be reached after other journals have already been applied.
             var journals: [(url: URL, journal: PortablePackageTransactionJournal)] = []
             for url in urls {
+                try requireNotSymbolicLink(
+                    "Recovery/Transactions/\(url.lastPathComponent)", packageRoot: packageRoot)
                 let journal: PortablePackageTransactionJournal
                 do {
                     journal = try decodeJournal(from: Data(contentsOf: url))
@@ -1326,7 +1328,34 @@ struct PortablePackageTransaction {
             throw PortablePackageTransactionError.unsafeJournal(
                 "backup path '\(backupPath)' is outside the transaction's backup directory")
         }
-        return try packageURL(relative, in: packageRoot)
+        return try transactionStorageURL(relative, journal: journal, packageRoot: packageRoot)
+    }
+
+    /// Staged content and backups must resolve inside the transaction directory itself. Package
+    /// containment alone is not enough: an in-package symlink could otherwise redirect a backup
+    /// into canonical library data while still resolving below the package root.
+    private static func transactionStorageURL(
+        _ relativePath: String, journal: PortablePackageTransactionJournal, packageRoot: URL
+    ) throws -> URL {
+        let transactionRoot = try packageURL(journal.stagingDirectory, in: packageRoot)
+        let candidate = try packageURL(relativePath, in: packageRoot)
+        let resolvedRoot = transactionRoot.resolvingSymlinksInPath().standardizedFileURL
+        let resolvedCandidate = candidate.resolvingSymlinksInPath().standardizedFileURL
+        let prefix = resolvedRoot.path.hasSuffix("/")
+            ? resolvedRoot.path : resolvedRoot.path + "/"
+        guard resolvedCandidate.path.hasPrefix(prefix) else {
+            throw PortablePackageTransactionError.unsafeJournal(
+                "path '\(relativePath)' does not resolve inside its transaction directory")
+        }
+        return candidate
+    }
+
+    private static func isQuarantinePath(_ path: String) -> Bool {
+        path.hasPrefix("Recovery/Quarantine/")
+    }
+
+    private static func isForbiddenRecoveryPath(_ path: String) -> Bool {
+        path == "Recovery" || (path.hasPrefix("Recovery/") && !isQuarantinePath(path))
     }
 
     private static func requireNotSymbolicLink(_ relativePath: String, packageRoot: URL) throws {
@@ -1357,36 +1386,47 @@ struct PortablePackageTransaction {
             throw unsafe("staging directory '\(journal.stagingDirectory)' is not '\(expectedStaging)'")
         }
         try requireNotSymbolicLink(expectedStaging, packageRoot: packageRoot)
-        if let packageID = journal.packageID,
-            let data = try? Data(contentsOf: packageRoot.appendingPathComponent("manifest.json")),
-            let manifest = try? PackageJSONCoder.decode(PortablePackageManifest.self, from: data),
-            manifest.libraryID != packageID
-        {
-            throw unsafe("journal belongs to a different package")
+        if let packageID = journal.packageID {
+            let manifest: PortablePackageManifest
+            do {
+                let data = try Data(contentsOf: packageRoot.appendingPathComponent("manifest.json"))
+                manifest = try PackageJSONCoder.decode(PortablePackageManifest.self, from: data)
+            } catch {
+                throw unsafe("cannot verify journal package identity from manifest.json")
+            }
+            guard manifest.libraryID == packageID else {
+                throw unsafe("journal belongs to a different package")
+            }
         }
         func requireCanonicalOrQuarantine(_ path: String) throws {
-            guard !path.hasPrefix("Recovery/") || path.hasPrefix("Recovery/Quarantine/") else {
+            guard !Self.isForbiddenRecoveryPath(path) else {
                 throw unsafe("path '\(path)' targets recovery storage")
             }
             _ = try packageURL(path, in: packageRoot)
         }
         for file in journal.files {
             try requireCanonicalOrQuarantine(file.relativePath)
-            guard file.stagingPath.hasPrefix(expectedStaging + "/") else {
-                throw unsafe("staged path '\(file.stagingPath)' is outside the transaction")
+            let expectedFileStaging = "\(expectedStaging)/\(file.relativePath)"
+            guard file.stagingPath == expectedFileStaging else {
+                throw unsafe("staged path '\(file.stagingPath)' does not match its package path")
             }
-            _ = try packageURL(file.stagingPath, in: packageRoot)
+            _ = try transactionStorageURL(
+                file.stagingPath, journal: journal, packageRoot: packageRoot)
             _ = try backupURL(file.backupPath, journal: journal, packageRoot: packageRoot)
         }
         for move in journal.moves {
             for path in [move.sourcePath, move.targetPath] {
-                guard !path.hasPrefix("Recovery/Transactions/"), !path.hasPrefix("Recovery/Staging/")
-                else { throw unsafe("move path '\(path)' targets recovery storage") }
+                guard !Self.isForbiddenRecoveryPath(path) else {
+                    throw unsafe("move path '\(path)' targets recovery storage")
+                }
                 _ = try packageURL(path, in: packageRoot)
             }
         }
         for removal in journal.removals {
-            try requireCanonicalOrQuarantine(removal.relativePath)
+            guard Self.isQuarantinePath(removal.relativePath) else {
+                throw unsafe("removal path '\(removal.relativePath)' is outside quarantine")
+            }
+            _ = try packageURL(removal.relativePath, in: packageRoot)
             _ = try backupURL(removal.backupPath, journal: journal, packageRoot: packageRoot)
         }
     }
@@ -1408,14 +1448,14 @@ struct PortablePackageTransaction {
     }
 
     private func validateRelativePath(_ path: String) throws {
-        guard !path.hasPrefix("Recovery/") || path.hasPrefix("Recovery/Quarantine/") else {
+        guard !Self.isForbiddenRecoveryPath(path) else {
             throw PortablePackageTransactionError.invalidRelativePath(path)
         }
         _ = try packageURL(for: path)
     }
 
     private func validateMovePath(_ path: String) throws {
-        guard !path.hasPrefix("Recovery/Transactions/"), !path.hasPrefix("Recovery/Staging/") else {
+        guard !Self.isForbiddenRecoveryPath(path) else {
             throw PortablePackageTransactionError.invalidRelativePath(path)
         }
         _ = try packageURL(for: path)

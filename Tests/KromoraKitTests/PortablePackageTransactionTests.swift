@@ -778,10 +778,10 @@ final class PortablePackageTransactionTests: TempDirectoryTestCase {
 
     private func journal(
         staging: String, files: [PortablePackageTransactionFile] = [],
-        id: UUID = UUID()
+        id: UUID = UUID(), packageID: UUID? = nil
     ) -> PortablePackageTransactionJournal {
         PortablePackageTransactionJournal(
-            transactionID: id, packageID: nil, createdAt: now, stagingDirectory: staging,
+            transactionID: id, packageID: packageID, createdAt: now, stagingDirectory: staging,
             files: files, state: .committed)
     }
 
@@ -851,6 +851,76 @@ final class PortablePackageTransactionTests: TempDirectoryTestCase {
         try writeJournal(
             journal(staging: "Recovery/Staging/\(id.uuidString)", files: [file], id: id),
             in: packageURL)
+        try assertRejected(try openExpiredPackage(packageURL), packageURL: packageURL, sentinel: sibling)
+    }
+
+    func testRecoveryRejectsRecoveryRootAsAFileCleanupTarget() throws {
+        let packageURL = try makePackage()
+        let sibling = try makeSentinel(named: "UnrelatedSibling")
+        let id = UUID()
+        let file = PortablePackageTransactionFile(
+            relativePath: "Recovery", stagingPath: "Recovery/Staging/\(id.uuidString)/Recovery",
+            backupPath: nil, byteCount: 0, stagedChecksum: "", publicationState: .published)
+        var value = journal(staging: "Recovery/Staging/\(id.uuidString)", files: [file], id: id)
+        value.state = .publishing
+        try writeJournal(value, in: packageURL)
+
+        try assertRejected(try openExpiredPackage(packageURL), packageURL: packageURL, sentinel: sibling)
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: packageURL.appendingPathComponent("Recovery/Transactions/\(id.uuidString).json").path))
+    }
+
+    func testRecoveryRejectsStagedPathThatDoesNotMatchItsPackagePath() throws {
+        let packageURL = try makePackage()
+        let sibling = try makeSentinel(named: "UnrelatedSibling")
+        let id = UUID()
+        let file = PortablePackageTransactionFile(
+            relativePath: "State/a.txt",
+            stagingPath: "Recovery/Staging/\(id.uuidString)/State/other.txt",
+            backupPath: nil, byteCount: 0, stagedChecksum: "", publicationState: .published)
+        var value = journal(staging: "Recovery/Staging/\(id.uuidString)", files: [file], id: id)
+        value.state = .publishing
+        try writeJournal(value, in: packageURL)
+
+        try assertRejected(try openExpiredPackage(packageURL), packageURL: packageURL, sentinel: sibling)
+    }
+
+    func testRecoveryRejectsBackupSymlinkIntoCanonicalPackageData() throws {
+        let packageURL = try makePackage()
+        let sibling = try makeSentinel(named: "UnrelatedSibling")
+        let assets = packageURL.appendingPathComponent("Assets")
+        try FileManager.default.createDirectory(at: assets, withIntermediateDirectories: true)
+        let canonicalFile = assets.appendingPathComponent("sentinel.txt")
+        try Data("keep".utf8).write(to: canonicalFile)
+
+        let id = UUID()
+        let staging = packageURL.appendingPathComponent("Recovery/Staging/\(id.uuidString)")
+        let backupDirectory = staging.appendingPathComponent("Backups")
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(
+            at: backupDirectory, withDestinationURL: assets)
+        let file = PortablePackageTransactionFile(
+            relativePath: "State/a.txt",
+            stagingPath: "Recovery/Staging/\(id.uuidString)/State/a.txt",
+            backupPath: "Recovery/Staging/\(id.uuidString)/Backups/sentinel.txt",
+            byteCount: 0, stagedChecksum: "", publicationState: .published)
+        var value = journal(staging: "Recovery/Staging/\(id.uuidString)", files: [file], id: id)
+        value.state = .publishing
+        try writeJournal(value, in: packageURL)
+
+        try assertRejected(try openExpiredPackage(packageURL), packageURL: packageURL, sentinel: sibling)
+        XCTAssertEqual(try Data(contentsOf: canonicalFile), Data("keep".utf8))
+    }
+
+    func testRecoveryRejectsJournalForADifferentPackageIdentity() throws {
+        let packageURL = try makePackage()
+        let sibling = try makeSentinel(named: "UnrelatedSibling")
+        let id = UUID()
+        try writeJournal(
+            journal(
+                staging: "Recovery/Staging/\(id.uuidString)", id: id, packageID: UUID()),
+            in: packageURL)
+
         try assertRejected(try openExpiredPackage(packageURL), packageURL: packageURL, sentinel: sibling)
     }
 
