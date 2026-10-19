@@ -6,6 +6,39 @@ import XCTest
 @MainActor
 final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
 
+    private actor WriteAcknowledgementGate {
+        private var isReleased = false
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+
+        func wait() async {
+            guard !isReleased else { return }
+            await withCheckedContinuation { waiters.append($0) }
+        }
+
+        func release() {
+            isReleased = true
+            let waiting = waiters
+            waiters.removeAll()
+            for waiter in waiting { waiter.resume() }
+        }
+    }
+
+    private func waitForWriteStart(_ stream: AsyncStream<Void>) async -> Bool {
+        await withTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                var iterator = stream.makeAsyncIterator()
+                return await iterator.next() != nil
+            }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(5))
+                return false
+            }
+            let didStart = await group.next() ?? false
+            group.cancelAll()
+            return didStart
+        }
+    }
+
     private func registerLoadedPhotos(
         in viewModel: AppViewModel, url: URL, with fixture: EditPackageFixture
     ) throws {
@@ -273,6 +306,161 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         let retry = await viewModel.flushPendingWrites()
         XCTAssertTrue(retry.succeeded)
         XCTAssertEqual(viewModel.pendingPersistenceCount, 0)
+    }
+
+    /// KRMA-1068: A's save is acknowledged late, after the user has navigated to B. The write-start
+    /// signal proves A's snapshot is committed but unacknowledged, so A stays pinned while dirty,
+    /// the late acknowledgement cannot touch B, and A's durable edit is exactly what was saved.
+    func testLateAcknowledgementOfPhotoACannotChangePhotoBAndKeepsAResident() async throws {
+        let urlA = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "ack-a.png", in: tempDirectory)
+        let urlB = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "ack-b.png", in: tempDirectory)
+        let container = makeEditPackageFixture()
+        try container.register(urlA)
+        try container.register(urlB)
+        let (started, signal) = AsyncStream<Void>.makeStream()
+        let gate = WriteAcknowledgementGate()
+        let store = container.store(
+            writeStartSignal: signal,
+            writeAcknowledgementGate: { await gate.wait() })
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine(), editStore: store)
+        addTeardownBlock {
+            await gate.release()
+            await viewModel.shutdown()
+        }
+        viewModel.openImage(url: urlA)
+        try await waitUntil("photo A") { viewModel.sourceImage != nil }
+        try registerLoadedPhotos(in: viewModel, url: urlA, with: container)
+        let idA = try XCTUnwrap(viewModel.maskingAssetID)
+        viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.5)] }
+        let revisionA = viewModel.editorDocument.revision(for: idA)
+
+        // Navigation forces A's save. B's stored read queues behind that barrier.
+        viewModel.openImage(url: urlB)
+        let didStartWrite = await waitForWriteStart(started)
+        XCTAssertTrue(didStartWrite, "timed out waiting for A's durable write")
+
+        XCTAssertEqual(viewModel.pendingPersistenceCount, 1, "A is committed but unacknowledged")
+        XCTAssertEqual(
+            viewModel.editorDocument.session(for: idA)?.document.adjustments,
+            [.exposure(ev: 0.5)], "A stays pinned while dirty")
+        XCTAssertEqual(viewModel.editorDocument.revision(for: idA), revisionA)
+
+        try await waitUntil("photo B while A's write is unacknowledged") {
+            viewModel.sourceImage != nil && viewModel.sourceName == urlB.lastPathComponent
+                && !viewModel.admissionStoredEditsResolved
+        }
+        try registerLoadedPhotos(in: viewModel, url: urlB, with: container)
+        let idB = try XCTUnwrap(viewModel.maskingAssetID)
+        XCTAssertNotEqual(idA, idB)
+        XCTAssertEqual(viewModel.pendingPersistenceCount, 1)
+        XCTAssertEqual(viewModel.document, EditDocument(), "A's pending acknowledgement must not change B")
+
+        await gate.release()
+        try await waitUntil("B's stored edit adoption") {
+            viewModel.admissionStoredEditsResolved
+        }
+        XCTAssertEqual(viewModel.pendingPersistenceCount, 0, "the acknowledgement has landed")
+        XCTAssertEqual(viewModel.document, EditDocument(), "A's acknowledgement must not change B")
+        XCTAssertEqual(
+            viewModel.editorDocument.revision(for: idA), revisionA,
+            "an acknowledgement is not an edit and must not advance A's revision fence")
+        XCTAssertEqual(viewModel.editorDocument.session(for: idB)?.document, EditDocument())
+
+        let storedA = await container.store().load(for: EditSourceReference(assetID: idA, url: urlA))
+        XCTAssertEqual(storedA.document.adjustments, [.exposure(ev: 0.5)])
+        let storedB = await container.store().load(for: EditSourceReference(assetID: idB, url: urlB))
+        XCTAssertEqual(storedB.document, EditDocument())
+        let writes = await store.writeCount
+        XCTAssertEqual(writes, 1, "only A is written")
+    }
+
+    /// KRMA-1068: a category-limited paste lands on a cold photo while its stored read is still
+    /// queued behind another photo's held save. The stored read, when it arrives, is fenced out by
+    /// the revision the paste advanced, so the pasted document wins and only the copied category
+    /// was transferred.
+    func testCategoryPasteDuringPendingStoredAdoptionSurvivesTheLateRead() async throws {
+        let urlA = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "paste-a.png", in: tempDirectory)
+        let urlB = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "paste-b.png", in: tempDirectory)
+        let container = makeEditPackageFixture()
+        try container.register(urlA)
+        try container.register(urlB)
+
+        // Give B a durable edit, then relaunch so B is cold (no resident session).
+        let seed = makeAppViewModel(engine: FakeRenderEngine(), editStore: container.store())
+        seed.openImage(url: urlB)
+        try await waitUntil("seed photo B") { seed.sourceImage != nil }
+        try registerLoadedPhotos(in: seed, url: urlB, with: container)
+        let idB = try XCTUnwrap(seed.maskingAssetID)
+        seed.updateDocument { $0.adjustments = [.vibrance(amount: 0.2)] }
+        let seeded = await seed.flushPendingWrites()
+        XCTAssertEqual(seeded, .success)
+        await seed.shutdown()
+
+        let (started, signal) = AsyncStream<Void>.makeStream()
+        let gate = WriteAcknowledgementGate()
+        let store = container.store(
+            writeStartSignal: signal,
+            writeAcknowledgementGate: { await gate.wait() })
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine(), editStore: store)
+        addTeardownBlock {
+            await gate.release()
+            await viewModel.shutdown()
+        }
+        viewModel.openImage(url: urlA)
+        try await waitUntil("photo A") { viewModel.sourceImage != nil }
+        try registerLoadedPhotos(in: viewModel, url: urlA, with: container)
+        let idA = try XCTUnwrap(viewModel.maskingAssetID)
+        viewModel.updateDocument {
+            $0.adjustments = [.exposure(ev: 0.5), .vibrance(amount: 0.9)]
+        }
+        viewModel.selectiveCopyCategories = [.light]
+        viewModel.confirmSelectiveCopy()
+        XCTAssertNil(viewModel.editorDocument.session(for: idB), "B starts cold")
+
+        // A's save is committed but unacknowledged, so B's stored read cannot have completed.
+        viewModel.openImage(url: urlB)
+        let didStartWrite = await waitForWriteStart(started)
+        XCTAssertTrue(didStartWrite, "timed out waiting for A's durable write")
+        try await waitUntil("photo B to begin loading") {
+            viewModel.sourceName == urlB.lastPathComponent
+        }
+        XCTAssertFalse(viewModel.admissionStoredEditsResolved, "B's stored adoption is pending")
+        XCTAssertEqual(viewModel.pendingPersistenceCount, 1)
+        XCTAssertNotNil(viewModel.editorDocument.session(for: idA), "A stays pinned while dirty")
+        let revisionBeforePaste = viewModel.editorDocument.revision(for: idB)
+
+        // The paste reads B's saved document as its base, so B keeps its color category and gains
+        // only the copied Light category.
+        let expected = EditDocument(adjustments: [.exposure(ev: 0.5), .vibrance(amount: 0.2)])
+        viewModel.pasteEdits()
+        await viewModel.editClipboardWorkflow.waitForPendingPaste()
+        XCTAssertEqual(viewModel.editorDocument.session(for: idB)?.document, expected)
+        XCTAssertGreaterThan(viewModel.editorDocument.revision(for: idB), revisionBeforePaste)
+        let revisionAfterPaste = viewModel.editorDocument.revision(for: idB)
+        XCTAssertFalse(viewModel.admissionStoredEditsResolved, "the stored adoption remains pending")
+
+        // Release the explicit write gate: B's late stored read now arrives and must be fenced out.
+        await gate.release()
+        try await waitUntil("B's stored adoption to resolve") {
+            viewModel.admissionStoredEditsResolved
+        }
+        XCTAssertEqual(viewModel.editorDocument.session(for: idB)?.document, expected)
+        XCTAssertEqual(
+            viewModel.editorDocument.revision(for: idB), revisionAfterPaste,
+            "the late read must not re-adopt over the pasted session")
+
+        let flushed = await viewModel.flushPendingWrites()
+        XCTAssertEqual(flushed, .success)
+        let storedB = await container.store().load(for: EditSourceReference(assetID: idB, url: urlB))
+        XCTAssertEqual(storedB.document, expected)
+        let storedA = await container.store().load(for: EditSourceReference(assetID: idA, url: urlA))
+        XCTAssertEqual(
+            storedA.document.adjustments, [.exposure(ev: 0.5), .vibrance(amount: 0.9)],
+            "the copy source keeps every category")
     }
 
     func testCancelledFlushIsReportedDistinctly() async throws {

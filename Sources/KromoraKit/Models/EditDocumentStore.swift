@@ -176,6 +176,7 @@ actor EditDocumentStore {
     private var membershipObserver: (@Sendable (PortablePackageMembershipEntry) -> Void)?
     private var artificialWriteDelay: Duration
     private var failuresRemaining: Int
+    private let writeAcknowledgementGate: (@Sendable () async -> Void)?
 
     private init(awaitsBinding: Bool = false) {
         self.awaitsBinding = awaitsBinding
@@ -185,6 +186,7 @@ actor EditDocumentStore {
         artificialWriteDelay = .zero
         failuresRemaining = 0
         writeStartSignal = nil
+        writeAcknowledgementGate = nil
     }
 
     /// Opens the canonical package edit store.
@@ -194,7 +196,8 @@ actor EditDocumentStore {
         cacheCapacity: Int = EditDocumentStore.defaultCacheCapacity,
         artificialWriteDelay: Duration = .zero,
         failuresBeforeSuccess: Int = 0,
-        writeStartSignal: AsyncStream<Void>.Continuation? = nil
+        writeStartSignal: AsyncStream<Void>.Continuation? = nil,
+        writeAcknowledgementGate: (@Sendable () async -> Void)? = nil
     ) {
         packageRoot = package.rootURL
         packageLease = lease
@@ -202,6 +205,7 @@ actor EditDocumentStore {
         self.artificialWriteDelay = artificialWriteDelay
         self.failuresRemaining = max(0, failuresBeforeSuccess)
         self.writeStartSignal = writeStartSignal
+        self.writeAcknowledgementGate = writeAcknowledgementGate
     }
 
     /// Convenience form for integration boundaries that retain only the package URL.
@@ -211,12 +215,14 @@ actor EditDocumentStore {
         cacheCapacity: Int = EditDocumentStore.defaultCacheCapacity,
         artificialWriteDelay: Duration = .zero,
         failuresBeforeSuccess: Int = 0,
-        writeStartSignal: AsyncStream<Void>.Continuation? = nil
+        writeStartSignal: AsyncStream<Void>.Continuation? = nil,
+        writeAcknowledgementGate: (@Sendable () async -> Void)? = nil
     ) throws {
         try self.init(
             package: PortableLibraryPackage.openForQuery(at: packageRoot), lease: lease,
             cacheCapacity: cacheCapacity, artificialWriteDelay: artificialWriteDelay,
-            failuresBeforeSuccess: failuresBeforeSuccess, writeStartSignal: writeStartSignal
+            failuresBeforeSuccess: failuresBeforeSuccess, writeStartSignal: writeStartSignal,
+            writeAcknowledgementGate: writeAcknowledgementGate
         )
     }
 
@@ -439,6 +445,7 @@ actor EditDocumentStore {
             writeCount += 1
             status = .ready
             writeStartSignal?.yield(())
+            await writeAcknowledgementGate?()
             await delayIfNeeded()
         } catch {
             status = .writeFailure(error.localizedDescription)

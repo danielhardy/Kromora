@@ -52,13 +52,15 @@ final class EditPackageFixture {
     func store(
         artificialWriteDelay: Duration = .zero,
         failuresBeforeSuccess: Int = 0,
-        writeStartSignal: AsyncStream<Void>.Continuation? = nil
+        writeStartSignal: AsyncStream<Void>.Continuation? = nil,
+        writeAcknowledgementGate: (@Sendable () async -> Void)? = nil
     ) -> EditDocumentStore {
         EditDocumentStore(
             package: package, lease: lease,
             artificialWriteDelay: artificialWriteDelay,
             failuresBeforeSuccess: failuresBeforeSuccess,
-            writeStartSignal: writeStartSignal
+            writeStartSignal: writeStartSignal,
+            writeAcknowledgementGate: writeAcknowledgementGate
         )
     }
 }
@@ -715,12 +717,14 @@ class TempDirectoryTestCase: XCTestCase {
         container: EditPackageFixture? = nil,
         artificialWriteDelay: Duration = .zero,
         failuresBeforeSuccess: Int = 0,
-        writeStartSignal: AsyncStream<Void>.Continuation? = nil
+        writeStartSignal: AsyncStream<Void>.Continuation? = nil,
+        writeAcknowledgementGate: (@Sendable () async -> Void)? = nil
     ) -> EditDocumentStore {
         (container ?? makeEditPackageFixture()).store(
             artificialWriteDelay: artificialWriteDelay,
             failuresBeforeSuccess: failuresBeforeSuccess,
-            writeStartSignal: writeStartSignal
+            writeStartSignal: writeStartSignal,
+            writeAcknowledgementGate: writeAcknowledgementGate
         )
     }
 
