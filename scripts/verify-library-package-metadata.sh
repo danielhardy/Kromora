@@ -1,40 +1,19 @@
 #!/bin/zsh
 set -euo pipefail
 
-project_root="${0:A:h}/.."
+script_dir="${0:A:h}"
+project_root="$script_dir/.."
 cd "$project_root"
 
-python3 - "App/Info.plist" "App/Kromora.entitlements" <<'PY'
+"$script_dir/check-sandbox-entitlements.py" App/Kromora.entitlements source
+python3 - "App/Info.plist" <<'PY'
 import pathlib
 import plistlib
 import sys
 
-info_path, entitlements_path = map(pathlib.Path, sys.argv[1:])
+info_path = pathlib.Path(sys.argv[1])
 info = plistlib.loads(info_path.read_bytes())
-entitlements = plistlib.loads(entitlements_path.read_bytes())
 
-expected_security_entitlements = {
-    "com.apple.security.app-sandbox": True,
-    "com.apple.security.files.user-selected.read-write": True,
-    "com.apple.security.files.removable-media.read-only": True,
-    "com.apple.security.files.bookmarks.app-scope": True,
-    "com.apple.security.assets.pictures.read-write": True,
-}
-security_entitlements = {
-    key: value for key, value in entitlements.items() if key.startswith("com.apple.security.")
-}
-missing = sorted(expected_security_entitlements.keys() - security_entitlements.keys())
-unexpected = sorted(security_entitlements.keys() - expected_security_entitlements.keys())
-incorrect = {
-    key: {"actual": security_entitlements[key], "expected": expected_security_entitlements[key]}
-    for key in expected_security_entitlements.keys() & security_entitlements.keys()
-    if security_entitlements[key] is not expected_security_entitlements[key]
-}
-if missing or unexpected or incorrect:
-    raise SystemExit(
-        "source App Sandbox entitlements do not match the expected set: "
-        f"missing={missing}, unexpected={unexpected}, incorrect={incorrect}"
-    )
 
 photos_usage_description = info.get("NSPhotoLibraryUsageDescription")
 if not isinstance(photos_usage_description, str) or not photos_usage_description.strip():
@@ -56,5 +35,5 @@ if not any(
 ):
     raise SystemExit("Kromora Library UTI declaration is missing package/extension metadata")
 
-print("verified Photos usage description, Kromora Library package UTI declaration (no document type), and exact App Sandbox entitlement set")
+print("verified Photos usage description, Kromora Library package UTI declaration (no document type)")
 PY

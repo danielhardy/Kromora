@@ -17,6 +17,62 @@ final class XcodeProjectInvariantTests: XCTestCase {
                       "PhotoKit is denied in the sandbox without the Photos library entitlement.")
     }
 
+    // MARK: Strict entitlement checker contract
+
+    private static let intendedEntitlements: [String: Bool] = [
+        "com.apple.security.app-sandbox": true,
+        "com.apple.security.files.user-selected.read-write": true,
+        "com.apple.security.files.removable-media.read-only": true,
+        "com.apple.security.files.bookmarks.app-scope": true,
+        "com.apple.security.assets.pictures.read-write": true,
+        "com.apple.security.personal-information.photos-library": true,
+    ]
+
+    func testEntitlementCheckerAcceptsSourceEntitlementsAndIntendedSet() throws {
+        let source = packageRoot.appendingPathComponent("App/Kromora.entitlements")
+        guard FileManager.default.fileExists(atPath: source.path) else { return }
+        XCTAssertEqual(try runEntitlementChecker(on: source).status, 0)
+        XCTAssertEqual(try runEntitlementChecker(on: writeEntitlements(Self.intendedEntitlements)).status, 0)
+    }
+
+    func testEntitlementCheckerRejectsUnexpectedMissingAndFalseEntitlements() throws {
+        var extra = Self.intendedEntitlements
+        extra["com.apple.security.network.client"] = true
+        let unexpected = try runEntitlementChecker(on: writeEntitlements(extra))
+        XCTAssertNotEqual(unexpected.status, 0)
+        XCTAssertTrue(unexpected.output.contains("network.client"))
+
+        var missing = Self.intendedEntitlements
+        missing["com.apple.security.personal-information.photos-library"] = nil
+        XCTAssertNotEqual(try runEntitlementChecker(on: writeEntitlements(missing)).status, 0)
+
+        var disabled = Self.intendedEntitlements
+        disabled["com.apple.security.personal-information.photos-library"] = false
+        XCTAssertNotEqual(try runEntitlementChecker(on: writeEntitlements(disabled)).status, 0)
+    }
+
+    private func writeEntitlements(_ entitlements: [String: Bool]) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("kromora-entitlements-\(UUID().uuidString).plist")
+        try PropertyListSerialization.data(fromPropertyList: entitlements, format: .xml, options: 0).write(to: url)
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        return url
+    }
+
+    private func runEntitlementChecker(on plist: URL) throws -> (status: Int32, output: String) {
+        let script = packageRoot.appendingPathComponent("scripts/check-sandbox-entitlements.py")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        process.arguments = ["-I", script.path, plist.path, "test"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        try process.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return (process.terminationStatus, String(decoding: data, as: UTF8.self))
+    }
+
     func testXcodeSourcesBuildPhaseContainsOnlyTheAppLauncher() throws {
         guard let project = readText(at: xcodeProjectURL) else { return }
         guard

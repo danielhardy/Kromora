@@ -49,7 +49,7 @@ records observations; it does not claim that those checks have already been run.
 
    **Expected:** signature verification succeeds. The embedded entitlements include
    `com.apple.security.app-sandbox = true`, user-selected read/write, removable-media read-only,
-   app-scope bookmarks, and Pictures read/write. There are no unexpected `com.apple.security.*`
+   app-scope bookmarks, Pictures read/write, and Photos library. There are no unexpected `com.apple.security.*`
    entitlements. Record version and build number.
 4. Prepare disposable fixtures and a folder layout outside Pictures:
 
@@ -110,7 +110,7 @@ functional cases populate that profile. The signature and resource checks A1–A
 
 | ID | Action and UI path / command | Expected result |
 | --- | --- | --- |
-| A1 | Complete preparation steps 1–3 and 5–6. Check `codesign -d --entitlements :- "$KROMORA_APP"` and Activity Monitor's Sandbox column. | Signed Release app verifies; the five expected sandbox entitlements are present; Activity Monitor reports **Sandbox: Yes** for the launched process. |
+| A1 | Complete preparation steps 1–3 and 5–6. Check `codesign -d --entitlements :- "$KROMORA_APP"` and Activity Monitor's Sandbox column. | Signed Release app verifies; the six expected sandbox entitlements are present; Activity Monitor reports **Sandbox: Yes** for the launched process. |
 | A2 | In the editor, open **Edit** and the Look inspector. Search/browse the starter Looks, apply one, and render a photo. | Bundled Looks appear without selecting an external Look folder; a starter Look applies, and the image renders without missing resource/shader errors. This checks the packaged SwiftPM resource bundle as well as the starter Look manifest and Metal libraries (KRMA-813 audit item). |
 | A3 | Inspect built resources with `find "$KROMORA_APP/Contents/Resources" -maxdepth 8 \( -name 'Kromora_KromoraKit.bundle' -o -name 'manifest.json' -o -name '*.cube' -o -name '*.metallib' \) -print`. | The app contains `Kromora_KromoraKit.bundle`, `StarterLooks/manifest.json` and its `.cube` files, `KromoraCIKernels.ci.metallib`, and `KromoraPresentation.metallib`. Record the bundle path; A2 verifies these resources resolve and work at runtime. |
 

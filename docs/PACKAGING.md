@@ -26,7 +26,7 @@ scripts/app-store-build.sh verify
 
 Use Xcode 27 or newer with the macOS 27 SDK. This builds the Release, arm64 app with a macOS 26 (Tahoe) minimum. Local verification can use an ad-hoc signature; set `DEVELOPMENT_TEAM` in the environment to use Xcode automatic development signing.
 
-[`scripts/verify-xcode-app.sh`](../scripts/verify-xcode-app.sh) checks the built app's bundle identity and required Info.plist values, including the bundle identifier, Photography category, encryption flag, macOS 26 minimum, and non-empty Photos usage string. It opens the packaged resource bundle and checks every bundled Look listed by its manifest, then calls the signature and icon verifiers. [`scripts/verify-app-signature.sh`](../scripts/verify-app-signature.sh) validates the code signature and exact sandbox entitlement set; [`scripts/verify-app-icon.sh`](../scripts/verify-app-icon.sh) validates the packaged app icon and required assets.
+[`scripts/verify-xcode-app.sh`](../scripts/verify-xcode-app.sh) checks the built app's bundle identity and required Info.plist values, including the bundle identifier, Photography category, encryption flag, macOS 26 minimum, and non-empty Photos usage string. It opens the packaged resource bundle and checks every bundled Look listed by its manifest, then calls the signature and icon verifiers. [`scripts/verify-app-signature.sh`](../scripts/verify-app-signature.sh) validates the code signature and exact sandbox entitlement set (the allowlist lives in [`check-sandbox-entitlements.py`](../scripts/check-sandbox-entitlements.py), shared with `verify-library-package-metadata.sh`); [`scripts/verify-app-icon.sh`](../scripts/verify-app-icon.sh) validates the packaged app icon and required assets.
 
 ## Signing and capabilities
 
@@ -39,8 +39,9 @@ The production app uses the App Sandbox and Hardened Runtime. Both are enabled i
 | `com.apple.security.files.removable-media.read-only` | Discovers and reads supported images from mounted camera cards; imports are copied into the library. |
 | `com.apple.security.files.bookmarks.app-scope` | Retains access to user-selected external files and folders across launches. |
 | `com.apple.security.assets.pictures.read-write` | Stores the default library package, exports, and app-owned Looks under Pictures. |
+| `com.apple.security.personal-information.photos-library` | Lets PhotoKit authorize, fetch, and transfer originals for Photos import and save exports to Photos; without it the sandbox denies PhotoKit. |
 
-This is the complete set. Kromora makes no app-owned network requests, so it does not request the network-client entitlement. Photos import uses the system Photos picker; saving to Photos uses PhotoKit with the existing `NSPhotoLibraryUsageDescription` in [`Info.plist`](../App/Info.plist). Standard open/save panels and sandbox grants do not need file or folder usage-description strings. The current privacy and permission analysis is in [`APP_STORE_SANDBOX_AUDIT.md`](APP_STORE_SANDBOX_AUDIT.md).
+This is the complete set. Kromora makes no app-owned network requests, so it does not request the network-client entitlement. Photos import and saving to Photos use PhotoKit with the existing `NSPhotoLibraryUsageDescription` in [`Info.plist`](../App/Info.plist). Standard open/save panels and sandbox grants do not need file or folder usage-description strings. The current privacy and permission analysis is in [`APP_STORE_SANDBOX_AUDIT.md`](APP_STORE_SANDBOX_AUDIT.md).
 
 Required-reason API declarations in a privacy manifest are not a current signing or packaging prerequisite for Kromora's native macOS-only target. See the sandbox audit for the current platform scope and rationale; revisit the manifest requirements if target platforms or SDK requirements change. App Store Connect privacy answers are a separate submission task; see [`APP_STORE_SUBMISSION.md`](APP_STORE_SUBMISSION.md).
 
