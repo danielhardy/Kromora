@@ -178,3 +178,88 @@ classes and enforces the per-class floors above. These are generated-fixture res
 about camera-image performance. The evaluation limits are a quality gate, not a timing benchmark. For
 real-camera coverage, use local RAW fixtures in `realworldtest/` or another fixture directory with
 `KROMORA_RAW_FIXTURE_DIR`; the normal quality suite does not use those images.
+
+## Camera-scale diagnostics (KRMA-1061)
+
+Measured 2026-10-19 with `swift test --no-parallel --filter RetouchCameraScaleDiagnosticsTests`
+(serial lane; real Core Image and the production `RetouchRenderer`/`RetouchSourcePicker`). The suite
+generates sixteen 1800 × 1200 crops (native pixel pitch, the size of a 1:1 region of a 24 MP frame):
+sky, foliage, skin, and a soft-edged ridge, each with a 3 px hair, a 160 px-wide "long hair" crossing
+about 60% of the frame, a 7 px soft dust disc, and a 5 px hard speck. Fixtures are generated from fixed
+coordinates and seed 658, with a known clean reference, and graded with the same per-background limits
+as the 96 × 72 corpus (`RetouchQualityMetrics`). The brush covers each defect with a 1.5 px margin.
+Automatic sources are picked at declared proxy scales: 1.0 (native), 0.57 (the production 1024 px
+proxy of this crop used as a whole frame), and 0.17 (this crop as a 1:1 region of a 6000 px frame).
+Generated-fixture results only; camera-image acceptance is KRMA-1063.
+
+### Reproduced counts (unchanged limits, seeds, classes)
+
+Shipping gate on the 96 × 72 corpus, as before: dust/speck Heal 10/12, automatic Heal 11/12, Clone
+10/12; hair/fibre Heal 2/6, automatic Heal 0/6, Clone 2/6. Stress report: Heal 22/36, automatic Heal
+11/36, Clone 21/36.
+
+Camera-scale crops (16 cases per row):
+
+| Mode | Pass |
+|---|---:|
+| Manual Heal / Manual Clone (known clean source) | 13 / 14 |
+| Auto, native proxy (1.0), coarse pick | 11 |
+| Auto, proxy 0.57, shipped path (coarse + refine) | 10 |
+| Auto, proxy 0.17, shipped path | 9 |
+| Auto, proxy 0.57 / 0.17, coarse pick rounded to whole source pixels | 12 / 11 |
+
+Per class, shipped path at 0.57 / 0.17: hair 2/4 and 3/4, soft dust 4/4 and 4/4, hard speck 4/4 and 2/4,
+long hair 0/4 and 0/4. Manual Heal passes hair 4/4, long hair 4/4, soft dust 2/4, hard speck 3/4.
+
+### First failed boundary
+
+1. **Candidate generation: contamination avoidance (the 96 × 72 hair failure, and long hairs at camera
+   scale).** `RetouchSourcePicker.valid` rejects any placement whose translated bounds overlap the
+   *bounding box* of the whole stroke (`Shape.bounds`), so a hair that spans a large part of the frame
+   leaves no placement. On every 96 × 72 hair row the picker returns **zero** candidates, the spot keeps no
+   source, and the render is unchanged (luma shift −0.09 to −0.22 is the untouched hair). The same
+   happens for the camera-scale long hair on all four backgrounds at every proxy scale. The sources exist:
+   on the 96 × 72 rows there are 44 whole-pixel, defect-free, in-frame placements per background, and on
+   foliage and water (where manual Heal already passes) all 44 pass every limit. On the other four
+   backgrounds not even a defect-free source passes, because the fixture brush has no margin over the
+   hair; that is a fixture limit, not a picker one. Manual Heal and automatic Heal with a defect-free
+   source repair the camera-scale long hair on all four backgrounds.
+2. **Source ranking is not the limiting factor.** At camera scale the ranked list holds 24 defect-free
+   sources for every case and the first passing rank is 0 on 10 of 12 cases (rank 1 on edge hair, rank 3 on
+   skin hair); no case contaminates its own source.
+3. **Offset quantization (variance failures).** The coarse pick is normalized by the *proxy* size, so at
+   0.57 or 0.17 it is a fractional source-pixel offset (e.g. −45.6, 140.4). Core Image resamples the fill,
+   which smooths the grain: skin and edge hair and sky speck fail the variance limit at 0.46–0.52. Rounding
+   the same offset to whole source pixels passes them (hair 2/4 → 4/4 at 0.57, 3/4 → 4/4 at 0.17;
+   hard speck 2/4 → 4/4 at 0.17). A residual failure remains for sky soft dust at 0.17 (variance 1.71).
+4. **Refinement crop origin (`RenderEngine.pickRetouchSource` / `retouchAnalysisCrop`).** The crop is chosen
+   in Core Image y-up coordinates and its `originY` is `crop.minY`, but `RetouchAnalysisRegion.lab`
+   and `RetouchSourcePicker.Shape` use top-down rows (the bitmap's first row is the crop's *top*). With
+   the top-down origin (`sourceHeight - crop.maxY`) the refined winner differs on 11 of the 24 non-long-hair
+   rows (12 cases at scales 0.57 and 0.17), and on foliage dust/speck the shipped path returns the vertical mirror
+   (e.g. (−10.5, 42.1) against (10.0, −43.0)). Both choices pass here, so this is an evidence-backed
+   correctness defect rather than a measured quality failure.
+5. **Blend, secondary.** Manual Heal on sky soft dust fails variance (1.83 against a 1.65 limit) and on
+   foliage dust/speck fails luminance (+0.036/+0.038): a halo from the dust tail past the brush and a
+   fixed-offset source on textured ground. Auto sources pass those rows, so this is not on the
+   hair-repair path.
+
+### Declared acceptance for KRMA-1062
+
+For every one of the sixteen cases, automatic Heal with the corrected picker must pass all four limits at
+both proxy scales (0.57 and 0.17) with a whole-pixel offset; the suite prints a `TARGET ... met/NOT met`
+line per case and currently reports 23 of 32 met (all long-hair cases and sky soft dust at 0.17 are not).
+The 96 × 72 automatic-Heal hair row must pass wherever manual Heal does (foliage and water). Do not lower
+limits or drop rows. The suite asserts only no-regression floors (Manual Heal 13, Manual Clone 14, shipped
+path 10 at 0.57 and 9 at 0.17); KRMA-1062 turns the targets into assertions.
+
+### Bounded corrective approach (KRMA-1062 entry points)
+
+- `RetouchSourcePicker.valid` (and `Shape.bounds`): test overlap against the stroke geometry (sample
+  segments inflated by `radius + margin`) rather than one bounding box, for the destination and for other
+  spots; score against a ring around the stroke instead of only the bounding-box centre in `score`.
+- `RetouchSourcePicker.candidates` / `RenderEngine.pickRetouchSource`: return offsets rounded to whole
+  full-resolution pixels (`round(dx × nativeWidth) / nativeWidth`).
+- `RenderEngine.retouchAnalysisCrop`: pass the top-down origin (`sourceHeight - crop.maxY`) to
+  `RetouchAnalysisRegion`.
+- Keep the stress-only wires and 60 px removal out of scope.

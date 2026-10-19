@@ -7,40 +7,6 @@ import XCTest
 /// Deterministic, image-quality oracle for the small-defect retouch lane. This is deliberately
 /// separate from renderer timing tests; it compares rendered pixels with known clean references.
 final class RetouchQualityEvaluationTests: TempDirectoryTestCase {
-    private struct Metrics {
-        let deltaE2000: Double
-        let gradientError: Double
-        let varianceRatio: Double
-        let luminanceShift: Double
-
-        func failures(against limit: Limits) -> [String] {
-            var result: [String] = []
-            if deltaE2000 > limit.deltaE { result.append("ΔE") }
-            if gradientError > limit.gradient { result.append("gradient") }
-            if !(limit.variance.lowerBound...limit.variance.upperBound).contains(varianceRatio) { result.append("variance") }
-            if abs(luminanceShift) > limit.luminance { result.append("luminance") }
-            return result
-        }
-    }
-
-    private struct Limits {
-        let deltaE: Double
-        let gradient: Double
-        let variance: ClosedRange<Double>
-        let luminance: Double
-    }
-
-    // Phase-0 starting limits. They are intentionally conservative but reject visible remnants,
-    // broad halos, broken edges, and strongly smoothed grain. Tighten only with recorded evidence.
-    private let limits: [String: Limits] = [
-        "sky": Limits(deltaE: 3.0, gradient: 28, variance: 0.55...1.65, luminance: 0.025),
-        "cloud": Limits(deltaE: 3.5, gradient: 32, variance: 0.50...1.75, luminance: 0.03),
-        "foliage": Limits(deltaE: 4.5, gradient: 38, variance: 0.48...1.8, luminance: 0.035),
-        "water": Limits(deltaE: 3.5, gradient: 30, variance: 0.50...1.7, luminance: 0.03),
-        "brick": Limits(deltaE: 4.0, gradient: 34, variance: 0.48...1.8, luminance: 0.03),
-        "skin": Limits(deltaE: 3.0, gradient: 28, variance: 0.55...1.65, luminance: 0.025),
-    ]
-
     /// Defect families the v1 product supports. Wires and broad removal (the 60 px dust case) are
     /// stress-corpus rows only; they are reported but never gate shipping.
     private static let shippingClasses: [String: [String]] = [
@@ -60,7 +26,7 @@ final class RetouchQualityEvaluationTests: TempDirectoryTestCase {
 
     private struct Row {
         let background: String, defect: String, label: String
-        let metrics: Metrics
+        let metrics: RetouchQualityMetrics.Metrics
         let failed: [String]
     }
 
@@ -103,8 +69,8 @@ final class RetouchQualityEvaluationTests: TempDirectoryTestCase {
                         )
                         output = try Pixels.bytes(of: rendered)
                     } else { continue }
-                    let values = measure(clean: clean, output: output, fixture: fixture)
-                    let failed = values.failures(against: limits[background]!)
+                    let values = RetouchQualityMetrics.measure(clean: clean, output: output, mask: fixture.mask, width: fixture.width, height: fixture.height)
+                    let failed = values.failures(against: RetouchQualityMetrics.limits[background]!)
                     table.append(Row(background: background, defect: defect, label: label,
                                      metrics: values, failed: failed))
                 }
@@ -200,112 +166,10 @@ final class RetouchQualityEvaluationTests: TempDirectoryTestCase {
                     output[index * 4 + c] = UInt8(min(max(value.rounded(), 0), 255))
                 }
             }
-            let metrics = measure(clean: clean, output: output, fixture: fixture)
-            XCTAssertTrue(metrics.failures(against: limits[background]!).isEmpty,
+            let metrics = RetouchQualityMetrics.measure(clean: clean, output: output, mask: fixture.mask, width: fixture.width, height: fixture.height)
+            XCTAssertTrue(metrics.failures(against: RetouchQualityMetrics.limits[background]!).isEmpty,
                 "hand-built interpolation and texture synthesis should pass for \(background)")
         }
     }
 
-    private func measure(clean: [UInt8], output: [UInt8], fixture: RetouchQualityFixtures.Case) -> Metrics {
-        let w = fixture.width, h = fixture.height
-        var selected = fixture.mask
-        for y in 0..<h { for x in 0..<w where !selected[y * w + x] {
-            let near = (-4...4).contains { dy in (-4...4).contains { dx in
-                abs(dx) + abs(dy) <= 4 && x + dx >= 0 && x + dx < w && y + dy >= 0 && y + dy < h
-                    && fixture.mask[(y + dy) * w + x + dx]
-            }}
-            if near { selected[y * w + x] = true }
-        }}
-        let indices = selected.indices.filter { selected[$0] }
-        var delta = 0.0, lumaShift = 0.0
-        for i in indices {
-            let a = lab(clean, i * 4), b = lab(output, i * 4)
-            delta += deltaE2000(a, b)
-            lumaShift += luminance(output, i * 4) - luminance(clean, i * 4)
-        }
-        let gradientIndices = indices.filter { i in
-            let x = i % w, y = i / w
-            return x + 1 < w && y + 1 < h
-        }
-        var gradient = 0.0
-        for i in gradientIndices {
-            for neighbor in [i + 1, i + w] {
-                for c in 0..<3 {
-                    let actual = Double(Int(output[neighbor * 4 + c]) - Int(output[i * 4 + c]))
-                    let expected = Double(Int(clean[neighbor * 4 + c]) - Int(clean[i * 4 + c]))
-                    gradient += abs(actual - expected)
-                }
-            }
-        }
-        let cleanVariance = localVariance(clean, indices: indices, width: w, height: h)
-        let outputVariance = localVariance(output, indices: indices, width: w, height: h)
-        return Metrics(
-            deltaE2000: delta / Double(max(1, indices.count)),
-            gradientError: gradient / Double(max(1, gradientIndices.count * 6)),
-            varianceRatio: cleanVariance > 1e-10 ? outputVariance / cleanVariance : 1,
-            luminanceShift: lumaShift / Double(max(1, indices.count))
-        )
-    }
-
-    private func localVariance(_ pixels: [UInt8], indices: [Int], width: Int, height: Int) -> Double {
-        var varianceSum = 0.0
-        for index in indices {
-            let x = index % width, y = index / width
-            var values: [Double] = []
-            for dy in -1...1 { for dx in -1...1 {
-                let nx = x + dx, ny = y + dy
-                if nx >= 0 && nx < width && ny >= 0 && ny < height { values.append(luminance(pixels, (ny * width + nx) * 4)) }
-            }}
-            let mean = values.reduce(0, +) / Double(values.count)
-            varianceSum += values.reduce(0) { $0 + pow($1 - mean, 2) } / Double(values.count)
-        }
-        return indices.isEmpty ? 0 : varianceSum / Double(indices.count)
-    }
-
-    private func luminance(_ p: [UInt8], _ i: Int) -> Double {
-        (0.2126 * Double(p[i]) + 0.7152 * Double(p[i + 1]) + 0.0722 * Double(p[i + 2])) / 255
-    }
-
-    private func lab(_ p: [UInt8], _ i: Int) -> (Double, Double, Double) {
-        func linear(_ byte: UInt8) -> Double {
-            let v = Double(byte) / 255
-            return v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
-        }
-        let r = linear(p[i]), g = linear(p[i + 1]), b = linear(p[i + 2])
-        let x = (r * 0.4124564 + g * 0.3575761 + b * 0.1804375) / 0.95047
-        let y = (r * 0.2126729 + g * 0.7151522 + b * 0.0721750)
-        let z = (r * 0.0193339 + g * 0.1191920 + b * 0.9503041) / 1.08883
-        func f(_ value: Double) -> Double { value > 0.008856451679 ? pow(value, 1 / 3) : 7.787037 * value + 16 / 116 }
-        let fx = f(x), fy = f(y), fz = f(z)
-        return (116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz))
-    }
-
-    /// CIEDE2000, Sharma et al. This keeps the reported colour error perceptual rather than RGB-only.
-    private func deltaE2000(_ lhs: (Double, Double, Double), _ rhs: (Double, Double, Double)) -> Double {
-        let (l1, a1, b1) = lhs, (l2, a2, b2) = rhs
-        let c1 = hypot(a1, b1), c2 = hypot(a2, b2), cBar = (c1 + c2) / 2
-        let g = 0.5 * (1 - sqrt(pow(cBar, 7) / (pow(cBar, 7) + pow(25.0, 7))))
-        let ap1 = (1 + g) * a1, ap2 = (1 + g) * a2
-        let cp1 = hypot(ap1, b1), cp2 = hypot(ap2, b2)
-        func hue(_ a: Double, _ b: Double) -> Double { (atan2(b, a) * 180 / .pi + 360).truncatingRemainder(dividingBy: 360) }
-        let hp1 = hue(ap1, b1), hp2 = hue(ap2, b2)
-        let dL = l2 - l1, dC = cp2 - cp1
-        var dh = hp2 - hp1
-        if cp1 * cp2 == 0 { dh = 0 } else if dh > 180 { dh -= 360 } else if dh < -180 { dh += 360 }
-        let dH = 2 * sqrt(cp1 * cp2) * sin(dh * .pi / 360)
-        let lBar = (l1 + l2) / 2, cpBar = (cp1 + cp2) / 2
-        var hpBar = hp1 + hp2
-        if cp1 * cp2 == 0 { hpBar = hp1 + hp2 }
-        else if abs(hp1 - hp2) > 180 { hpBar += hpBar < 360 ? 360 : -360 }
-        hpBar /= 2
-        let t = 1 - 0.17 * cos((hpBar - 30) * .pi / 180) + 0.24 * cos(2 * hpBar * .pi / 180)
-            + 0.32 * cos((3 * hpBar + 6) * .pi / 180) - 0.20 * cos((4 * hpBar - 63) * .pi / 180)
-        let sl = 1 + 0.015 * pow(lBar - 50, 2) / sqrt(20 + pow(lBar - 50, 2))
-        let sc = 1 + 0.045 * cpBar, sh = 1 + 0.015 * cpBar * t
-        let deltaTheta = 30 * exp(-pow((hpBar - 275) / 25, 2))
-        let rc = 2 * sqrt(pow(cpBar, 7) / (pow(cpBar, 7) + pow(25.0, 7)))
-        let rt = -rc * sin(2 * deltaTheta * .pi / 180)
-        let x = dL / sl, y = dC / sc, z = dH / sh
-        return sqrt(max(0, x * x + y * y + z * z + rt * y * z))
-    }
 }
