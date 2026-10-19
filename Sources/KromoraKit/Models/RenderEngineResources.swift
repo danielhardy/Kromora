@@ -81,17 +81,17 @@ final class RenderEngineResources {
               extent.width.isFinite, extent.height.isFinite else { return nil }
 
         let scale = CGFloat(longEdge) / max(extent.width, extent.height)
-        let width = max(1, Int((extent.width * scale).rounded()))
-        let height = max(1, Int((extent.height * scale).rounded()))
-        // Scale each axis to the rounded pixel size so the scaled extent is exactly
-        // `width` x `height`. A single uniform scale leaves the last row/column only partially
-        // covered when `extent * scale` rounds up; JPEG encoding drops that partial alpha and it
-        // presents as a light line on the stored first frame (KRMA-1042).
+        // Scale uniformly so the photo is never stretched, then keep only the whole pixels the
+        // scaled content fully covers. Rounding the size up would leave a partially covered last
+        // row/column (JPEG encoding drops that alpha and it presents as a light line), and
+        // stretching to the rounded size resamples the photo so the stored frame sits up to a
+        // pixel off the settled render (KRMA-1042). A tolerance absorbs float error on the long
+        // axis, which is exactly `longEdge`.
+        let width = max(1, Int((extent.width * scale + 1e-4).rounded(.down)))
+        let height = max(1, Int((extent.height * scale + 1e-4).rounded(.down)))
         let scaled = image.transformed(by: CGAffineTransform(
             translationX: -extent.minX, y: -extent.minY
-        )).transformed(by: CGAffineTransform(
-            scaleX: CGFloat(width) / extent.width, y: CGFloat(height) / extent.height
-        ))
+        )).transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         let target = CGRect(x: 0, y: 0, width: width, height: height)
         return context.createCGImage(
             scaled, from: target, format: .RGBA8, colorSpace: space.cgColorSpace

@@ -49,4 +49,27 @@ final class CanonicalPreviewRasterEdgeCoverageTests: XCTestCase {
             }
         }
     }
+
+    /// The stored frame must be whole pixels of the same uniform scale as the settled render, not
+    /// a raster stretched to a rounded size (a sub-pixel shift when the settled frame replaces it).
+    func testCanonicalRasterKeepsUniformScaleWithWholePixelSize() throws {
+        let cases: [(CGSize, Int)] = [
+            (CGSize(width: 149, height: 202), 97),
+            (CGSize(width: 517, height: 255), 333),
+            (CGSize(width: 3001, height: 1687), 2048),
+        ]
+        for (size, longEdge) in cases {
+            let ramp = CIImage(color: CIColor(red: 1, green: 1, blue: 1))
+                .cropped(to: CGRect(origin: .zero, size: size))
+            let scale = CGFloat(longEdge) / max(size.width, size.height)
+            let raster = try XCTUnwrap(RenderEngineResources.canonicalPreviewRaster(
+                from: ramp, space: .current, longEdge: longEdge
+            ))
+            XCTAssertEqual(raster.width, Int((size.width * scale + 1e-4).rounded(.down)), "\(size)")
+            XCTAssertEqual(raster.height, Int((size.height * scale + 1e-4).rounded(.down)), "\(size)")
+            XCTAssertLessThanOrEqual(Double(raster.width), Double(size.width * scale) + 1e-3)
+            XCTAssertLessThanOrEqual(Double(raster.height), Double(size.height * scale) + 1e-3)
+            XCTAssertEqual(max(raster.width, raster.height), longEdge, "\(size)")
+        }
+    }
 }
