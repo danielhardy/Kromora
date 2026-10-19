@@ -87,10 +87,11 @@ Cost of a session = `(1 + undoCount + redoCount + (isGrouping ? 1 : 0)) × docum
 document is the undo point held by an open gesture group. `documentCost` is a deterministic
 value-payload estimate: a fixed 4 KiB shell, `count × MemoryLayout<Element>.stride` for each
 variable-length collection recursively in the document and its recipes (including brush strokes,
-brush and retouch samples, local layers/components, adjustment nodes, retouch spots, and eye
-corrections), plus the UTF-8 byte count of retained strings. Do not encode the document or charge
-array capacity. This estimate deliberately takes no copy-on-write discount, but it is not an upper
-bound on allocated memory or RSS: allocator and array-capacity overhead are not captured. The 192
+brush, color-range, and retouch samples, local layers/components, adjustment nodes, retouch spots,
+and eye corrections), plus the UTF-8 byte count of retained strings, including Auto-run fingerprint
+metadata. Do not encode the document or charge array capacity. The estimate takes no copy-on-write
+discount, but it is not an upper bound on allocated memory or RSS: allocator and array-capacity
+overhead are not captured. The 192
 MiB limit is an estimated recipe-payload threshold, not a process-memory guarantee. Compute the
 estimate when the session is stored (`commit`, `apply`, `adopt*`) and keep it in the entry; never
 scan sessions or encode documents on a read. Also refresh the active session's cached cost when

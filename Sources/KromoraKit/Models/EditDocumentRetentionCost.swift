@@ -19,10 +19,16 @@ extension EditDocument {
             total += layer.components.count * MemoryLayout<MaskComponent>.stride
             for component in layer.components {
                 total += component.name.utf8.count
-                guard case .brush(let brush) = component.source else { continue }
-                total += brush.strokes.count * MemoryLayout<BrushStroke>.stride
-                for stroke in brush.strokes {
-                    total += stroke.samples.count * MemoryLayout<BrushSample>.stride
+                switch component.source {
+                case .brush(let brush):
+                    total += brush.strokes.count * MemoryLayout<BrushStroke>.stride
+                    for stroke in brush.strokes {
+                        total += stroke.samples.count * MemoryLayout<BrushSample>.stride
+                    }
+                case .color(let color):
+                    total += color.samples.count * MemoryLayout<ColorRangeSample>.stride
+                default:
+                    break
                 }
             }
         }
@@ -31,6 +37,11 @@ extension EditDocument {
             total += spot.region.samples.count * MemoryLayout<BrushSample>.stride
         }
         total += retouch.eyes.count * MemoryLayout<EyeCorrection>.stride
+        if let fingerprint = lastAutoRunFingerprint {
+            total += fingerprint.sourceFingerprint.utf8.count
+            total += fingerprint.documentHash.utf8.count
+            total += fingerprint.renderIdentity.utf8.count
+        }
         return total
     }
 }
