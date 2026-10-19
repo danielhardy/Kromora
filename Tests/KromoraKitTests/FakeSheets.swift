@@ -9,6 +9,13 @@ final class FakeSheets: SheetPresenting {
     var saveURL: URL?
     var openURLs: [URL]?
     var confirmResult = true
+    /// Answers for export Step 1, consumed in order; `true` (Continue) once exhausted.
+    var setupResults: [Bool] = []
+    /// Runs inside the folder step with its panel, standing in for the user's clicks.
+    var openHandler: ((NSOpenPanel) -> [URL]?)?
+    private(set) var setupCalls = 0
+    private(set) var lastSetupAccessory: ExportSetupAccessoryView?
+    private(set) var lastSetupTitle: String?
     private(set) var saveCalls = 0
     private(set) var openCalls = 0
     private(set) var confirmCalls = 0
@@ -29,7 +36,15 @@ final class FakeSheets: SheetPresenting {
         let panel = NSOpenPanel()
         configure(panel)
         lastOpenPanel = panel
+        if let openHandler { return openHandler(panel) }
         return openURLs
+    }
+
+    func confirmExportSetup(title: String, message: String, accessory: NSView) async -> Bool {
+        setupCalls += 1
+        lastSetupTitle = title
+        lastSetupAccessory = accessory as? ExportSetupAccessoryView
+        return setupResults.isEmpty ? true : setupResults.removeFirst()
     }
 
     func confirm(

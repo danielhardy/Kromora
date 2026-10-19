@@ -9,6 +9,9 @@ protocol SheetPresenting {
     func chooseSaveURL(configure: (NSSavePanel) -> Void) async -> URL?
     /// The chosen URLs, or `nil` when the user cancelled.
     func chooseOpenURLs(configure: (NSOpenPanel) -> Void) async -> [URL]?
+    /// Export Step 1: shows `accessory` (target review and settings) with Continue and Cancel.
+    /// `true` when the user chose Continue; nothing is started or written either way.
+    func confirmExportSetup(title: String, message: String, accessory: NSView) async -> Bool
     /// `true` when the user chose the first (default) button.
     func confirm(
         message: String, informativeText: String, style: NSAlert.Style, buttons: [String]
@@ -33,6 +36,24 @@ struct AppKitSheetPresenter: SheetPresenting {
         configure(panel)
         let response = await present(panel)
         return response == .OK ? panel.urls : nil
+    }
+
+    func confirmExportSetup(title: String, message: String, accessory: NSView) async -> Bool {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: "Continue")
+        alert.addButton(withTitle: "Cancel")
+        accessory.layoutSubtreeIfNeeded()
+        accessory.setFrameSize(accessory.fittingSize)
+        alert.accessoryView = accessory
+        if let window = hostWindow {
+            return await alert.beginSheetModal(for: window) == .alertFirstButtonReturn
+        }
+        NSApp.activate()
+        return await withCheckedContinuation { continuation in
+            continuation.resume(returning: alert.runModal() == .alertFirstButtonReturn)
+        }
     }
 
     func confirm(

@@ -69,6 +69,9 @@ enum ExportFormat: String, CaseIterable, Identifiable, Codable, Sendable {
         }
     }
 
+    /// Lossy encoders take a quality setting; TIFF and PNG are lossless.
+    var supportsQuality: Bool { self == .jpeg || self == .heif }
+
     var defaultBitDepth: ExportBitDepth {
         self == .tiff ? .sixteen : .eight
     }

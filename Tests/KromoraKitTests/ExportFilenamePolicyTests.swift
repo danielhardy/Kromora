@@ -127,9 +127,7 @@ final class ExportFilenamePolicyTests: TempDirectoryTestCase {
             try await Task.sleep(for: .milliseconds(10))
         }
         XCTAssertEqual(sheets.openCalls, 1)
-        let accessory = try XCTUnwrap(
-            sheets.lastOpenPanel?.accessoryView as? ExportFormatAccessoryView
-        )
+        let accessory = try XCTUnwrap(sheets.lastSetupAccessory?.settings)
         let lookComponent = firstLook.name.replacingOccurrences(of: " ", with: "_")
         XCTAssertEqual(accessory.namingExample, "DSC01305_\(lookComponent).jpg")
     }

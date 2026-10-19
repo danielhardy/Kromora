@@ -55,6 +55,8 @@ final class ExportCoordinator {
     /// The format used by the most recently started export in this session.
     /// Both export dialogs use this to seed their accessory view.
     private(set) var lastUsedFormat: ExportFormat
+    /// The compression quality of the most recently started export in this session.
+    private(set) var lastUsedQuality: Double = 0.95
     /// Supplied by the app's settings owner at panel presentation time. It is a default only: the
     /// chosen export destination is never written back into the setting automatically.
     var defaultFolderURL: (() -> URL?)?
@@ -471,26 +473,47 @@ final class ExportCoordinator {
             }
             let formatPicker = ExportFormatAccessoryView(
                 selectedFormat: self.lastUsedFormat,
+                quality: self.lastUsedQuality,
+                photosAvailable: self.photosDelivery != nil,
                 batchNaming: (self.lastUsedFilenamePolicy, firstItem.name, exampleLook)
             )
-            let chosen = await self.sheets.chooseOpenURLs { panel in
-                panel.title = items.count == 1 ? "Export 1 Photo" : "Export \(items.count) Photos"
-                panel.message = items.count == 1
-                    ? "Choose a folder for the exported photo."
-                    : "Choose a folder for \(items.count) exported photos."
-                panel.prompt = "Export Here"
-                panel.canChooseFiles = false
-                panel.canChooseDirectories = true
-                panel.canCreateDirectories = true
-                panel.allowsMultipleSelection = false
-                panel.directoryURL = directoryURL
-                panel.accessoryView = formatPicker
-            }
-            guard let folder = chosen?.first else { return }
-            self.startBatchExport(
-                items: items, document: document, lut: lut, folder: folder,
-                formatPicker: formatPicker
+            let setup = ExportSetupAccessoryView(
+                entries: items.map { ExportSetupEntry(name: $0.name, url: $0.url, data: $0.data) },
+                settings: formatPicker
             )
+            let title = items.count == 1 ? "Export 1 Photo" : "Export \(items.count) Photos"
+            // Step 1 (settings) then Step 2 (folder). Back from Step 2 reopens Step 1 with the
+            // same accessory, so nothing the user chose is lost. Nothing starts until a folder.
+            while true {
+                guard await self.sheets.confirmExportSetup(
+                    title: title,
+                    message: ExportSetupAccessoryView.countText(for: items.count)
+                        + ". Choose the output settings, then pick a folder.",
+                    accessory: setup
+                ) else { return }
+                let back = ExportBackAccessoryView()
+                let chosen = await self.sheets.chooseOpenURLs { panel in
+                    panel.title = title
+                    panel.message = items.count == 1
+                        ? "Choose a folder for the exported photo."
+                        : "Choose a folder for \(items.count) exported photos."
+                    panel.prompt = "Export Here"
+                    panel.canChooseFiles = false
+                    panel.canChooseDirectories = true
+                    panel.canCreateDirectories = true
+                    panel.allowsMultipleSelection = false
+                    panel.directoryURL = directoryURL
+                    panel.accessoryView = back
+                }
+                if let folder = chosen?.first {
+                    self.startBatchExport(
+                        items: items, document: document, lut: lut, folder: folder,
+                        formatPicker: formatPicker
+                    )
+                    return
+                }
+                guard back.didRequestBack else { return }
+            }
         }
     }
 
@@ -507,6 +530,7 @@ final class ExportCoordinator {
         }
         // Record the choice as soon as the dialog completes, before the async batch starts.
         lastUsedFormat = format
+        lastUsedQuality = formatPicker.quality
         let options = formatPicker.exportOptions(destination: .folder(folder))
         lastUsedFilenamePolicy = options.filenamePolicy
         let task = Task { [weak self, access] in
@@ -960,6 +984,8 @@ final class ExportCoordinator {
 @MainActor
 final class ExportFormatAccessoryView: NSView {
     private let picker: NSSegmentedControl
+    private let qualitySlider: NSSlider
+    private let qualityValueLabel: NSTextField
     private let metadataCheckbox: NSButton
     private let locationCheckbox: NSButton
     private let photosCheckbox: NSButton
@@ -1028,8 +1054,12 @@ final class ExportFormatAccessoryView: NSView {
 
     init(
         selectedFormat: ExportFormat,
+        quality: Double = 0.95,
+        photosAvailable: Bool = true,
         batchNaming: (policy: ExportFilenamePolicy, exampleSource: String, exampleLook: String?)? = nil
     ) {
+        qualitySlider = NSSlider(value: quality, minValue: 0.5, maxValue: 1, target: nil, action: nil)
+        qualityValueLabel = NSTextField(labelWithString: "")
         picker = NSSegmentedControl(
             labels: ExportFormat.allCases.map(\.rawValue),
             trackingMode: .selectOne,
@@ -1087,7 +1117,23 @@ final class ExportFormatAccessoryView: NSView {
             "Share the source photo's precise GPS location; off by default"
         )
 
+        qualitySlider.target = self
+        qualitySlider.action = #selector(qualityChanged)
+        qualitySlider.translatesAutoresizingMaskIntoConstraints = false
+        qualitySlider.widthAnchor.constraint(greaterThanOrEqualToConstant: 160).isActive = true
+        qualitySlider.setAccessibilityLabel("Export quality")
+        qualitySlider.setAccessibilityHelp("Compression quality for JPEG and HEIF; TIFF and PNG are lossless")
+        qualityValueLabel.textColor = .secondaryLabelColor
+        qualityValueLabel.setContentHuggingPriority(.required, for: .horizontal)
+        let qualityRow = NSStackView(views: [qualitySlider, qualityValueLabel])
+        qualityRow.spacing = 8
+        updateQualityControls()
+
         photosCheckbox.setAccessibilityLabel("Also add to Photos")
+        if !photosAvailable {
+            photosCheckbox.isEnabled = false
+            photosCheckbox.toolTip = "Adding to Photos isn't available"
+        }
         photosCheckbox.target = self
         photosCheckbox.action = #selector(photosSelectionChanged)
 
@@ -1110,6 +1156,7 @@ final class ExportFormatAccessoryView: NSView {
         // One label column (trailing-aligned) and one control column, grouped into sections.
         var rows: [[NSView]] = [
             [Self.rowLabel("Format:"), picker],
+            [Self.rowLabel("Quality:"), qualityRow],
             [Self.separator()],
             [Self.rowLabel("Metadata:"), metadataCheckbox],
             [NSGridCell.emptyContentView, locationCheckbox],
@@ -1145,7 +1192,7 @@ final class ExportFormatAccessoryView: NSView {
             }
         }
         // Tighten the two checkboxes that belong to one group.
-        grid.row(at: 3).topPadding = -4
+        grid.row(at: 4).topPadding = -4
         addSubview(grid)
         NSLayoutConstraint.activate([
             grid.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
@@ -1193,6 +1240,9 @@ final class ExportFormatAccessoryView: NSView {
 
     var namingExample: String? { naming?.exampleLabel.stringValue }
 
+    /// The compression quality; ignored by lossless formats.
+    var quality: Double { qualitySlider.doubleValue }
+
     var photosOptions: PhotosExportOptions? {
         guard photosCheckbox.state == .on else { return nil }
         return PhotosExportOptions(albumName: albumField.stringValue)
@@ -1218,6 +1268,7 @@ final class ExportFormatAccessoryView: NSView {
     func exportOptions(destination: ExportDestination) -> ExportOptions {
         ExportOptions(
             format: selectedFormat,
+            quality: quality,
             filenamePolicy: filenamePolicy,
             destination: destination,
             metadata: metadataPolicy,
@@ -1237,7 +1288,18 @@ final class ExportFormatAccessoryView: NSView {
         }
     }
 
+    /// Lossless formats have no quality; show that rather than a dead-looking control.
+    private func updateQualityControls() {
+        let supported = selectedFormat.supportsQuality
+        qualitySlider.isEnabled = supported
+        qualityValueLabel.stringValue = supported
+            ? "\(Int((qualitySlider.doubleValue * 100).rounded()))%" : "Lossless"
+    }
+
+    @objc private func qualityChanged() { updateQualityControls() }
+
     @objc private func selectionChanged() {
+        updateQualityControls()
         naming?.refreshExample()
         onSelectionChanged?(selectedFormat)
     }

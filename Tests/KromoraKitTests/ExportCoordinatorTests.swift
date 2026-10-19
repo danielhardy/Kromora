@@ -934,4 +934,87 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
         XCTAssertEqual(coordinator.batchTotal, 0)
     }
 
+
+    // MARK: - Two-step setup (KRMA-1039)
+
+    func testCancellingSetupStepNeverOpensFolderStepOrExports() async throws {
+        let sheets = FakeSheets()
+        sheets.setupResults = [false]
+        let coordinator = ExportCoordinator(sheets: sheets)
+        coordinator.batchExportDialog(
+            items: try makeSources(["one", "two"]), document: EditDocument(), lut: nil)
+        try await waitUntil { sheets.setupCalls == 1 }
+        await Task.yield()
+        XCTAssertEqual(sheets.openCalls, 0)
+        XCTAssertFalse(coordinator.isExporting)
+        XCTAssertEqual(sheets.lastSetupTitle, "Export 2 Photos")
+        XCTAssertEqual(sheets.lastSetupAccessory?.entries.map(\.name), ["one", "two"])
+        XCTAssertEqual(sheets.lastSetupAccessory?.countText, "2 photos will be exported")
+    }
+
+    func testSingleAndMultiPhotoSetupShareTheSameFlow() async throws {
+        let one = FakeSheets()
+        let coordinatorOne = ExportCoordinator(sheets: one)
+        coordinatorOne.batchExportDialog(
+            items: try makeSources(["solo"]), document: EditDocument(), lut: nil)
+        try await waitUntil { one.openCalls == 1 }
+        XCTAssertEqual(one.lastSetupTitle, "Export 1 Photo")
+        XCTAssertEqual(one.lastSetupAccessory?.countText, "1 photo will be exported")
+        XCTAssertNil(one.lastOpenPanel?.accessoryView as? ExportFormatAccessoryView)
+        XCTAssertEqual(one.setupCalls, 1)
+    }
+
+    @MainActor
+    func testBackFromFolderStepReopensSetupWithSameOptions() async throws {
+        let sheets = FakeSheets()
+        var visits = 0
+        var seenSetups: [ExportSetupAccessoryView] = []
+        sheets.openHandler = { panel in
+            visits += 1
+            if let setup = sheets.lastSetupAccessory { seenSetups.append(setup) }
+            if visits == 1 {
+                // Settings chosen in Step 1, then Back from Step 2.
+                sheets.lastSetupAccessory?.settings.setNaming(
+                    prefix: "P_", suffix: "_S", appendsLook: false)
+                (panel.accessoryView as? ExportBackAccessoryView)?.back()
+            }
+            return nil
+        }
+        let coordinator = ExportCoordinator(sheets: sheets)
+        coordinator.batchExportDialog(
+            items: try makeSources(["one"]), document: EditDocument(), lut: nil)
+        try await waitUntil { visits == 2 }
+        await Task.yield()
+        XCTAssertEqual(sheets.setupCalls, 2)
+        XCTAssertEqual(seenSetups.count, 2)
+        XCTAssertTrue(seenSetups[0] === seenSetups[1])
+        XCTAssertEqual(seenSetups[1].settings.filenamePolicy.prefix, "P_")
+        XCTAssertEqual(seenSetups[1].settings.filenamePolicy.suffix, "_S")
+        XCTAssertEqual(seenSetups[1].entries.count, 1)
+        // The second Step 2 visit is a plain cancel: nothing starts.
+        XCTAssertFalse(coordinator.isExporting)
+    }
+
+    func testCancellingFolderStepStartsNothing() async throws {
+        let sheets = FakeSheets()
+        let coordinator = ExportCoordinator(sheets: sheets)
+        coordinator.batchExportDialog(
+            items: try makeSources(["one"]), document: EditDocument(), lut: nil)
+        try await waitUntil { sheets.openCalls == 1 }
+        await Task.yield()
+        XCTAssertEqual(sheets.setupCalls, 1)
+        XCTAssertFalse(coordinator.isExporting)
+        XCTAssertEqual(coordinator.batchTotal, 0)
+    }
+
+    @MainActor
+    func testQualityControlMapsToOptionsAndFollowsFormat() {
+        let accessory = ExportFormatAccessoryView(selectedFormat: .jpeg, quality: 0.8)
+        let options = accessory.exportOptions(destination: .folder(tempDirectory))
+        XCTAssertEqual(options.quality, 0.8, accuracy: 0.001)
+        XCTAssertTrue(ExportFormat.jpeg.supportsQuality)
+        XCTAssertTrue(ExportFormat.heif.supportsQuality)
+        XCTAssertFalse(ExportFormat.tiff.supportsQuality)
+        XCTAssertFalse(ExportFormat.png.supportsQuality)
+    }
 }
