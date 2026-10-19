@@ -118,15 +118,19 @@ jobs:
       - name: Build app bundle
         run: scripts/app-store-build.sh
 
-      - name: Launch, open, Settings/menu, and export smoke path
+      - name: Launch, import, Settings/menu, and export smoke path
         shell: bash
+        env:
+          # A hosted runner is an ephemeral profile; the script refuses to run without this.
+          KROMORA_SMOKE_DISPOSABLE_PROFILE: "1"
         run: |
           set +e
           scripts/smoke-macos-app.sh .build/xcode/Build/Products/Release/Kromora.app
           status=$?
           set -e
           if [[ "$status" == 2 ]]; then
-            echo "Smoke path deferred: hosted runner has no accessible WindowServer session."
+            echo "::warning title=Application smoke deferred::No accessible WindowServer session; the UI smoke did NOT execute."
+            echo "Smoke path DEFERRED (not passed): hosted runner has no accessible WindowServer session."
             exit 0
           fi
           exit "$status"

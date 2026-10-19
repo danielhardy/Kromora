@@ -14,6 +14,18 @@ if [[ ! -d "$app_bundle" ]]; then
 fi
 bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_bundle/Contents/Info.plist")
 
+# Exit codes: 0 passed, 1 failed (the failed stage is named), 2 deferred (no accessible UI session),
+# 3 refused (no disposable-profile confirmation). Only 0 is an executed smoke pass.
+#
+# The app imports into its own selected/default library, so this script must only run in a disposable
+# macOS profile or VM. Setting the variable below is the operator's statement that it is; nothing in
+# the shipping app can redirect the library.
+if [[ "${KROMORA_SMOKE_DISPOSABLE_PROFILE:-}" != "1" ]]; then
+  print -u2 "REFUSED: this test imports into the app's current library. Run it only in a disposable macOS"
+  print -u2 "profile/library and set KROMORA_SMOKE_DISPOSABLE_PROFILE=1 to confirm."
+  exit 3
+fi
+
 # Hosted macOS runners may not have a logged-in WindowServer session. The CI job still invokes this
 # path, but leaves the decision to run it to the session rather than producing a false application
 # failure from an unavailable accessibility service.
@@ -24,11 +36,16 @@ fi
 
 smoke_dir="$(mktemp -d -t kromora-app-smoke)"
 # Open Image selects the first sorted library item, so this fixture stays ahead of existing photos.
-input_png="$smoke_dir/000-Kromora-Smoke.png"
-# Keep atomic export staging inside the sandboxed app's writable temporary directory.
-sandbox_temp="$HOME/Library/Containers/$bundle_id/Data/tmp"
-output_image="$sandbox_temp/kromora-app-smoke-$$.jpg"
+fixture_stem="000-Kromora-Smoke"
+input_png="$smoke_dir/$fixture_stem.png"
+export_dir="$smoke_dir/export"
+# Default export settings are JPEG with the source-name policy and no Look, so the output name is
+# `<fixture stem>.jpg`, with the original pixel dimensions.
+output_image="$export_dir/$fixture_stem.jpg"
+expected_size=256
+mkdir -p "$export_dir"
 app_pid=""
+stage="startup"
 app_is_running() {
   [[ -z "$app_pid" ]] && return 1
   for candidate in $(/usr/bin/pgrep -x Kromora || true); do
@@ -37,7 +54,24 @@ app_is_running() {
   done
   return 1
 }
+find_app_pid() {
+  for candidate in $(/usr/bin/pgrep -x Kromora || true); do
+    process_path="$(/bin/ps -o comm= -p "$candidate" | /usr/bin/sed 's/^[[:space:]]*//')"
+    # A separately installed copy can share Kromora's process name and bundle identifier.
+    if [[ "$process_path" == "$app_executable" ]]; then
+      print -- "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+# Only the instance this script launched (matched by pid and executable path) is closed, and only
+# harness-owned fixtures are removed.
 cleanup() {
+  local status=$?
+  if [[ $status -ne 0 && $status -ne 2 ]]; then
+    print -u2 "FAILED at stage: $stage"
+  fi
   if [[ -n "$app_pid" ]]; then
     /usr/bin/osascript >/dev/null 2>&1 <<APPLESCRIPT || true
 tell application "System Events"
@@ -53,33 +87,34 @@ APPLESCRIPT
     done
     app_is_running && kill "$app_pid" >/dev/null 2>&1 || true
   fi
-  /bin/rm -f "$output_image" >/dev/null 2>&1 || true
   rm -rf "$smoke_dir"
 }
 trap cleanup EXIT
 
-/usr/bin/sips -s format png -z 256 256 App/Branding/KromoraIcon.svg --out "$input_png" >/dev/null
-open -n "$app_bundle"
+# Run one bounded UI stage. `ui_stage` records the name for the failure report; every AppleScript
+# wait is a bounded repeat loop that raises an error naming what never appeared.
+ui_stage() {
+  stage="$1"
+  KROMORA_SMOKE_PID="$app_pid" KROMORA_SMOKE_INPUT="$input_png" \
+    KROMORA_SMOKE_EXPORT_DIR="$export_dir" /usr/bin/osascript
+}
 
+if find_app_pid >/dev/null; then
+  print -u2 "a Kromora instance from $app_bundle is already running; quit it so the harness owns its instance"
+  exit 1
+fi
+
+stage="fixture"
+/usr/bin/sips -s format png -z $expected_size $expected_size App/Branding/KromoraIcon.svg --out "$input_png" >/dev/null
+
+stage="launch"
+open -n "$app_bundle"
 for _ in {1..30}; do
-  app_pid=""
-  for candidate in $(/usr/bin/pgrep -x Kromora || true); do
-    process_path="$(/bin/ps -o comm= -p "$candidate" | /usr/bin/sed 's/^[[:space:]]*//')"
-    # A separately installed copy can share Kromora's process name and bundle identifier.
-    if [[ "$process_path" == "$app_executable" ]]; then
-      app_pid="$candidate"
-      break
-    fi
-  done
+  app_pid="$(find_app_pid || true)"
   [[ -n "$app_pid" ]] && break
   sleep 1
 done
 [[ -n "$app_pid" ]] || { print -u2 "Kromora did not launch"; exit 1; }
-for _ in {1..30}; do
-  [[ -d "$sandbox_temp" ]] && break
-  sleep 1
-done
-[[ -d "$sandbox_temp" ]] || { print -u2 "Kromora sandbox temporary directory is unavailable"; exit 1; }
 
 if ! /usr/bin/osascript >/dev/null 2>&1 <<APPLESCRIPT
 tell application "System Events"
@@ -91,36 +126,26 @@ then
   exit 2
 fi
 
-export KROMORA_SMOKE_PID="$app_pid"
-export KROMORA_SMOKE_INPUT="$input_png"
-export KROMORA_SMOKE_OUTPUT="$output_image"
-/usr/bin/osascript <<'APPLESCRIPT'
+ui_stage "window" <<'APPLESCRIPT'
 set appPID to (do shell script "printf '%s' \"$KROMORA_SMOKE_PID\"") as integer
-set inputPath to do shell script "printf '%s' \"$KROMORA_SMOKE_INPUT\""
-set outputDirectory to do shell script "dirname \"$KROMORA_SMOKE_OUTPUT\""
-set outputName to do shell script "basename \"$KROMORA_SMOKE_OUTPUT\""
-
-using terms from application "System Events"
-on waitForWindow(processID)
-    tell application "System Events"
-        tell first process whose unix id is processID
-            repeat 30 times
-                if (count of windows) > 0 then return
-                delay 1
-            end repeat
-            error "Kromora did not create a window"
-        end tell
-    end tell
-end waitForWindow
-
-end using terms from
-
 tell application "System Events"
     tell first process whose unix id is appPID
         set frontmost to true
-        my waitForWindow(appPID)
+        repeat 30 times
+            if (count of windows) > 0 then exit repeat
+            delay 1
+        end repeat
+        if (count of windows) = 0 then error "Kromora did not create a window"
+    end tell
+end tell
+APPLESCRIPT
 
-        -- Open through the File menu's keyboard equivalent and native Open panel.
+ui_stage "import (Open Image panel)" <<'APPLESCRIPT'
+set appPID to (do shell script "printf '%s' \"$KROMORA_SMOKE_PID\"") as integer
+set inputPath to do shell script "printf '%s' \"$KROMORA_SMOKE_INPUT\""
+tell application "System Events"
+    tell first process whose unix id is appPID
+        set frontmost to true
         keystroke "o" using command down
         repeat 20 times
             if exists window "Open Image" then exit repeat
@@ -144,19 +169,32 @@ tell application "System Events"
         if (count of sheets of window "Open Image") > 0 then error "Open Image file did not become selectable"
         if not (enabled of button "Open" of splitter group 1 of window "Open Image") then error "Open Image file did not become selectable"
         click button "Open" of splitter group 1 of window "Open Image"
+    end tell
+end tell
+APPLESCRIPT
 
-        -- Wait until the imported smoke image has finished loading before asking Kromora to export.
+# Ready means the File menu's Export command is enabled, not a toolbar position.
+ui_stage "import readiness (File > Export enabled)" <<'APPLESCRIPT'
+set appPID to (do shell script "printf '%s' \"$KROMORA_SMOKE_PID\"") as integer
+tell application "System Events"
+    tell first process whose unix id is appPID
         repeat 60 times
-            if enabled of first button of group 1 of group 4 of toolbar 1 of window 1 then
-                exit repeat
-            end if
+            try
+                if enabled of menu item "Export…" of menu 1 of menu bar item "File" of menu bar 1 then exit repeat
+            end try
             delay 1
         end repeat
-        if not (enabled of first button of group 1 of group 4 of toolbar 1 of window 1) then
+        if not (enabled of menu item "Export…" of menu 1 of menu bar item "File" of menu bar 1) then
             error "Kromora did not finish loading the smoke image"
         end if
+    end tell
+end tell
+APPLESCRIPT
 
-        -- Exercise the application-level Settings scene, then return to the main window.
+ui_stage "Settings" <<'APPLESCRIPT'
+set appPID to (do shell script "printf '%s' \"$KROMORA_SMOKE_PID\"") as integer
+tell application "System Events"
+    tell first process whose unix id is appPID
         key code 43 using command down
         repeat 20 times
             if exists window "Kromora Settings" then exit repeat
@@ -165,47 +203,81 @@ tell application "System Events"
         if not (exists window "Kromora Settings") then error "Settings did not open"
         key code 13 using command down
         delay 1
-
-        -- Export through the File menu's keyboard equivalent and native Save panel.
-        keystroke "s" using command down
-        repeat 20 times
-            if exists window "Export" then exit repeat
-            delay 1
-        end repeat
-        if not (exists window "Export") then error "Export save panel did not appear"
-        keystroke "g" using {command down, shift down}
-        repeat 20 times
-            if (count of sheets of window "Export") > 0 then exit repeat
-            delay 1
-        end repeat
-        if (count of sheets of window "Export") = 0 then error "Export location sheet did not appear"
-        set value of text field 1 of sheet 1 of window "Export" to outputDirectory
-        key code 36
-        repeat 20 times
-            if (count of sheets of window "Export") = 0 then
-                if exists text field "Save As:" of splitter group 1 of window "Export" then exit repeat
-            end if
-            delay 1
-        end repeat
-        if (count of sheets of window "Export") > 0 then error "Export destination did not become selectable"
-        set value of text field "Save As:" of splitter group 1 of window "Export" to outputName
-        repeat 20 times
-            if enabled of button "Save" of splitter group 1 of window "Export" then exit repeat
-            delay 1
-        end repeat
-        click button "Save" of splitter group 1 of window "Export"
-        repeat 20 times
-            if not (exists window "Export") then exit repeat
-            delay 1
-        end repeat
-        if exists window "Export" then error "Export save panel remained open after Save"
     end tell
 end tell
 APPLESCRIPT
 
-for _ in {1..30}; do
+# File > Export… (Command-S): Step 1 is the "Export 1 Photo" setup sheet whose defaults (JPEG) are
+# kept; Continue opens Step 2, a folder chooser whose default button is "Export Here".
+ui_stage "export setup sheet" <<'APPLESCRIPT'
+set appPID to (do shell script "printf '%s' \"$KROMORA_SMOKE_PID\"") as integer
+tell application "System Events"
+    tell first process whose unix id is appPID
+        set frontmost to true
+        click menu item "Export…" of menu 1 of menu bar item "File" of menu bar 1
+        repeat 20 times
+            if (count of sheets of window 1) > 0 then
+                if exists button "Continue" of sheet 1 of window 1 then exit repeat
+            end if
+            delay 1
+        end repeat
+        if not (exists button "Continue" of sheet 1 of window 1) then error "Export setup sheet did not appear"
+        if not (exists static text "Export 1 Photo" of sheet 1 of window 1) then error "Export setup sheet is not the one-photo setup"
+        click button "Continue" of sheet 1 of window 1
+    end tell
+end tell
+APPLESCRIPT
+
+ui_stage "export folder chooser" <<'APPLESCRIPT'
+set appPID to (do shell script "printf '%s' \"$KROMORA_SMOKE_PID\"") as integer
+set exportDirectory to do shell script "printf '%s' \"$KROMORA_SMOKE_EXPORT_DIR\""
+tell application "System Events"
+    tell first process whose unix id is appPID
+        repeat 20 times
+            if (count of sheets of window 1) > 0 then
+                if exists button "Export Here" of sheet 1 of window 1 then exit repeat
+            end if
+            delay 1
+        end repeat
+        if not (exists button "Export Here" of sheet 1 of window 1) then error "Export folder chooser did not appear"
+        keystroke "g" using {command down, shift down}
+        repeat 20 times
+            if (count of sheets of sheet 1 of window 1) > 0 then exit repeat
+            delay 1
+        end repeat
+        if (count of sheets of sheet 1 of window 1) = 0 then error "Export location sheet did not appear"
+        set value of text field 1 of sheet 1 of sheet 1 of window 1 to exportDirectory
+        key code 36
+        repeat 20 times
+            if (count of sheets of sheet 1 of window 1) = 0 then
+                if enabled of button "Export Here" of sheet 1 of window 1 then exit repeat
+            end if
+            delay 1
+        end repeat
+        if (count of sheets of sheet 1 of window 1) > 0 then error "Export destination did not become selectable"
+        click button "Export Here" of sheet 1 of window 1
+        repeat 20 times
+            if (count of sheets of window 1) = 0 then exit repeat
+            delay 1
+        end repeat
+        if (count of sheets of window 1) > 0 then error "Export folder chooser remained open after Export Here"
+    end tell
+end tell
+APPLESCRIPT
+
+stage="export output ($fixture_stem.jpg)"
+for _ in {1..60}; do
   [[ -s "$output_image" ]] && break
   sleep 1
 done
 [[ -s "$output_image" ]] || { print -u2 "application smoke export was not created: $output_image"; exit 1; }
-print "Application smoke passed: launch, open, Settings, File menu, and export"
+# Staging is atomic, so a decodable file at the final name is the finished export.
+width="$(/usr/bin/sips -g pixelWidth "$output_image" 2>/dev/null | /usr/bin/awk '/pixelWidth/ {print $2}')"
+height="$(/usr/bin/sips -g pixelHeight "$output_image" 2>/dev/null | /usr/bin/awk '/pixelHeight/ {print $2}')"
+format="$(/usr/bin/sips -g format "$output_image" 2>/dev/null | /usr/bin/awk '/format/ {print $2}')"
+if [[ "$format" != "jpeg" || "$width" != "$expected_size" || "$height" != "$expected_size" ]]; then
+  print -u2 "export output is not a ${expected_size}x${expected_size} JPEG (format=$format size=${width}x${height})"
+  exit 1
+fi
+stage="done"
+print "Application smoke passed: launch, import, Settings, File menu, and export ($fixture_stem.jpg, ${width}x${height} JPEG)"

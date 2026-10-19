@@ -267,6 +267,30 @@ behavior, inspector disclosure state, mask overlay and export parity, and icon/s
 The app-level smoke test and the verification scripts under `scripts/` are the executable checks;
 the source and test names are the authoritative coverage map.
 
+### Packaged-app UI smoke
+
+`scripts/smoke-macos-app.sh [Kromora.app]` (default `.build/xcode/Build/Products/Release/Kromora.app`,
+built by `scripts/app-store-build.sh`) drives the packaged app through System Events: launch, Open Image
+import of a generated `000-Kromora-Smoke.png` (256 x 256), Settings, File menu readiness
+(File > Export… enabled), then the one-photo export workflow: the "Export 1 Photo" setup sheet
+(default JPEG settings kept, Continue), the folder chooser (a throwaway folder entered with Go to Folder,
+Export Here). It passes only when `000-Kromora-Smoke.jpg` (source-name policy, no Look) exists in that
+folder as a decodable 256 x 256 JPEG (checked with `sips`).
+
+The app imports into its own current library, so run it only in a disposable macOS profile or VM and set
+`KROMORA_SMOKE_DISPOSABLE_PROFILE=1` to confirm. CI sets it for the ephemeral hosted runner. Do not run it
+against a real photo library. The script quits only the instance it launched (matched by pid and
+executable path), removes only its own temporary fixtures, and bounds every wait; a failure names the stage.
+
+| Exit | Meaning |
+| --- | --- |
+| 0 | Executed and passed |
+| 1 | Failed; stderr names the failed stage |
+| 2 | Deferred: no accessible UI session or automation refused. Not a pass; CI logs a warning |
+| 3 | Refused: disposable-profile confirmation missing |
+
+Manual sandbox acceptance remains in `docs/APP_STORE_ACCEPTANCE.md` (KRMA-1058).
+
 ## Last-known-frame qualification matrix
 
 The deterministic frame qualification is split across model, store, coordinator, package, and UI
