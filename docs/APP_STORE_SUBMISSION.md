@@ -29,17 +29,17 @@ privacy guidance](https://developer.apple.com/help/app-store-connect/manage-app-
 The repository evidence supports this answer for the current macOS app:
 
 - The sandbox audit found no production app-source calls to `URLSession` or other network APIs. Its
-  only listed external links open in the user's browser ([sandbox audit, network inventory](APP_STORE_SANDBOX_AUDIT.md#L294-L306)).
+  only listed external links open in the user's browser ([sandbox audit, network inventory](APP_STORE_SANDBOX_AUDIT.md#L329-L334)).
 - The audit found no embedded third-party framework or helper executable; `Package.swift` lists
   Apple frameworks, and the product README says there are no third-party runtime dependencies
-  ([sandbox audit](APP_STORE_SANDBOX_AUDIT.md#L301-L306), [Package.swift](../Package.swift#L124-L147),
+  ([sandbox audit](APP_STORE_SANDBOX_AUDIT.md#L336-L341), [Package.swift](../Package.swift#L124-L147),
   [README](../README.md#L1-L14)).
 - Kromora is a local, package-backed photo workflow: accepted imports are copied into the library
   package ([product scope](PRODUCT_SCOPE.md#L20-L35), [storage policy](STORAGE_POLICY.md)).
   Photos imports are user-selected through PhotosPicker, and Kromora then uses PhotoKit read/write
   authorization to retrieve the selected originals (including iCloud downloads), show Photos
-  thumbnails, and optionally deliver exports and place albums ([sandbox audit, protected resources](APP_STORE_SANDBOX_AUDIT.md#L322-L328),
-  [Info.plist usage description](../App/Info.plist#L34-L41)).
+  thumbnails, and optionally deliver exports and place albums ([sandbox audit, protected resources](APP_STORE_SANDBOX_AUDIT.md#L361-L363),
+  [Info.plist usage description](../App/Info.plist#L25-L26)).
 - Apple's answers cover collection by the app and its third-party partners across platforms. Apple
   says to select “No, we do not collect data from this app” when neither the app nor its partners
   collect data ([App Store Connect privacy guidance](https://developer.apple.com/help/app-store-connect/manage-app-information/manage-app-privacy/)).
@@ -50,7 +50,7 @@ reason list names iOS, iPadOS, tvOS, visionOS, and watchOS ([privacy-manifest gu
 The current package and Xcode target are macOS-only ([Package.swift](../Package.swift#L119-L147),
 [project target](../Xcode/Kromora.xcodeproj/project.pbxproj#L155-L174)); the sandbox audit likewise
 states that App Store Connect data-collection answers reflect actual practices independently of a
-manifest ([sandbox audit](APP_STORE_SANDBOX_AUDIT.md#L342-L349)).
+manifest ([sandbox audit](APP_STORE_SANDBOX_AUDIT.md#L375-L385)).
 
 ## Export compliance
 
@@ -78,7 +78,7 @@ Apple's current questionnaire covers content descriptors, in-app controls, and c
 | --- | --- |
 | Parental controls; age assurance | No / not present (**confirm**). The documented MVP has photo-library and editing workflows, with no age gate or parental-control feature ([product scope](PRODUCT_SCOPE.md#L18-L35), [README](../README.md#L49-L69)). |
 | User-generated content; messaging and chat; social media; advertising | No public or shared user-content capability, messaging/chat, social media, or advertising (**confirm**). Edits and exports are local photo-workflow outputs; the README documents no cloud catalog or shared library ([README](../README.md#L21-L25), [README limits](../README.md#L75-L84)). |
-| Unrestricted web access | No (**confirm**). The audit lists only explicit About-page links handed to the system browser and no app-initiated network requests ([sandbox audit](APP_STORE_SANDBOX_AUDIT.md#L294-L306)). |
+| Unrestricted web access | No (**confirm**). The audit lists only explicit About-page links handed to the system browser and no app-initiated network requests ([sandbox audit](APP_STORE_SANDBOX_AUDIT.md#L329-L334)). |
 | Profanity/crude humor; horror/fear; alcohol, tobacco, or drug use/references | None (**confirm** against bundled and submitted sample content); these are not product features in the documented still-photo workflow ([product scope](PRODUCT_SCOPE.md#L18-L35), [sample-photo manifest](../Sources/KromoraKit/Resources/SamplePhotos/manifest.json#L1-L20)). |
 | Medical/treatment information; health/wellness topics | None (**confirm**); not part of the documented photo-editing workflow ([product scope](PRODUCT_SCOPE.md#L18-L35)). |
 | Mature/suggestive themes; sexual content or nudity; graphic sexual content | None (**confirm** against bundled and submitted sample content); the sample-photo manifest lists the two bundled assets ([sample-photo manifest](../Sources/KromoraKit/Resources/SamplePhotos/manifest.json#L5-L19)). |
@@ -106,21 +106,21 @@ This path follows the welcome options and local Library → Edit → Export flow
 assets ([sample-photo manifest](../Sources/KromoraKit/Resources/SamplePhotos/manifest.json#L1-L20)).
 PhotosPicker selects the items to import, but retrieving their originals goes through PhotoKit, so
 the first Photos import (and any Photos delivery) prompts for Photos read/write access; both can be
-skipped when testing the local workflow and disk export ([sandbox audit](APP_STORE_SANDBOX_AUDIT.md#L326-L328),
+skipped when testing the local workflow and disk export ([sandbox audit](APP_STORE_SANDBOX_AUDIT.md#L361-L363),
 [App Store acceptance](APP_STORE_ACCEPTANCE.md#photos-authorization-and-delivery)).
 The no-account note is an inference from this local workflow and the audit's finding that the app
 has no app-initiated network requests; confirm the release build still has no sign-in dependency
-([product scope](PRODUCT_SCOPE.md#L20-L35), [sandbox audit](APP_STORE_SANDBOX_AUDIT.md#L294-L306)).
+([product scope](PRODUCT_SCOPE.md#L20-L35), [sandbox audit](APP_STORE_SANDBOX_AUDIT.md#L329-L334)).
 
 ### Entitlements in one line each
 
 | Entitlement | Purpose |
 | --- | --- |
-| `com.apple.security.app-sandbox` | Runs the distributed app in the macOS App Sandbox ([entitlements](../App/Kromora.entitlements#L1-L6), [audit rationale](APP_STORE_SANDBOX_AUDIT.md#L367-L378)). |
-| `com.apple.security.files.user-selected.read-write` | Reads and writes files or folders the user selects, including imports, exports, and Look files ([entitlements](../App/Kromora.entitlements#L5-L9), [audit rationale](APP_STORE_SANDBOX_AUDIT.md#L367-L373)). |
-| `com.apple.security.files.removable-media.read-only` | Reads imported images from mounted camera cards without writing to the card ([entitlements](../App/Kromora.entitlements#L7-L11), [audit rationale](APP_STORE_SANDBOX_AUDIT.md#L367-L373)). |
-| `com.apple.security.files.bookmarks.app-scope` | Retains access to user-selected external files and folders across launches ([entitlements](../App/Kromora.entitlements#L9-L13), [audit rationale](APP_STORE_SANDBOX_AUDIT.md#L367-L373)). |
-| `com.apple.security.assets.pictures.read-write` | Stores the default library package, default exports, and app-owned Looks under Pictures ([entitlements](../App/Kromora.entitlements#L11-L16), [audit rationale](APP_STORE_SANDBOX_AUDIT.md#L367-L373)). |
+| `com.apple.security.app-sandbox` | Runs the distributed app in the macOS App Sandbox ([entitlements](../App/Kromora.entitlements#L1-L6), [audit rationale](APP_STORE_SANDBOX_AUDIT.md#L401-L414)). |
+| `com.apple.security.files.user-selected.read-write` | Reads and writes files or folders the user selects, including imports, exports, and Look files ([entitlements](../App/Kromora.entitlements#L5-L9), [audit rationale](APP_STORE_SANDBOX_AUDIT.md#L401-L414)). |
+| `com.apple.security.files.removable-media.read-only` | Reads imported images from mounted camera cards without writing to the card ([entitlements](../App/Kromora.entitlements#L7-L11), [audit rationale](APP_STORE_SANDBOX_AUDIT.md#L401-L414)). |
+| `com.apple.security.files.bookmarks.app-scope` | Retains access to user-selected external files and folders across launches ([entitlements](../App/Kromora.entitlements#L9-L13), [audit rationale](APP_STORE_SANDBOX_AUDIT.md#L401-L414)). |
+| `com.apple.security.assets.pictures.read-write` | Stores the default library package, default exports, and app-owned Looks under Pictures ([entitlements](../App/Kromora.entitlements#L11-L16), [audit rationale](APP_STORE_SANDBOX_AUDIT.md#L401-L414)). |
 | `com.apple.security.personal-information.photos-library` | Lets PhotoKit authorize, fetch originals for Photos import, and save exports to Photos in the sandbox ([entitlements](../App/Kromora.entitlements#L16-L18), requested by KRMA-1040). |
 
 ### RAW formats
