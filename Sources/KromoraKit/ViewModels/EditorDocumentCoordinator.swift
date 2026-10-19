@@ -26,6 +26,13 @@ final class EditorDocumentCoordinator {
     var undoDepth: Int { activeHistory.undoCount }
     var isGrouping: Bool { activeHistory.isGrouping }
 
+    /// Retention diagnostics: how many photos hold an in-memory session, and how many
+    /// undo/redo entries those sessions retain in total (the active history included).
+    var retainedSessionCount: Int { sessions.count }
+    var retainedHistoryEntryCount: Int {
+        sessions.reduce(0) { $0 + $1.value.history.undoCount + $1.value.history.redoCount }
+    }
+
     func session(for assetID: PhotoAssetID) -> PhotoEditSession? {
         sessions[assetID]
     }
