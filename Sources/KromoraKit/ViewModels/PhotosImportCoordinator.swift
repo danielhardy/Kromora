@@ -88,22 +88,15 @@ extension PhotosImportProviding {
 /// remains here because it is provider metadata, not durable collection policy.
 @MainActor
 final class PhotosPickerImportProvider: PhotosImportProviding {
-    /// Review keeps at most this many bytes of transferred originals on disk; later items are
-    /// inspected and discarded, then transferred again if imported.
-    static let retainedByteLimit: Int64 = 2 << 30
+    /// Review stops transferring once it holds this many bytes of originals; see
+    /// `PhotosReviewTransferCache`.
+    static let retainedByteLimit = PhotosReviewTransferCache.defaultByteLimit
 
     private let items: [PhotosPickerItem]
-    private let retainedDirectory = FileManager.default.temporaryDirectory
-        .appendingPathComponent("KromoraPhotosReview-\(UUID().uuidString)", isDirectory: true)
-    private var retained: [Int: (url: URL, bytes: Int64)] = [:]
-    private var retainedBytes: Int64 = 0
+    private let cache = PhotosReviewTransferCache()
 
     init(items: [PhotosPickerItem]) {
         self.items = items
-    }
-
-    deinit {
-        try? FileManager.default.removeItem(at: retainedDirectory)
     }
 
     func originalFilename(for selection: PhotosImportSelection) -> String? {
@@ -126,11 +119,7 @@ final class PhotosPickerImportProvider: PhotosImportProviding {
         for selection: PhotosImportSelection,
         progress: @escaping @MainActor @Sendable (Double) -> Void
     ) async throws -> Data? {
-        if let entry = retained.removeValue(forKey: selection.ordinal) {
-            retainedBytes -= entry.bytes
-            defer { try? FileManager.default.removeItem(at: entry.url) }
-            if let data = try? Data(contentsOf: entry.url, options: .mappedIfSafe) { return data }
-        }
+        if let data = cache.consume(ordinal: selection.ordinal) { return data }
         guard let resource = Self.originalResource(for: selection) else {
             throw PhotosOriginalError.noOriginalResource
         }
@@ -142,41 +131,16 @@ final class PhotosPickerImportProvider: PhotosImportProviding {
     }
 
     func inspectionData(for selection: PhotosImportSelection) async throws -> Data? {
-        if let entry = retained[selection.ordinal],
-            let data = try? Data(contentsOf: entry.url, options: .mappedIfSafe)
-        {
-            return data
-        }
-        guard let resource = Self.originalResource(for: selection) else {
-            throw PhotosOriginalError.noOriginalResource
-        }
-        try FileManager.default.createDirectory(at: retainedDirectory, withIntermediateDirectories: true)
-        let file = retainedDirectory.appendingPathComponent(String(selection.ordinal))
-        do {
+        try await cache.inspect(ordinal: selection.ordinal) { file in
+            guard let resource = Self.originalResource(for: selection) else {
+                throw PhotosOriginalError.noOriginalResource
+            }
             try await Self.writeOriginal(resource, to: file)
-            try Task.checkCancellation()
-        } catch {
-            try? FileManager.default.removeItem(at: file)
-            throw error
         }
-        let bytes = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
-        let data = try Data(contentsOf: file, options: .mappedIfSafe)
-        if retainedBytes + bytes <= Self.retainedByteLimit {
-            retained[selection.ordinal] = (file, bytes)
-            retainedBytes += bytes
-        } else {
-            try? FileManager.default.removeItem(at: file)
-        }
-        return data
     }
 
     func discardRetainedTransfers(keeping ordinals: Set<Int>) {
-        for (ordinal, entry) in retained where !ordinals.contains(ordinal) {
-            try? FileManager.default.removeItem(at: entry.url)
-            retained[ordinal] = nil
-            retainedBytes -= entry.bytes
-        }
-        if retained.isEmpty { try? FileManager.default.removeItem(at: retainedDirectory) }
+        cache.discard(keeping: ordinals)
     }
 
     /// The camera original, never an edited rendition. A RAW+JPEG pair exposes the RAW as
@@ -230,6 +194,81 @@ final class PhotosPickerImportProvider: PhotosImportProviding {
             throw PhotosOriginalError.unavailable(error.localizedDescription)
         }
         try Task.checkCancellation()
+    }
+}
+
+/// Review's retained originals. Every item the cache transfers is kept until import consumes it
+/// or review discards it, so an imported original is fetched once. The disk cost is bounded by
+/// refusing to start another transfer once `byteLimit` is held: later items are not inspected
+/// (they stay untagged in review) and are transferred a single time, at import. The bound can be
+/// exceeded by at most the one item whose transfer crossed it.
+@MainActor
+final class PhotosReviewTransferCache {
+    static let defaultByteLimit: Int64 = 2 << 30
+
+    let byteLimit: Int64
+    private let directory: URL
+    private var entries: [Int: (url: URL, bytes: Int64)] = [:]
+    private(set) var retainedBytes: Int64 = 0
+
+    init(byteLimit: Int64 = PhotosReviewTransferCache.defaultByteLimit, directory: URL? = nil) {
+        self.byteLimit = byteLimit
+        self.directory = directory ?? FileManager.default.temporaryDirectory
+            .appendingPathComponent("KromoraPhotosReview-\(UUID().uuidString)", isDirectory: true)
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    var retainedOrdinals: Set<Int> { Set(entries.keys) }
+
+    /// The retained original for review, transferring it with `fetch` when it is not held. Nil
+    /// when the budget is spent, without transferring anything.
+    func inspect(ordinal: Int, fetch: (URL) async throws -> Void) async throws -> Data? {
+        if let entry = entries[ordinal], let data = try? Data(contentsOf: entry.url, options: .mappedIfSafe) {
+            return data
+        }
+        guard retainedBytes < byteLimit else { return nil }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent(String(ordinal))
+        do {
+            try await fetch(file)
+            try Task.checkCancellation()
+        } catch {
+            try? FileManager.default.removeItem(at: file)
+            throw error
+        }
+        let bytes = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
+        let data: Data
+        do {
+            data = try Data(contentsOf: file, options: .mappedIfSafe)
+        } catch {
+            try? FileManager.default.removeItem(at: file)
+            throw error
+        }
+        if let previous = entries.updateValue((file, bytes), forKey: ordinal) {
+            retainedBytes -= previous.bytes
+        }
+        retainedBytes += bytes
+        return data
+    }
+
+    /// Hands the retained original to import and unlinks it; the mapping keeps it readable.
+    func consume(ordinal: Int) -> Data? {
+        guard let entry = entries.removeValue(forKey: ordinal) else { return nil }
+        retainedBytes -= entry.bytes
+        defer { try? FileManager.default.removeItem(at: entry.url) }
+        return try? Data(contentsOf: entry.url, options: .mappedIfSafe)
+    }
+
+    func discard(keeping ordinals: Set<Int>) {
+        for (ordinal, entry) in entries where !ordinals.contains(ordinal) {
+            try? FileManager.default.removeItem(at: entry.url)
+            entries[ordinal] = nil
+            retainedBytes -= entry.bytes
+        }
+        if entries.isEmpty { try? FileManager.default.removeItem(at: directory) }
     }
 }
 
