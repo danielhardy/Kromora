@@ -819,6 +819,29 @@ final class PortablePackageTransactionTests: TempDirectoryTestCase {
         try assertRejected(try openExpiredPackage(packageURL), packageURL: packageURL, sentinel: sibling)
     }
 
+    func testRecoveryRejectsSymlinkedEnumeratedJournalWithoutFollowingIt() throws {
+        let packageURL = try makePackage()
+        let sibling = try makeSentinel(named: "UnrelatedSibling")
+        let id = UUID()
+        let externalJournal = tempDirectory.appendingPathComponent("\(id.uuidString).json")
+        let maliciousFile = PortablePackageTransactionFile(
+            relativePath: "Recovery", stagingPath: "Recovery/Staging/\(id.uuidString)/Recovery",
+            backupPath: nil, byteCount: 0, stagedChecksum: "", publicationState: .published)
+        var value = journal(
+            staging: "Recovery/Staging/\(id.uuidString)", files: [maliciousFile], id: id)
+        value.state = .publishing
+        try PackageJSONCoder.encode(value).write(to: externalJournal)
+        let transactions = packageURL.appendingPathComponent("Recovery/Transactions")
+        try FileManager.default.createDirectory(at: transactions, withIntermediateDirectories: true)
+        let enumeratedJournal = transactions.appendingPathComponent("\(id.uuidString).json")
+        try FileManager.default.createSymbolicLink(
+            at: enumeratedJournal, withDestinationURL: externalJournal)
+
+        try assertRejected(try openExpiredPackage(packageURL), packageURL: packageURL, sentinel: sibling)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: enumeratedJournal.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: externalJournal.path))
+    }
+
     func testRecoveryRejectsBackupPathsOutsideTheTransaction() throws {
         let sibling = try makeSentinel(named: "UnrelatedSibling")
         for backup in [
