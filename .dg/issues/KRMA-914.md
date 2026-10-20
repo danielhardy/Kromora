@@ -2,9 +2,62 @@
 id: KRMA-914
 title: "Smart Mask Discovery: develop a signature visual experience beyond the initial prototype"
 type: feature
-status: review
+status: done
 priority: medium
 human_review_required: false
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: The revised experience is reviewed in motion and addresses the user's "pretty underwhelming" assessment with a distinctive, coherent discovery-and-reveal treatment. Record the visual review outcome; technical checks alone do not complete this criterion.
+      result: pass
+      notes: The user accepted the current Darkroom Development treatment in motion on 2026-10-19, including whole-image waiting flowing into the reveal and the completed mask becoming visible after overlays were hidden with O.
+    - criterion: The original photograph retains its integrity and remains readable across bright/dark scenes, portraits, landscapes, and detailed backgrounds. Review at representative canvas sizes and zoom levels.
+      result: pass
+      notes: The recorded human review accepted the current rendering. The offscreen Metal test confirms a transparent photo perimeter, bounded waiting overlay alpha below 90/255, and mask-shaped lift from actual coverage; geometry tests cover portrait/landscape placement, crop, pan, zoom, Retina scale, flips, rotation, and perspective. The review record does not enumerate a separate full image-by-canvas matrix.
+    - criterion: A request produces immediate visual acknowledgement, with no runtime shader compilation or heavy preparation on the request path.
+      result: pass
+      notes: The workflow begins presentation state before starting analysis; the canvas prewarms its pipeline from the bundled metallib. The runtime shader-source compilation gate passed.
+    - criterion: Millisecond/cached results, approximately 30-second operations, and waits exceeding one minute all have intentional choreography without a manufactured delay or fake progress.
+      result: pass
+      notes: Cached results enter reveal immediately; waiting exposure settles without progress or a deadline. Focused timing tests cover immediate, 30-second, 90-second, and longer elapsed values.
+    - criterion: Successful reveal uses the actual admitted mask pixels and remains aligned through all supported document and canvas geometry.
+      result: pass
+      notes: The overlay loads pixels through the returned mask reference and maps them with the inverse document/canvas transform. Shader coverage and geometry tests passed.
+    - criterion: Success commits the durable mask immediately; discovery never triggers extra inference, changes provider behavior, or delays mask availability.
+      result: pass
+      notes: The masking coordinator commits the result before resolving presentation state; the overlay only reads stored pixels. Workflow tests cover immediate durable creation and component insertion.
+    - criterion: Failure, cancellation, empty/unavailable masks, source changes, and superseded requests never reveal fabricated or stale geometry.
+      result: pass
+      notes: Request IDs, cancellation, source revision/fingerprint admission, and empty/error exits gate the reveal. Focused lifecycle tests passed.
+    - criterion: Discovery remains independently owned and swappable, with narrow integration into the existing canvas and workflow.
+      result: pass
+      notes: Discovery state and the transparent Metal surface are separate from PreviewSurface and mask analysis; canvas integration injects only the stored-pixel reader.
+    - criterion: Fragment work, drawable resolution, frame cadence, allocations, and queued GPU work remain bounded. Waiting frames do not evaluate the photo's Core Image graph. Hidden/inactive windows suspend animation, and Reduce Motion has an intentional still treatment.
+      result: pass
+      notes: Structural limits are a 512-pixel mask raster, 960-pixel drawable, 24/12 fps cadence, one command buffer in flight, fixed shader loops, hidden/inactive suspension, and a still Reduce Motion path. Raster-cap and shader/resource tests passed.
+    - criterion: Record evidence appropriate to the final design for resource use and interference with analysis. Clearly distinguish structural limits from measured performance; near-zero contention is not yet established.
+      result: pass
+      notes: Structural bounds are recorded in docs/ENGINEERING_GUIDE.md and confirmed by code/tests. No GPU-contention measurement was run, and no near-zero interference claim is made.
+    - criterion: Focused lifecycle, geometry, shader/resource, and relevant workflow tests pass; the application builds and the production package verifies.
+      result: pass
+      notes: The declared strict build, focused 76-test suite, shader freshness check, and production package verification all passed.
+  checks_run:
+    - swift build -Xswiftc -warnings-as-errors — exit 0, no compiler diagnostics
+    - swift test --no-parallel --filter 'MaskDiscoveryTests|MaskingWorkflowCoordinatorTests|MetalKernelParityTests|GeometryPointMappingTests|CanvasNavigationTests|PackageSettingsTests|XcodeProjectInvariantTests' — exit 0, 76 tests passed
+    - scripts/build-metal-libraries.sh --check — exit 0
+    - scripts/app-store-build.sh — exit 0; arm64 app, signature, entitlements, and resources verified; emitted the existing AppIntents metadata-extraction notice
+    - git diff --check — exit 0
+    - dg validate — exit 0; KRMA-914 absolute-path warning cleared, unrelated project/model-name and historical-event warnings remain
+    - Human in-motion review recorded 2026-10-19 — current interaction accepted, including hidden-overlay restoration
+  findings:
+    - GPU contention/interference was not measured. Structural limits are confirmed, and no near-zero contention claim is made.
+  fixes:
+    - Changed the KRMA-914 source-context header to say paths are relative to the project root, removing its absolute local filesystem path.
+  verification_commits: []
+  actor: codex
+  resolved_model: gpt-6-luna
+  completed_at: 2026-10-19T22:21:19.577Z
+  session: local session omitted
 creation_provenance:
   runner: codex
   model: unknown
@@ -16,7 +69,7 @@ labels:
   - design
   - performance
 created: 2026-10-12T21:56:49.211Z
-updated: 2026-10-14T13:12:55.058Z
+updated: 2026-10-19T22:21:19.581Z
 blockers:
   - id: evt_mv6x4j4h_ul6zvn
     type: human
@@ -25,7 +78,7 @@ blockers:
     created_at: 2026-10-13T16:51:38.321Z
     resolved_at: 2026-10-14T12:23:35.454Z
     resolved_by: web
-order: zv
+order: z
 board: product
 blocked_reason: Remaining acceptance needs a live, in-motion visual review of the 'Darkroom Development' treatment (5a090b2c) across bright/dark/portrait/landscape/busy photos, canvas sizes and zoom. The ticket's prior feedback was 'underwhelming', and I cannot see motion in a non-interactive run.
 blocked_action: Run 'swift run', request a Smart Mask on several photos, and record accept / what to change. Say whether to build the optional extras (cursor-as-safelight, haptic at edge lock-in, sound, longer-wait choreography). A supervised GPU-contention measurement per CLAUDE.md is also needed if near-zero interference is to be claimed.
@@ -150,7 +203,7 @@ A quick cached result should enter the reveal without an artificial wait. A long
 
 ## Source and documentation context
 
-Paths are relative to `/Users/dhardy/Dev/Kromora`:
+Paths are relative to the project root:
 
 - `Sources/KromoraKit/Models/MaskDiscoveryState.swift`
 - `Sources/KromoraKit/Models/MaskDiscoveryGeometry.swift`
@@ -262,3 +315,43 @@ The current implementation works well but is missing two critical features.
 ### Comment — claude @ 2026-10-14T13:12:53.860Z
 
 Addressed the two human-requested features in cfcd7c7e. (1) On resolve, both createSmartMask and addSmartMaskComponent now set interactionState.showOverlay = true, so the returned mask is shown even if overlays were hidden (new test testResolvedSmartMaskTurnsHiddenOverlayBackOn). (2) Waiting phase now carries the reveal's vocabulary across the whole frame: slow uniform waves of silver-grain nucleation and sparkle (a field, not a region; no coverage or progress implied) fading into the reveal. MaskDiscovery.metal rewritten and metallib rebuilt (--check passes). Verified: strict swift build passes; 71 focused tests pass; git diff --check clean. NOT run: app-store-build.sh, live in-motion visual review, GPU contention measurement. Visual acceptance remains the user's call.
+
+
+### Comment — codex @ 2026-10-19T22:01:40.968Z
+
+Human visual acceptance PASSED on 2026-10-19. During the review session the user was asked to hide mask overlays with O, then create a Smart Mask and check both the whole-image waiting animation flowing into the reveal and the finished mask becoming visible automatically despite the previously hidden overlay. The user replied "this works - shiop it". Record approval of the current interaction, including those two requested features; this supersedes the earlier lack of human acceptance for the current design. No additional cursor, haptic, sound or other optional effects were requested. This is approval of this feature within the ongoing ticket review, not a request to publish a release or push the repository. Resume normal technical verification with the latest implementation and resource/package checks; this review session ran no new build/tests and established no GPU-contention or near-zero-interference measurement. Preserve the distinction between the accepted visual result and any unmeasured performance claims.
+
+## Agent log
+
+- 2026-10-19T22:21:19.577Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] The revised experience is reviewed in motion and addresses the user's "pretty underwhelming" assessment with a distinctive, coherent discovery-and-reveal treatment. Record the visual review outcome; technical checks alone do not complete this criterion. (pass) — The user accepted the current Darkroom Development treatment in motion on 2026-10-19, including whole-image waiting flowing into the reveal and the completed mask becoming visible after overlays were hidden with O.
+- [x] The original photograph retains its integrity and remains readable across bright/dark scenes, portraits, landscapes, and detailed backgrounds. Review at representative canvas sizes and zoom levels. (pass) — The recorded human review accepted the current rendering. The offscreen Metal test confirms a transparent photo perimeter, bounded waiting overlay alpha below 90/255, and mask-shaped lift from actual coverage; geometry tests cover portrait/landscape placement, crop, pan, zoom, Retina scale, flips, rotation, and perspective. The review record does not enumerate a separate full image-by-canvas matrix.
+- [x] A request produces immediate visual acknowledgement, with no runtime shader compilation or heavy preparation on the request path. (pass) — The workflow begins presentation state before starting analysis; the canvas prewarms its pipeline from the bundled metallib. The runtime shader-source compilation gate passed.
+- [x] Millisecond/cached results, approximately 30-second operations, and waits exceeding one minute all have intentional choreography without a manufactured delay or fake progress. (pass) — Cached results enter reveal immediately; waiting exposure settles without progress or a deadline. Focused timing tests cover immediate, 30-second, 90-second, and longer elapsed values.
+- [x] Successful reveal uses the actual admitted mask pixels and remains aligned through all supported document and canvas geometry. (pass) — The overlay loads pixels through the returned mask reference and maps them with the inverse document/canvas transform. Shader coverage and geometry tests passed.
+- [x] Success commits the durable mask immediately; discovery never triggers extra inference, changes provider behavior, or delays mask availability. (pass) — The masking coordinator commits the result before resolving presentation state; the overlay only reads stored pixels. Workflow tests cover immediate durable creation and component insertion.
+- [x] Failure, cancellation, empty/unavailable masks, source changes, and superseded requests never reveal fabricated or stale geometry. (pass) — Request IDs, cancellation, source revision/fingerprint admission, and empty/error exits gate the reveal. Focused lifecycle tests passed.
+- [x] Discovery remains independently owned and swappable, with narrow integration into the existing canvas and workflow. (pass) — Discovery state and the transparent Metal surface are separate from PreviewSurface and mask analysis; canvas integration injects only the stored-pixel reader.
+- [x] Fragment work, drawable resolution, frame cadence, allocations, and queued GPU work remain bounded. Waiting frames do not evaluate the photo's Core Image graph. Hidden/inactive windows suspend animation, and Reduce Motion has an intentional still treatment. (pass) — Structural limits are a 512-pixel mask raster, 960-pixel drawable, 24/12 fps cadence, one command buffer in flight, fixed shader loops, hidden/inactive suspension, and a still Reduce Motion path. Raster-cap and shader/resource tests passed.
+- [x] Record evidence appropriate to the final design for resource use and interference with analysis. Clearly distinguish structural limits from measured performance; near-zero contention is not yet established. (pass) — Structural bounds are recorded in docs/ENGINEERING_GUIDE.md and confirmed by code/tests. No GPU-contention measurement was run, and no near-zero interference claim is made.
+- [x] Focused lifecycle, geometry, shader/resource, and relevant workflow tests pass; the application builds and the production package verifies. (pass) — The declared strict build, focused 76-test suite, shader freshness check, and production package verification all passed.
+Checks run:
+- swift build -Xswiftc -warnings-as-errors — exit 0, no compiler diagnostics
+- swift test --no-parallel --filter 'MaskDiscoveryTests|MaskingWorkflowCoordinatorTests|MetalKernelParityTests|GeometryPointMappingTests|CanvasNavigationTests|PackageSettingsTests|XcodeProjectInvariantTests' — exit 0, 76 tests passed
+- scripts/build-metal-libraries.sh --check — exit 0
+- scripts/app-store-build.sh — exit 0; arm64 app, signature, entitlements, and resources verified; emitted the existing AppIntents metadata-extraction notice
+- git diff --check — exit 0
+- dg validate — exit 0; KRMA-914 absolute-path warning cleared, unrelated project/model-name and historical-event warnings remain
+- Human in-motion review recorded 2026-10-19 — current interaction accepted, including hidden-overlay restoration
+Findings:
+- GPU contention/interference was not measured. Structural limits are confirmed, and no near-zero contention claim is made.
+Fixes:
+- Changed the KRMA-914 source-context header to say paths are relative to the project root, removing its absolute local filesystem path.
+Verification commits:
+- None
+Actor: codex
+Resolved model: gpt-6-luna
+Pickup session: local session omitted
+Summary: Verification passed: human in-motion acceptance and all declared technical checks passed; GPU contention remains unmeasured and no near-zero claim is made.

@@ -14,7 +14,7 @@ labels:
   - must-fix
   - ci
 created: 2026-10-13T14:47:40.853Z
-updated: 2026-10-13T18:43:24.098Z
+updated: 2026-10-19T17:03:31.405Z
 parent: KRMA-922
 depends_on:
   - KRMA-927
@@ -58,3 +58,8 @@ action in this repo (`.dg/AGENTS.md`: push only when a human asks).
 Block on the human with: reason "CI has not run on the release candidate", action "Push main (or a
 release branch) and share the Actions run URL". Once the URL exists, an agent can read failures with
 `gh run view --log-failed`.
+
+
+### Comment — codex @ 2026-10-19T17:03:31.404Z
+
+October 19 review follow-ups are under KRMA-1051: KRMA-1054 owns the reproduced production entitlement-allowlist failure; KRMA-1055 owns the retired export UI smoke path; KRMA-1056 and KRMA-1057 own emitted test-isolation warnings and enforcement. Consume those fixes when evaluating release-candidate CI. Ticket filing performed no push, CI rerun, or remote status claim.
