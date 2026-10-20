@@ -183,6 +183,31 @@ KROMORA_PHOTOS_RAW=/absolute/path/to/representative.dng \
 swift test --filter PhotosImportPerformanceTests
 ```
 
+Share Copy peak memory (KRMA-1048) is measured through the real engine and pasteboard path, one process
+per selection size:
+
+```sh
+KROMORA_SHARE_COPY_MEMORY=1 KROMORA_SHARE_COPY_COUNT=32 \
+swift test --filter ShareCopyMemoryTests/testMeasurePeakFootprintForMultiPhotoCopy
+```
+
+Measured 2026-10-19 on an Apple Silicon host, debug build, using a private local RAW/DNG fixture set at
+the 4096-pixel JPEG share size. Fixture names and source metadata are omitted. `phys_footprint` peak:
+
+| Photos | Peak footprint | Result |
+| ---: | ---: | --- |
+| 1 | 3,720.75 MiB | copied |
+| 8 | 3,889.35 MiB | copied |
+| 24 | 4,373.02 MiB | copied |
+| 32 | 4,635.14 MiB | copied |
+| 48 | 4,437.30 MiB | rejected, clipboard untouched |
+
+The peak is set by one RAW render's Core Image intermediates and does not grow with the selection;
+retained encoded JPEGs add at most the 256 MiB cap, and the pasteboard server's copy is the same size
+again outside the app. The cap therefore
+bounds the part that scales with selection size and is kept. The production cap is also exercised
+deterministically by `ShareCopyMemoryTests`.
+
 For a reproducible `xctrace` run, use the supported wrapper with an explicit mode:
 
 ```sh
