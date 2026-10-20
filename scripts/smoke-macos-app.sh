@@ -39,9 +39,11 @@ smoke_dir="$(mktemp -d -t kromora-app-smoke)"
 fixture_stem="000-Kromora-Smoke"
 input_png="$smoke_dir/$fixture_stem.png"
 export_dir="$smoke_dir/export"
-# Default export settings are JPEG with the source-name policy and no Look, so the output name is
-# `<fixture stem>.jpg`, with the original pixel dimensions.
-output_image="$export_dir/$fixture_stem.jpg"
+# The output name comes from the filename policy the setup sheet has selected (it persists across
+# launches), so it is read from the sheet's live "Example filename" after the sheet opens rather than
+# assumed. The format stays at its default or remembered value and is verified as a JPEG below.
+output_name=""
+output_image=""
 expected_size=256
 mkdir -p "$export_dir"
 app_pid=""
@@ -207,9 +209,11 @@ tell application "System Events"
 end tell
 APPLESCRIPT
 
-# File > Export… (Command-S): Step 1 is the "Export 1 Photo" setup sheet whose defaults (JPEG) are
-# kept; Continue opens Step 2, a folder chooser whose default button is "Export Here".
-ui_stage "export setup sheet" <<'APPLESCRIPT'
+# File > Export… (Command-S): Step 1 is the "Export 1 Photo" setup sheet whose selected settings are
+# kept; Continue opens Step 2, a folder chooser whose default button is "Export Here". The sheet's
+# "Example filename" static text is the selected policy's resulting name for the single photo.
+stage="export setup sheet"
+output_name="$(KROMORA_SMOKE_PID="$app_pid" /usr/bin/osascript <<'APPLESCRIPT'
 set appPID to (do shell script "printf '%s' \"$KROMORA_SMOKE_PID\"") as integer
 tell application "System Events"
     tell first process whose unix id is appPID
@@ -223,10 +227,28 @@ tell application "System Events"
         end repeat
         if not (exists button "Continue" of sheet 1 of window 1) then error "Export setup sheet did not appear"
         if not (exists static text "Export 1 Photo" of sheet 1 of window 1) then error "Export setup sheet is not the one-photo setup"
+        set exampleName to ""
+        repeat 10 times
+            repeat with element in (entire contents of sheet 1 of window 1)
+                try
+                    if role of element is "AXStaticText" and description of element is "Example filename" then
+                        set exampleName to value of element
+                        exit repeat
+                    end if
+                end try
+            end repeat
+            if exampleName is not "" then exit repeat
+            delay 1
+        end repeat
+        if exampleName is "" then error "Export setup sheet did not expose its example filename"
         click button "Continue" of sheet 1 of window 1
+        return exampleName
     end tell
 end tell
 APPLESCRIPT
+)"
+[[ -n "$output_name" && "$output_name" != */* ]] || { print -u2 "unusable example filename: '$output_name'"; exit 1; }
+output_image="$export_dir/$output_name"
 
 ui_stage "export folder chooser" <<'APPLESCRIPT'
 set appPID to (do shell script "printf '%s' \"$KROMORA_SMOKE_PID\"") as integer
@@ -265,7 +287,7 @@ tell application "System Events"
 end tell
 APPLESCRIPT
 
-stage="export output ($fixture_stem.jpg)"
+stage="export output ($output_name)"
 for _ in {1..60}; do
   [[ -s "$output_image" ]] && break
   sleep 1
@@ -280,4 +302,4 @@ if [[ "$format" != "jpeg" || "$width" != "$expected_size" || "$height" != "$expe
   exit 1
 fi
 stage="done"
-print "Application smoke passed: launch, import, Settings, File menu, and export ($fixture_stem.jpg, ${width}x${height} JPEG)"
+print "Application smoke passed: launch, import, Settings, File menu, and export ($output_name, ${width}x${height} JPEG)"

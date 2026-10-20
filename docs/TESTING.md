@@ -306,9 +306,11 @@ the source and test names are the authoritative coverage map.
 built by `scripts/app-store-build.sh`) drives the packaged app through System Events: launch, Open Image
 import of a generated `000-Kromora-Smoke.png` (256 x 256), Settings, File menu readiness
 (File > Export… enabled), then the one-photo export workflow: the "Export 1 Photo" setup sheet
-(default JPEG settings kept, Continue), the folder chooser (a throwaway folder entered with Go to Folder,
-Export Here). It passes only when `000-Kromora-Smoke.jpg` (source-name policy, no Look) exists in that
-folder as a decodable 256 x 256 JPEG (checked with `sips`).
+(selected settings kept; the script reads the sheet's "Example filename" text, Continue), the folder chooser (a throwaway folder entered with Go to Folder,
+Export Here). It passes only when the file named by that example (the persisted prefix, suffix, and Append Look
+choice, so `000-Kromora-Smoke.jpg` under default naming) exists in that folder as a decodable 256 x 256
+JPEG (checked with `sips`). The script never rewrites preferences; a profile whose remembered format is
+not JPEG fails the format check.
 
 The app imports into its own current library, so run it only in a disposable macOS profile or VM and set
 `KROMORA_SMOKE_DISPOSABLE_PROFILE=1` to confirm. CI sets it for the ephemeral hosted runner. Do not run it
