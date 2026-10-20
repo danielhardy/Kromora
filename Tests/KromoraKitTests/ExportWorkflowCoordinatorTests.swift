@@ -326,6 +326,165 @@ final class ExportWorkflowCoordinatorTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
     }
 
+    func testCopyServiceWritesDecodableJPEGImagesAndSurvivesCleanup() async throws {
+        let root = try makeShareRoot()
+        let engine = FakeRenderEngine()
+        let (workflow, destination, window) = makeMultiShare(engine: engine, root: root)
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("kromora-test-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        workflow.sharePasteboard = pasteboard
+        var shown: NSSharingServicePicker?
+        workflow.showPicker = { _, picker, _ in shown = picker }
+        workflow.shareDialog()
+
+        let picker = try XCTUnwrap(shown)
+        let delegate = try XCTUnwrap(picker.delegate as? SharePickerDelegate)
+        let system = NSSharingService(
+            title: ShareCopyPolicy.serviceTitle, image: NSImage(size: NSSize(width: 1, height: 1)),
+            alternateImage: nil, handler: {}
+        )
+        let services = delegate.sharingServicePicker(
+            picker, sharingServicesForItems: [], proposedSharingServices: [system]
+        )
+        XCTAssertEqual(services.count, 1)
+        XCTAssertFalse(services[0] === system, "the system Copy must be replaced")
+
+        let request = ShareCopyPolicy.options
+        XCTAssertEqual(request.format, .jpeg)
+        XCTAssertEqual(request.sizing, ShareExportPolicy.options().sizing)
+
+        services[0].perform(withItems: [])
+        for _ in 0..<200 where !FileManager.default.fileExists(atPath: root.path) == false {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        // Cleanup removed the temporary directory, yet the clipboard still holds the images.
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+        let items = try XCTUnwrap(pasteboard.pasteboardItems)
+        XCTAssertEqual(items.count, 2)
+        for item in items {
+            XCTAssertEqual(item.types, [ShareCopyPolicy.pasteboardType])
+            XCTAssertNotNil(item.data(forType: ShareCopyPolicy.pasteboardType))
+        }
+        let requests = await engine.encodeRequests
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertTrue(requests.allSatisfy { $0.format == .jpeg })
+        withExtendedLifetime((window, destination)) {}
+    }
+
+    func testLocalizedSystemCopyIsReplacedByASingleJPEGCopy() async throws {
+        let root = try makeShareRoot()
+        let engine = FakeRenderEngine()
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: 4, pixelsHigh: 3, bitsPerSample: 8,
+            samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ))
+        let jpeg = try XCTUnwrap(bitmap.representation(using: .jpeg, properties: [:]))
+        await engine.setEncodedData(jpeg, for: .jpeg)
+        let (workflow, destination, window) = makeMultiShare(engine: engine, root: root)
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("kromora-test-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        workflow.sharePasteboard = pasteboard
+        workflow.nativeCopyTitles = ["Copier"]
+        var shown: NSSharingServicePicker?
+        workflow.showPicker = { _, picker, _ in shown = picker }
+        workflow.shareDialog()
+
+        let picker = try XCTUnwrap(shown)
+        let delegate = try XCTUnwrap(picker.delegate as? SharePickerDelegate)
+        let system = NSSharingService(
+            title: "Copier", image: NSImage(size: NSSize(width: 1, height: 1)),
+            alternateImage: nil, handler: {}
+        )
+        let other = NSSharingService(
+            title: "Mail", image: NSImage(size: NSSize(width: 1, height: 1)),
+            alternateImage: nil, handler: {}
+        )
+        let services = delegate.sharingServicePicker(
+            picker, sharingServicesForItems: [], proposedSharingServices: [system, other]
+        )
+        XCTAssertEqual(services.count, 2)
+        XCTAssertFalse(services[0] === system, "the system Copy must be replaced")
+        XCTAssertEqual(services[0].title, "Copier")
+        XCTAssertTrue(services[1] === other, "other proposed services must be preserved")
+        XCTAssertEqual(services.filter { $0.title == "Copier" }.count, 1)
+
+        let request = ShareCopyPolicy.options
+        XCTAssertEqual(request.format, .jpeg)
+        XCTAssertEqual(request.sizing, ShareExportPolicy.options().sizing)
+
+        services[0].perform(withItems: [])
+        for _ in 0..<200 where !FileManager.default.fileExists(atPath: root.path) == false {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        // Cleanup removed the temporary directory, yet the clipboard still holds the images.
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+        let items = try XCTUnwrap(pasteboard.pasteboardItems)
+        XCTAssertEqual(items.count, 2)
+        for item in items {
+            XCTAssertEqual(item.types, [ShareCopyPolicy.pasteboardType])
+            let data = try XCTUnwrap(item.data(forType: ShareCopyPolicy.pasteboardType))
+            let decoded = try XCTUnwrap(NSBitmapImageRep(data: data))
+            XCTAssertEqual(decoded.pixelsWide, 4)
+            XCTAssertEqual(decoded.pixelsHigh, 3)
+        }
+        let requests = await engine.encodeRequests
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertTrue(requests.allSatisfy { $0.format == .jpeg })
+        withExtendedLifetime((window, destination)) {}
+    }
+
+    func testCopyStopsRenderingAndLeavesClipboardUntouchedPastByteLimit() async throws {
+        let root = try makeShareRoot()
+        let (workflow, destination, window) = makeMultiShare(engine: FakeRenderEngine(), root: root)
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("kromora-test-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        workflow.sharePasteboard = pasteboard
+        pasteboard.clearContents()
+        pasteboard.setString("previous", forType: .string)
+
+        var encoded = 0
+        let items = (0..<5).map { _ in
+            ShareCopyItem { _ in
+                encoded += 1
+                return Data(count: 100)
+            }
+        }
+
+        await workflow.copyToPasteboard(items, byteLimit: 250)
+
+        XCTAssertEqual(encoded, 3, "rendering stops at the first image that crosses the limit")
+        XCTAssertEqual(pasteboard.string(forType: .string), "previous")
+        XCTAssertNil(pasteboard.pasteboardItems?.first?.data(forType: ShareCopyPolicy.pasteboardType))
+
+        encoded = 0
+        await workflow.copyToPasteboard(Array(items.prefix(2)), byteLimit: 250)
+        XCTAssertEqual(encoded, 2)
+        XCTAssertEqual(pasteboard.pasteboardItems?.count, 2)
+        withExtendedLifetime((window, destination)) {}
+    }
+
+    func testPasteboardWriterAdvertisesImageTypeWithDecodableBytes() throws {
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("kromora-test-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        let rep = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: 4, pixelsHigh: 3, bitsPerSample: 8,
+            samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ))
+        let jpeg = try XCTUnwrap(rep.representation(using: .jpeg, properties: [:]))
+
+        XCTAssertTrue(SharePasteboardWriter.write([jpeg], to: pasteboard))
+        XCTAssertFalse(SharePasteboardWriter.write([], to: pasteboard) )
+        let data = try XCTUnwrap(pasteboard.pasteboardItems?.first?.data(forType: ShareCopyPolicy.pasteboardType))
+        let decoded = try XCTUnwrap(NSBitmapImageRep(data: data))
+        XCTAssertEqual(decoded.pixelsWide, 4)
+        XCTAssertEqual(decoded.pixelsHigh, 3)
+        XCTAssertNil(pasteboard.string(forType: .fileURL))
+    }
+
     func testMultiPhotoShareDisambiguatesCaseInsensitiveFilenameCollisions() async throws {
         let root = try makeShareRoot()
         let engine = FakeRenderEngine()

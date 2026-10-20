@@ -172,6 +172,7 @@ actor FakeRenderEngine: RenderEngining {
 
     /// Swap in a failure to exercise the caller's error path.
     var shouldFailEncode = false
+    private var encodedDataByFormat: [ExportFormat: Data] = [:]
     /// Test-only paths that create a staging file before failing or being cancelled.
     private var failAfterWritingPartialStagingFile = false
     private var waitForCancellationAfterWritingPartialStagingFile = false
@@ -246,7 +247,7 @@ actor FakeRenderEngine: RenderEngining {
             if shouldFailEncode || failingEncodeFormats.contains(format) { throw ImageError.exportFailed }
             emit(.encodeCompleted(record))
             return RenderResult(
-                data: Data("fake-\(format.rawValue)".utf8), extent: .zero,
+                data: encodedDataByFormat[format] ?? Data("fake-\(format.rawValue)".utf8), extent: .zero,
                 colorSpace: request.space, quality: request.quality, output: request.output
             )
         }
@@ -557,6 +558,7 @@ actor FakeRenderEngine: RenderEngining {
     private(set) var nativeRequests: [[NativePatchSpec]] = []
 
     func setShouldFailEncode(_ value: Bool) { shouldFailEncode = value }
+    func setEncodedData(_ data: Data, for format: ExportFormat) { encodedDataByFormat[format] = data }
     func setFailAfterWritingPartialStagingFile(_ value: Bool) {
         failAfterWritingPartialStagingFile = value
     }

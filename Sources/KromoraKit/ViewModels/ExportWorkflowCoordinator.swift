@@ -58,6 +58,12 @@ final class ExportWorkflowCoordinator {
         picker.show(relativeTo: placement.rect, of: placement.view, preferredEdge: placement.edge)
     }
 
+    /// The pasteboard the Share picker's Copy action writes to. Tests substitute a private one.
+    var sharePasteboard: NSPasteboard = .general
+
+    /// Titles that identify the system Copy among proposed services. Tests substitute a localized one.
+    var nativeCopyTitles: Set<String> = ShareCopyPolicy.nativeTitles
+
     init(
         export: ExportCoordinator,
         sheets: any SheetPresenting = AppKitSheetPresenter(),
@@ -286,6 +292,7 @@ final class ExportWorkflowCoordinator {
         // The picker appears before any render. Each item is a lazy file representation that
         // renders only when the chosen service loads it, from the snapshot taken here.
         var usedNameKeys = Set<String>()
+        var copyItems: [ShareCopyItem] = []
         let providers = request.items.map { item -> NSItemProvider in
             let stem = URL(fileURLWithPath: item.name).deletingPathExtension().lastPathComponent
             let base = stem.isEmpty ? "Photo" : stem
@@ -299,6 +306,12 @@ final class ExportWorkflowCoordinator {
                 counter += 1
             }
             let name = candidate
+            copyItems.append(ShareCopyItem { [weak self] options in
+                guard let self else { throw CocoaError(.userCancelled) }
+                return try await self.export.renderEncodedData(
+                    for: item, document: request.document, lut: request.lut, options: options
+                )
+            })
             let provider = NSItemProvider()
             provider.suggestedName = name
             provider.registerFileRepresentation(
@@ -331,7 +344,7 @@ final class ExportWorkflowCoordinator {
             }
             return provider
         }
-        presentSharePicker(for: providers, in: directory)
+        presentSharePicker(for: providers, copyItems: copyItems, in: directory)
     }
 
     /// The handle a sharing service uses to cancel a lazy render it no longer wants.
@@ -387,7 +400,14 @@ final class ExportWorkflowCoordinator {
             }
             return Self.cancellationProgress(for: task)
         }
-        presentSharePicker(for: [provider], in: directory)
+        let copyItem = ShareCopyItem { [weak self] options in
+            guard let self else { throw CocoaError(.userCancelled) }
+            return try await self.export.renderEncodedData(
+                source: request.source, assetID: assetID, document: request.document,
+                lut: request.lut, options: options
+            )
+        }
+        presentSharePicker(for: [provider], copyItems: [copyItem], in: directory)
     }
 
     /// Renders the share file into `directory`: HEIC, or JPEG when HEIC encoding fails.
@@ -424,13 +444,62 @@ final class ExportWorkflowCoordinator {
         return url
     }
 
+    /// The picker's built-in Copy hands a lazy file provider to the pasteboard, which does not
+    /// yield pasteable image data. This replacement renders the share image and writes the encoded
+    /// bytes themselves, so they survive cleanup of the temporary share directory.
+    private func makeCopyService(
+        title: String, for items: [ShareCopyItem], in directory: URL
+    ) -> NSSharingService {
+        NSSharingService(
+            title: title,
+            image: NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil) ?? NSImage(),
+            alternateImage: nil
+        ) { [weak self] in
+            guard let self else { return }
+            Task { @MainActor in
+                await self.copyToPasteboard(items)
+                self.removeShareExport(at: directory)
+            }
+        }
+    }
+
+    /// Renders every item first and writes only when all succeed, so a failure never leaves a
+    /// partial clipboard or silently drops a photo. Rendering stops as soon as the encoded bytes
+    /// exceed `byteLimit`, so peak memory is bounded by the limit plus one image.
+    func copyToPasteboard(_ items: [ShareCopyItem], byteLimit: Int = ShareCopyPolicy.maxTotalBytes) async {
+        do {
+            let images = try await export.runJob(.share) {
+                var images: [Data] = []
+                var total = 0
+                for item in items {
+                    let data = try await item.encode(ShareCopyPolicy.options)
+                    total += data.count
+                    guard total <= byteLimit else { throw ShareCopyError.selectionTooLarge }
+                    images.append(data)
+                }
+                return images
+            }
+            guard SharePasteboardWriter.write(images, to: sharePasteboard) else {
+                destination?.setExportStatus("Could not copy to the clipboard")
+                return
+            }
+            destination?.setExportStatus(images.count == 1 ? "Copied photo" : "Copied \(images.count) photos")
+        } catch is CancellationError {
+            return
+        } catch ShareCopyError.selectionTooLarge {
+            destination?.setExportStatus("Too many photos to copy at once. Select fewer photos and try again.")
+        } catch {
+            destination?.setExportStatus("Copy failed: \(error.localizedDescription)")
+        }
+    }
+
     nonisolated private static func write(_ data: Data, to url: URL) async throws {
         try data.write(to: url, options: .atomic)
     }
 
-    private func presentSharePicker(for items: [Any], in directory: URL) {
-        // Prefer the toolbar control; fall back to the key window so a missing anchor never
-        // discards a share that is ready to present.
+    private func presentSharePicker(for items: [Any], copyItems: [ShareCopyItem], in directory: URL) {
+        // Prefer the registered toolbar control, then the control that received the click; fall
+        // back to the key window so a missing anchor never discards a share that is ready.
         let fallback = NSApp.keyWindow?.contentView ?? NSApp.mainWindow?.contentView
         let placement = shareAnchorView.flatMap(SharePickerPlacement.init(anchor:))
             ?? Self.clickedControlPlacement()
@@ -441,9 +510,15 @@ final class ExportWorkflowCoordinator {
             return
         }
         let picker = NSSharingServicePicker(items: items)
-        let delegate = SharePickerDelegate { [weak self] in
-            self?.removeShareExport(at: directory)
-        }
+        let delegate = SharePickerDelegate(
+            copyService: { [weak self] title in
+                self?.makeCopyService(title: title, for: copyItems, in: directory)
+            },
+            nativeCopyTitles: nativeCopyTitles,
+            onFinish: { [weak self] in
+                self?.removeShareExport(at: directory)
+            }
+        )
         picker.delegate = delegate
         sharePickerSessions[directory.standardizedFileURL] = SharePickerSession(
             picker: picker,
@@ -516,6 +591,50 @@ enum ShareExportPolicy {
     }
 }
 
+/// One photo's lazy renderer for the Copy service, from the snapshot taken when Share was chosen.
+struct ShareCopyItem {
+    let encode: @MainActor (ExportOptions) async throws -> Data
+}
+
+/// Copy puts JPEG bytes on the pasteboard: unlike HEIC, every paste target decodes it, and the
+/// working-space profile is embedded. Size and quality follow `ShareExportPolicy`.
+enum ShareCopyPolicy {
+    /// The Copy label the system uses in the current language, from AppKit's own strings.
+    static var serviceTitle: String {
+        Bundle(for: NSApplication.self).localizedString(forKey: "Copy", value: "Copy", table: "MenuCommands")
+    }
+    /// Titles that identify the system Copy service among the proposed ones.
+    static var nativeTitles: Set<String> { [serviceTitle, "Copy"] }
+    static let format: ExportFormat = .jpeg
+    static let pasteboardType = NSPasteboard.PasteboardType(UTType.jpeg.identifier)
+    static var options: ExportOptions { ShareExportPolicy.options(format: format) }
+    /// Cap on encoded bytes held at once for a multi-photo Copy. Measured (docs/TESTING.md, KRMA-1048):
+    /// peak footprint is about 4.6 GB regardless of selection size, set by one RAW render, and 32
+    /// mixed photos copy while larger selections are rejected. The cap bounds only the part that
+    /// grows with the selection, plus the pasteboard server's equal-sized copy.
+    static let maxTotalBytes = 256 * 1024 * 1024
+}
+
+enum ShareCopyError: Error {
+    case selectionTooLarge
+}
+
+enum SharePasteboardWriter {
+    /// Replaces the pasteboard contents with one image item per encoded photo. Several photos
+    /// become several pasteboard items; targets that accept only one image take the first.
+    @MainActor
+    static func write(_ images: [Data], to pasteboard: NSPasteboard) -> Bool {
+        guard !images.isEmpty else { return false }
+        let items = images.map { data -> NSPasteboardItem in
+            let item = NSPasteboardItem()
+            item.setData(data, forType: ShareCopyPolicy.pasteboardType)
+            return item
+        }
+        pasteboard.clearContents()
+        return pasteboard.writeObjects(items)
+    }
+}
+
 @MainActor
 private final class SharePickerSession {
     let picker: NSSharingServicePicker
@@ -532,9 +651,34 @@ private final class SharePickerSession {
 @MainActor
 final class SharePickerDelegate: NSObject, @MainActor NSSharingServicePickerDelegate, @MainActor NSSharingServiceDelegate {
     private let onFinish: () -> Void
+    private let copyService: (String) -> NSSharingService?
+    private let nativeCopyTitles: Set<String>
 
-    init(onFinish: @escaping () -> Void) {
+    init(
+        copyService: @escaping (String) -> NSSharingService? = { _ in nil },
+        nativeCopyTitles: Set<String> = ShareCopyPolicy.nativeTitles,
+        onFinish: @escaping () -> Void
+    ) {
+        self.copyService = copyService
+        self.nativeCopyTitles = nativeCopyTitles
         self.onFinish = onFinish
+    }
+
+    /// Swaps the system Copy, which does not write image data, for the workflow's own.
+    func sharingServicePicker(
+        _ picker: NSSharingServicePicker, sharingServicesForItems items: [Any],
+        proposedSharingServices proposedServices: [NSSharingService]
+    ) -> [NSSharingService] {
+        var services = proposedServices
+        if let index = services.firstIndex(where: { nativeCopyTitles.contains($0.title) }) {
+            guard let replacement = copyService(services[index].title) else { return services }
+            services[index] = replacement
+            return services
+        }
+
+        guard let replacement = copyService(ShareCopyPolicy.serviceTitle) else { return services }
+        services.append(replacement)
+        return services
     }
 
     func sharingServicePicker(_ picker: NSSharingServicePicker, didChoose service: NSSharingService?) {
