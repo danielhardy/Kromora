@@ -298,3 +298,33 @@ brush has no margin over the hair, a fixture limit, not a picker one). Manual He
 on some foliage dust/speck still fails (blend, not on the automatic hair path). The coarse, unrefined
 proxy pick at 0.17 still misses sky soft dust; the shipped path refines it. Real-camera sign-off is not
 claimed until KRMA-1063 is recorded.
+
+## Camera-scale acceptance run sheet (KRMA-1063)
+
+Status: **Not run.** This sheet is the case matrix for the human reviewer. No row below is a pass until a
+reviewer has assessed the actual pixels at 100% source scale. Evidence is the local fixture filename plus
+a reviewer note; never commit or upload the photographs. Use copies of the licensed fixtures in
+`realworldtest/` (see its README) in a confirmed disposable library/profile, never an active one.
+
+Run header (fill at run time): candidate commit; signing type (ad hoc / Apple-signed); macOS version;
+machine; reviewer; date; fixture identifiers with source pixel dimensions (resolve from `realworldtest/`
+filenames, for example the two ARW files for 24 MP+ coverage and the DNG files for smaller sources).
+
+| # | Background / defect | Heal (manual) | Heal (auto source) | Clone | Notes |
+|---|---|---|---|---|---|
+| 1 | Sky or cloud: soft dust | Not run | Not run | Not run | |
+| 2 | Sky or cloud edge: hard speck | Not run | Not run | Not run | |
+| 3 | Sky or cloud edge: hair/fibre | Not run | Not run | Not run | |
+| 4 | Textured foliage: dust/speck and hair | Not run | Not run | Not run | |
+| 5 | Water or brick: dust/speck and hair | Not run | Not run | Not run | |
+| 6 | Skin-like detail: dust/speck | Not run | Not run | Not run | |
+
+Per cell, inspect at 100% and record: remaining defect, halo or seam, blur or texture loss, duplicated
+structure, and source-patch contamination. Omit a row only with an explicit "no representative crop
+available" note.
+
+Persistence check (representative cases): export at full resolution and reopen the file; confirm repairs,
+masks, and source offsets agree with the settled preview; quit and relaunch, then confirm the repairs
+persist in the package. Record Pass/Fail/Not run each.
+
+File a focused defect for each reproducible failure. Link the completed sheet from KRMA-1016.
