@@ -54,8 +54,8 @@ final class ExportWorkflowCoordinator {
     private var sharePickerSessions: [URL: SharePickerSession] = [:]
     private let shareRoot: URL
     /// Presents the picker at the Share control. Tests replace it to observe ordering.
-    var showPicker: ([Any], NSSharingServicePicker, NSView) -> Void = { _, picker, view in
-        picker.show(relativeTo: view.bounds, of: view, preferredEdge: .minY)
+    var showPicker: ([Any], NSSharingServicePicker, SharePickerPlacement) -> Void = { _, picker, placement in
+        picker.show(relativeTo: placement.rect, of: placement.view, preferredEdge: placement.edge)
     }
 
     init(
@@ -432,8 +432,10 @@ final class ExportWorkflowCoordinator {
         // Prefer the toolbar control; fall back to the key window so a missing anchor never
         // discards a share that is ready to present.
         let fallback = NSApp.keyWindow?.contentView ?? NSApp.mainWindow?.contentView
-        let anchor = shareAnchorView.flatMap { $0.window != nil ? $0 : nil }
-        guard let view = anchor ?? fallback else {
+        let placement = shareAnchorView.flatMap(SharePickerPlacement.init(anchor:))
+            ?? Self.clickedControlPlacement()
+            ?? fallback.map { SharePickerPlacement(view: $0, rect: $0.bounds) }
+        guard let placement else {
             removeShareExport(at: directory)
             destination?.setExportStatus("Share unavailable: no window to present the sharing menu")
             return
@@ -447,7 +449,40 @@ final class ExportWorkflowCoordinator {
             picker: picker,
             delegate: delegate
         )
-        showPicker(items, picker, view)
+        showPicker(items, picker, placement)
+    }
+
+    /// The view under the mouse-up that triggered Share, which is the toolbar button itself when
+    /// the registered anchor has no usable geometry.
+    private static func clickedControlPlacement() -> SharePickerPlacement? {
+        guard let event = NSApp.currentEvent, event.type == .leftMouseUp || event.type == .leftMouseDown,
+              let root = event.window?.contentView?.superview,
+              let hit = root.hitTest(root.convert(event.locationInWindow, from: nil)),
+              hit !== event.window?.contentView else { return nil }
+        return SharePickerPlacement(anchor: hit)
+    }
+}
+
+/// Where the sharing picker opens: a rect in `view`'s coordinates, and the edge it prefers.
+@MainActor
+struct SharePickerPlacement {
+    let view: NSView
+    let rect: NSRect
+    var edge: NSRectEdge = .minY
+
+    /// Nil unless `anchor` is in a window, visible, and has real bounds, so a zero-size or hidden
+    /// toolbar copy never positions the picker at the window edge.
+    init?(anchor: NSView) {
+        guard anchor.window != nil, !anchor.isHiddenOrHasHiddenAncestor,
+              anchor.bounds.width > 0, anchor.bounds.height > 0 else { return nil }
+        self.view = anchor
+        self.rect = anchor.bounds
+    }
+
+    init(view: NSView, rect: NSRect, edge: NSRectEdge = .minY) {
+        self.view = view
+        self.rect = rect
+        self.edge = edge
     }
 }
 

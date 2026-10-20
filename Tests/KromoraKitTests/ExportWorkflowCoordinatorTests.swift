@@ -282,11 +282,13 @@ final class ExportWorkflowCoordinatorTests: XCTestCase {
         let (workflow, destination, window) = makeMultiShare(engine: engine, root: root)
         var items: [Any] = []
         var anchor: NSView?
+        var placementRect: NSRect?
         var shown: NSSharingServicePicker?
         var rendersAtPresentation = -1
-        workflow.showPicker = { pickerItems, picker, view in
+        workflow.showPicker = { pickerItems, picker, placement in
             items = pickerItems
-            anchor = view
+            anchor = placement.view
+            placementRect = placement.rect
             shown = picker
         }
         workflow.shareDialog()
@@ -294,6 +296,7 @@ final class ExportWorkflowCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(rendersAtPresentation, 0)
         XCTAssertTrue(anchor === workflow.shareAnchorView)
+        XCTAssertEqual(placementRect, NSRect(x: 0, y: 0, width: 40, height: 20))
         XCTAssertEqual(items.count, 2)
         let providers = try XCTUnwrap(items as? [NSItemProvider])
         XCTAssertEqual(providers.map(\.suggestedName), ["A", "A 2"])
@@ -419,7 +422,7 @@ final class ExportWorkflowCoordinatorTests: XCTestCase {
         let (workflow, destination, window) = makeMultiShare(engine: FakeRenderEngine(), root: root)
         workflow.shareAnchorView = nil
         var presentedIn: NSView?
-        workflow.showPicker = { _, _, view in presentedIn = view }
+        workflow.showPicker = { _, _, placement in presentedIn = placement.view }
         window.makeKeyAndOrderFront(nil)
         defer { window.orderOut(nil) }
         try XCTSkipIf(NSApplication.shared.keyWindow !== window, "Window did not become key")
@@ -430,13 +433,31 @@ final class ExportWorkflowCoordinatorTests: XCTestCase {
         XCTAssertNotEqual(destination.statuses.last, "Share unavailable: no window to present the sharing menu")
     }
 
+    func testZeroSizeAnchorFallsBackToTheKeyWindowRatherThanAnchoringAtTheEdge() throws {
+        let root = try makeShareRoot()
+        let (workflow, _, window) = makeMultiShare(engine: FakeRenderEngine(), root: root)
+        let anchor = try XCTUnwrap(workflow.shareAnchorView)
+        XCTAssertNotNil(SharePickerPlacement(anchor: anchor))
+        anchor.frame = .zero
+        XCTAssertNil(SharePickerPlacement(anchor: anchor))
+        var placement: SharePickerPlacement?
+        workflow.showPicker = { _, _, value in placement = value }
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        try XCTSkipIf(NSApplication.shared.keyWindow !== window, "Window did not become key")
+
+        workflow.shareDialog()
+
+        XCTAssertTrue(placement?.view === window.contentView)
+    }
+
     func testDetachedAnchorFallsBackToTheKeyWindow() throws {
         let root = try makeShareRoot()
         let (workflow, _, window) = makeMultiShare(engine: FakeRenderEngine(), root: root)
         let anchor = try XCTUnwrap(workflow.shareAnchorView)
         anchor.removeFromSuperview()
         var presentedIn: NSView?
-        workflow.showPicker = { _, _, view in presentedIn = view }
+        workflow.showPicker = { _, _, placement in presentedIn = placement.view }
         window.makeKeyAndOrderFront(nil)
         defer { window.orderOut(nil) }
         try XCTSkipIf(NSApplication.shared.keyWindow !== window, "Window did not become key")
@@ -492,9 +513,9 @@ final class ExportWorkflowCoordinatorTests: XCTestCase {
 
         var presentedItems: [Any] = []
         var presentedIn: NSView?
-        workflow.showPicker = { items, _, view in
+        workflow.showPicker = { items, _, placement in
             presentedItems = items
-            presentedIn = view
+            presentedIn = placement.view
         }
         workflow.shareDialog()
         XCTAssertTrue(presentedIn === secondAnchor)
