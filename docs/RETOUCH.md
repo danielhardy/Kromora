@@ -301,8 +301,11 @@ claimed until KRMA-1063 is recorded.
 
 ## Camera-scale acceptance run sheet (KRMA-1063)
 
-Status: **Not run.** This sheet is the case matrix for the human reviewer. No row below is a pass until a
-reviewer has assessed the actual pixels at 100% source scale. Evidence is the local fixture filename plus
+Status: **Execution prepared; human visual review Not run.** The
+[2026-10-20 execution record](../.context/2026-10-20-KRMA-1063-retouch-qualification.md) links 27 local
+native-size comparisons and records mechanical export/persistence checks, the missing skin fixture,
+and the remaining live-app check. No row below is a pass until a reviewer has assessed the actual
+pixels at 100% source scale. Evidence is the local fixture filename plus
 a reviewer note; never commit or upload the photographs. Use copies of the licensed fixtures in
 `realworldtest/` (see its README) in a confirmed disposable library/profile, never an active one.
 
