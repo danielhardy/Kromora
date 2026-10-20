@@ -49,6 +49,8 @@ jobs:
 
       - name: Warning budget (Sources and Tests)
         run: scripts/ci-tests.sh warning-gate
+      - name: Warning gate self-test
+        run: scripts/ci-tests.sh warning-gate-selftest
 
       - name: Build (debug)
         run: swift build -v

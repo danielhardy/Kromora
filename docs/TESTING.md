@@ -34,12 +34,20 @@ git diff --check
 dg validate
 ```
 
-`warning-gate` builds the package and test target with Swift compiler warnings promoted to errors
-(`swift build --build-tests -Xswiftc -warnings-as-errors`). This is deliberately compiler-enforced
-rather than a grep over build output: SDK/toolchain paths and informational output cannot create
-false positives, while a warning introduced in `Sources/` or `Tests/` fails the build. Keep the
-gate on the supported Xcode/macOS toolchain; do not add warning suppressions or Swift 6 opt-outs
-to make it pass.
+`warning-gate` runs `swift build --build-tests -Xswiftc -warnings-as-errors` over both `KromoraKit`
+and `KromoraKitTests`, then scans the build output for Swift source diagnostics
+(`path:line:col: warning:`). Both halves are needed: on Xcode 27 / Swift 6.4,
+`-warnings-as-errors` promotes ordinary warnings but not diagnostics the compiler downgrades from
+errors (the XCTest lifecycle actor-isolation warnings in `PhotosReviewTransferCacheTests` built and
+exited 0). The scan matches only compiler source locations, so linker, SDK, and packaging notes
+(such as the AppIntents metadata note) cannot trip it, and it runs only after a zero exit, so it can
+never mask a failing build. All output stays visible. Because the compiler only reports on files it
+recompiles, CI's clean checkout is the authoritative run; a warm local build may skip unchanged files.
+
+`scripts/ci-tests.sh warning-gate-selftest` (also a CI step, and run by `PackageSettingsTests`)
+proves the gate with disposable stub builders: clean passes, source and test warnings fail, an
+ordinary compiler failure fails, and a non-Swift linker warning passes. Do not add warning
+suppressions or Swift 6 opt-outs to make the gate pass.
 
 `fast` covers deterministic model, coordinator, and fake-engine tests in parallel. `serial` covers
 Core Image, render, and AppKit/UI-sensitive tests. `scripts/ci-tests.sh optional` runs RAW-fixture,

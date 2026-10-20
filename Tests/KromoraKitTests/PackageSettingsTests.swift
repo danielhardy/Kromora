@@ -38,6 +38,25 @@ final class PackageSettingsTests: XCTestCase {
         )
     }
 
+    /// The warning gate's enforcement (exit-0 compiler warnings must still fail) is a script
+    /// behavior, so exercise it through its stub-builder self-test rather than the real build.
+    func testWarningGateRejectsEmittedSwiftWarnings() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = [
+            packageRoot.appendingPathComponent("scripts/ci-tests.sh").path, "warning-gate-selftest"
+        ]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        try process.run()
+        let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0, text)
+    }
+
     private static var manifest: String {
         get throws {
             let url = URL(fileURLWithPath: #filePath)   // Tests/KromoraKitTests/PackageSettingsTests.swift

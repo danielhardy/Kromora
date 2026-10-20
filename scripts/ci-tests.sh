@@ -23,9 +23,10 @@ identity_filter='IdentityRegressionGateTests'
 optional_filter='(ShareCopyMemoryTests/testMeasurePeakFootprintForMultiPhotoCopy|WarmNavigationProfileBenchmark|PortablePackageImportPerformanceTests|ConcurrentExportEditingBenchmark|StoredEditAdoptionBenchmark|DeriveInvarianceTests|LibraryScanPerformanceTests|LibraryFolderBaselinePerformanceTests|LibraryScaleRegressionPerformanceTests|SyntheticLibraryGeneratorPerformanceTests|PackedThumbnailPerformanceTests|LargeImportLibraryGridBenchmark|MaskResamplingPerformanceTests|MetalPresentationBenchmark|PhotoAnalysisPerformanceTests|PhotosImportPerformanceTests|PreviewCostBenchmark|TracingOverheadBenchmark|TextureAllocationBenchmark|AutoPerformanceDiagnosticsTests/testAutoEndToEndBenchmark|EmbeddedFirstFrameTests/testOptInRealEngineEmbeddedFirstFrameTiming|LastKnownFrameReleaseBenchmark|SingleViewLatencyBenchmark/testOptInRealEngineSingleViewLatencyBaseline|LocalMaskRenderingTests/testSemanticPreviewMaskWorkingResolutionBenchmark|PreviewCoordinatorTests/testLargePreviewInteractiveLatencyBenchmark|RAWCapabilitiesTests/(testProbingARealRAWReportsItsDecodersFlags|testProbingARealRAWReportsItsDecodersSeeds|testEveryPerImageSeedLandsStrictlyInsideItsSliderRange|testWritingTheAsShotValuesMatchesLeavingThemUnset|testAValueWrittenToAnUnsupportedAdjustmentChangesNothing|testRaisingNeutralTemperatureWarmsTheImage|testRawTintDirectionMatchesGreenToMagentaTrack)|RAWDevelopSettingsTests/(testApplyPushesEverySupportedKnobOntoARealFilter|testApplyingNeutralChangesNothingOnARealFilter)|RawOrientationTests/testLocalPortraitRAWDevelopMatchesThumbnailAxes|ImageLoadingTests/testLoadingARAWGoesThroughCIRAWFilter|ImageSourceTests/testRAWBytesAreDetectedWithoutAFilename|DevelopInspectorTests/(testARAWStaysOnProbingUntilTheProbeAnswers|testAsShotRestoresTheActualRAWDecoderSeed)|RenderCacheTests/testAboveBudgetRAWSessionDoesNotMaterializeOnEveryEdit|RenderPipelineTests/(testRAWDevelopAndScaleReachTheDecoder|testNeutralRAWMatchesTheExistingNeutralBaseline)|RenderEngineTests/(testCompletedRAWPreviewReflectsDevelopSettings|testInteractiveSessionDoesNotLeakSettingsAcrossTicks|testInteractiveRAWDownstreamEditsReuseTheCompletedOutput)|PreviewCutoverTests/testRAWDevelopReachesThePreview)'
 
 usage() {
-    print -u2 "Usage: $0 {verify|warning-gate|fast|serial|identity|optional}"
+    print -u2 "Usage: $0 {verify|warning-gate|warning-gate-selftest|fast|serial|identity|optional}"
     print -u2 "  verify    audit that every discovered test belongs to exactly one lane"
-    print -u2 "  warning-gate  build Sources and Tests with Swift warnings promoted to errors"
+    print -u2 "  warning-gate  build Sources and Tests; fail on any emitted Swift warning"
+    print -u2 "  warning-gate-selftest  prove the gate rejects warnings, using stub builders"
     print -u2 "  fast      run required deterministic/model/fake-engine tests in parallel"
     print -u2 "  serial    run required Core Image/render/AppKit/UI tests serially"
     print -u2 "  identity  run the standing Phase 1 relocation/collision/stale-completion gate"
@@ -77,6 +78,61 @@ run_lane() {
     }
 }
 
+# Runs a build command, echoing all of its output unchanged, and fails when it exits nonzero or
+# when it emitted a Swift source diagnostic (`path:line:col: warning:`). `-warnings-as-errors`
+# promotes ordinary warnings, but the compiler still exits 0 for diagnostics it downgrades from
+# errors (for example XCTest lifecycle actor-isolation in Swift 6 mode), so the output check is the
+# backstop. It matches only compiler source locations, so linker, SDK, and packaging notes cannot
+# trip it, and it never turns a failing build into a pass.
+build_without_swift_warnings() {
+    local log build_status=0 warning_count
+    log="$(mktemp -t kromora-warning-gate)"
+    "$@" 2>&1 | tee "$log" || build_status=$pipestatus[1]
+    if (( build_status != 0 )); then
+        rm -f "$log"
+        return "$build_status"
+    fi
+    warning_count="$(sed $'s/\x1b\[[0-9;]*m//g' "$log" | grep -cE '^[^[:space:]].*:[0-9]+:[0-9]+: warning:' || true)"
+    if (( warning_count > 0 )); then
+        print -u2 "Swift warning gate failed: the build exited 0 but emitted $warning_count warning line(s)."
+        sed $'s/\x1b\[[0-9;]*m//g' "$log" | grep -E '^[^[:space:]].*:[0-9]+:[0-9]+: warning:' >&2 || true
+        rm -f "$log"
+        return 1
+    fi
+    rm -f "$log"
+}
+
+warning_gate_selftest() {
+    local dir stub name expected failures=0
+    dir="$(mktemp -d -t kromora-warning-gate-selftest)"
+    local -A bodies=(
+        clean            'echo "Build complete!"'
+        source-warning   'echo "Sources/KromoraKit/A.swift:3:9: warning: variable was never used"; echo "Build complete!"'
+        test-warning     $'printf "Tests/KromoraKitTests/B.swift:4:43: \033[1;33mwarning: \033[1;39mmain actor-isolated property\033[0m\n"'
+        compiler-failure 'echo "Sources/KromoraKit/A.swift:1:1: error: cannot find x in scope"; exit 1'
+        linker-note      'echo "ld: warning: duplicate -rpath"; echo "Build complete!"'
+    )
+    local -A expectations=(clean 0 source-warning fail test-warning fail compiler-failure fail linker-note 0)
+    for name in ${(k)bodies}; do
+        stub="$dir/$name.sh"
+        printf "#!/bin/zsh\n%s\n" "${bodies[$name]}" > "$stub"
+        chmod +x "$stub"
+        expected="${expectations[$name]}"
+        if ( build_without_swift_warnings "$stub" ) > "$dir/$name.out" 2>&1; then
+            [[ "$expected" == 0 ]] || { print -u2 "selftest FAILED: $name passed but must fail"; failures=$((failures + 1)); }
+        else
+            [[ "$expected" == fail ]] || { print -u2 "selftest FAILED: $name failed but must pass"; failures=$((failures + 1)); }
+        fi
+        # Full diagnostics must remain visible regardless of outcome.
+        if [[ "$name" != clean && "$name" != linker-note ]] && ! grep -q "$name" "$dir/$name.out" 2>/dev/null; then
+            grep -qE 'warning|error' "$dir/$name.out" || { print -u2 "selftest FAILED: $name diagnostics were hidden"; failures=$((failures + 1)); }
+        fi
+    done
+    rm -rf "$dir"
+    (( failures == 0 )) || return 1
+    print "warning-gate selftest: clean passes; source/test warnings and compiler failures are rejected"
+}
+
 case "${1:-}" in
     verify)
         audit_lanes
@@ -84,7 +140,10 @@ case "${1:-}" in
     warning-gate)
         run_lane "zero-warning-build" \
             "swift build --build-tests -Xswiftc -warnings-as-errors" \
-            swift build --build-tests -Xswiftc -warnings-as-errors
+            build_without_swift_warnings swift build --build-tests -Xswiftc -warnings-as-errors
+        ;;
+    warning-gate-selftest)
+        warning_gate_selftest
         ;;
     fast)
         audit_lanes
