@@ -308,6 +308,47 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.pendingPersistenceCount, 0)
     }
 
+    /// KRMA-1065: switching away from a photo whose save failed must neither drop its edit nor
+    /// leak it into the incoming photo; the retained session stays dirty until a retry lands.
+    func testFailedSaveOfPhotoAIsRetainedAcrossSwitchToBAndRetrySavesOnlyA() async throws {
+        let urlA = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "switch-a.png", in: tempDirectory)
+        let urlB = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "switch-b.png", in: tempDirectory)
+        let container = makeEditPackageFixture()
+        try container.register(urlA)
+        try container.register(urlB)
+        let store = container.store(failuresBeforeSuccess: 1)
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine(), editStore: store)
+        viewModel.openImage(url: urlA)
+        try await waitUntil("photo A") { viewModel.sourceImage != nil }
+        try registerLoadedPhotos(in: viewModel, url: urlA, with: container)
+        let idA = try XCTUnwrap(viewModel.maskingAssetID)
+        viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.5)] }
+
+        // The switch is a flush barrier; the configured first write fails and A stays dirty.
+        viewModel.openImage(url: urlB)
+        try await waitUntil("photo B") {
+            viewModel.sourceImage != nil && viewModel.document.adjustments.isEmpty
+        }
+        try registerLoadedPhotos(in: viewModel, url: urlB, with: container)
+
+        XCTAssertEqual(viewModel.document, EditDocument(), "A's edit must not leak into B")
+        XCTAssertEqual(
+            viewModel.editedThumbnailDocument(for: idA)?.adjustments, [.exposure(ev: 0.5)],
+            "A's unsaved session stays resident")
+
+        // The background worker may already have retried; a forced flush is idempotent either way.
+        let retry = await viewModel.flushPendingWrites()
+        XCTAssertEqual(retry, .success)
+        XCTAssertEqual(viewModel.pendingPersistenceCount, 0)
+        let storedA = await container.store().load(
+            for: EditSourceReference(assetID: idA, url: urlA))
+        XCTAssertEqual(storedA.document.adjustments, [.exposure(ev: 0.5)])
+        let writes = await store.writeCount
+        XCTAssertEqual(writes, 1, "only A is written; B was never edited")
+    }
+
     /// KRMA-1068: A's save is acknowledged late, after the user has navigated to B. The write-start
     /// signal proves A's snapshot is committed but unacknowledged, so A stays pinned while dirty,
     /// the late acknowledgement cannot touch B, and A's durable edit is exactly what was saved.

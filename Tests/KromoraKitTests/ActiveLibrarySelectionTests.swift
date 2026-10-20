@@ -305,6 +305,33 @@ final class ActiveLibrarySelectionTests: XCTestCase {
         XCTAssertTrue(chooser.statusMessage.contains("unsaved edits were discarded"))
     }
 
+    /// KRMA-1065: Retry loops back into the flush with no discard and no shutdown in between;
+    /// Cancel keeps the model, and therefore the package lease, alive.
+    func testReleaseFlowRetriesUntilFlushSucceedsThenShutsDownOnce() async {
+        var results: [PersistenceFlushResult] = [.failure("disk full"), .cancelled, .success]
+        var log: [String] = []
+        let outcome = await LibraryReleaseFlow.flushAndRelease(
+            flush: { log.append("flush"); return results.removeFirst() },
+            chooseAfterFailure: { _ in log.append("ask"); return .retry },
+            discard: { log.append("discard") },
+            shutdown: { log.append("shutdown") }
+        )
+        XCTAssertEqual(outcome, .released)
+        XCTAssertEqual(log, ["flush", "ask", "flush", "ask", "flush", "shutdown"])
+    }
+
+    func testReleaseFlowCancelAfterFailureNeverShutsDownOrDiscards() async {
+        var log: [String] = []
+        let outcome = await LibraryReleaseFlow.flushAndRelease(
+            flush: { log.append("flush"); return .failure("disk full") },
+            chooseAfterFailure: { _ in .cancel },
+            discard: { log.append("discard") },
+            shutdown: { log.append("shutdown") }
+        )
+        XCTAssertEqual(outcome, .declined)
+        XCTAssertEqual(log, ["flush"], "the lease stays held and dirty edits stay queued")
+    }
+
     func testDeclinedReleaseDoesNotLaunch() async throws {
         let url = try await makePackage("Chosen.kromoralibrary")
         let dialog = StubDialog(); dialog.folder = url

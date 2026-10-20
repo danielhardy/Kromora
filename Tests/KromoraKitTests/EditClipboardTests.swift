@@ -347,6 +347,7 @@ final class CopyPasteTests: TempDirectoryTestCase {
             Set(["two.png", "three.png"])
         )
         viewModel.pasteEdits()
+        await viewModel.editClipboardWorkflow.waitForPendingPaste()
 
         viewModel.selectCollectionImage(at: secondIndex)
         try await waitUntil("the second photo") { viewModel.sourceName == "two.png" }

@@ -366,6 +366,44 @@ preview owners. The shared image scheduler barrier runs before the portable pack
 writer lease; cancelled root tasks are awaited, then explicitly abandoned persistence snapshots
 are discarded. Each collaborator cancels its own work within this order.
 
+### Lifecycle transitions (KRMA-1065 audit)
+
+Who owns what at each cross-feature transition, and the test that pins it. `AppViewModel` stays the
+only published active-document owner; each row is sequencing the root already performs.
+
+| Transition | Document owner | Generation invalidation | Accepted task owner | Drain barrier | Package lease |
+| --- | --- | --- | --- | --- | --- |
+| Source switch (`load`/`beginLoad`) | Root publishes the incoming session's document; the outgoing session stays in `EditorDocumentCoordinator` | `load()` advances `loadRequestGeneration` and clears the visible source synchronously. After the import plan resolves, `beginLoad()` calls `sourceSession.begin()`, which advances `sourceRevision` | Pending edit writes: `EditPersistenceCoordinator`; source preparation: `SourceSessionCoordinator` | `requestPersistenceFlush()` chains behind the previous barrier and gates the stored-edit read; source preparation can proceed while it flushes | Held |
+| Failed save then switch/retry | The failed photo's session stays resident and dirty (`isDirty` pins it against eviction) | None needed; the snapshot is keyed by asset and reference, not by the active photo | `EditPersistenceCoordinator` keeps the snapshot queued | A forced `flushPendingWrites()` retries; failure is reported, never approved | Held |
+| Quit (`applicationShouldTerminate`) | Unchanged until the flush succeeds or the user discards | `shutdown()` sets `isShuttingDown` first, then awaits `libraryOpen.cancelAndWait()` before invalidating source/load generations and closing coordinator-specific admission; callbacks are disconnected before the remaining drains | Edit writes: persistence. Accepted history/snapshot/copy writes: `EditHistoryCoordinator`. Export jobs: `ExportCoordinator` | `flushPendingWrites()`, then `shutdown()`: `editHistory.shutdown()` drains accepted writes; `export.shutdown()` cancels and awaits jobs; `workScheduler.cancelAllAndWait()` | Released by `portableLibrary.shutdown()` after the scheduler barrier, then `persistence.discard()` |
+| Library relaunch (`flushAndReleaseLibrary`) | Same as quit | Same as quit (`shutdown()`) | Same as quit | `LibraryReleaseFlow`: flush; on failure Retry loops, Cancel returns `.declined` without shutdown, Discard shuts down as `.releasedWithoutSaving` | Released only on `.released` / `.releasedWithoutSaving`; the replacement launches only after `.released` |
+
+Test map:
+
+- Edit A, delayed/failed save, switch to B, late A completion:
+  `EditPersistenceIntegrationTests.testFailedSaveOfPhotoAIsRetainedAcrossSwitchToBAndRetrySavesOnlyA`
+  (B shows the default document, A's session remains resident, and the forced flush makes only A durable);
+  `testForcedFlushWaitsForAnInFlightSlowWrite` and `testRacedFlushReportsSuccessAfterReplacementDrainsQueue`
+  (slow and raced writes); `testLateEditStoreResultCannotOverwriteAnInMemoryEdit` and
+  `StoredEditAdoptionTests.testSlowMaterializationCannotReopenSupersededPhoto` /
+  `testASupersededSelectionNeverPublishesTheOldPhotosStoredValues` (late results);
+  `EditorSessionEvictionTests.testFailedSaveKeepsSessionResidentOverBudgetUntilRetrySucceeds`.
+- Quit with accepted history writes plus an export: `EditHistoryCoordinatorTests.testShutdownDrainsAcceptedSnapshotWithoutPublishing`,
+  `testShutdownDoesNotCancelAcceptedSnapshotWhileItWaitsForFlush`, `testShutdownDuringVirtualCopySuppressesDidCreate`
+  (accepted writes complete, nothing publishes, new work is rejected);
+  `ExportJobOwnershipTests.testShutdownCancelsAndAwaitsEveryRegisteredJob` and
+  `testViewModelTerminationGuardSeesRegisteredJobs` (jobs are cancelled and awaited, and the quit guard lists them);
+  `EditPersistenceIntegrationTests.testFailedTerminationFlushCannotApproveQuitSilently`.
+  The ordering between the two drains is fixed by the sequence in `shutdown()` (history before the
+  scheduler barrier and lease), so no further combined test mirrors it.
+- Failed library-release flush with cancel/retry: `ActiveLibrarySelectionTests.testReleaseFlowRetriesUntilFlushSucceedsThenShutsDownOnce`,
+  `testReleaseFlowCancelAfterFailureNeverShutsDownOrDiscards`, `testFailedFlushQuitWithoutSavingDoesNotLaunch`,
+  `testReleaseWithoutSavingDoesNotLaunch`, `testDeclinedReleaseDoesNotLaunch`,
+  `testRelaunchRequestsLaunchOnlyAfterLibraryReleased`, `testLaunchRequestFindsPackageLeaseReleased`.
+
+Disposition: the audit found no ownership defect. The sequencing lives in `load`/`shutdown()` by
+design, is covered per owner as above, and no further pre-release extraction is justified.
+
 Source, document, and display revisions remain distinct. `load` and source-session publications
 fence source identity; `updateDocument` advances the document revision and advances display revision
 outside an active preview interaction, while `applyHistoryDocument` advances both for history
