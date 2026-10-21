@@ -123,6 +123,7 @@ struct RecipeExtractorSheet: View {
                 coordinator.dismiss()
                 dismiss()
             }
+            .neutralActionButton()
             .keyboardShortcut(.cancelAction)
 
             Spacer()
@@ -131,6 +132,7 @@ struct RecipeExtractorSheet: View {
                 Button("Save to Look Folder…") {
                     coordinator.saveDialog()
                 }
+                .neutralActionButton()
             }
 
             Button("Derive") {

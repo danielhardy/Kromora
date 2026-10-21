@@ -35,6 +35,7 @@ struct PhotosImportReviewView: View {
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { review.cancel() }
+                    .neutralActionButton()
                     .keyboardShortcut(.cancelAction)
                 Button("Import \(review.selection.count) Selected") { review.confirm() }
                     .keyboardShortcut(.defaultAction)
@@ -49,7 +50,9 @@ struct PhotosImportReviewView: View {
     private var toolbar: some View {
         HStack {
             Button("Select All") { review.selectAll() }
+                .neutralActionButton()
             Button("Select None") { review.selectNone() }
+                .neutralActionButton()
             if !review.inLibrary.isEmpty {
                 Text("\(review.inLibrary.count) of \(review.items.count) already in library")
                     .font(.callout)

@@ -369,6 +369,7 @@ public struct ContentView: View {
         }
         .controlGroupStyle(.navigation)
         .labelStyle(.iconOnly)
+        .tint(nil)
         .fixedSize()
     }
 
@@ -393,6 +394,7 @@ public struct ContentView: View {
             .accessibilityValue(viewModel.isSideBySide ? "Side by side" : "Single photo")
             .accessibilityHint("Switch comparison view (V)")
             .help("Switch between single-photo and side-by-side comparison (V). Hold ⌘\\ or Space to show original in single view.")
+            .tint(viewModel.isSideBySide ? KromoraTheme.primaryAccent : nil)
             .disabled(!viewModel.toolbarPhotoActionsAvailable)
 
             resetToolbarButton
@@ -420,6 +422,7 @@ public struct ContentView: View {
             Label("Reset", systemImage: "arrow.counterclockwise")
         }
         .menuIndicator(.hidden)
+        .neutralMenu()
         .help("Reset the current adjustment section or the whole photo")
         .disabled(!viewModel.toolbarPhotoActionsAvailable)
     }
@@ -539,6 +542,7 @@ private struct CanvasToolbarControls: View {
             Label("Zoom", systemImage: "magnifyingglass")
         }
         .menuIndicator(.hidden)
+        .neutralMenu()
         .help(
             "Canvas zoom \(canvasState.navigation.zoomAccessibilityValue). "
                 + "Zoom out stops at Fit or 100% source scale."

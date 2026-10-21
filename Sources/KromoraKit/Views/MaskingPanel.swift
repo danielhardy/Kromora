@@ -154,6 +154,7 @@ struct MaskingPanel: View {
                 HStack {
                     Spacer()
                     Button("Cancel") { dismiss() }
+                        .neutralActionButton()
                     Button(model.isApplying ? "Applying…" : "Apply Mask") {
                         Task { await model.apply() }
                     }
@@ -168,6 +169,7 @@ struct MaskingPanel: View {
                 HStack {
                     Spacer()
                     Button("Cancel") { dismiss() }
+                        .neutralActionButton()
                 }
             }
         }

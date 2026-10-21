@@ -25,6 +25,7 @@ struct LibraryFacetSidebar: View {
                 Text("Filters").font(.headline)
                 Spacer()
                 Button("Reset") { viewModel.setPortableFacets(.none) }
+                    .neutralActionButton()
                     .disabled(!query.facets.isActive)
                     .help("Clear all metadata filters")
             }

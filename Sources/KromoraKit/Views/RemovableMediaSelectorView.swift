@@ -73,7 +73,9 @@ struct RemovableMediaSelectorView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Button("Select All") { viewModel.selectAllRemovableMedia() }
+                    .neutralActionButton()
                 Button("Select None") { viewModel.selectNoRemovableMedia() }
+                    .neutralActionButton()
                 libraryStatus
                 Spacer()
                 Text("Shift-click to select a range. Source files are not changed.")
@@ -214,6 +216,7 @@ struct RemovableMediaSelectorView: View {
             }
             Spacer()
             Button("Cancel") { viewModel.cancelRemovableMediaImport() }
+                .neutralActionButton()
                 .keyboardShortcut(.cancelAction)
             Button("Import Selected to Library") { viewModel.importSelectedRemovableMedia() }
                 .keyboardShortcut(.defaultAction)

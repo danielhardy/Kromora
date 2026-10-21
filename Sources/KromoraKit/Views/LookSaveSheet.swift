@@ -43,6 +43,7 @@ struct LookSaveSheet: View {
                     coordinator.dismiss()
                     dismiss()
                 }
+                .neutralActionButton()
                 .keyboardShortcut(.cancelAction)
 
                 Spacer()

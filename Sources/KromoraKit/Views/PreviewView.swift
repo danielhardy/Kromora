@@ -165,7 +165,9 @@ struct PreviewView: View {
                 HStack(spacing: 12) {
                     Label("Export complete", systemImage: "checkmark.circle.fill")
                     Button("Export another…") { viewModel.shareDialog() }
+                        .neutralActionButton()
                     Button("Back to Library") { _ = viewModel.navigate(to: .grid) }
+                        .neutralActionButton()
                 }
                 .font(.caption)
                 .padding(.horizontal, 14)

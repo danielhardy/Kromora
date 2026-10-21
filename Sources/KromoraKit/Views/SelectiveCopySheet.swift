@@ -38,6 +38,7 @@ struct SelectiveCopySheet: View {
 
             HStack {
                 Button("Cancel", action: onCancel)
+                    .neutralActionButton()
                     .keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Copy", action: onCopy)
