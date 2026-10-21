@@ -338,24 +338,25 @@ persist in the package. Record Pass/Fail/Not run each.
 
 File a focused defect for each reproducible failure. Link the completed sheet from KRMA-1016.
 
-### Export versus harness pixel tolerance (KRMA-1076)
+### Export versus harness pixel comparison (KRMA-1076)
 
-The signed app's full-size PNG export differed from the Debug qualification harness in 2,023 of
-48,771,072 pixels, all inside the repair bounds, at most 2/255 per channel. `RetouchExportBoundaryTests`
+The archived signed app's full-size PNG export differs from the Debug qualification harness in 2,023
+of 48,771,072 pixels, all inside the repair bounds, at most 2/255 per channel. `RetouchExportBoundaryTests`
 compares streamed and in-memory paths within each build using a generated 1200 × 900 image and a newly
-constructed document. It does not replay the persisted 8064 × 6048 package or compare Debug pixels
-directly with Release pixels. KRMA-1085 replayed the persisted package (8064 × 6048 asset, saved Heal document revision 1, automatic
-source, `ExportOptions` PNG full size) in Debug and in Release (`swift test -c release -Xswiftc
--enable-testing`), changing one variable at a time: cold versus warm renderer, source with and without
-portable identity, in-memory `render` versus streamed `encode`, and with and without `assetID`. All
-twelve outputs decoded to identical pixels in a common sRGB context (0 differing pixels), and match the
-earlier harness export. Build configuration, renderer cache state, source identity, asset identity, and
-streamed versus in-memory encoding are therefore not the cause. The signed app's export of the same
-asset still differs from every one of them in 2,023 pixels, inclusive bounds x=4646–4707, y=756–815,
-maximum RGB channel delta 2/255. The package holds only revision 1, so the app did not save a different
-document. The cause is unknown and lies in an input the in-process replay does not reproduce (the
-app-supplied document or source at export time, or the signed sandboxed runtime); it was not isolated
-because driving the signed app needs an attended display. The difference is not numeric noise, and no
-cross-build tolerance is published. Reproducing it needs the app's export request captured at export
-time.
-Human visual approval is recorded separately and is not implied by this comparison.
+constructed document. It does not replay the persisted package or compare Debug pixels directly with
+Release pixels. KRMA-1085 replayed the saved package asset (8064 × 6048, Heal document revision 1,
+automatic source, PNG full size) in SwiftPM Debug and Release runs. The six replay variants per build
+changed one variable at a time: cold versus warm renderer, source with and without portable identity,
+in-memory `render` versus streamed `encode`, and with and without `assetID`. All twelve outputs decoded
+to identical pixels in a common sRGB context (0 differing pixels), matching the archived harness export.
+The SwiftPM Debug and Release builds and the tested cache, identity, and encoding variations did not
+change the in-process KromoraKit outputs. This does not isolate or exclude effects specific to the
+signed Xcode app target: the archived signed-app export was not rerun with those variations.
+
+Comparing that archived signed-app PNG with each replay output still gives 2,023 differing pixels,
+inclusive bounds x=4646–4707, y=756–815, maximum RGB channel delta 2/255. The package contains saved
+revision 1; the export-time request passed by the app was not captured, so the cause remains unknown.
+The app request, app-target configuration, sandboxed runtime, and other untested evaluation differences
+are possibilities, not established causes. This measured difference is not evidence of numeric noise;
+no cross-build tolerance is published. Human visual approval is recorded separately and is not implied
+by this comparison.

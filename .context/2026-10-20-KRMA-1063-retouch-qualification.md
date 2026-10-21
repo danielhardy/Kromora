@@ -100,7 +100,7 @@ as recorded in the supplied export; no skin-quality claim is made. Brick was not
 | Signed app opens test package and saved recipe | Pass | App showed 27 assets; selected 01-sky-dust-auto-heal had one saved repair |
 | Signed app File export | Pass: full resolution, readable PNG | `ui-exports/01-sky-dust-auto-heal.png.png`, 8064 × 6048; app displayed Export complete |
 | Signed app repair after normal quit/reopen | Pass: saved recipe present | Reopened the same photo; Heal inspector showed 1 spot. This checks saved recipe presence, not a second export after relaunch |
-| Signed app export versus harness full-frame pixels | Not exact | 2,023 of 48,771,072 pixels differ, confined to the repair at inclusive bounds x=4646–4707, y=756–815; maximum RGB channel difference 2/255. All other pixels match. No visual acceptance inferred. KRMA-1076 disposition: not a source-selection or encode-path inconsistency (see "KRMA-1076 reconciliation" below) |
+| Signed app export versus harness full-frame pixels | Not exact | 2,023 of 48,771,072 pixels differ, confined to the repair at inclusive bounds x=4646–4707, y=756–815; maximum RGB channel difference 2/255. All other pixels match. No visual acceptance inferred. KRMA-1085 found no differences among twelve in-process SwiftPM replay variants; this does not isolate the signed app because its export was not rerun with those variants. Cause remains unknown (see "KRMA-1076 reconciliation" below). |
 | Restore original default library | Pass | Settings > Use Default Library > Relaunch; default path shown and Use Default disabled; replacement app showed 56 of 56 photos |
 
 `package-reopen.json` also contains three excluded case-09 calibration checks; those are not counted
@@ -215,14 +215,17 @@ the saved file can be opened by the user in a regular browser. No local-file pre
 `RetouchExportBoundaryTests` compares `RenderEngine.render` (in-memory, no asset identity) and
 `RenderEngine.encode` (streamed to a file, with `PhotoAssetID` and `ExportOptions`) on fresh engines,
 then decodes both PNGs in a common context. The test constructs a generated 1200 × 900 image and a new
-Heal document; it does not load the persisted document from the disposable package. Debug and Release
-test runs each compare their two paths within that build and require a maximum byte delta of 1/255.
-This is evidence against a same-build difference between those synthetic render paths, but it does not
-compare Debug output with Release output or establish the effect of a warm cache.
+Heal document; it does not load the persisted document from the disposable package. It requires a
+maximum byte delta of 1/255 in each build.
 
-The original signed-Release-app versus Debug-harness result remains: 2,023 of 48,771,072 pixels differ,
-within x=4646–4707, y=756–815, by at most 2/255 per channel. That camera-scale variation was not
-reproduced by the synthetic test and is not attributed to build mode or Core Image time variation. The
-general observation in `PixelAssertions.swift` that occasional bytes move by 1 does not establish a
-2/255 tolerance for this result. Keep the comparison unresolved; no cross-build tolerance or human
-visual verdict is established.
+KRMA-1085 separately replayed the package's saved 8064 × 6048 automatic Heal asset and revision-1
+document. Six variants each in SwiftPM Debug and Release changed renderer warmth, portable source
+identity, `assetID`, and in-memory versus streamed output. Every one of the twelve outputs decoded to
+the same sRGB RGB pixels as the archived harness export. The archived signed-app PNG still differs by
+2,023 pixels, inclusive bounds x=4646–4707, y=756–815, maximum channel delta 2/255. These results
+establish that the tested variants do not change the in-process outputs; they do not isolate effects
+specific to the signed Xcode app because that app export was not rerun with the variants. The saved
+package remains at revision 1, but the app's export-time request was not captured. The cause remains
+unknown. The general observation in `PixelAssertions.swift` that occasional bytes move by 1 does not
+establish a 2/255 tolerance for this result. Do not call it numeric noise or publish a cross-build
+tolerance; no human visual verdict is established by this pixel comparison.
