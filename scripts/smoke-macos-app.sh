@@ -187,27 +187,27 @@ tell application "System Events"
         if not openCommandReady then error "Open Image command did not become available"
         click menu item "Open Image…" of menu 1 of menu bar item "File" of menu bar 1
         repeat 20 times
-            if exists window "Open Image" then exit repeat
+            if (count of sheets of window 1) > 0 then exit repeat
             delay 1
         end repeat
-        if not (exists window "Open Image") then error "Open Image panel did not appear"
+        if (count of sheets of window 1) = 0 then error "Open Image panel did not appear"
         keystroke "g" using {command down, shift down}
         repeat 20 times
-            if (count of sheets of window "Open Image") > 0 then exit repeat
+            if (count of sheets of sheet 1 of window 1) > 0 then exit repeat
             delay 1
         end repeat
-        if (count of sheets of window "Open Image") = 0 then error "Open Image location sheet did not appear"
-        set value of text field 1 of sheet 1 of window "Open Image" to inputPath
+        if (count of sheets of sheet 1 of window 1) = 0 then error "Open Image location sheet did not appear"
+        set value of text field 1 of sheet 1 of sheet 1 of window 1 to inputPath
         key code 36
         repeat 20 times
-            if (count of sheets of window "Open Image") = 0 then
-                if enabled of button "Open" of splitter group 1 of window "Open Image" then exit repeat
+            if (count of sheets of sheet 1 of window 1) = 0 then
+                if enabled of button "Open" of splitter group 1 of sheet 1 of window 1 then exit repeat
             end if
             delay 1
         end repeat
-        if (count of sheets of window "Open Image") > 0 then error "Open Image file did not become selectable"
-        if not (enabled of button "Open" of splitter group 1 of window "Open Image") then error "Open Image file did not become selectable"
-        click button "Open" of splitter group 1 of window "Open Image"
+        if (count of sheets of sheet 1 of window 1) > 0 then error "Open Image file did not become selectable"
+        if not (enabled of button "Open" of splitter group 1 of sheet 1 of window 1) then error "Open Image file did not become selectable"
+        click button "Open" of splitter group 1 of sheet 1 of window 1
     end tell
 end tell
 APPLESCRIPT
