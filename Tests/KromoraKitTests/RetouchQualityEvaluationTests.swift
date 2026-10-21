@@ -172,4 +172,43 @@ final class RetouchQualityEvaluationTests: TempDirectoryTestCase {
         }
     }
 
+    /// KRMA-1077: a manual source brighter than the destination ring used to be corrected with an
+    /// additive offset, which pushed the source's own shadow structure below black and left a dark
+    /// blob inside the repair. The tone match must scale, not subtract.
+    func testHealFromBrighterSourceDoesNotClipShadowStructureToBlack() throws {
+        let width = 400, height = 300
+        var rgba = [UInt8](repeating: 0, count: width * height * 4)
+        for y in 0..<height { for x in 0..<width {
+            // Mid-dark destination ring; bright source area on the right with a dark stripe that is
+            // as dark as the destination, which an additive correction drives to zero.
+            var value: UInt8 = 64
+            if x >= 230 { value = 180 }
+            if (258...266).contains(x), (96...140).contains(y) { value = 64 }
+            let o = (y * width + x) * 4
+            rgba[o] = value; rgba[o + 1] = value; rgba[o + 2] = value; rgba[o + 3] = 255
+        }}
+        let provider = CGDataProvider(data: Data(rgba) as CFData)!
+        let cgImage = CGImage(
+            width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+            provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)!
+        let spot = RetouchSpot(
+            mode: .heal,
+            region: RetouchRegion(samples: [BrushSample(point: CGPoint(x: 100.0 / 400, y: 118.0 / 300))],
+                                  radius: 30.0 / 300),
+            source: .manual(offset: CGVector(dx: 160.0 / 400, dy: 0))
+        )
+        let rendered = RetouchRenderer.apply(
+            RetouchSettings(spots: [spot]), to: CIImage(cgImage: cgImage),
+            sourceSize: CGSize(width: width, height: height), maskRenderer: LocalMaskRenderer()
+        )
+        let output = try Pixels.bytes(of: rendered)
+        var darkest = 255
+        for y in 96...140 { for x in 98...106 {
+            darkest = min(darkest, Int(output[(y * width + x) * 4]))
+        }}
+        XCTAssertGreaterThanOrEqual(darkest, 12, "healed shadow structure must not clip to black")
+    }
+
 }

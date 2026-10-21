@@ -455,6 +455,18 @@ float4 retouchPush(sampler fill, sampler coarse, sampler numerator, sampler conf
     return float4(base.rgb + merged, base.a);
 }
 
+// Applies the propagated tone correction to the fill. The correction is additive, so a source much
+// brighter than the destination ring would push the source's own shadows below black and leave a
+// dark blob in the repair. A pixel may lose at most 65% of its value: ordinary corrections are
+// unchanged, and an extreme one degrades to a scaled copy of the source instead of clipping.
+constant float retouchMinimumRetainedTone = 0.35;
+
+float4 retouchApplyCorrection(sampler fill, sampler correction) {
+    float4 base = sample(fill, samplerCoord(fill));
+    float3 field = sample(correction, samplerCoord(correction)).rgb;
+    return float4(max(base.rgb + field, base.rgb * retouchMinimumRetainedTone), base.a);
+}
+
 float4 retouchMembraneApply(sampler destination, sampler fill, sampler mask) {
     float4 original = sample(destination, samplerCoord(destination));
     float4 replacement = sample(fill, samplerCoord(fill));

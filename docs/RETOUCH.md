@@ -168,6 +168,13 @@ edge (a half-pixel placement error in the fixtures) can no longer be sampled as 
 drag the correction toward the dust. Still failing: cloud-boundary dust/speck for manual Heal and
 Clone (the fixed manual offset lands on a cloud edge), and every automatic-Heal hair/fibre row.
 
+KRMA-1077 fixed a dark blob in the camera-scale foliage dust Manual Heal case. The tone correction is
+additive, so a manual source much brighter than the destination ring drove the source's own shadow
+structure below black. The final correction step (`retouchApplyCorrection`) now lets a pixel lose at
+most 65% of its value; ordinary corrections are unchanged (every existing floor holds). The cause was
+the renderer's tone matching, not the source picker. `testHealFromBrighterSourceDoesNotClipShadowStructureToBlack`
+covers it, and the historical human Fail for that case stands until a new visual verdict is recorded.
+
 Both run on 96 × 72 px synthetic fixtures. Neither is a camera-scale sign-off; camera-scale
 inspection is tracked in KRMA-1016.
 

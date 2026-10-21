@@ -27,6 +27,7 @@ enum CIKernelLibrary {
         "localInvertMask",
         "localCombineMask",
         "applyToneCurve",
+        "retouchApplyCorrection",
         "retouchMembraneApply",
         "retouchPull",
         "retouchPush",

@@ -99,7 +99,8 @@ enum RetouchRenderer {
         _ fill: CIImage, destination: CIImage, mask: CIImage, bounds: CGRect, radius: CGFloat
     ) -> CIImage {
         guard let pull = CIKernelLibrary.kernel(named: "retouchPull"),
-              let push = CIKernelLibrary.kernel(named: "retouchPush") else { return fill }
+              let push = CIKernelLibrary.kernel(named: "retouchPush"),
+              let apply = CIKernelLibrary.kernel(named: "retouchApplyCorrection") else { return fill }
         let exteriorWeight = mask.cropped(to: bounds)
         let difference = pull.apply(
             extent: bounds, roiCallback: { _, rect in rect },
@@ -130,9 +131,9 @@ enum RetouchRenderer {
                 ) ?? coarse
             }
         }
-        let membrane = push.apply(
+        let membrane = apply.apply(
             extent: bounds, roiCallback: { _, rect in rect },
-            arguments: [fill, correction, zeroImage(bounds), zeroImage(bounds)]
+            arguments: [fill, correction]
         ) ?? fill
         return membrane.cropped(to: bounds)
     }
