@@ -2338,10 +2338,10 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         editorDocument.evictIfNeeded()
     }
 
-    /// The stored raster keeps only whole pixels, so its own pixel aspect can differ from the
-    /// cropped photo's true aspect by up to one stored pixel. Declaring the persisted oriented
-    /// aspect on the raster's long axis gives the first frame the same fit rect as the settled
-    /// render, so the photo does not shift by a pixel when the render replaces it (KRMA-1042).
+    /// The stored raster keeps only whole pixels, so its pixel aspect can differ from the cropped
+    /// photo's true aspect after both whole-pixel render snapping and canonical downsampling.
+    /// Declaring the persisted oriented aspect on the raster's long axis gives the first frame the
+    /// settled crop's fit rect (KRMA-1042).
     static func storedFramePresentationExtent(_ metadata: PresentationFrameMetadata) -> CGSize {
         let width = CGFloat(metadata.pixelWidth), height = CGFloat(metadata.pixelHeight)
         let aspect = CGFloat(metadata.geometry.orientedAspectRatio)
