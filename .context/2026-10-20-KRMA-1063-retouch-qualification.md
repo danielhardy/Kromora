@@ -126,3 +126,36 @@ exporting, or relaunching. The viewer also links the actual signed-app PNG and i
 Retain human review until the actual pixels and missing skin row have been assessed. KRMA-1076 owns
 reconciliation of the bounded numeric discrepancy; KRMA-1075 owns the library picker issue. No product
 source was changed under this qualification ticket.
+
+## Review setup audit
+
+The reviewer reported that most repaired crops looked almost indistinguishable from the clean
+reference and questioned the setup. Codex audited the evidence rather than treating this observation
+as approval:
+
+- All 27 managed package originals byte-match the corresponding damaged input PNG, and none matches
+  its full-frame clean reference. The renderer receives that damaged original and the repair recipe;
+  the clean reference is used only for comparison.
+- All 27 clean/damaged/repaired crop triples have three distinct decoded sRGB RGBA pixel hashes.
+  Every repaired crop differs from both the damaged input and the reference. Each of the nine cases
+  also has three distinct repair-mode pixel hashes.
+- The browser loads distinct input and repair URLs at native 600 × 400 dimensions. In a live toggle
+  check, Show clean reference changed only the left image from damaged to clean; the right repair URL
+  stayed fixed. The initial toggle state was restored; no reviewer verdict or note was changed.
+- Repaired-versus-clean differences occupy 320–3,958 pixels of each 240,000-pixel crop (0.13–1.65%).
+  Sky dust/cloud speck cases differ by at most 2–4 RGB levels out of 255, while textured foliage has
+  larger local changes (up to 104/255 for the Clone case). Similar appearance is therefore compatible
+  with distinct, actually repaired pixels. These figures establish image identity and difference;
+  they are not a quality score or human verdict.
+
+Local details: `viewer-audit.json`, `viewer-routing-audit.json`, `input-provenance-audit.json`, and
+`audit-viewer.swift` under `.build/krma1063-evidence/`.
+
+The setup is deliberately favorable: defects are small and artificial, brush regions are generated
+from the same known defect geometry, and manual sources are placed 220 source pixels away, outside
+the added defect. The tests exercise real camera texture and the production renderer, but they do
+not establish freehand placement tolerance, larger-object removal, or performance on naturally
+occurring dust/hair. Strong results here should be described as controlled small-defect evidence.
+A separate ordinary-editing check with naturally occurring defects and hand-painted masks remains
+useful before making broader quality claims. Skin-detail coverage is still missing. The reviewer's
+observation was recorded without turning any Not run human verdict into Pass.
