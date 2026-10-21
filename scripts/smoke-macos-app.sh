@@ -185,7 +185,7 @@ tell application "System Events"
             delay 1
         end repeat
         if not openCommandReady then error "Open Image command did not become available"
-        keystroke "o" using command down
+        click menu item "Open Image…" of menu 1 of menu bar item "File" of menu bar 1
         repeat 20 times
             if exists window "Open Image" then exit repeat
             delay 1
