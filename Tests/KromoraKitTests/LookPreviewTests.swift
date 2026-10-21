@@ -243,8 +243,21 @@ final class LookPreviewTests: XCTestCase {
 
     func testStaleCandidateDropTest() async throws {
         let fake = FakeRenderEngine()
-        let scheduler = ImageWorkScheduler()
+        let scheduler = ImageWorkScheduler(
+            configuration: .init(maxConcurrentThumbnails: 1, maxQueuedThumbnails: 1)
+        )
         let coordinator = LookPreviewCoordinator(engine: fake, scheduler: scheduler)
+        let gate = Gate()
+        scheduler.enqueue(
+            id: .init("stale-candidate-blocker"), lane: .thumbnail, priority: .background
+        ) {
+            await gate.wait()
+        }
+        defer { Task { await gate.releaseAll() } }
+        try await waitUntil("the thumbnail lane blocker to start") {
+            scheduler.runningThumbnailCount == 1
+        }
+
         let departedSource = ImageSource(
             data: Data([31, 32, 33]), nativeExtent: CGSize(width: 1200, height: 800))
         let visibleSource = ImageSource(
@@ -255,15 +268,24 @@ final class LookPreviewTests: XCTestCase {
             await coordinator.image(
                 source: departedSource, document: EditDocument(), look: look)
         }
-        try await Task.sleep(for: .milliseconds(10))
+        try await waitUntil("the departed source preview to queue") {
+            scheduler.pendingThumbnailCount == 1
+        }
         let visible = Task {
             await coordinator.image(
                 source: visibleSource, document: EditDocument(), look: look)
         }
 
+        try await waitUntil("the departed source preview to be cancelled") {
+            scheduler.pendingThumbnailCount == 0
+        }
         let departedImage = await departed.value
-        let visibleImage = await visible.value
         XCTAssertNil(departedImage)
+        try await waitUntil("the current source preview to replace the stale queue entry") {
+            scheduler.pendingThumbnailCount == 1
+        }
+        await gate.releaseAll()
+        let visibleImage = await visible.value
         XCTAssertNotNil(visibleImage)
         let requests = await fake.renderRequests
         XCTAssertEqual(

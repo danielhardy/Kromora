@@ -148,6 +148,43 @@ set inputPath to do shell script "printf '%s' \"$KROMORA_SMOKE_INPUT\""
 tell application "System Events"
     tell first process whose unix id is appPID
         set frontmost to true
+
+        -- A clean CI profile shows the first-run welcome sheet. Dismiss it explicitly, then wait
+        -- until the asynchronously opened library enables the File > Open Image command.
+        set welcomeShown to false
+        try
+            if exists button "Start with an empty library" of sheet 1 of window 1 then
+                set welcomeShown to true
+                click button "Start with an empty library" of sheet 1 of window 1
+            end if
+        end try
+        if welcomeShown then
+            set welcomeDismissed to false
+            repeat 30 times
+                try
+                    if (count of sheets of window 1) = 0 then
+                        set welcomeDismissed to true
+                        exit repeat
+                    end if
+                on error
+                    set welcomeDismissed to true
+                    exit repeat
+                end try
+                delay 1
+            end repeat
+            if not welcomeDismissed then error "first-run welcome sheet did not dismiss"
+        end if
+        set openCommandReady to false
+        repeat 60 times
+            try
+                if enabled of menu item "Open Image…" of menu 1 of menu bar item "File" of menu bar 1 then
+                    set openCommandReady to true
+                    exit repeat
+                end if
+            end try
+            delay 1
+        end repeat
+        if not openCommandReady then error "Open Image command did not become available"
         keystroke "o" using command down
         repeat 20 times
             if exists window "Open Image" then exit repeat

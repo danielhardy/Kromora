@@ -1,6 +1,7 @@
-import XCTest
 import AppKit
 import SwiftUI
+import XCTest
+
 @testable import KromoraKit
 
 /// That the numbers `SliderFill` produces actually reach pixels, through the AppKit drawing path
@@ -66,10 +67,11 @@ final class NeutralOriginSliderTests: XCTestCase {
     /// an origin rather than a place the fill happens to pass through.
     func testEqualAndOppositeValuesFillEqualAmountsOfTrack() {
         guard let up = filledSpan(range: -100...100, neutral: 0, value: 60),
-              let down = filledSpan(range: -100...100, neutral: 0, value: -60)
+            let down = filledSpan(range: -100...100, neutral: 0, value: -60)
         else { return XCTFail("±60 drew no fill") }
-        XCTAssertEqual(up.upperBound - up.lowerBound, down.upperBound - down.lowerBound,
-                       accuracy: tolerance)
+        XCTAssertEqual(
+            up.upperBound - up.lowerBound, down.upperBound - down.lowerBound,
+            accuracy: tolerance)
     }
 
     // MARK: - Unipolar controls keep the left-origin fill
@@ -116,17 +118,24 @@ final class NeutralOriginSliderTests: XCTestCase {
         let warm = trackColor(style: .temperature, at: 0.8)
 
         XCTAssertGreaterThan(cool.blueComponent, cool.redComponent, "the cool end should read blue")
-        XCTAssertGreaterThan(warm.redComponent, warm.blueComponent, "the warm end should read amber")
-        XCTAssertGreaterThan(warm.greenComponent, warm.blueComponent, "the warm end should not read magenta")
+        XCTAssertGreaterThan(
+            warm.redComponent, warm.blueComponent, "the warm end should read amber")
+        XCTAssertGreaterThan(
+            warm.greenComponent, warm.blueComponent, "the warm end should not read magenta")
     }
 
     func testTintTrackRunsFromGreenToMagenta() {
         let green = trackColor(style: .tint, at: 0.2)
         let magenta = trackColor(style: .tint, at: 0.8)
 
-        XCTAssertGreaterThan(green.greenComponent, green.redComponent, "the negative tint end should read green")
-        XCTAssertGreaterThan(magenta.redComponent, magenta.greenComponent, "the positive tint end should read magenta")
-        XCTAssertGreaterThan(magenta.blueComponent, magenta.greenComponent, "the positive tint end should retain blue")
+        XCTAssertGreaterThan(
+            green.greenComponent, green.redComponent, "the negative tint end should read green")
+        XCTAssertGreaterThan(
+            magenta.redComponent, magenta.greenComponent,
+            "the positive tint end should read magenta")
+        XCTAssertGreaterThan(
+            magenta.blueComponent, magenta.greenComponent,
+            "the positive tint end should retain blue")
     }
 
     func testSaturationTrackRunsFromMutedLeftThroughCyanGreenToWarmColor() {
@@ -143,8 +152,9 @@ final class NeutralOriginSliderTests: XCTestCase {
             XCTAssertGreaterThan(cyanGreen.blueComponent, cyanGreen.redComponent)
             XCTAssertGreaterThan(chroma(of: cyanGreen), 0.30)
             XCTAssertGreaterThan(warm.redComponent, warm.blueComponent)
-            XCTAssertGreaterThan(warm.greenComponent, warm.blueComponent,
-                                 "the warm endpoint should remain amber rather than red in \(appearance)")
+            XCTAssertGreaterThan(
+                warm.greenComponent, warm.blueComponent,
+                "the warm endpoint should remain amber rather than red in \(appearance)")
             XCTAssertGreaterThan(chroma(of: warm), 0.35)
         }
     }
@@ -156,12 +166,14 @@ final class NeutralOriginSliderTests: XCTestCase {
 
             XCTAssertGreaterThan(blue.blueComponent, blue.redComponent)
             XCTAssertGreaterThan(blue.greenComponent, blue.redComponent)
-            XCTAssertGreaterThan(chroma(of: blue), 0.35,
-                                 "the blue range should be vivid in \(appearance)")
+            XCTAssertGreaterThan(
+                chroma(of: blue), 0.35,
+                "the blue range should be vivid in \(appearance)")
             XCTAssertGreaterThan(magenta.redComponent, magenta.greenComponent)
             XCTAssertGreaterThan(magenta.blueComponent, magenta.greenComponent)
-            XCTAssertGreaterThan(chroma(of: magenta), 0.35,
-                                 "the magenta end should be vivid in \(appearance)")
+            XCTAssertGreaterThan(
+                chroma(of: magenta), 0.35,
+                "the magenta end should be vivid in \(appearance)")
         }
     }
 
@@ -240,7 +252,7 @@ final class NeutralOriginSliderTests: XCTestCase {
             let barRows = inkedRows(in: barColumn)
             let thumbRows = inkedRows(in: thumbColumn)
             guard let barFirst = barRows.first, let barLast = barRows.last,
-                  let thumbFirst = thumbRows.first, let thumbLast = thumbRows.last
+                let thumbFirst = thumbRows.first, let thumbLast = thumbRows.last
             else {
                 return XCTFail("no bar or thumb pixels rendered for \(controlSize)")
             }
@@ -362,7 +374,9 @@ final class NeutralOriginSliderTests: XCTestCase {
         coordinator.present(1, on: slider, animated: true)
         try await Task.sleep(for: .milliseconds(100))
         coordinator.present(-0.5, on: slider, animated: true)
-        try await Task.sleep(for: .milliseconds(430))
+        try await waitUntil("the superseding animation to reach its latest target") {
+            abs(slider.doubleValue + 0.5) < 0.0001
+        }
 
         XCTAssertEqual(slider.doubleValue, -0.5, accuracy: 0.0001)
     }
@@ -451,14 +465,26 @@ final class NeutralOriginSliderTests: XCTestCase {
         )
     }
 
+    private func waitUntil(
+        _ description: String,
+        timeout: TimeInterval = 2,
+        _ condition: @MainActor () -> Bool
+    ) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() {
+            if Date() > deadline { return XCTFail("timed out waiting for \(description)") }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
     private func trackColor(
         style: SliderTrackStyle, at fraction: CGFloat, appearance: NSAppearance.Name = .aqua
     ) -> NSColor {
         let slider = makeSlider(range: -100...100, neutral: 0, value: 0, trackStyle: style)
         slider.appearance = NSAppearance(named: appearance)
         guard let cell = slider.cell as? NeutralOriginSliderCell,
-              let rep = slider.bitmapImageRepForCachingDisplay(in: slider.bounds),
-              let context = NSGraphicsContext(bitmapImageRep: rep)
+            let rep = slider.bitmapImageRepForCachingDisplay(in: slider.bounds),
+            let context = NSGraphicsContext(bitmapImageRep: rep)
         else {
             XCTFail("could not build a drawing context for the colour-track snapshot")
             return .clear
@@ -494,18 +520,20 @@ final class NeutralOriginSliderTests: XCTestCase {
         diameter: CGFloat, enabled: Bool, appearance: NSAppearance.Name = .darkAqua
     ) throws -> NSBitmapImageRep {
         let canvas = Int(ceil(diameter + 8))
-        guard let rep = NSBitmapImageRep(
-            bitmapDataPlanes: nil,
-            pixelsWide: canvas,
-            pixelsHigh: canvas,
-            bitsPerSample: 8,
-            samplesPerPixel: 4,
-            hasAlpha: true,
-            isPlanar: false,
-            colorSpaceName: .deviceRGB,
-            bytesPerRow: 0,
-            bitsPerPixel: 0
-        ), let context = NSGraphicsContext(bitmapImageRep: rep) else {
+        guard
+            let rep = NSBitmapImageRep(
+                bitmapDataPlanes: nil,
+                pixelsWide: canvas,
+                pixelsHigh: canvas,
+                bitsPerSample: 8,
+                samplesPerPixel: 4,
+                hasAlpha: true,
+                isPlanar: false,
+                colorSpaceName: .deviceRGB,
+                bytesPerRow: 0,
+                bitsPerPixel: 0
+            ), let context = NSGraphicsContext(bitmapImageRep: rep)
+        else {
             struct RenderFailure: Error {}
             throw RenderFailure()
         }
@@ -529,8 +557,10 @@ final class NeutralOriginSliderTests: XCTestCase {
     private func sample(
         _ rep: NSBitmapImageRep, xFraction: CGFloat, yFraction: CGFloat
     ) throws -> NSColor {
-        let x = min(max(Int((CGFloat(rep.pixelsWide) * xFraction).rounded()), 0), rep.pixelsWide - 1)
-        let y = min(max(Int((CGFloat(rep.pixelsHigh) * yFraction).rounded()), 0), rep.pixelsHigh - 1)
+        let x = min(
+            max(Int((CGFloat(rep.pixelsWide) * xFraction).rounded()), 0), rep.pixelsWide - 1)
+        let y = min(
+            max(Int((CGFloat(rep.pixelsHigh) * yFraction).rounded()), 0), rep.pixelsHigh - 1)
         guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else {
             struct SampleFailure: Error {}
             throw SampleFailure()
@@ -550,8 +580,8 @@ final class NeutralOriginSliderTests: XCTestCase {
     ) -> ClosedRange<CGFloat>? {
         let slider = makeSlider(range: range, neutral: neutral, value: value)
         guard let cell = slider.cell as? NeutralOriginSliderCell,
-              let rep = slider.bitmapImageRepForCachingDisplay(in: slider.bounds),
-              let context = NSGraphicsContext(bitmapImageRep: rep)
+            let rep = slider.bitmapImageRepForCachingDisplay(in: slider.bounds),
+            let context = NSGraphicsContext(bitmapImageRep: rep)
         else {
             XCTFail("could not build a drawing context for the slider")
             return nil
