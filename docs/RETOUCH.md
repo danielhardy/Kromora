@@ -344,8 +344,18 @@ The signed app's full-size PNG export differed from the Debug qualification harn
 48,771,072 pixels, all inside the repair bounds, at most 2/255 per channel. `RetouchExportBoundaryTests`
 compares streamed and in-memory paths within each build using a generated 1200 × 900 image and a newly
 constructed document. It does not replay the persisted 8064 × 6048 package or compare Debug pixels
-directly with Release pixels. The original camera-scale variation therefore remains unexplained; the
-test does not establish that build mode, cache state, or Core Image time variation caused it. The known
-Core Image byte variation is not evidence for a 2/255 cross-build tolerance. Do not apply a cross-build
-pixel tolerance until it is measured on paired outputs from the same persisted source and document.
+directly with Release pixels. KRMA-1085 replayed the persisted package (8064 × 6048 asset, saved Heal document revision 1, automatic
+source, `ExportOptions` PNG full size) in Debug and in Release (`swift test -c release -Xswiftc
+-enable-testing`), changing one variable at a time: cold versus warm renderer, source with and without
+portable identity, in-memory `render` versus streamed `encode`, and with and without `assetID`. All
+twelve outputs decoded to identical pixels in a common sRGB context (0 differing pixels), and match the
+earlier harness export. Build configuration, renderer cache state, source identity, asset identity, and
+streamed versus in-memory encoding are therefore not the cause. The signed app's export of the same
+asset still differs from every one of them in 2,023 pixels, inclusive bounds x=4646–4707, y=756–815,
+maximum RGB channel delta 2/255. The package holds only revision 1, so the app did not save a different
+document. The cause is unknown and lies in an input the in-process replay does not reproduce (the
+app-supplied document or source at export time, or the signed sandboxed runtime); it was not isolated
+because driving the signed app needs an attended display. The difference is not numeric noise, and no
+cross-build tolerance is published. Reproducing it needs the app's export request captured at export
+time.
 Human visual approval is recorded separately and is not implied by this comparison.
