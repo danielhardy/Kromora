@@ -337,3 +337,15 @@ masks, and source offsets agree with the settled preview; quit and relaunch, the
 persist in the package. Record Pass/Fail/Not run each.
 
 File a focused defect for each reproducible failure. Link the completed sheet from KRMA-1016.
+
+### Export versus harness pixel tolerance (KRMA-1076)
+
+The signed app's full-size PNG export differed from the Debug qualification harness in 2,023 of
+48,771,072 pixels, all inside the repair bounds, at most 2/255 per channel. `RetouchExportBoundaryTests`
+shows the streamed, asset-identified export path and the in-memory render path agree within 1/255 in
+the same build (Debug and Release), so source selection and encoding are not the cause. The camera-scale
+variation was not reproduced or attributed to build mode; Core Image is not bit-reproducible across
+time-separated runs. For qualification, compare outputs from one build exactly (≤1/255) and treat
+cross-build differences of ≤2/255 confined to the repair as numeric noise. Anything larger, or any
+difference outside the repair, is a defect. Human visual approval is recorded separately and is not
+implied by this tolerance.

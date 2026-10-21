@@ -100,7 +100,7 @@ as recorded in the supplied export; no skin-quality claim is made. Brick was not
 | Signed app opens test package and saved recipe | Pass | App showed 27 assets; selected 01-sky-dust-auto-heal had one saved repair |
 | Signed app File export | Pass: full resolution, readable PNG | `ui-exports/01-sky-dust-auto-heal.png.png`, 8064 × 6048; app displayed Export complete |
 | Signed app repair after normal quit/reopen | Pass: saved recipe present | Reopened the same photo; Heal inspector showed 1 spot. This checks saved recipe presence, not a second export after relaunch |
-| Signed app export versus harness full-frame pixels | Not exact | 2,023 of 48,771,072 pixels differ, confined to the repair at inclusive bounds x=4646–4707, y=756–815; maximum RGB channel difference 2/255. All other pixels match. No cause or visual acceptance inferred; KRMA-1076 tracks reconciliation |
+| Signed app export versus harness full-frame pixels | Not exact | 2,023 of 48,771,072 pixels differ, confined to the repair at inclusive bounds x=4646–4707, y=756–815; maximum RGB channel difference 2/255. All other pixels match. No visual acceptance inferred. KRMA-1076 disposition: not a source-selection or encode-path inconsistency (see "KRMA-1076 reconciliation" below) |
 | Restore original default library | Pass | Settings > Use Default Library > Relaunch; default path shown and Use Default disabled; replacement app showed 56 of 56 photos |
 
 `package-reopen.json` also contains three excluded case-09 calibration checks; those are not counted
@@ -209,3 +209,19 @@ all full-frame copy hashes match; embedded JavaScript passes `node --check`; the
 matches. These checks are recorded in `archive-verification.json`. The in-app browser's security policy
 rejected `file:` navigation, so an offline browser preview was not run. That restriction was respected;
 the saved file can be opened by the user in a regular browser. No local-file preview success is claimed.
+
+## KRMA-1076 reconciliation
+
+`RetouchExportBoundaryTests` renders one persisted automatic-source Heal document from one source through
+`RenderEngine.render` (in-memory, no asset identity) and through `RenderEngine.encode` (streamed to a
+file, with `PhotoAssetID` and `ExportOptions`), each on a fresh engine, and decodes both PNGs in a common
+sRGB context. In a Debug build and in a Release build (`swift test -c release -Xswiftc -enable-testing`) the
+two paths agree within 1/255. Automatic-source resolution does not read `assetID`, and `exportOptions`
+only changes colour space, bit depth, alpha, metadata and sharpening, which are neutral here. So source
+selection, cache state and streaming versus in-memory encoding are not the cause.
+
+What remains is the Debug-harness versus signed-Release-app comparison at camera scale (2,023 pixels,
+max 2/255, confined to the repair). It was not reproduced at that scale and was not attributed to build
+mode: the synthetic frame is 1200 × 900, not the 8064 × 6048 DNG-derived fixture. Core Image is already
+documented in `PixelAssertions.swift` as not bit-reproducible across time-separated runs. Treat it as
+an unattributed numeric variation, not a product defect, with no visual verdict implied.
