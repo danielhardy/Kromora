@@ -31,6 +31,8 @@ final class FileIntegrationBoundaryTests: TempDirectoryTestCase {
             folderStartingURL = directoryURL
             return folderResult
         }
+
+        func chooseLibraryPackage(title: String, prompt: String, startingAt directoryURL: URL?) -> URL? { nil }
     }
 
     private final class StubWorkspace: WorkspaceRevealing {

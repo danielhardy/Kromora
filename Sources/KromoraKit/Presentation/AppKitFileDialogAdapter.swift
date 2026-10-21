@@ -18,6 +18,13 @@ public protocol FileDialogProviding {
         startingAt directoryURL: URL?,
         canCreateDirectories: Bool
     ) async -> URL?
+    /// Chooses a portable library package. Packages are opaque bundles to AppKit, so a folder-only
+    /// panel shows them disabled; this panel accepts them as selectable items.
+    func chooseLibraryPackage(
+        title: String,
+        prompt: String,
+        startingAt directoryURL: URL?
+    ) async -> URL?
 }
 
 public extension FileDialogProviding {
@@ -69,6 +76,31 @@ public final class AppKitFileDialog: FileDialogProviding {
             panel.allowsMultipleSelection = false
             panel.directoryURL = directoryURL
         }?.first
+    }
+
+    public func chooseLibraryPackage(
+        title: String,
+        prompt: String,
+        startingAt directoryURL: URL?
+    ) async -> URL? {
+        await sheets.chooseOpenURLs { panel in
+            Self.configureLibraryPackagePanel(panel, title: title, prompt: prompt, startingAt: directoryURL)
+        }?.first
+    }
+
+    /// A `.kromoralibrary` package is a file-package item, not a plain directory, so the panel must
+    /// allow files as well as directories. Validation of the choice stays with ``ActiveLibrarySelection``.
+    static func configureLibraryPackagePanel(
+        _ panel: NSOpenPanel, title: String, prompt: String, startingAt directoryURL: URL?
+    ) {
+        panel.title = title
+        panel.prompt = prompt
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.treatsFilePackagesAsDirectories = false
+        panel.canCreateDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = directoryURL
     }
 }
 

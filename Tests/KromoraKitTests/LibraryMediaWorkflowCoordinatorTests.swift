@@ -379,4 +379,6 @@ private final class WorkflowFileDialog: FileDialogProviding {
     func chooseFolder(
         title: String, prompt: String, startingAt directoryURL: URL?, canCreateDirectories: Bool
     ) -> URL? { folder }
+
+    func chooseLibraryPackage(title: String, prompt: String, startingAt directoryURL: URL?) -> URL? { nil }
 }

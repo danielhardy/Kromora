@@ -133,7 +133,8 @@ final class ActiveLibrarySelectionTests: XCTestCase {
         func chooseFiles(title: String, allowedContentTypes: [UTType], allowsMultipleSelection: Bool,
                          startingAt directoryURL: URL?) -> [URL]? { nil }
         func chooseFolder(title: String, prompt: String, startingAt directoryURL: URL?,
-                          canCreateDirectories: Bool) -> URL? { folder }
+                          canCreateDirectories: Bool) -> URL? { nil }
+        func chooseLibraryPackage(title: String, prompt: String, startingAt directoryURL: URL?) -> URL? { folder }
     }
 
     private final class SpyRelauncher: AppRelaunching {
@@ -373,5 +374,28 @@ final class ActiveLibrarySelectionTests: XCTestCase {
         XCTAssertEqual(relauncher.count, 0)
         XCTAssertEqual(released, 0)
         XCTAssertFalse(chooser.statusMessage.isEmpty)
+    }
+}
+
+@MainActor
+final class LibraryPackagePanelConfigurationTests: XCTestCase {
+    func testLibraryPackagePanelAcceptsPackagesWithoutChangingFolderPanel() {
+        let panel = NSOpenPanel()
+        let start = URL(filePath: "/tmp", directoryHint: .isDirectory)
+        AppKitFileDialog.configureLibraryPackagePanel(panel, title: "Choose Library", prompt: "Use Library", startingAt: start)
+        XCTAssertTrue(panel.canChooseFiles)
+        XCTAssertTrue(panel.canChooseDirectories)
+        XCTAssertFalse(panel.treatsFilePackagesAsDirectories)
+        XCTAssertFalse(panel.allowsMultipleSelection)
+        XCTAssertFalse(panel.canCreateDirectories)
+        XCTAssertEqual(panel.prompt, "Use Library")
+    }
+
+    func testGenericFolderPanelStillChoosesOnlyDirectories() async {
+        let sheets = FakeSheets()
+        let dialog = AppKitFileDialog(sheets: sheets)
+        _ = await dialog.chooseFolder(title: "Folder", prompt: "Choose", startingAt: nil, canCreateDirectories: true)
+        XCTAssertEqual(sheets.lastOpenPanel?.canChooseFiles, false)
+        XCTAssertEqual(sheets.lastOpenPanel?.canChooseDirectories, true)
     }
 }

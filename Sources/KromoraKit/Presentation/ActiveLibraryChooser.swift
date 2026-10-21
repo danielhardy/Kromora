@@ -78,11 +78,10 @@ final class ActiveLibraryChooser {
     func choose() async {
         errorMessage = ""
         statusMessage = ""
-        guard let url = await fileDialog.chooseFolder(
+        guard let url = await fileDialog.chooseLibraryPackage(
             title: "Choose Library",
             prompt: "Use Library",
-            startingAt: chosenURL?.deletingLastPathComponent() ?? selection.defaultURL.deletingLastPathComponent(),
-            canCreateDirectories: false
+            startingAt: chosenURL?.deletingLastPathComponent() ?? selection.defaultURL.deletingLastPathComponent()
         ) else { return }
         do {
             try await selection.chooseOffMain(url, access: .systemGranted(for: url))
