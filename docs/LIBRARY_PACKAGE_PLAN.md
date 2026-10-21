@@ -1,6 +1,6 @@
 # Portable library package — implementation plan
 
-> Product status (KRMA-520): the package-backed library is now the only library mode. The design
+> **Historical plan.** The package-backed library is now the only library mode. The design
 > notes below retain format and migration history; folder chooser/drop and removable media are
 > import sources, not persisted referenced-folder browsing. Existing `EditStore*.store` files
 > remain untouched. If referenced assets return, they will use package `.referenced` records.

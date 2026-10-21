@@ -1,7 +1,6 @@
 # Looks and LUTs
 
-This guide describes the current Look workflow and asset policy. Product scope and explicit
-post-MVP boundaries are in [`PRODUCT_SCOPE.md`](PRODUCT_SCOPE.md).
+This guide describes the current Look workflow and asset policy.
 
 Kromora's Look workflow supports text-based 3D LUTs, derives Looks from a RAW/JPG pair, and ships
 13 read-only starter Looks. The parser and renderer are implemented in `CubeLUT`, `LUTLibrary`,

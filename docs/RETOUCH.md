@@ -1,8 +1,7 @@
 # Retouch recipes
 
-Retouch is a current MVP capability with a small-defect target, not a promise of generative
-large-object removal. Product-level scope is in [`PRODUCT_SCOPE.md`](PRODUCT_SCOPE.md); the measured
-limitations below are specific to their generated fixtures and methods.
+Retouch is a current capability with a small-defect target, not a promise of generative
+large-object removal. The measured limitations below are specific to their generated fixtures and methods.
 
 Retouch values are part of `EditDocument` and are persisted with each photo. A spot stores its
 Heal or Clone mode, one `RetouchRegion` of oriented-source normalized brush samples and pressure,

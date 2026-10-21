@@ -1,7 +1,7 @@
 # Interoperability exports
 
 This is a rendered-file handoff guide, not a promise of live layered or Lightroom-compatible
-round-tripping. See [`PRODUCT_SCOPE.md`](PRODUCT_SCOPE.md) for the product boundary.
+round-tripping.
 
 ## External editor
 

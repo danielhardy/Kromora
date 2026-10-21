@@ -35,7 +35,7 @@ The repository evidence supports this answer for the current macOS app:
   ([sandbox audit](APP_STORE_SANDBOX_AUDIT.md#L336-L341), [Package.swift](../Package.swift#L124-L147),
   [README](../README.md#L1-L14)).
 - Kromora is a local, package-backed photo workflow: accepted imports are copied into the library
-  package ([product scope](PRODUCT_SCOPE.md#L20-L35), [storage policy](STORAGE_POLICY.md)).
+  package ([README](../README.md), [storage policy](STORAGE_POLICY.md)).
   Photos imports are user-selected through PhotosPicker, and Kromora then uses PhotoKit read/write
   authorization to retrieve the selected originals (including iCloud downloads), show Photos
   thumbnails, and optionally deliver exports and place albums ([sandbox audit, protected resources](APP_STORE_SANDBOX_AUDIT.md#L361-L363),
@@ -76,14 +76,14 @@ Apple's current questionnaire covers content descriptors, in-app controls, and c
 
 | Questionnaire area | Draft answer |
 | --- | --- |
-| Parental controls; age assurance | No / not present (**confirm**). The documented MVP has photo-library and editing workflows, with no age gate or parental-control feature ([product scope](PRODUCT_SCOPE.md#L18-L35), [README](../README.md#L49-L69)). |
+| Parental controls; age assurance | No / not present (**confirm**). The documented product has photo-library and editing workflows, with no age gate or parental-control feature ([README](../README.md)). |
 | User-generated content; messaging and chat; social media; advertising | No public or shared user-content capability, messaging/chat, social media, or advertising (**confirm**). Edits and exports are local photo-workflow outputs; the README documents no cloud catalog or shared library ([README](../README.md#L21-L25), [README limits](../README.md#L75-L84)). |
 | Unrestricted web access | No (**confirm**). The audit lists only explicit About-page links handed to the system browser and no app-initiated network requests ([sandbox audit](APP_STORE_SANDBOX_AUDIT.md#L329-L334)). |
-| Profanity/crude humor; horror/fear; alcohol, tobacco, or drug use/references | None (**confirm** against bundled and submitted sample content); these are not product features in the documented still-photo workflow ([product scope](PRODUCT_SCOPE.md#L18-L35), [sample-photo manifest](../Sources/KromoraKit/Resources/SamplePhotos/manifest.json#L1-L20)). |
-| Medical/treatment information; health/wellness topics | None (**confirm**); not part of the documented photo-editing workflow ([product scope](PRODUCT_SCOPE.md#L18-L35)). |
+| Profanity/crude humor; horror/fear; alcohol, tobacco, or drug use/references | None (**confirm** against bundled and submitted sample content); these are not product features in the documented still-photo workflow ([README](../README.md), [sample-photo manifest](../Sources/KromoraKit/Resources/SamplePhotos/manifest.json#L1-L20)). |
+| Medical/treatment information; health/wellness topics | None (**confirm**); not part of the documented photo-editing workflow ([README](../README.md)). |
 | Mature/suggestive themes; sexual content or nudity; graphic sexual content | None (**confirm** against bundled and submitted sample content); the sample-photo manifest lists the two bundled assets ([sample-photo manifest](../Sources/KromoraKit/Resources/SamplePhotos/manifest.json#L5-L19)). |
-| Cartoon/fantasy violence; realistic violence; prolonged graphic violence; guns/weapons | None (**confirm** against bundled and submitted sample content); these are not product features in the documented still-photo workflow ([product scope](PRODUCT_SCOPE.md#L18-L35), [sample-photo manifest](../Sources/KromoraKit/Resources/SamplePhotos/manifest.json#L5-L19)). |
-| Gambling; simulated gambling; contests; loot boxes | None (**confirm**); the documented product has no games, competitions, or chance-based activities ([product scope](PRODUCT_SCOPE.md#L18-L35)). |
+| Cartoon/fantasy violence; realistic violence; prolonged graphic violence; guns/weapons | None (**confirm** against bundled and submitted sample content); these are not product features in the documented still-photo workflow ([README](../README.md), [sample-photo manifest](../Sources/KromoraKit/Resources/SamplePhotos/manifest.json#L5-L19)). |
+| Gambling; simulated gambling; contests; loot boxes | None (**confirm**); the documented product has no games, competitions, or chance-based activities ([README](../README.md)). |
 
 Do not select “Made for Kids” on the basis of a low calculated rating; that is a separate App Store
 category choice with additional guidelines ([Apple age-rating guidance](https://developer.apple.com/help/app-store-connect/manage-app-information/set-an-app-age-rating/)).
@@ -102,7 +102,7 @@ category choice with additional guidelines ([Apple age-rating guidance](https://
 > control, choose a bundled Starter Look; no external LUT file is needed.
 
 This path follows the welcome options and local Library → Edit → Export flow ([onboarding](ONBOARDING.md#L3-L18),
-[product scope](PRODUCT_SCOPE.md#L20-L35)). The bundled starter photographs are listed as CC0 1.0
+[README](../README.md)). The bundled starter photographs are listed as CC0 1.0
 assets ([sample-photo manifest](../Sources/KromoraKit/Resources/SamplePhotos/manifest.json#L1-L20)).
 PhotosPicker selects the items to import, but retrieving their originals goes through PhotoKit, so
 the first Photos import (and any Photos delivery) prompts for Photos read/write access; both can be
@@ -110,7 +110,7 @@ skipped when testing the local workflow and disk export ([sandbox audit](APP_STO
 [App Store acceptance](APP_STORE_ACCEPTANCE.md#photos-authorization-and-delivery)).
 The no-account note is an inference from this local workflow and the audit's finding that the app
 has no app-initiated network requests; confirm the release build still has no sign-in dependency
-([product scope](PRODUCT_SCOPE.md#L20-L35), [sandbox audit](APP_STORE_SANDBOX_AUDIT.md#L329-L334)).
+([README](../README.md), [sandbox audit](APP_STORE_SANDBOX_AUDIT.md#L329-L334)).
 
 ### Entitlements in one line each
 
@@ -121,14 +121,14 @@ has no app-initiated network requests; confirm the release build still has no si
 | `com.apple.security.files.removable-media.read-only` | Reads imported images from mounted camera cards without writing to the card ([entitlements](../App/Kromora.entitlements#L7-L11), [audit rationale](APP_STORE_SANDBOX_AUDIT.md#L401-L414)). |
 | `com.apple.security.files.bookmarks.app-scope` | Retains access to user-selected external files and folders across launches ([entitlements](../App/Kromora.entitlements#L9-L13), [audit rationale](APP_STORE_SANDBOX_AUDIT.md#L401-L414)). |
 | `com.apple.security.assets.pictures.read-write` | Stores the default library package, default exports, and app-owned Looks under Pictures ([entitlements](../App/Kromora.entitlements#L11-L16), [audit rationale](APP_STORE_SANDBOX_AUDIT.md#L401-L414)). |
-| `com.apple.security.personal-information.photos-library` | Lets PhotoKit authorize, fetch originals for Photos import, and save exports to Photos in the sandbox ([entitlements](../App/Kromora.entitlements#L16-L18), requested by KRMA-1040). |
+| `com.apple.security.personal-information.photos-library` | Lets PhotoKit authorize, fetch originals for Photos import, and save exports to Photos in the sandbox ([entitlements](../App/Kromora.entitlements#L16-L18)). |
 
 ### RAW formats
 
 Kromora develops **RAW files supported by the macOS/Core Image decoder**. Product documentation does
 not publish a fixed camera-model or extension whitelist; coverage varies with the source and macOS
 decoder capabilities, so use a known-supported review file and do not claim universal RAW support
-([README](../README.md#L49-L54), [product scope](PRODUCT_SCOPE.md#L59-L66)). The extension list in
+([README](../README.md)). The extension list in
 [`realworldtest/README.md`](../realworldtest/README.md#L1-L20) describes local test-fixture discovery,
 not a complete product compatibility guarantee; those local camera files are not release screenshot
 assets.
@@ -140,12 +140,12 @@ assets.
 Kromora is a native Mac photo editor for organizing a local photo library, developing RAW and
 standard still images, and exporting finished photos. Import from files, folders, Photos, or
 supported removable media; accepted originals are copied into a portable library package you own.
-([README](../README.md#L21-L47), [product scope](PRODUCT_SCOPE.md#L20-L35))
+([README](../README.md))
 
 Edit non-destructively with RAW controls, Light, Color, Effects, crop and rotation, local masks,
 Heal and Clone retouch, and reusable `.cube` Looks. Compare edits, then export one photo or a batch
 as TIFF, JPEG, PNG, or HEIF. Decoder and output options vary by source and macOS capabilities.
-([README](../README.md#L49-L66), [product scope](PRODUCT_SCOPE.md#L59-L70))
+([README](../README.md))
 
 ### Keywords — draft
 

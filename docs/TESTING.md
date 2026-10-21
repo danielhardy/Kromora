@@ -1,8 +1,27 @@
 # Testing and profiling
 
-The release bar and interpretation of required versus optional checks are summarized in
-[`PRODUCT_SCOPE.md`](PRODUCT_SCOPE.md). This document is authoritative for verification commands
-and lane requirements.
+This document is authoritative for the release bar, verification commands, and lane requirements.
+
+## Release bar
+
+The app is ready to release when the ordinary Library → Edit → Export loop is dependable and these
+properties hold:
+
+- Imports and exports report partial failures honestly, preserve the user's source files, and leave
+  recoverable package state after interrupted operations.
+- Edits survive navigation, relaunch, undo/redo, and a quit-and-copy of the package. A corrupt or
+  unsupported edit is reported instead of silently replaced with a blank edit.
+- Preview and full-resolution export use one ordered rendering pipeline; supported crop, masks,
+  Looks, and retouch recipes stay aligned across both.
+- Library membership and canonical data live in the package. Indexes, previews, thumbnails, masks,
+  and analysis caches are disposable and can be rebuilt.
+- The `fast` and `serial` lanes below pass on the supported toolchain. Hardware and licensed-camera
+  checks (the `optional` lane) are reported separately when their environment is unavailable; skipped
+  work is not described as a pass.
+- Distribution follows the signed-app and entitlement process in [`PACKAGING.md`](PACKAGING.md).
+
+Performance numbers in the dated diagnostics below are evidence for their recorded machines and
+methods, not universal release claims.
 
 The required checks are deterministic build/test lanes. Hardware, AppKit, RAW, and Instruments
 work is opt-in because it needs a logged-in display or licensed local fixtures.
@@ -602,8 +621,7 @@ XCTest main-thread sample set contains SwiftUI graph/layout work (`AG::Graph::Up
 samples do not isolate the grid interval or quantify a specific view's contribution. A separate
 SwiftUI-template recording produced no SwiftUI update rows. The profiling request therefore remains
 open. A subsequent 30-sample capture after changing the grid's `AppViewModel` property from
-an observed-object wrapper to a plain reference (the finished `@Observable` migration is recorded in
-`docs/APP_VIEWMODEL_OBSERVATION_PLAN.md`) was skipped before measurement because the capture window was
+an observed-object wrapper to a plain reference (the `@Observable` migration is complete) was skipped before measurement because the capture window was
 not onscreen (`occlusionState=8192`, `isVisible=false`, `keyWindow=false`, `appActive=false`); it
 provides no performance evidence. Keep the KRMA-734 target unchanged and complete the capture from an
 unlocked, awake display before claiming a pass.

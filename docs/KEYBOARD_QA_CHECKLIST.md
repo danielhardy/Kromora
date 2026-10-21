@@ -1,48 +1,21 @@
-# Keyboard QA checklist
+# Keyboard shortcut matrix
 
-Hands-on verification of the KRMA-920 keyboard rework in the signed, sandboxed app (KRMA-926).
-The rows are generated from `KeyboardShortcutCatalog.all`
-(`Sources/KromoraKit/Views/KeyboardShortcutCatalog.swift`); `KeyboardShortcutCatalogTests`
-fails when this table and the catalog disagree. Add a row here whenever a shortcut is added.
+Expected behavior of every keyboard shortcut in each focus state. Rows come from
+`KeyboardShortcutCatalog.all` (`Sources/KromoraKit/Views/KeyboardShortcutCatalog.swift`);
+`KeyboardShortcutCatalogTests` fails when this table and the catalog disagree, so add a row here
+whenever a shortcut is added.
 
-- **Build under test:** `Kromora` scheme run from `Xcode/Kromora.xcodeproj` (signed, App Sandbox), on `efe50615` plus uncommitted working-tree changes
-- **Date:** 2026-10-13
-- **Heard any system alert beep during the run?** No
+## Checking a change by hand
 
-## Results (2026-10-13 spot check, original observations)
-
-The numbered list records what was observed on 2026-10-13 and is kept as history; the
-"Current status" notes below say what has changed since.
-
-This was a hands-on spot check of clicking around and using the keyboard in the signed build, not a
-cell-by-cell run of the grid below. The per-cell result columns were not filled in, and the
-requirement to fill them in was waived by the human on 2026-10-13 (KRMA-926). The grid remains
-available as an optional aid for future keyboard changes.
-
-1. `keyboardRouter` resolves in the real scene: **yes**. Photo and Tools menu items are enabled and
-   shortcuts run. This agrees with the KRMA-920 by-ear confirmation.
-2. Plain ⌘V: **keep**. KRMA-966 (`bfa146d4`) restored ⌘V as a standard Paste command, so it pastes
-   copied edits in the editor while a focused text field keeps its own paste. The KRMA-920 deviation
-   no longer applies.
-3. Failure found: **Esc does not cancel the crop tool**. Tracked in KRMA-969.
-4. Unrelated polish found: the top-right toolbar buttons are all bronze. Tracked in KRMA-970.
-
-Current status (2026-10-14, from the issue records; not re-observed in a signed build): the
-failures in items 3 and 4 are resolved — KRMA-969 and KRMA-970 are `done`. Item 2's ⌘V behavior is
-current. Re-run the affected rows in a signed build before citing them as freshly verified.
-
-## How to run
-
-Open a collection with several photos, then for each focus state put the focus there and press the
-key. Record **P** (matches expected), **F** (differs; note what happened), **B** (correct but the
-system beep sounded) or **-** (not applicable). Every cell must also be silent.
+Open a library with several photos, put focus in each state below, and press the key. The result
+must match the expected cell, and no key may sound a system alert beep. Run the affected rows in the
+signed, sandboxed app (`Kromora` scheme in `Xcode/Kromora.xcodeproj`) after changing key handling.
 
 Menu commands follow the availability gates in `MenuCommands.swift` (`MenuCommandAvailability` and
-the keyboard context), so a command that is unavailable in the current context (for example `H`
-outside Retouch, a rating with no active collection) is a disabled or silent no-op, not a beep. An
-earlier revision of this checklist said menu items were always enabled; that is no longer true.
-Where a cell says "runs" the command must run only if it is available in that context; otherwise
-it must do nothing, silently.
+the keyboard context). A command that is unavailable in the current context (for example `H`
+outside Retouch, or a rating with no active selection) is a disabled or silent no-op, not a beep.
+Where a cell says "runs" the command runs only if it is available in that context; otherwise it does
+nothing, silently.
 
 ## Focus states
 
@@ -111,14 +84,3 @@ Legend for expected results:
 | Radial mask tool | R | Masks | menu key, tools | runs | runs | runs | runs | types | runs | suppressed |
 | Show or hide mask overlay | O | Masks | menu key, tools | runs | runs | runs | runs | types | runs | suppressed |
 | Nudge selected mask | ← → ↑ ↓ (⇧ to accelerate) | Masks | surface | runs | runs | runs | runs | types | slider | suppressed |
-
-## Results
-
-Replace each expected-result cell above with P / F / B and a note, or record failures here:
-
-| Shortcut | Focus state | Result | Notes / child ticket |
-| --- | --- | --- | --- |
-| | | | |
-
-Every failing cell needs a fix commit referencing KRMA-926 or a child ticket labelled
-`release-readiness,must-fix`.

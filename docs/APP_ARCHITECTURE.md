@@ -1,9 +1,9 @@
 # Application ownership boundaries
 
-Product intent and explicit scope boundaries are in [`PRODUCT_SCOPE.md`](PRODUCT_SCOPE.md). This
-guide describes current code ownership; the package library is the only production library mode.
+This guide describes current code ownership. The package library is the only production library
+mode.
 
-## Library product boundary (KRMA-520)
+## Library product boundary
 
 The library product is package-backed. Referenced-folder browsing has no product future and is not
 restored, persisted, or maintained as a second mode. A folder chooser, folder drop, Photos import,
@@ -24,8 +24,7 @@ fences. Feature workflows do not reach into one another's private state.
 
 `AppViewModel.swift` is a size-guarded file: `PackageSettingsTests.testAppViewModelDoesNotRegrow` holds
 the line ceiling as a trend guard (the test owns the number; this page does not copy it). Extract new
-workflows into coordinators rather than raising the ceiling. A dated measurement: 5,033 lines on
-2026-10-14.
+workflows into coordinators rather than raising the ceiling.
 
 ## Boundaries
 
@@ -87,8 +86,8 @@ shut-down operation.
 ## Stored-edit adoption ownership
 
 `StoredEditAdoptionCoordinator` owns the rules for adopting a photo's stored edits while it loads,
-and the per-source state they need: the reconciled source revision and the early-adoption record
-(KRMA-755). It takes a value `Context` (request and current source revisions, `hadInMemorySession`,
+and the per-source state they need: the reconciled source revision and the early-adoption record. It
+takes a value `Context` (request and current source revisions, `hadInMemorySession`,
 whether the in-memory edit revision moved, whether the stored document differs, whether a
 speculative render is already scheduled) and returns outcomes: stage one (`decideEarlyAdoption`)
 says adopt or skip; stage two (`decideLateAdoption`) returns whether to adopt, whether the document
@@ -125,7 +124,7 @@ unnecessary, and presents an exact hit instead of rendering. `PreviewCoordinator
 value-only document/source/navigation inputs and retains the `PreviewSurface` instances, so there
 is no second document store or surface reference in these collaborators.
 
-## Source-presentation state ownership (KRMA-910)
+## Source-presentation state ownership
 
 `SourcePresentationState` (`ViewModels/SourcePresentationState.swift`) is the single owner of the
 source-loading presentation flags: `isLoading`, `isNavigationLoading`, `previewState`,
@@ -366,7 +365,7 @@ preview owners. The shared image scheduler barrier runs before the portable pack
 writer lease; cancelled root tasks are awaited, then explicitly abandoned persistence snapshots
 are discarded. Each collaborator cancels its own work within this order.
 
-### Lifecycle transitions (KRMA-1065 audit)
+### Lifecycle transitions
 
 Who owns what at each cross-feature transition, and the test that pins it. `AppViewModel` stays the
 only published active-document owner; each row is sequencing the root already performs.
@@ -433,12 +432,12 @@ default), holds the security scope for the session, and passes the URL to the vi
 unresolvable or missing choice falls back to the default with a one-time notice and clears only the
 bookmark; the old path is never touched. "Use Default Library" clears the bookmark.
 
-## Launch sequence (KRMA-944)
+## Launch sequence
 
 1. **Process start.** The SwiftPM or Xcode launcher creates `KromoraAppDelegate`.
 2. **Delegate init (no I/O).** It sets window-tabbing and activation policy and creates
    `AppLaunch()` with `KromoraSettings`. No package, lease, recovery or `AppViewModel` work runs in
-   the delegate, `KromoraScene` or `AppLaunch.init`. (Activation policy there is KRMA-945's scope.)
+   the delegate, `KromoraScene` or `AppLaunch.init`.
 3. **First window with the library shell.** `KromoraRootView` shows a progress shell while
    `AppLaunch.viewModel` is nil; its `.task` calls `AppLaunch.open()`. Settings also calls it.
 4. **Open starts.** `open()` resolves the active library (see above), builds `AppViewModel` through
@@ -453,7 +452,7 @@ bookmark; the old path is never touched. "Use Default Library" clears the bookma
 7. **Bind.** The returned `OpenedPackage` is bound on the main actor and `PortableLibrarySession`
    is built.
 8. **Collection/index load.** Binding publishes the collection, then the packed index loads
-   asynchronously (KRMA-557).
+   asynchronously.
 9. **Ready.** `LibraryOpenState` becomes `.ready` and commands enable.
 
 An open failure sets `LibraryOpenState.failed` and publishes one error message.
@@ -466,7 +465,7 @@ released rather than bound. `applicationShouldTerminate` returns `.terminateNow`
 `.task` has run: nothing was opened, so there is nothing to flush or release. Otherwise it goes
 through the termination guard, flush and `shutdown()`.
 
-## Library open (KRMA-984)
+## Library open
 
 `AppLaunch.open()` builds `AppViewModel` immediately with `defersLibraryOpen`, then
 `beginOpeningLibrary` starts `LibraryOpenCoordinator`. The coordinator asks the lease-takeover

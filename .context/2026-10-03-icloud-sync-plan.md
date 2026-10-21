@@ -1,7 +1,7 @@
 # iCloud library sync — evaluation and plan (2026-10-03)
 
 > **Status: proposal.** This is a design and sequencing plan, not current behavior or a release
-> commitment. Cloud sync is a listed post-MVP boundary in [`PRODUCT_SCOPE.md`](../docs/PRODUCT_SCOPE.md),
+> commitment. Cloud sync is a listed limit in the [README](../README.md#important-limits),
 > so Phase 0 below starts with a product decision. Current storage authority remains
 > [`STORAGE_POLICY.md`](../docs/STORAGE_POLICY.md) until a phase ships and that document is updated.
 >
@@ -104,7 +104,7 @@ first."* This plan follows that instruction.
    Sync also adds sandbox-sensitive behavior that the App Store plan's Workstream 0 audit must cover:
    staging downloaded originals on the package volume, the persistent bookmark to the package
    location, and device-local sync state under the sandbox container's Application Support.
-10. **Product scope.** `PRODUCT_SCOPE.md` lists cloud sync as a post-MVP boundary, and
+10. **Product scope.** The README lists cloud sync as a product limit, and
     `STORAGE_POLICY.md` says iCloud Documents sync is out of scope. Both need an explicit, recorded
     decision (ADR) before implementation.
 
@@ -673,7 +673,7 @@ Each phase ships independently and leaves the product in a coherent state.
 
 ## 14. Documentation to update when phases ship
 
-- `PRODUCT_SCOPE.md`: move cloud sync from post-MVP boundaries into scope with stated limits.
+- `README.md`: move cloud sync out of the product limits and into the capabilities, with stated limits.
 - `STORAGE_POLICY.md`: add rows for engine state, ledger, device identity, binding, media journal,
   and CloudKit records. Revise the "iCloud Documents sync is out of scope" paragraph to say a
   package placed in iCloud Drive is still unsupported and CloudKit sync is the mechanism.

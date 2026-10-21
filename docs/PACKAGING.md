@@ -1,6 +1,6 @@
 # App packaging and distribution
 
-This guide is the current reference for building, signing, archiving, and submitting Kromora. Product intent is in [`PRODUCT_SCOPE.md`](PRODUCT_SCOPE.md); test lanes are in [`TESTING.md`](TESTING.md).
+This guide is the current reference for building, signing, archiving, and submitting Kromora. Test lanes are in [`TESTING.md`](TESTING.md).
 
 ## Distribution model
 

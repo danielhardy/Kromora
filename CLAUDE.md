@@ -2,7 +2,7 @@
 
 Kromora targets **macOS 26 (Tahoe) and later on Apple Silicon only**. Prefer current-platform APIs and simplicity over backwards compatibility. Do not implement fallbacks for earlier macOS releases or Intel hardware. Focus on exceptional code quality using the modern API, and recommend current best practices.
 
-Kromora is a native RAW photo editor (**Swift 6 language mode**, SwiftUI + Core Image, **zero third-party dependencies**) with a package-backed Library/Edit/Export workflow. The open package owns library membership, originals, metadata, and edit revisions; folder, Photos, and removable-volume choices are import sources. Local indexes and caches are projections. Existing `EditStore*.store` files remain untouched and are not read as a library fallback. See [`docs/PRODUCT_SCOPE.md`](docs/PRODUCT_SCOPE.md) for MVP intent and boundaries, [`docs/APP_ARCHITECTURE.md`](docs/APP_ARCHITECTURE.md) for current coordinator ownership, [`docs/STORAGE_POLICY.md`](docs/STORAGE_POLICY.md) for durable storage, and [`docs/LIBRARY_PACKAGE_PLAN.md`](docs/LIBRARY_PACKAGE_PLAN.md) for format history.
+Kromora is a native RAW photo editor (**Swift 6 language mode**, SwiftUI + Core Image, **zero third-party dependencies**) with a package-backed Library/Edit/Export workflow. The open package owns library membership, originals, metadata, and edit revisions; folder, Photos, and removable-volume choices are import sources. Local indexes and caches are projections. Existing `EditStore*.store` files remain untouched and are not read as a library fallback. See the [`README`](README.md) for audience, workflow, and limits, [`docs/APP_ARCHITECTURE.md`](docs/APP_ARCHITECTURE.md) for current coordinator ownership, [`docs/STORAGE_POLICY.md`](docs/STORAGE_POLICY.md) for durable storage, and [`docs/LIBRARY_PACKAGE_PLAN.md`](docs/LIBRARY_PACKAGE_PLAN.md) for format history.
 
 ## Build architecture
 
@@ -104,7 +104,7 @@ The package is split so the app's code is testable (`@testable` can't import an 
 - `App/` — production packaging inputs only (`Info.plist`, entitlements, asset catalog, and
   branding); no Swift implementation.
 - `Tests/KromoraKitTests/` — XCTest. **Most fixtures are generated, never committed** (`Fixtures.swift`
-  builds `.cube` files and orientation-tagged JPEGs into a temp dir). Exception (KRMA-459): a small
+  builds `.cube` files and orientation-tagged JPEGs into a temp dir). A small
   set of AI-generated photo-intelligence JPEGs (≤ 5 MB total, each ≤ 500 KB) may be committed under
   the tests target resources with a provenance manifest. Local camera files for the opt-in RAW lane
   belong in the gitignored `realworldtest/` folder and are selected with `KROMORA_RAW_FIXTURE_DIR`

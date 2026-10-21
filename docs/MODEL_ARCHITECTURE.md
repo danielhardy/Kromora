@@ -1,7 +1,6 @@
 # Model and platform boundaries
 
-The intended product scope is in [`PRODUCT_SCOPE.md`](PRODUCT_SCOPE.md); this guide describes the
-current module and platform boundaries.
+This guide describes the current module and platform boundaries.
 
 Kromora uses a one-way dependency direction:
 

@@ -1,6 +1,6 @@
 # Kromora release readiness and code quality review — 2026-10-19
 
-Reviewed `main` at `bb01e0c374fb`, including the pre-existing working-tree changes to
+Historical dated review, not a roadmap or current product guidance. Reviewed `main` at `bb01e0c374fb`, including the pre-existing working-tree changes to
 `ExportWorkflowCoordinator.swift` and its tests. This is a review, not a product implementation
 or a DispatchGraph handoff. Product source, tests, issue records, and existing local changes were
 left untouched. This report is the only repository file added by the review.
@@ -159,7 +159,7 @@ policy. Do not treat an exit-0 build as a clean-diagnostics result without check
   launcher, and an arm64 executable with a macOS 26 deployment floor.
 
 These are visible implementation improvements over the
-[October 14 assessment](2026-10-14-release-readiness-review.md), not just closed ticket labels.
+earlier October 14 assessment, not just closed ticket labels.
 
 ## Remaining quality risks
 

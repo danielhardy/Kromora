@@ -1,7 +1,6 @@
 # Auto performance diagnostics — dated baseline (KRMA-352)
 
 This is dated diagnostic evidence, not a product latency guarantee or roadmap. See
-[`PRODUCT_SCOPE.md`](PRODUCT_SCOPE.md) for current product intent and
 [`TESTING.md`](TESTING.md) for how optional performance checks are interpreted.
 
 How Auto latency is measured, what the numbers mean, and the M1 Pro gate evidence captured on

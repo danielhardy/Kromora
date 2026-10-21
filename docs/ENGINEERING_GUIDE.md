@@ -1,12 +1,9 @@
 # Kromora engineering guide
 
-The product audience, MVP, release bar, and post-MVP boundaries are in
-[`PRODUCT_SCOPE.md`](PRODUCT_SCOPE.md). This guide records durable implementation constraints for
-the current product; completed issue sequences and dated review proposals are not requirements.
-
-This is the durable contributor guide for Kromora's current architecture. The source tree and test
-suite are authoritative when implementation changes; this document records the boundaries that a
-change must preserve.
+This is the durable contributor guide for Kromora's current architecture. It records the
+implementation constraints a change must preserve; completed issue sequences and dated review
+proposals are not requirements. The source tree and test suite are authoritative when
+implementation changes.
 
 ## Application boundaries
 
@@ -52,8 +49,7 @@ view re-evaluates only for values it displays.
   subviews does not narrow this on its own; it would need a per-section projection that updates
   only when its section changes.
 - Verify with the body-count probe (`Tests/KromoraKitTests/Support/BodyProbe.swift`,
-  `ObservationBodyBaselineTests`) in the serial lane; the table and history are in
-  `APP_VIEWMODEL_OBSERVATION_PLAN.md`.
+  `ObservationBodyBaselineTests`) in the serial lane; it counts logical body evaluations, not timings.
 
 ## Value document and render path
 
@@ -234,7 +230,7 @@ preview texture's output encoding. The tag persists across SwiftUI view updates 
 can color-match the canvas to the display, keeping it consistent with color-managed thumbnails and
 exports on Display P3 screens.
 
-**Camera sources and the sRGB canvas (KRMA-1045, 2026-10-19).** The local samples are five iPhone
+**Camera sources and the sRGB canvas.** The local samples are five iPhone
 17 Pro DNGs, one 8-bit iPhone 17 Pro HEIC, and two Sony ILCE-7CR ARWs. ImageIO identifies the DNGs
 as Adobe RAW, the HEIC as HEIC, and the Sony files as Sony ARW; all report Display P3. For RAW,
 Display P3 is the developed `CIImage` color space, not an embedded ICC profile. The HEIC carries a
@@ -357,7 +353,7 @@ in its change summary.
 
 ## Keyboard routing
 
-Kromora has **no `NSEvent` key monitor** (removed in KRMA-920; `KeyboardShortcutCatalogTests` fails
+Kromora has **no `NSEvent` key monitor** (`KeyboardShortcutCatalogTests` fails
 if one returns). A monitor sits ahead of the responder chain and must guess whether a control owns
 a key; every key it declined fell through to AppKit and played the system alert. The responder chain
 now decides, and the app claims the keys it owns:

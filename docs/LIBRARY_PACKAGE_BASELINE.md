@@ -2,8 +2,8 @@
 
 > **Historical baseline:** the folder-backed implementation described here was replaced by the
 > package-backed library. This file preserves pre-cutover measurements only; see
-> [`PRODUCT_SCOPE.md`](PRODUCT_SCOPE.md) and [`STORAGE_POLICY.md`](STORAGE_POLICY.md) for current
-> product and storage behavior.
+> [`STORAGE_POLICY.md`](STORAGE_POLICY.md) and [`APP_ARCHITECTURE.md`](APP_ARCHITECTURE.md) for
+> current storage behavior.
 
 This is the frozen pre-package baseline for the current `ImageCollection` folder-backed library and
 the `AppViewModel` interactive preview submission path. It was captured on 2026-09-12 from commit
