@@ -212,16 +212,17 @@ the saved file can be opened by the user in a regular browser. No local-file pre
 
 ## KRMA-1076 reconciliation
 
-`RetouchExportBoundaryTests` renders one persisted automatic-source Heal document from one source through
-`RenderEngine.render` (in-memory, no asset identity) and through `RenderEngine.encode` (streamed to a
-file, with `PhotoAssetID` and `ExportOptions`), each on a fresh engine, and decodes both PNGs in a common
-sRGB context. In a Debug build and in a Release build (`swift test -c release -Xswiftc -enable-testing`) the
-two paths agree within 1/255. Automatic-source resolution does not read `assetID`, and `exportOptions`
-only changes colour space, bit depth, alpha, metadata and sharpening, which are neutral here. So source
-selection, cache state and streaming versus in-memory encoding are not the cause.
+`RetouchExportBoundaryTests` compares `RenderEngine.render` (in-memory, no asset identity) and
+`RenderEngine.encode` (streamed to a file, with `PhotoAssetID` and `ExportOptions`) on fresh engines,
+then decodes both PNGs in a common context. The test constructs a generated 1200 × 900 image and a new
+Heal document; it does not load the persisted document from the disposable package. Debug and Release
+test runs each compare their two paths within that build and require a maximum byte delta of 1/255.
+This is evidence against a same-build difference between those synthetic render paths, but it does not
+compare Debug output with Release output or establish the effect of a warm cache.
 
-What remains is the Debug-harness versus signed-Release-app comparison at camera scale (2,023 pixels,
-max 2/255, confined to the repair). It was not reproduced at that scale and was not attributed to build
-mode: the synthetic frame is 1200 × 900, not the 8064 × 6048 DNG-derived fixture. Core Image is already
-documented in `PixelAssertions.swift` as not bit-reproducible across time-separated runs. Treat it as
-an unattributed numeric variation, not a product defect, with no visual verdict implied.
+The original signed-Release-app versus Debug-harness result remains: 2,023 of 48,771,072 pixels differ,
+within x=4646–4707, y=756–815, by at most 2/255 per channel. That camera-scale variation was not
+reproduced by the synthetic test and is not attributed to build mode or Core Image time variation. The
+general observation in `PixelAssertions.swift` that occasional bytes move by 1 does not establish a
+2/255 tolerance for this result. Keep the comparison unresolved; no cross-build tolerance or human
+visual verdict is established.

@@ -6,9 +6,10 @@ import XCTest
 
 /// KRMA-1076: the signed app's full-size PNG export (`ExportCoordinator` → `RenderEngine.encode` with
 /// asset identity and export options, streamed to a file) must carry the same retouch pixels as the
-/// in-memory `RenderEngine.render` path the qualification harness uses. This pins the boundary in one
-/// build, with one source and one persisted document, so a difference here is a product inconsistency
-/// and a difference only across builds or time-separated runs is not.
+/// in-memory `RenderEngine.render` path the qualification harness uses. This pins the boundary within
+/// one build using one generated source and document. It does not establish whether the previously
+/// observed difference between a signed Release app and a Debug harness is caused by build mode or
+/// time-separated Core Image evaluation.
 final class RetouchExportBoundaryTests: TempDirectoryTestCase {
     private let width = 1200, height = 900
 
