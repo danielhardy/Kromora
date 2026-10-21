@@ -88,23 +88,41 @@ omission disposition. Brick was not separately exercised; water supplies the row
 | Fresh store reload preserves full recipe | Pass, 27/27 | Document equality includes mask samples, source offsets, modes and defaults |
 | Close package lease, reopen, fresh renderer, full-frame export equality | Pass, 6/6 final representatives | All modes of 01-sky-dust and 13-cloud-edge-fibre; full-frame decoded RGBA equality |
 | Signed app opens test package and saved recipe | Pass | App showed 27 assets; selected 01-sky-dust-auto-heal had one saved repair |
-| Signed app File export and relaunch persistence | Not run to completion | Focused export commands were disabled while app was background; after user foregrounded it, automation reported macOS locked |
-| Restore original default library | Pending | Awaiting screen unlock to use Settings > Use Default Library > Relaunch; personal package has not been retouched |
+| Signed app File export | Pass: full resolution, readable PNG | `ui-exports/01-sky-dust-auto-heal.png.png`, 8064 × 6048; app displayed Export complete |
+| Signed app repair after normal quit/reopen | Pass: saved recipe present | Reopened the same photo; Heal inspector showed 1 spot. This checks saved recipe presence, not a second export after relaunch |
+| Signed app export versus harness full-frame pixels | Not exact | 2,023 of 48,771,072 pixels differ, confined to the repair at inclusive bounds x=4646–4707, y=756–815; maximum RGB channel difference 2/255. All other pixels match. No cause or visual acceptance inferred; KRMA-1076 tracks reconciliation |
+| Restore original default library | Pass | Settings > Use Default Library > Relaunch; default path shown and Use Default disabled; replacement app showed 56 of 56 photos |
 
 `package-reopen.json` also contains three excluded case-09 calibration checks; those are not counted
 in the six final representatives above. Rendering in a fresh engine/package is recorded separately
 from launching the signed app. No display-bound performance capture was run.
 
-## Live-session boundary and remaining work
+## Live-session completion and remaining human review
 
 The app originally used the default personal package (`~/Pictures/Kromora Library.kromoralibrary`).
-Its photos were not modified. Settings temporarily selects the disposable `Retouch Review Library`.
-The first normal Settings relaunch safely released the personal writer lease and opened the test
-package. UI access later required foregrounding; the user confirmed foregrounding, but the next
-accessibility call reported the Mac locked. A screen-unlock request is pending. Do not describe the
-personal-library restoration or the remaining signed-app export/relaunch check as complete.
+Its photos were not modified. The first normal Settings relaunch safely released that writer lease
+and opened the disposable package. Screen locking interrupted the initial session; the user later
+unlocked the Mac and explicitly confirmed Kromora was frontmost.
 
-After unlock, finish a representative signed-app full-resolution export, quit/reopen to confirm the
-saved repair, then restore Default Library and verify the original 56-photo library opens. The human
-can review the prepared 27 comparisons without repeating their setup or drawing the repairs. Retain
-human review until the actual pixels and missing skin row have been assessed.
+On continuation (2026-10-20, America/Boise), File > Export was enabled. Codex selected PNG, kept
+metadata/GPS/sharpening/naming options unchanged, and chose the local `ui-exports` directory. The
+app displayed **Export complete** and **Exported 1 image to ui-exports**. The file decodes at native
+8064 × 6048. Full-frame comparison in a common sRGB RGBA CGContext found the small, localized
+numeric difference recorded above; `ui-export-check.json` and `ui-export-difference.json` retain the
+measurements, and `compare-ui.swift` is the local comparison helper. Debug-linked harness versus
+Release packaged app and automatic-source/encoding paths have not been isolated as causes. This is
+not an exact-match pass or an established visible defect.
+
+Codex used Quit Kromora, confirmed the packaged process exited, reopened the same executable, and
+opened `01-sky-dust-auto-heal.png`. The Heal inspector showed the persisted one-spot recipe. Codex
+then used Settings > Use Default Library > Relaunch. Settings displayed the original default path
+with Use Default Library disabled, and the replacement app opened the **56 of 56** personal library.
+The disposable writer lease was released normally. Export format/quality are session-only settings
+and reset to the original JPEG/95% defaults on relaunch; the configured export-folder default was
+unchanged (`Pictures/Kromora Exports`). The app is left open in the normal Library view.
+
+The human can now review the 27 prepared comparisons without repeating setup, drawing repairs,
+exporting, or relaunching. The viewer also links the actual signed-app PNG and its native repair crop.
+Retain human review until the actual pixels and missing skin row have been assessed. KRMA-1076 owns
+reconciliation of the bounded numeric discrepancy; KRMA-1075 owns the library picker issue. No product
+source was changed under this qualification ticket.
