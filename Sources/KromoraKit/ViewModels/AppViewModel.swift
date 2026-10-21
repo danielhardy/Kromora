@@ -323,7 +323,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
     }
 
     private var activeAssetID: PhotoAssetID?
-    private var activeSourceReference: EditSourceReference? {
+    private(set) var activeSourceReference: EditSourceReference? {
         didSet { virtualCopyMetadata?.activeAssetChanged(to: activeSourceReference?.portableAssetID) }
     }
     /// Cached copy-relationship snapshot for the inspector; nil without a portable library.
@@ -359,7 +359,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
     /// and selection/audition decisions. The document stays here; see `LookSelectionCoordinator`.
     @ObservationIgnored private lazy var lookSelection = LookSelectionCoordinator(library: library)
     /// Package-backed edit history, named snapshots, and virtual-copy I/O for the active photo.
-    @ObservationIgnored private lazy var editHistory = EditHistoryCoordinator(
+    @ObservationIgnored lazy var editHistory = EditHistoryCoordinator(
         store: editStore,
         environment: .init(
             activeSourceReference: { [weak self] in self?.activeSourceReference },
@@ -752,7 +752,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
     let lookSave = LookSaveCoordinator()
     let libraryMediaWorkflow: LibraryMediaWorkflowCoordinator
     private let libraryDeletionCoordinator: LibraryDeletionCoordinator
-    @ObservationIgnored private lazy var libraryBrowsingCoordinator = LibraryBrowsingCoordinator(
+    @ObservationIgnored lazy var libraryBrowsingCoordinator = LibraryBrowsingCoordinator(
         collection: collection, library: portableLibrary, destination: self,
         scheduler: workScheduler, frameStore: thumbnailFrameStore,
         hintsStore: LaunchHintsStore(url: KromoraStorage.launchHintsURL())

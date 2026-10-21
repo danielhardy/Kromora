@@ -6,6 +6,7 @@ struct FilmstripView: View {
     @Bindable var collection: ImageCollection
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     let settings: KromoraSettings
+    let viewModel: AppViewModel
     let onSelect: (Int, LibrarySelectionModel.Modifiers) -> Void
 
     var body: some View {
@@ -35,6 +36,13 @@ struct FilmstripView: View {
                             // belong to the app-level key surface (`KeyboardSurface`), and a focused
                             // NSButton would strand them on a control that cannot use them.
                             .focusable(false)
+                            .overlay {
+                                LibraryContextClickRetarget {
+                                    viewModel.retargetLibrarySelection(toContext: item.id)
+                                }
+                                .accessibilityHidden(true)
+                            }
+                            .contextMenu { LibraryContextMenuItems(viewModel: viewModel, photoID: item.id) }
                             // Use the source ID for navigation scrolling; the collection keeps the
                             // reservation ID internally so this cell can be replaced in place.
                             .id(item.id)

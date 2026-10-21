@@ -101,6 +101,7 @@ struct LibraryGridView: View {
                                     admittedThumbnailIDs: admittedThumbnailIDs,
                                     onSelect: select(id:flags:),
                                     onOpen: onOpen,
+                                    viewModel: viewModel,
                                     onAppearIndex: { viewModel.loadMorePortableIfNeeded(currentIndex: $0) }
                                 )
                             }
@@ -297,6 +298,7 @@ private struct LibraryGridRow: View {
     let admittedThumbnailIDs: [PhotoAssetID]
     let onSelect: (PhotoAssetID, NSEvent.ModifierFlags) -> Void
     let onOpen: (PhotoAssetID) -> Void
+    let viewModel: AppViewModel
     var onAppearIndex: ((Int) -> Void)? = nil
 
     var body: some View {
@@ -333,6 +335,13 @@ private struct LibraryGridRow: View {
                         )
                         .accessibilityHidden(true)
                     }
+                    .overlay {
+                        LibraryContextClickRetarget {
+                            viewModel.retargetLibrarySelection(toContext: item.id)
+                        }
+                        .accessibilityHidden(true)
+                    }
+                    .contextMenu { LibraryContextMenuItems(viewModel: viewModel, photoID: item.id) }
                     .accessibilityAction { onOpen(item.id) }
                     .accessibilityAddTraits(
                         collection.selection.selectedIDs.contains(item.id) ? .isSelected : []

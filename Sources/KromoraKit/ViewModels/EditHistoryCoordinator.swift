@@ -186,24 +186,31 @@ final class EditHistoryCoordinator {
     @discardableResult
     func createVirtualCopy(
         of reference: EditSourceReference,
+        storedDocument: (@MainActor () async throws -> EditDocument)? = nil,
         makeCopy: @escaping @MainActor () async throws -> VirtualCopy,
         didCreate: @escaping @MainActor (VirtualCopy) throws -> Void
     ) -> Task<Void, Never>? {
         guard !isShutDown, !isCreatingVirtualCopy else { return nil }
         isCreatingVirtualCopy = true
         environment.endUndoGrouping()
-        let document = environment.currentDocument()
+        // A photo that is not the open one is copied from its durable edit, so the active
+        // document is never mistaken for it and the active-photo fence does not apply.
+        let isInactive = storedDocument != nil
+        let activeDocument = environment.currentDocument()
         return spawn { [self, store, environment] in
             defer { isCreatingVirtualCopy = false }
             guard await environment.flushPersistence() else { return }
-            guard environment.activeSourceReference() == reference else { return }
+            if !isInactive, environment.activeSourceReference() != reference { return }
+            @MainActor func isStillValid() -> Bool { isInactive ? !isShutDown : isCurrent(reference) }
             do {
+                let document: EditDocument
+                if let storedDocument { document = try await storedDocument() } else { document = activeDocument }
                 let copy = try await makeCopy()
                 try await store.save(document, for: copy.sourceReference)
-                guard isCurrent(reference) else { return }
+                guard isStillValid() else { return }
                 try didCreate(copy)
             } catch {
-                guard isCurrent(reference) else { return }
+                guard isStillValid() else { return }
                 environment.reportStatus("Could not create virtual copy: \(error.localizedDescription)")
             }
         }

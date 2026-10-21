@@ -44,6 +44,7 @@ final class EditClipboardCoordinator {
     @ObservationIgnored private let editor: EditorDocumentCoordinator
     @ObservationIgnored private let settings: KromoraSettings
     @ObservationIgnored private var pasteTask: Task<Void, Never>?
+    @ObservationIgnored private var copyTask: Task<Void, Never>?
 
     init(
         editor: EditorDocumentCoordinator,
@@ -93,6 +94,31 @@ final class EditClipboardCoordinator {
         }
         copy(document: destination.clipboardDocument, categories: Set(EditClipboardPayload.Category.allCases))
         destination.setClipboardStatus("Copied all edits from \(destination.clipboardSourceName)")
+    }
+
+    /// Copies the durable edit of a photo that is not the open one (the context-menu source).
+    /// The open photo copies its live document instead, so unsaved slider changes are included.
+    func copyAllEdits(from reference: EditSourceReference, name: String) {
+        guard let destination else { return }
+        if destination.clipboardActiveSourceReference == reference, destination.clipboardHasCopySource {
+            copyAllEdits()
+            return
+        }
+        copyTask?.cancel()
+        copyTask = Task { @MainActor [weak self] in
+            guard let self, let destination = self.destination else { return }
+            destination.flushClipboardPersistence()
+            let result = await destination.loadClipboardBase(for: reference)
+            guard !Task.isCancelled else { return }
+            switch result.status {
+            case .ready, .relinked:
+                self.copy(
+                    document: result.document, categories: Set(EditClipboardPayload.Category.allCases))
+                destination.setClipboardStatus("Copied all edits from \(name)")
+            default:
+                destination.setClipboardStatus("Could not read the edits of \(name)")
+            }
+        }
     }
 
     private func copy(document: EditDocument, categories: Set<EditClipboardPayload.Category>) {
@@ -212,6 +238,8 @@ final class EditClipboardCoordinator {
     func stop() {
         pasteTask?.cancel()
         pasteTask = nil
+        copyTask?.cancel()
+        copyTask = nil
     }
 
     private func applyToActiveDocument(

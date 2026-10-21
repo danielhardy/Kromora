@@ -349,6 +349,29 @@ final class EditHistoryCoordinatorTests: XCTestCase {
         XCTAssertTrue(host.statuses.last?.hasPrefix("Could not create virtual copy") == true)
     }
 
+    func testVirtualCopySkipsCopyCreationWhenStoredEditsCannotBeRead() async throws {
+        let store = FakeStore()
+        let host = Host()
+        host.reference = referenceA
+        let coordinator = makeCoordinator(store: store, host: host)
+        let copy = EditHistoryCoordinator.VirtualCopy(
+            sourceReference: referenceB, displayName: "Copy", assetID: PortablePhotoAssetID()
+        )
+        var makeCopyCalled = false
+
+        await coordinator.createVirtualCopy(
+            of: referenceB,
+            storedDocument: { throw CocoaError(.fileReadCorruptFile) },
+            makeCopy: { makeCopyCalled = true; return copy },
+            didCreate: { _ in XCTFail("a failed edit read must not create a virtual copy") }
+        )?.value
+
+        XCTAssertFalse(makeCopyCalled)
+        let savedDocuments = await store.savedDocuments
+        XCTAssertTrue(savedDocuments.isEmpty)
+        XCTAssertTrue(host.statuses.last?.hasPrefix("Could not create virtual copy") == true)
+    }
+
     @MainActor
     private final class CopyGate {
         private var entered: CheckedContinuation<Void, Never>?

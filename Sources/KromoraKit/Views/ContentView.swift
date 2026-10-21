@@ -255,7 +255,8 @@ public struct ContentView: View {
                                     )
                                     FilmstripView(
                                         collection: collection,
-                                        settings: viewModel.settings
+                                        settings: viewModel.settings,
+                                        viewModel: viewModel
                                     ) { index, modifiers in
                                         viewModel.selectCollectionImage(at: index, modifiers: modifiers)
                                     }

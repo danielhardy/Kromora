@@ -274,6 +274,32 @@ final class ExportWorkflowCoordinator {
         }
     }
 
+    /// Share exactly the selection (one photo included), never the open photo.
+    func shareSelectedPhotos() {
+        guard !refusedWhileBusy() else { return }
+        shareSelectedExports()
+    }
+
+    /// Copy the developed output of the selection (or the open photo with no selection) to the
+    /// system pasteboard.
+    func copySelectedImages() {
+        guard let destination, !refusedWhileBusy() else { return }
+        let request = destination.exportBatchRequest(selectedOnly: true)
+        guard !request.items.isEmpty else {
+            destination.setExportStatus("Select at least one photo to copy")
+            return
+        }
+        let items = request.items.map { item in
+            ShareCopyItem { [weak self] options in
+                guard let self else { throw CocoaError(.userCancelled) }
+                return try await self.export.renderEncodedData(
+                    for: item, document: request.document, lut: request.lut, options: options
+                )
+            }
+        }
+        Task { @MainActor [weak self] in await self?.copyToPasteboard(items) }
+    }
+
     private func shareSelectedExports() {
         guard let destination else { return }
         let request = destination.exportBatchRequest(selectedOnly: true)
