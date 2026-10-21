@@ -24,7 +24,9 @@ final class CropKeyboardWindowTests: TempDirectoryTestCase {
         override var acceptsFirstResponder: Bool { true }
         override func keyDown(with event: NSEvent) { interpretKeyEvents([event]) }
         override func doCommand(by selector: Selector) {
-            if !tryToPerform(selector, with: nil) { window?.noResponder(for: #selector(NSResponder.keyDown(with:))) }
+            if !tryToPerform(selector, with: nil) {
+                window?.noResponder(for: #selector(NSResponder.keyDown(with:)))
+            }
         }
     }
 
@@ -63,10 +65,12 @@ final class CropKeyboardWindowTests: TempDirectoryTestCase {
         await viewModel.collection.scanCompletion()
         viewModel.collection.setSelection(at: 0)
         XCTAssertTrue(viewModel.navigate(to: .edit))
-        viewModel.sourceImage = CIImage(color: .gray).cropped(to: CGRect(x: 0, y: 0, width: 8, height: 8))
+        viewModel.sourceImage = CIImage(color: .gray).cropped(
+            to: CGRect(x: 0, y: 0, width: 8, height: 8))
 
         let textInputView = TextInputStyleView(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
-        let hosting = NSHostingView(rootView: WindowContent(viewModel: viewModel, textInputView: textInputView))
+        let hosting = NSHostingView(
+            rootView: WindowContent(viewModel: viewModel, textInputView: textInputView))
         let window = ProbeWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1100, height: 720),
             styleMask: [.titled, .resizable], backing: .buffered, defer: false
@@ -81,11 +85,14 @@ final class CropKeyboardWindowTests: TempDirectoryTestCase {
 
     private func send(_ chars: String, code: UInt16, in window: NSWindow) {
         for type in [NSEvent.EventType.keyDown, .keyUp] {
-            NSApp.sendEvent(NSEvent.keyEvent(
-                with: type, location: .zero, modifierFlags: [], timestamp: 0,
-                windowNumber: window.windowNumber, context: nil, characters: chars,
-                charactersIgnoringModifiers: chars, isARepeat: false, keyCode: code
-            )!)
+            // These keys have no app-level menu equivalent. Deliver them to the target window so
+            // this exercises its real responder chain without requiring XCTest to be foreground.
+            window.sendEvent(
+                NSEvent.keyEvent(
+                    with: type, location: .zero, modifierFlags: [], timestamp: 0,
+                    windowNumber: window.windowNumber, context: nil, characters: chars,
+                    charactersIgnoringModifiers: chars, isARepeat: false, keyCode: code
+                )!)
         }
     }
 
@@ -96,7 +103,7 @@ final class CropKeyboardWindowTests: TempDirectoryTestCase {
     }
 
     private static let keys: [(name: String, chars: String, code: UInt16, applies: Bool)] = [
-        ("Escape", "\u{1b}", 53, false), ("Return", "\r", 36, true)
+        ("Escape", "\u{1b}", 53, false), ("Return", "\r", 36, true),
     ]
 
     /// Every focusable view in the window (the SwiftUI key-view proxy, toolbar and inspector
@@ -110,7 +117,9 @@ final class CropKeyboardWindowTests: TempDirectoryTestCase {
         for key in Self.keys {
             f.viewModel.beginCrop()
             try await Task.sleep(for: .milliseconds(300))
-            var states: [(String, NSResponder)] = [("entry", try XCTUnwrap(f.window.firstResponder))]
+            var states: [(String, NSResponder)] = [
+                ("entry", try XCTUnwrap(f.window.firstResponder))
+            ]
             states += Self.focusable(in: root).map { (String(describing: type(of: $0)), $0) }
             states += [("window", f.window), ("hosting view", root)]
             for item in f.window.toolbar?.items ?? [] {
@@ -124,7 +133,9 @@ final class CropKeyboardWindowTests: TempDirectoryTestCase {
                 f.window.unclaimed = 0
                 send(key.chars, code: key.code, in: f.window)
                 if f.viewModel.isCropToolActive || f.window.unclaimed != 0 {
-                    failures.append("\(key.name) | \(state) | active=\(f.viewModel.isCropToolActive) beeps=\(f.window.unclaimed)")
+                    failures.append(
+                        "\(key.name) | \(state) | active=\(f.viewModel.isCropToolActive) beeps=\(f.window.unclaimed)"
+                    )
                 }
             }
             if f.viewModel.isCropToolActive { f.viewModel.cancelCrop() }
@@ -145,7 +156,9 @@ final class CropKeyboardWindowTests: TempDirectoryTestCase {
             send(key.chars, code: key.code, in: f.window)
             XCTAssertFalse(f.viewModel.isCropToolActive, "\(key.name) must end the crop")
             XCTAssertEqual(f.window.unclaimed, 0, "\(key.name) must not beep")
-            XCTAssertEqual(!f.viewModel.document.crop.isIdentity, key.applies, "\(key.name) applies=\(key.applies)")
+            XCTAssertEqual(
+                !f.viewModel.document.crop.isIdentity, key.applies,
+                "\(key.name) applies=\(key.applies)")
             f.viewModel.resetCrop()
             f.viewModel.updateDocument { $0.crop = .neutral }
         }
