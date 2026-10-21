@@ -37,7 +37,30 @@ final class StoredFrameExtentTests: XCTestCase {
         XCTAssertEqual(size.width / size.height, aspect, accuracy: 1e-9)
     }
 
-    func testDisagreementBeyondOnePixelKeepsRasterDimensions() {
+    func testCanonicalDownsamplingCompensatesForStackedWholePixelRounding() {
+        // A 1000×562 whole-pixel render becomes 2048×1150 after uniform downsampling and
+        // flooring. For a 16:9 planned crop, the stored frame needs a virtual height of 1152;
+        // the previous one-pixel limit left its aspect mismatched and caused a small canvas shift.
+        let aspect = 16.0 / 9.0
+        let size = AppViewModel.storedFramePresentationExtent(
+            metadata(width: 2048, height: 1150, aspect: aspect)
+        )
+        XCTAssertEqual(size.width, 2048)
+        XCTAssertEqual(size.height, 1152, accuracy: 1e-9)
+        XCTAssertEqual(size.width / size.height, aspect, accuracy: 1e-9)
+    }
+
+    func testPortraitCanonicalDownsamplingCompensatesForStackedWholePixelRounding() {
+        let aspect = 9.0 / 16.0
+        let size = AppViewModel.storedFramePresentationExtent(
+            metadata(width: 1150, height: 2048, aspect: aspect)
+        )
+        XCTAssertEqual(size.width, 1152, accuracy: 1e-9)
+        XCTAssertEqual(size.height, 2048)
+        XCTAssertEqual(size.width / size.height, aspect, accuracy: 1e-9)
+    }
+
+    func testDisagreementBeyondRoundingBoundKeepsRasterDimensions() {
         let size = AppViewModel.storedFramePresentationExtent(
             metadata(width: 2048, height: 1366, aspect: 1.0)
         )

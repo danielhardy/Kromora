@@ -2346,13 +2346,21 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         let width = CGFloat(metadata.pixelWidth), height = CGFloat(metadata.pixelHeight)
         let aspect = CGFloat(metadata.geometry.orientedAspectRatio)
         guard aspect.isFinite, aspect > 0 else { return CGSize(width: width, height: height) }
-        // Only correct a sub-pixel disagreement; a larger one means the frame is not this crop's.
+        // The settled preview is first snapped to whole render pixels, then downsampled to the
+        // canonical raster. Those two rounding steps can compound to several canonical pixels,
+        // even when the frame metadata describes this exact crop. Keep a small bound so unrelated
+        // or malformed geometry cannot stretch the candidate across the canvas.
+        let maximumAspectCorrectionPixels: CGFloat = 8
         if width >= height {
             let corrected = width / aspect
-            return abs(corrected - height) <= 1 ? CGSize(width: width, height: corrected) : CGSize(width: width, height: height)
+            return abs(corrected - height) <= maximumAspectCorrectionPixels
+                ? CGSize(width: width, height: corrected)
+                : CGSize(width: width, height: height)
         }
         let corrected = height * aspect
-        return abs(corrected - width) <= 1 ? CGSize(width: corrected, height: height) : CGSize(width: width, height: height)
+        return abs(corrected - width) <= maximumAspectCorrectionPixels
+            ? CGSize(width: corrected, height: height)
+            : CGSize(width: width, height: height)
     }
 
     private func presentProvisionalCandidate(
