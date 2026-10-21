@@ -301,13 +301,13 @@ claimed until KRMA-1063 is recorded.
 
 ## Camera-scale acceptance run sheet (KRMA-1063)
 
-Status: **Mechanically executed; human visual review Not run.** The
-[2026-10-20 execution record](../.context/2026-10-20-KRMA-1063-retouch-qualification.md) links 27 local
-native-size comparisons and records mechanical export/persistence checks, the missing skin fixture,
-the completed live-app check, and a bounded app/harness pixel discrepancy. No row below is a pass until a reviewer has assessed the actual
-pixels at 100% source scale. Evidence is the local fixture filename plus
-a reviewer note; never commit or upload the photographs. Use copies of the licensed fixtures in
-`realworldtest/` (see its README) in a confirmed disposable library/profile, never an active one.
+Status: **Human review recorded: 23 Pass, 4 Fail; skin detail Not run.** The
+[2026-10-20 execution record](../.context/2026-10-20-KRMA-1063-retouch-qualification.md) records the
+supplied verdicts and notes, mechanical export/persistence checks, controlled-fixture limitations,
+and the durable local archive at `artifacts/retouch-review-2026-10-20/Kromora Retouch Review.html`.
+All nine auto-source Heal cases passed. KRMA-1077 tracks the failed foliage Manual Heal case;
+the three Clone failures retain the reviewer's minor/close assessments. This is not blanket release
+approval, and the missing skin row remains explicit. Private photographs stay out of Git and uploads.
 
 Run header (fill at run time): candidate commit; signing type (ad hoc / Apple-signed); macOS version;
 machine; reviewer; date; fixture identifiers with source pixel dimensions (resolve from `realworldtest/`
@@ -315,12 +315,12 @@ filenames, for example the two ARW files for 24 MP+ coverage and the DNG files f
 
 | # | Background / defect | Heal (manual) | Heal (auto source) | Clone | Notes |
 |---|---|---|---|---|---|
-| 1 | Sky or cloud: soft dust | Not run | Not run | Not run | |
-| 2 | Sky or cloud edge: hard speck | Not run | Not run | Not run | |
-| 3 | Sky or cloud edge: hair/fibre | Not run | Not run | Not run | |
-| 4 | Textured foliage: dust/speck and hair | Not run | Not run | Not run | |
-| 5 | Water or brick: dust/speck and hair | Not run | Not run | Not run | |
-| 6 | Skin-like detail: dust/speck | Not run | Not run | Not run | |
+| 1 | Sky or cloud: soft dust | Pass | Pass | Pass | 01-sky-dust |
+| 2 | Sky or cloud edge: hard speck | Pass 2/2 | Pass 2/2 | Pass 2/2 | 02-cloud-speck, 08-cloud-edge-speck |
+| 3 | Sky or cloud edge: hair/fibre | Pass 2/2 | Pass 2/2 | 1 Pass, 1 Fail | 10 Clone Fail is minor per reviewer; 13 Clone Pass |
+| 4 | Textured foliage: dust/speck and hair | 1 Pass, 1 Fail | Pass 2/2 | Pass 2/2 | 04 manual Heal: dark branch, KRMA-1077; 11 Pass |
+| 5 | Water or brick: dust/speck and hair | Pass 2/2 | Pass 2/2 | Fail 2/2 | 06 and 12 Clone: minor/close per reviewer; water tested |
+| 6 | Skin-like detail: dust/speck | Not run | Not run | Not run | No representative crop available |
 
 Per cell, inspect at 100% and record: remaining defect, halo or seam, blur or texture loss, duplicated
 structure, and source-patch contamination. Omit a row only with an explicit "no representative crop

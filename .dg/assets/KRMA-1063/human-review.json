@@ -1,0 +1,141 @@
+{
+  "candidate": "116f14fddaa4fc780418957aee4932e8717057c1",
+  "decisions": {
+    "08-cloud-edge-speck-clone": {
+      "verdict": "Pass",
+      "notes": "",
+      "date": "2026-10-21T03:57:30.075Z"
+    },
+    "08-cloud-edge-speck-auto-heal": {
+      "verdict": "Pass",
+      "notes": "",
+      "date": "2026-10-21T03:57:42.637Z"
+    },
+    "08-cloud-edge-speck-manual-heal": {
+      "verdict": "Pass",
+      "notes": "",
+      "date": "2026-10-21T03:57:44.894Z"
+    },
+    "10-cloud-fibre-manual-heal": {
+      "verdict": "Pass",
+      "notes": "",
+      "date": "2026-10-21T03:57:50.138Z"
+    },
+    "10-cloud-fibre-auto-heal": {
+      "verdict": "Pass",
+      "notes": "",
+      "date": "2026-10-21T03:57:52.839Z"
+    },
+    "10-cloud-fibre-clone": {
+      "verdict": "Fail",
+      "notes": "this is really minor and likely not worth worrying about",
+      "date": "2026-10-21T03:58:41.244Z"
+    },
+    "11-foliage-fibre-clone": {
+      "verdict": "Pass",
+      "notes": "",
+      "date": "2026-10-21T03:58:12.128Z"
+    },
+    "11-foliage-fibre-auto-heal": {
+      "verdict": "Pass",
+      "notes": "",
+      "date": "2026-10-21T03:58:16.079Z"
+    },
+    "11-foliage-fibre-manual-heal": {
+      "verdict": "Pass",
+      "notes": "",
+      "date": "2026-10-21T03:58:20.032Z"
+    },
+    "13-cloud-edge-fibre-clone": {
+      "verdict": "Pass",
+      "notes": "",
+      "date": "2026-10-21T03:58:57.181Z"
+    },
+    "13-cloud-edge-fibre-auto-heal": {
+      "verdict": "Pass",
+      "notes": "",
+      "date": "2026-10-21T03:59:01.065Z"
+    },
+    "13-cloud-edge-fibre-manual-heal": {
+      "verdict": "Pass",
+      "notes": "",
+      "date": "2026-10-21T03:59:03.752Z"
+    },
+    "12-water-fibre-manual-heal": {
+      "verdict": "Pass",
+      "notes": "",
+      "date": "2026-10-21T03:59:08.513Z"
+    },
+    "12-water-fibre-auto-heal": {
+      "verdict": "Pass",
+      "notes": "",
+      "date": "2026-10-21T03:59:11.536Z"
+    },
+    "12-water-fibre-clone": {
+      "verdict": "Fail",
+      "notes": "Again not worth worrying about",
+      "date": "2026-10-21T03:59:23.273Z"
+    },
+    "06-water-speck-clone": {
+      "verdict": "Fail",
+      "notes": "Not worth worrying about as it is close",
+      "date": "2026-10-21T03:59:45.251Z"
+    },
+    "06-water-speck-auto-heal": {
+      "verdict": "Pass",
+      "notes": "",
+      "date": "2026-10-21T03:59:46.764Z"
+    },
+    "06-water-speck-manual-heal": {
+      "verdict": "Pass",
+      "notes": "",
+      "date": "2026-10-21T03:59:49.017Z"
+    },
+    "04-foliage-dust-manual-heal": {
+      "verdict": "Fail",
+      "notes": "Just got a dark branch",
+      "date": "2026-10-21T04:00:15.573Z"
+    },
+    "04-foliage-dust-auto-heal": {
+      "verdict": "Pass",
+      "notes": "",
+      "date": "2026-10-21T04:00:16.695Z"
+    },
+    "04-foliage-dust-clone": {
+      "verdict": "Pass",
+      "notes": "",
+      "date": "2026-10-21T04:00:20.320Z"
+    },
+    "02-cloud-speck-clone": {
+      "verdict": "Pass",
+      "notes": "",
+      "date": "2026-10-21T04:00:25.479Z"
+    },
+    "02-cloud-speck-auto-heal": {
+      "verdict": "Pass",
+      "notes": "",
+      "date": "2026-10-21T04:00:28.231Z"
+    },
+    "02-cloud-speck-manual-heal": {
+      "verdict": "Pass",
+      "notes": "",
+      "date": "2026-10-21T04:00:30.385Z"
+    },
+    "01-sky-dust-manual-heal": {
+      "verdict": "Pass",
+      "notes": "",
+      "date": "2026-10-21T04:00:34.622Z"
+    },
+    "01-sky-dust-auto-heal": {
+      "verdict": "Pass",
+      "notes": "",
+      "date": "2026-10-21T04:00:37.323Z"
+    },
+    "01-sky-dust-clone": {
+      "verdict": "Pass",
+      "notes": "",
+      "date": "2026-10-21T04:00:40.172Z"
+    }
+  },
+  "skin": "Not run — no representative crop"
+}

@@ -1,8 +1,8 @@
 # Retouch qualification execution — 2026-10-20
 
 Historical execution record for KRMA-1063. Codex prepared and ran camera-scale comparisons at the
-user's request. **Human visual acceptance remains Not run.** This record does not close KRMA-1016's
-retouch release gate.
+user's request. **Human review is recorded: 23 Pass, 4 Fail; skin detail Not run.** The foliage Manual Heal finding keeps
+KRMA-1016's retouch release gate open; skin coverage is explicitly omitted.
 
 ## Candidate and environment
 
@@ -10,14 +10,24 @@ retouch release gate.
 - App: `.build/xcode/Build/Products/Release/Kromora.app`, ad hoc signed. `scripts/app-store-build.sh`
   passed packaging, signature, sandbox-entitlement and resource checks.
 - macOS 27.2 (26B118), Mac mini Apple M4 Pro, 48 GB. Target remains macOS 26 / Apple Silicon.
-- Execution: Codex, 2026-10-20. Human pixel reviewer: pending.
+- Execution: Codex, 2026-10-20. Human pixel reviewer: the user; supplied review export records
+  27 decisions from 2026-10-20, 21:57–22:00 America/Boise (timestamps stored in UTC).
 - Local licensed sources: copies of `realworldtest/IMG_0371.DNG`, `IMG_0878.DNG`, and `IMG_1370.DNG`.
   Each neutral develop is 8064 × 6048. SHA-256 hashes of the copies match the originals; hashes and
   dimensions are in the local `fixtures.json`.
 
 ## Method and scope
 
-All photo evidence is ignored under `.build/krma1063-evidence/`; no photos are committed or uploaded.
+Original photo evidence is ignored under `.build/krma1063-evidence/`; a durable copy of the reviewed
+crops, final full-resolution outputs, metadata, helpers and supplied verdicts is saved under ignored
+`artifacts/retouch-review-2026-10-20/`. No photos are committed or uploaded.
+
+Open `artifacts/retouch-review-2026-10-20/Kromora Retouch Review.html` in a regular browser for the saved
+viewer. Its 46 review images and supplied decisions are embedded in the HTML, so the review itself
+needs no server or build cache. Keep the adjacent `exports/` and `ui-exports/` folders for the optional
+full-resolution links. `human-review.json`, `reviewed-results.json`, and `archive-manifest.json` preserve
+the supplied verdicts and provenance. The raw, photo-free review export is also committed as
+[human-review.json](../.dg/assets/KRMA-1063/human-review.json).
 Open the local viewer at `http://127.0.0.1:8765/review.html` while its loopback-only server is running,
 or open `.build/krma1063-evidence/review.html` in a browser. To restart the viewer:
 
@@ -64,18 +74,18 @@ All three mode columns below are **human verdicts**. Mechanical success does not
 
 | Row | Background / defect | Local case IDs | Manual Heal | Auto source Heal | Clone |
 |---|---|---|---|---|---|
-| 1 | Sky / soft dust | 01-sky-dust | Not run | Not run | Not run |
-| 2 | Cloud texture and cloud edge / hard speck | 02-cloud-speck, 08-cloud-edge-speck | Not run | Not run | Not run |
-| 3 | Cloud texture and cloud edge / continuous fibre | 10-cloud-fibre, 13-cloud-edge-fibre | Not run | Not run | Not run |
-| 4 | Foliage / soft dust and continuous fibre | 04-foliage-dust, 11-foliage-fibre | Not run | Not run | Not run |
-| 5 | Water / hard speck and continuous fibre | 06-water-speck, 12-water-fibre | Not run | Not run | Not run |
+| 1 | Sky / soft dust | 01-sky-dust | Pass | Pass | Pass |
+| 2 | Cloud texture and cloud edge / hard speck | 02-cloud-speck, 08-cloud-edge-speck | Pass 2/2 | Pass 2/2 | Pass 2/2 |
+| 3 | Cloud texture and cloud edge / continuous fibre | 10-cloud-fibre, 13-cloud-edge-fibre | Pass 2/2 | Pass 2/2 | 1 Pass, 1 Fail (10; reviewer considers minor) |
+| 4 | Foliage / soft dust and continuous fibre | 04-foliage-dust, 11-foliage-fibre | 1 Pass, 1 Fail (04; dark branch) | Pass 2/2 | Pass 2/2 |
+| 5 | Water / hard speck and continuous fibre | 06-water-speck, 12-water-fibre | Pass 2/2 | Pass 2/2 | Fail 2/2 (reviewer considers minor/close) |
 | 6 | Skin-like detail / dust or speck | None: no representative licensed crop available | Not run | Not run | Not run |
 
 For each mode, inspect remaining defect, halo/seam, blur/texture loss, duplicated structure and
 source-patch contamination. The viewer has a clean-reference toggle, individual Pass/Fail/Not run
 buttons, notes, and a JSON download. Decisions remain local to the browser until saved; they do not
-advance DispatchGraph automatically. Row 6 needs a suitable approved fixture or an explicit reviewer
-omission disposition. Brick was not separately exercised; water supplies the row-5 background.
+advance DispatchGraph automatically. Row 6 remains Not run because no representative licensed crop is available,
+as recorded in the supplied export; no skin-quality claim is made. Brick was not separately exercised; water supplies the row-5 background.
 
 ## Mechanical checks
 
@@ -121,10 +131,9 @@ The disposable writer lease was released normally. Export format/quality are ses
 and reset to the original JPEG/95% defaults on relaunch; the configured export-folder default was
 unchanged (`Pictures/Kromora Exports`). The app is left open in the normal Library view.
 
-The human can now review the 27 prepared comparisons without repeating setup, drawing repairs,
-exporting, or relaunching. The viewer also links the actual signed-app PNG and its native repair crop.
-Retain human review until the actual pixels and missing skin row have been assessed. KRMA-1076 owns
-reconciliation of the bounded numeric discrepancy; KRMA-1075 owns the library picker issue. No product
+The user has now reviewed all 27 prepared comparisons; those operations need no repetition. The viewer also links the actual signed-app PNG and its native repair crop.
+Human review is recorded for all available controlled cases. KRMA-1016 depends on KRMA-1077 for
+disposition of the failed foliage Manual Heal case. KRMA-1077 owns the foliage investigation. KRMA-1076 owns reconciliation of the bounded numeric discrepancy; KRMA-1075 owns the library picker issue. No product
 source was changed under this qualification ticket.
 
 ## Review setup audit
@@ -159,3 +168,44 @@ occurring dust/hair. Strong results here should be described as controlled small
 A separate ordinary-editing check with naturally occurring defects and hand-painted masks remains
 useful before making broader quality claims. Skin-detail coverage is still missing. The reviewer's
 observation was recorded without turning any Not run human verdict into Pass.
+
+## Supplied human review and preserved viewer
+
+The user supplied `KRMA-1063-human-review.json` and asked to keep the HTML comparison tool. Its
+candidate hash matches the frozen candidate, all 27 expected case/mode IDs are present exactly once,
+and the original bytes are preserved. SHA-256:
+`69ef12da3d1ffb8d430d3a5876254d671eae179f2c412d79e29360dd48a955be`.
+
+| Mode | Pass | Fail |
+|---|---:|---:|
+| Manual Heal | 8 | 1 |
+| Auto-source Heal | 9 | 0 |
+| Clone | 6 | 3 |
+| Total | 23 | 4 |
+
+The four failures and exact reviewer notes are retained as supplied:
+
+| Case / mode | Verdict | Reviewer note | Disposition |
+|---|---|---|---|
+| 10-cloud-fibre-clone | Fail | this is really minor and likely not worth worrying about | Recorded as a minor reviewer concern; not changed to Pass |
+| 12-water-fibre-clone | Fail | Again not worth worrying about | Recorded as a minor reviewer concern; not changed to Pass |
+| 06-water-speck-clone | Fail | Not worth worrying about as it is close | Recorded as a minor reviewer concern; not changed to Pass |
+| 04-foliage-dust-manual-heal | Fail | Just got a dark branch | Focused investigation filed as KRMA-1077; same case's auto Heal and Clone passed |
+
+The skin value remains exactly **Not run — no representative crop**. This records a coverage omission;
+it does not claim skin quality or blanket release approval. The controlled-fixture scope established in the
+setup audit still applies. The failure report does not assume that every Clone/reference difference
+is a renderer defect; Clone deliberately copies another patch's texture.
+
+The saved HTML is approximately 14 MB and embeds all 46 reviewed PNG crops, candidate metadata, and
+human verdicts/notes. Its local-storage access has a fallback for browsers that restrict storage on
+local files. It retains working case/mode selection, the clean reference toggle and review download.
+Twenty-seven final full-frame PNGs and the representative signed-app PNG were copied beside it using
+APFS clones; all 28 copies hash-match the original evidence. The foliage input and saved revision are
+also preserved under `repro/04-foliage-dust/` for the focused follow-up.
+
+Archive validation: all 46 embedded PNG payloads byte-match the originals and declare 600 × 400 dimensions;
+all full-frame copy hashes match; embedded JavaScript passes `node --check`; the supplied review hash
+matches. These checks are recorded in `archive-verification.json`. The in-app browser's security policy
+rejected `file:` navigation, so an offline browser preview was not run. That restriction was respected;
+the saved file can be opened by the user in a regular browser. No local-file preview success is claimed.
