@@ -597,7 +597,7 @@ actor RenderEngine: RenderEngining {
     func pickRetouchSource(
         source declared: ImageSource, settings: RetouchSettings, spotID: UUID, rank: Int
     ) async -> RetouchSource? {
-        let source = await sourceWithDecodedExtent(declared)
+        let source = await sourceWithResolvedExtent(declared)
         guard let spot = settings.spots.first(where: { $0.id == spotID }),
               !Task.isCancelled,
               let image = await developedSourceForBuild(
@@ -634,11 +634,30 @@ actor RenderEngine: RenderEngining {
     /// `nativeExtent` is only a hint (`ExportCoordinator` passes `.zero` to avoid a decode it does
     /// not need), but the Heal source analysis scales its proxy and snaps its offsets by it, so an
     /// undeclared extent must not change which source an automatic spot picks.
-    func sourceWithDecodedExtent(_ source: ImageSource) async -> ImageSource {
+    func sourceWithResolvedExtent(_ source: ImageSource) async -> ImageSource {
         let declared = source.nativeExtent
         if declared.width.isFinite, declared.height.isFinite, declared.width > 0, declared.height > 0 {
             return source
         }
+
+        // Standard-image dimensions are header metadata; don't build a full render graph just to
+        // recover them. RAW dimensions come from the configured decoder output below because its
+        // display-oriented extent can differ from the sensor size.
+        if source.kind == .standard {
+            let metadataExtent: CGSize?
+            switch source.backing {
+            case .url(let url):
+                metadataExtent = try? ImageDecoder.prepareStandard(from: url)
+            case .data(let data):
+                metadataExtent = try? ImageDecoder.prepareStandard(from: data, name: "Photo")
+            }
+            if let metadataExtent,
+               metadataExtent.width.isFinite, metadataExtent.height.isFinite,
+               metadataExtent.width > 0, metadataExtent.height > 0 {
+                return source.withNativeExtent(metadataExtent)
+            }
+        }
+
         guard let image = await developedSourceForBuild(
             source, .neutral, .full, rotation: .zero, space: .current,
             interactive: false, thumbnail: false
@@ -647,7 +666,7 @@ actor RenderEngine: RenderEngining {
     }
 
     func retouchAnalysisProxy(source declared: ImageSource) async -> RetouchAnalysisProxy? {
-        let source = await sourceWithDecodedExtent(declared)
+        let source = await sourceWithResolvedExtent(declared)
         guard !Task.isCancelled,
               let image = await developedSourceForBuild(
                 source, .neutral, .preview(maxSize: CGSize(width: 1024, height: 1024)), rotation: .zero,
