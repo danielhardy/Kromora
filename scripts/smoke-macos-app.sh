@@ -33,6 +33,12 @@ if ! /usr/bin/osascript -e 'tell application "System Events" to get name of firs
   print "SKIP: no accessible macOS UI session for application smoke test"
   exit 2
 fi
+# Reading a process's windows needs Accessibility for the terminal or app running this script; without
+# it every later UI stage fails with -25211, which is a missing grant rather than an app failure.
+if ! /usr/bin/osascript -e 'tell application "System Events" to get count of windows of first process' >/dev/null 2>&1; then
+  print "SKIP: this terminal/app lacks Accessibility access (System Settings > Privacy & Security > Accessibility)"
+  exit 2
+fi
 
 smoke_dir="$(mktemp -d -t kromora-app-smoke)"
 # Open Image selects the first sorted library item, so this fixture stays ahead of existing photos.
@@ -70,8 +76,8 @@ find_app_pid() {
 # Only the instance this script launched (matched by pid and executable path) is closed, and only
 # harness-owned fixtures are removed.
 cleanup() {
-  local status=$?
-  if [[ $status -ne 0 && $status -ne 2 ]]; then
+  local exit_code=$?
+  if [[ $exit_code -ne 0 && $exit_code -ne 2 ]]; then
     print -u2 "FAILED at stage: $stage"
   fi
   if [[ -n "$app_pid" ]]; then
@@ -110,7 +116,12 @@ stage="fixture"
 /usr/bin/sips -s format png -z $expected_size $expected_size App/Branding/KromoraIcon.svg --out "$input_png" >/dev/null
 
 stage="launch"
-open -n "$app_bundle"
+# KROMORA_LIBRARY_PACKAGE (an absolute path to a disposable library clone) is forwarded so the
+# unsandboxed development bundle from scripts/disposable-app.sh opens that clone; the sandboxed
+# packaged app ignores a path outside its container.
+launch_env=()
+[[ -n "${KROMORA_LIBRARY_PACKAGE:-}" ]] && launch_env=(--env "KROMORA_LIBRARY_PACKAGE=$KROMORA_LIBRARY_PACKAGE")
+open -n "${launch_env[@]}" "$app_bundle"
 for _ in {1..30}; do
   app_pid="$(find_app_pid || true)"
   [[ -n "$app_pid" ]] && break
@@ -235,11 +246,12 @@ set appPID to (do shell script "printf '%s' \"$KROMORA_SMOKE_PID\"") as integer
 tell application "System Events"
     tell first process whose unix id is appPID
         key code 43 using command down
+        -- The title is "<bundle name> Settings", so the development bundle's differs from the packaged app's.
         repeat 20 times
-            if exists window "Kromora Settings" then exit repeat
+            if exists (first window whose name ends with " Settings") then exit repeat
             delay 1
         end repeat
-        if not (exists window "Kromora Settings") then error "Settings did not open"
+        if not (exists (first window whose name ends with " Settings")) then error "Settings did not open"
         key code 13 using command down
         delay 1
     end tell
@@ -266,7 +278,8 @@ tell application "System Events"
         if not (exists static text "Export 1 Photo" of sheet 1 of window 1) then error "Export setup sheet is not the one-photo setup"
         set exampleName to ""
         repeat 10 times
-            repeat with element in (entire contents of sheet 1 of window 1)
+            -- The label is a direct child of the sheet; `entire contents` returns nothing for it.
+            repeat with element in (UI elements of sheet 1 of window 1)
                 try
                     if role of element is "AXStaticText" and description of element is "Example filename" then
                         set exampleName to value of element
@@ -294,11 +307,11 @@ tell application "System Events"
     tell first process whose unix id is appPID
         repeat 20 times
             if (count of sheets of window 1) > 0 then
-                if exists button "Export Here" of sheet 1 of window 1 then exit repeat
+                if exists button "Export Here" of splitter group 1 of sheet 1 of window 1 then exit repeat
             end if
             delay 1
         end repeat
-        if not (exists button "Export Here" of sheet 1 of window 1) then error "Export folder chooser did not appear"
+        if not (exists button "Export Here" of splitter group 1 of sheet 1 of window 1) then error "Export folder chooser did not appear"
         keystroke "g" using {command down, shift down}
         repeat 20 times
             if (count of sheets of sheet 1 of window 1) > 0 then exit repeat
@@ -309,12 +322,12 @@ tell application "System Events"
         key code 36
         repeat 20 times
             if (count of sheets of sheet 1 of window 1) = 0 then
-                if enabled of button "Export Here" of sheet 1 of window 1 then exit repeat
+                if enabled of button "Export Here" of splitter group 1 of sheet 1 of window 1 then exit repeat
             end if
             delay 1
         end repeat
         if (count of sheets of sheet 1 of window 1) > 0 then error "Export destination did not become selectable"
-        click button "Export Here" of sheet 1 of window 1
+        click button "Export Here" of splitter group 1 of sheet 1 of window 1
         repeat 20 times
             if (count of sheets of window 1) = 0 then exit repeat
             delay 1

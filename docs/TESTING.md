@@ -352,8 +352,29 @@ executable path), removes only its own temporary fixtures, and bounds every wait
 | --- | --- |
 | 0 | Executed and passed |
 | 1 | Failed; stderr names the failed stage |
-| 2 | Deferred: no accessible UI session or automation refused. Not a pass; CI logs a warning |
+| 2 | Deferred: no accessible UI session, automation refused, or the running terminal/app lacks Accessibility access. Not a pass; CI logs a warning |
 | 3 | Refused: disposable-profile confirmation missing |
+
+To run the harness without touching any real library, point it at the development bundle from
+`scripts/disposable-app.sh` and pass the clone through `KROMORA_LIBRARY_PACKAGE`, which the script
+forwards to the launched app. The packaged, sandboxed app ignores that variable, and its container
+holds the real profile, so the signed app's smoke needs a genuinely disposable profile or VM.
+
+```bash
+scripts/disposable-app.sh start "<package.kromoralibrary>"   # builds the bundle and clones; launches the app
+osascript -e 'tell application id "com.kromora.disposable" to quit'   # keep the clone and preferences
+KROMORA_SMOKE_DISPOSABLE_PROFILE=1 \
+  KROMORA_LIBRARY_PACKAGE="$PWD/.build/disposable-app/Library.kromoralibrary" \
+  scripts/smoke-macos-app.sh .build/disposable-app/KromoraDisposable.app
+scripts/disposable-app.sh stop
+```
+
+KRMA-1067 ran both passes this way on macOS 27: default naming exported `000-Kromora-Smoke.jpg` and
+seeded `pre-`/`-sfx` naming exported `pre-000-Kromora-Smoke-sfx.jpg`, each a 256 x 256 JPEG. The
+running terminal or app (for Claude Code, its separate `claude.app`) needs Accessibility access.
+
+For the persisted-naming run, seed the disposable domain before the second run, for example
+`defaults write com.kromora.disposable export.batchFilenamePolicy -data "$(printf '{"appendsLook":true,"prefix":"pre-","suffix":"-sfx"}' | xxd -p | tr -d '\n')"`.
 
 Manual sandbox acceptance remains in `docs/APP_STORE_ACCEPTANCE.md` (KRMA-1058).
 
