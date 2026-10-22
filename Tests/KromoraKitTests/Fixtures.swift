@@ -805,7 +805,8 @@ class TempDirectoryTestCase: XCTestCase {
         fileDropActionPolicy: FileDropActionPolicy = FileDropActionPolicy(),
         leaseRecoveryConfirmer: (any PortablePackageLeaseRecoveryConfirming)? = nil,
         persistenceCheckpointWait: EditPersistenceCoordinator.CheckpointWait? = nil,
-        packageOpener: any PackageOpening = PortablePackageOpener()
+        packageOpener: any PackageOpening = PortablePackageOpener(),
+        shareRoot: URL? = nil
     ) -> AppViewModel {
         let isolatedPreferences: UserDefaults
         if let preferences {
@@ -843,7 +844,8 @@ class TempDirectoryTestCase: XCTestCase {
             portableLibrarySession: portableLibrarySession,
             asynchronousPortableLibraryIndexLoading: asynchronousPortableLibraryIndexLoading,
             defersLibraryOpen: defersLibraryOpen,
-            packageOpener: packageOpener
+            packageOpener: packageOpener,
+            shareRoot: shareRoot
         )
         appViewModels.append(viewModel)
         return viewModel

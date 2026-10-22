@@ -68,13 +68,13 @@ final class ExportWorkflowCoordinator {
         export: ExportCoordinator,
         sheets: any SheetPresenting = AppKitSheetPresenter(),
         destination: (any ExportWorkflowDestination)? = nil,
-        shareRoot: URL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("Kromora Share Exports", isDirectory: true)
+        shareRoot: URL? = nil
     ) {
         self.export = export
         self.sheets = sheets
         self.destination = destination
-        self.shareRoot = shareRoot
+        self.shareRoot = shareRoot ?? FileManager.default.temporaryDirectory
+            .appendingPathComponent("Kromora Share Exports", isDirectory: true)
     }
 
     static func shareDialogMode(for selectionCount: Int) -> ShareDialogMode {

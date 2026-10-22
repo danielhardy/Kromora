@@ -231,7 +231,8 @@ final class LibraryContextMenuTests: TempDirectoryTestCase {
         // Cancel at Export Step 1 so no folder panel or export job ever starts.
         sheets.setupResults = [false]
         let viewModel = makeAppViewModel(
-            engine: engine, editStore: editStore, portableLibrarySession: session, sheets: sheets)
+            engine: engine, editStore: editStore, portableLibrarySession: session, sheets: sheets,
+            shareRoot: tempDirectory.appendingPathComponent("share-exports", isDirectory: true))
         XCTAssertTrue(viewModel.navigate(to: .grid))
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("kromora-test-\(UUID().uuidString)"))
         addTeardownBlock { pasteboard.releaseGlobally() }

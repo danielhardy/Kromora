@@ -1029,7 +1029,8 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         portableLibrarySession injectedPortableLibrarySession: PortableLibrarySession? = nil,
         asynchronousPortableLibraryIndexLoading: Bool = false,
         defersLibraryOpen: Bool = false,
-        packageOpener: any PackageOpening = PortablePackageOpener()
+        packageOpener: any PackageOpening = PortablePackageOpener(),
+        shareRoot: URL? = nil
     ) {
         var interval = KromoraSignpostInterval(.launch, context: .unknown)
         defer { interval.end() }
@@ -1140,7 +1141,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
             editStore: effectiveEditStore,
             sheets: sheets
         )
-        self.exportWorkflow = ExportWorkflowCoordinator(export: self.export)
+        self.exportWorkflow = ExportWorkflowCoordinator(export: self.export, shareRoot: shareRoot)
         self.previewCoordinator = PreviewCoordinator(engine: engine, scheduler: workScheduler)
         let previewFrameStore = LatestPreviewFrameStore(
             directory: previewFrameStoreDirectory
