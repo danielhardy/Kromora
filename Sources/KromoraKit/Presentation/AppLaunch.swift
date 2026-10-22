@@ -47,7 +47,7 @@ final class AppLaunch {
         if let viewModel { return viewModel }
         let packageURL: URL
         var notice: String?
-        if let injected = self.packageURL {
+        if let injected = self.packageURL ?? Self.libraryPackageOverride() {
             packageURL = injected
         } else {
             let resolution = settings.activeLibrary.resolve()
@@ -67,6 +67,17 @@ final class AppLaunch {
                 .decision(for: packageURL)?.allowBreak == true
         }
         return model
+    }
+
+    /// The package named by `KROMORA_LIBRARY_PACKAGE`, for live verification against a disposable
+    /// library (`scripts/disposable-app.sh`). It replaces the stored choice and the default for that
+    /// launch only: nothing is written to preferences, so a normal launch is unaffected. Unset,
+    /// empty and relative values are ignored.
+    static func libraryPackageOverride(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> URL? {
+        guard let path = environment["KROMORA_LIBRARY_PACKAGE"], path.hasPrefix("/") else { return nil }
+        return URL(fileURLWithPath: path, isDirectory: true)
     }
 
     /// Returns once the library open started by ``open()`` has bound or failed.

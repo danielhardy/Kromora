@@ -69,6 +69,16 @@ final class AppLaunchTests: XCTestCase {
         )
     }
 
+    func testLibraryPackageOverrideAcceptsOnlyAbsolutePaths() {
+        let key = "KROMORA_LIBRARY_PACKAGE"
+        XCTAssertEqual(
+            AppLaunch.libraryPackageOverride(environment: [key: "/tmp/Disposable.kromoralibrary"])?.path,
+            "/tmp/Disposable.kromoralibrary")
+        XCTAssertNil(AppLaunch.libraryPackageOverride(environment: [:]))
+        XCTAssertNil(AppLaunch.libraryPackageOverride(environment: [key: ""]))
+        XCTAssertNil(AppLaunch.libraryPackageOverride(environment: [key: "Relative.kromoralibrary"]))
+    }
+
     func testNoModelExistsUntilOpenIsRequested() throws {
         let (url, _) = try makeStaleLibrary()
         let appLaunch = launch(url, sheets: FakeSheets())

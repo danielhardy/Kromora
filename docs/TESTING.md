@@ -319,6 +319,18 @@ behavior, inspector disclosure state, mask overlay and export parity, and icon/s
 The app-level smoke test and the verification scripts under `scripts/` are the executable checks;
 the source and test names are the authoritative coverage map.
 
+### Live checks on a disposable library
+
+`scripts/disposable-app.sh start <package.kromoralibrary>` builds the development launcher, wraps it
+in an ad hoc signed bundle with its own bundle id (`com.kromora.disposable`) and preferences, and
+launches it on an APFS clone of the package through `KROMORA_LIBRARY_PACKAGE`. The variable replaces
+the stored library choice and the default for that launch only and writes nothing to preferences.
+`stop` quits the app and deletes the clone and its preferences. This is the unsandboxed development
+launcher, so it is not evidence about the sandboxed App Store build: use it to exercise UI and
+export behavior, and use `scripts/app-store-build.sh` and the packaged-app smoke for the signed app.
+KRMA-1086 used this setup to show that the unsandboxed launcher and the signed app export identical
+pixels.
+
 ### Packaged-app UI smoke
 
 `scripts/smoke-macos-app.sh [Kromora.app]` (default `.build/xcode/Build/Products/Release/Kromora.app`,
