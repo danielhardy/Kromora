@@ -52,6 +52,10 @@ struct PhotosImportSelection: Equatable, Sendable {
 /// constructing PhotosUI objects.
 @MainActor
 protocol PhotosImportProviding: AnyObject {
+    /// Settles PhotoKit authorization before names are resolved: the picker's private access does
+    /// not authorize PhotoKit, so a lookup made before the first grant cannot see the original
+    /// filename. The default does nothing.
+    func prepareForNaming() async
     func originalFilename(for selection: PhotosImportSelection) -> String?
     /// The asset's capture date, used to name items whose original filename is unavailable.
     func captureDate(for selection: PhotosImportSelection) -> Date?
@@ -71,6 +75,7 @@ protocol PhotosImportProviding: AnyObject {
 }
 
 extension PhotosImportProviding {
+    func prepareForNaming() async {}
     func captureDate(for selection: PhotosImportSelection) -> Date? { nil }
     func transferData(
         for selection: PhotosImportSelection,
@@ -97,6 +102,10 @@ final class PhotosPickerImportProvider: PhotosImportProviding {
 
     init(items: [PhotosPickerItem]) {
         self.items = items
+    }
+
+    func prepareForNaming() async {
+        _ = await Self.photoKitStatus()
     }
 
     func originalFilename(for selection: PhotosImportSelection) -> String? {
@@ -160,16 +169,20 @@ final class PhotosPickerImportProvider: PhotosImportProviding {
         return resources.first(where: { $0.type == .photo })
     }
 
+    /// The current PhotoKit status, asking once when it has not been determined.
+    private static func photoKitStatus() async -> PHAuthorizationStatus {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        guard status == .notDetermined else { return status }
+        return await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+    }
+
     /// Looks the original up, naming the first failing boundary: PhotoKit authorization, asset
     /// lookup, or the asset having no original resource. The picker's private access does not
     /// authorize PhotoKit, so an unauthorized fetch silently returns nothing (KRMA-991).
     private static func resolveOriginalResource(
         for selection: PhotosImportSelection
     ) async throws -> PHAssetResource {
-        var status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-        if status == .notDetermined {
-            status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
-        }
+        let status = await photoKitStatus()
         let asset = selection.localIdentifier.flatMap {
             PHAsset.fetchAssets(withLocalIdentifiers: [$0], options: nil).firstObject
         }

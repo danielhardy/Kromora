@@ -48,6 +48,12 @@ final class PhotosImportReviewCoordinator {
         items.filter { selection.contains(id: $0.id) }
     }
 
+    /// Settles PhotoKit authorization, then begins, so first-grant names use the original filename.
+    func beginAfterAuthorization(selections: [PhotosImportSelection], provider: any PhotosImportProviding) async {
+        await provider.prepareForNaming()
+        begin(selections: selections, provider: provider)
+    }
+
     func begin(selections: [PhotosImportSelection], provider: any PhotosImportProviding) {
         stopChecking()
         let id = UUID()

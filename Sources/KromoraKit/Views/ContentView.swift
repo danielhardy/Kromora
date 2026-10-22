@@ -174,12 +174,12 @@ public struct ContentView: View {
 
     private func handlePhotosSelection(_ selection: [PhotosPickerItem]) {
         guard !selection.isEmpty else { return }
-        viewModel.photosImportReview.begin(
-            selections: selection.enumerated().map {
-                PhotosImportSelection(ordinal: $0.offset, localIdentifier: $0.element.itemIdentifier)
-            },
-            provider: PhotosPickerImportProvider(items: selection)
-        )
+        let selections = selection.enumerated().map {
+            PhotosImportSelection(ordinal: $0.offset, localIdentifier: $0.element.itemIdentifier)
+        }
+        let provider = PhotosPickerImportProvider(items: selection)
+        let review = viewModel.photosImportReview
+        Task { await review.beginAfterAuthorization(selections: selections, provider: provider) }
         // The provider keeps the picked items, so the picker binding can be reset for next time.
         photosSelection = []
     }

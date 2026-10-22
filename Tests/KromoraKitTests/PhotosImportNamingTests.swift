@@ -6,9 +6,15 @@ import XCTest
 private final class NamingProvider: PhotosImportProviding {
     var filenames: [Int: String] = [:]
     var dates: [Int: Date] = [:]
+    /// Filenames that only become visible once `prepareForNaming` runs (access granted).
+    var filenamesAfterAuthorization: [Int: String] = [:]
+    private var authorized = false
     private(set) var captureDateLookups = 0
 
-    func originalFilename(for selection: PhotosImportSelection) -> String? { filenames[selection.ordinal] }
+    func prepareForNaming() async { authorized = true }
+    func originalFilename(for selection: PhotosImportSelection) -> String? {
+        filenames[selection.ordinal] ?? (authorized ? filenamesAfterAuthorization[selection.ordinal] : nil)
+    }
     func captureDate(for selection: PhotosImportSelection) -> Date? {
         captureDateLookups += 1
         return dates[selection.ordinal]
@@ -131,6 +137,27 @@ final class PhotosImportNamingTests: XCTestCase {
         XCTAssertEqual(review.items.map(\.name), review.items.map(\.selection.name))
         XCTAssertEqual(review.items[1].name, "IMG_2.HEIC")
         XCTAssertTrue(review.items[0].name.hasPrefix("Photo "))
+        review.cancel()
+    }
+
+    func testOriginalFilenameIsUsedWhenAccessIsGrantedAfterAnUnauthorizedLookup() async {
+        let provider = NamingProvider()
+        provider.filenamesAfterAuthorization = [0: "IMG_9.ARW"]
+        XCTAssertNil(provider.originalFilename(for: selections(1)[0]))
+
+        let review = PhotosImportReviewCoordinator()
+        await review.beginAfterAuthorization(selections: selections(1), provider: provider)
+        XCTAssertEqual(review.items.map(\.name), ["IMG_9.ARW"])
+        XCTAssertEqual(review.items.map(\.selection.name), ["IMG_9.ARW"])
+        review.cancel()
+    }
+
+    func testUnavailableOriginalKeepsDeterministicFallbackAfterAuthorization() async {
+        let provider = NamingProvider()
+        provider.dates = [0: Date(timeIntervalSince1970: 1_760_538_727)]
+        let review = PhotosImportReviewCoordinator()
+        await review.beginAfterAuthorization(selections: selections(1), provider: provider)
+        XCTAssertTrue(review.items[0].name.hasPrefix("Photo 20"))
         review.cancel()
     }
 }
