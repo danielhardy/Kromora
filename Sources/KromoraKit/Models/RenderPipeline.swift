@@ -140,7 +140,8 @@ enum RenderPipeline {
             grainSeed: grainSeed(for: source), applyCommittedCrop: !earlyCrop,
             spatialReferenceExtent: earlyCrop ? fullFrame : nil,
             finalFrameExtent: finalFrame, applyRotation: false,
-            retouchSourceSize: source.nativeExtent, retouchSourceAlreadyApplied: true
+            retouchSourceSize: source.nativeExtent.hasUsableArea ? source.nativeExtent : nil,
+            retouchSourceAlreadyApplied: true
         )
         guard let visibleROI, earlyCrop else { return result }
         return result.cropped(to: scaledSourceRect(
@@ -1645,4 +1646,9 @@ enum RenderPipeline {
         let cubeFilter = cache?.filter(for: lut, space: space) ?? lut.makeFilter(space: space)
         return lut.apply(to: image, intensity: settings.intensity, using: cubeFilter) ?? image
     }
+}
+
+private extension CGSize {
+    /// A declared source size the pipeline may trust; `.zero` means "not declared", not "empty".
+    var hasUsableArea: Bool { width.isFinite && height.isFinite && width > 0 && height > 0 }
 }

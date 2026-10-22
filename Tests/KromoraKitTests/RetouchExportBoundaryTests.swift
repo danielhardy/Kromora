@@ -89,4 +89,46 @@ final class RetouchExportBoundaryTests: TempDirectoryTestCase {
         XCTAssertGreaterThan(maxDelta(try decode(neutral.data), baseline).count, 0,
                              "the automatic Heal must actually change pixels")
     }
+
+    // KRMA-1086: the app's export builds its source with a zero `nativeExtent`
+    // (`ExportCoordinator.sourceAccess`); the qualification harness declared the real size. The
+    // automatic Heal source and the exported pixels must not depend on that hint.
+
+    private func undeclared(_ source: ImageSource, at url: URL) -> ImageSource {
+        ImageSource(url: url, nativeExtent: .zero)
+    }
+
+    func testAutomaticHealSourceDoesNotDependOnDeclaredNativeExtent() async throws {
+        let (declared, url) = try makeSource()
+        let hintless = undeclared(declared, at: url)
+        let settings = document().retouch
+        let spotID = try XCTUnwrap(settings.spots.first?.id)
+
+        let engine = RenderEngine(maskResolver: DefaultLocalMaskResolver())
+        let withHint = await engine.pickRetouchSource(source: declared, settings: settings, spotID: spotID, rank: 0)
+        let withoutHint = await RenderEngine(maskResolver: DefaultLocalMaskResolver())
+            .pickRetouchSource(source: hintless, settings: settings, spotID: spotID, rank: 0)
+        XCTAssertNotNil(withHint)
+        XCTAssertEqual(withHint, withoutHint, "automatic Heal source differs when nativeExtent is not declared")
+    }
+
+    func testExportPixelsDoNotDependOnDeclaredNativeExtent() async throws {
+        let (declared, url) = try makeSource()
+        let hintless = undeclared(declared, at: url)
+        let document = document()
+        let options = ExportOptions(format: .png, quality: 1, sizing: .fullSize)
+
+        func encoded(_ source: ImageSource, name: String) async throws -> [UInt8] {
+            let out = tempDirectory.appendingPathComponent(name)
+            try await RenderEngine(maskResolver: DefaultLocalMaskResolver()).encode(RenderRequest(
+                source: source, document: document, quality: .export,
+                output: .encoded(format: .png, quality: 1), exportOptions: options), to: out)
+            return try decode(try Data(contentsOf: out))
+        }
+        let withHint = try await encoded(declared, name: "declared.png")
+        let withoutHint = try await encoded(hintless, name: "undeclared.png")
+        XCTAssertEqual(withHint.count, withoutHint.count)
+        let delta = maxDelta(withHint, withoutHint)
+        XCTAssertEqual(delta.count, 0, "export differs by \(delta) when nativeExtent is not declared")
+    }
 }

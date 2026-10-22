@@ -595,8 +595,9 @@ actor RenderEngine: RenderEngining {
     }
 
     func pickRetouchSource(
-        source: ImageSource, settings: RetouchSettings, spotID: UUID, rank: Int
+        source declared: ImageSource, settings: RetouchSettings, spotID: UUID, rank: Int
     ) async -> RetouchSource? {
+        let source = await sourceWithDecodedExtent(declared)
         guard let spot = settings.spots.first(where: { $0.id == spotID }),
               !Task.isCancelled,
               let image = await developedSourceForBuild(
@@ -629,7 +630,24 @@ actor RenderEngine: RenderEngining {
         return .auto(offset: ranked[rank].offset, rank: rank)
     }
 
-    func retouchAnalysisProxy(source: ImageSource) async -> RetouchAnalysisProxy? {
+    /// `source` with a usable `nativeExtent`: the declared one when present, else the decoder's own.
+    /// `nativeExtent` is only a hint (`ExportCoordinator` passes `.zero` to avoid a decode it does
+    /// not need), but the Heal source analysis scales its proxy and snaps its offsets by it, so an
+    /// undeclared extent must not change which source an automatic spot picks.
+    func sourceWithDecodedExtent(_ source: ImageSource) async -> ImageSource {
+        let declared = source.nativeExtent
+        if declared.width.isFinite, declared.height.isFinite, declared.width > 0, declared.height > 0 {
+            return source
+        }
+        guard let image = await developedSourceForBuild(
+            source, .neutral, .full, rotation: .zero, space: .current,
+            interactive: false, thumbnail: false
+        ) else { return source }
+        return source.withNativeExtent(image.extent.size)
+    }
+
+    func retouchAnalysisProxy(source declared: ImageSource) async -> RetouchAnalysisProxy? {
+        let source = await sourceWithDecodedExtent(declared)
         guard !Task.isCancelled,
               let image = await developedSourceForBuild(
                 source, .neutral, .preview(maxSize: CGSize(width: 1024, height: 1024)), rotation: .zero,
