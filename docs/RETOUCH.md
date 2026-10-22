@@ -354,9 +354,18 @@ change the in-process KromoraKit outputs. This does not isolate or exclude effec
 signed Xcode app target: the archived signed-app export was not rerun with those variations.
 
 Comparing that archived signed-app PNG with each replay output still gives 2,023 differing pixels,
-inclusive bounds x=4646–4707, y=756–815, maximum RGB channel delta 2/255. The package contains saved
-revision 1; the export-time request passed by the app was not captured, so the cause remains unknown.
-The app request, app-target configuration, sandboxed runtime, and other untested evaluation differences
-are possibilities, not established causes. This measured difference is not evidence of numeric noise;
-no cross-build tolerance is published. Human visual approval is recorded separately and is not implied
-by this comparison.
+inclusive bounds x=4646–4707, y=756–815, maximum RGB channel delta 2/255. KRMA-1086 reproduced it
+with a current signed Release app and an unsandboxed SwiftPM launcher on a disposable package: both
+exports were identical to each other and to the archived signed-app PNG, so sandboxing, signing, the
+Xcode build and run-to-run variation were ruled out. A temporary capture at the app's export call
+showed the in-session document identical to the persisted revision 1. The remaining difference was the
+source: the app's export builds its `ImageSource` with a zero `nativeExtent`, while the harness declared
+8064 × 6048. With a zero extent the automatic Heal source analysis proxy was not downscaled and
+offset snapping and refinement were skipped, so the picked source offset differed. Replaying with a zero
+extent reproduced the app export exactly and with the declared extent reproduced the harness exactly.
+The fix resolves the decoder's extent before that analysis, and `RetouchExportBoundaryTests` now pins
+that export pixels and the automatic source do not depend on the declared extent. After the fix a
+replay of the saved asset with and without the declared extent matches the archived harness export
+(0 differing pixels); the signed app itself was not re-exported after the fix, and the archived
+signed-app PNG predates it. Human visual approval is recorded separately and is not implied by this
+comparison.
