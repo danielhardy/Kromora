@@ -605,6 +605,37 @@ final class CropPipelineTests: TempDirectoryTestCase {
     }
 }
 
+extension CropPipelineTests {
+    /// KRMA-1081: crop mode requests an interactive, unrotated frame with no ROI. Every axis and
+    /// sign must change the pixels while the output dimensions stay equal to the identity frame.
+    func testInteractiveCropModePerspectiveChangesPixelsOnBothAxes() async throws {
+        let engine = RenderEngine()
+        func frame(_ crop: CropAdjustments) async throws -> CGImage {
+            let request = RenderRequest(
+                source: source, document: EditDocument(crop: crop),
+                targetSize: CGSize(width: 96, height: 64),
+                quality: .interactive, output: .raster
+            )
+            let image = await engine.makeCGImage(request)
+            return try XCTUnwrap(image)
+        }
+        let identity = try await frame(CropAdjustments())
+        let identityBytes = try Pixels.bytes(of: identity)
+        for (name, crop) in [
+            ("vertical +", CropAdjustments(verticalPerspective: 0.3)),
+            ("vertical -", CropAdjustments(verticalPerspective: -0.3)),
+            ("horizontal +", CropAdjustments(horizontalPerspective: 0.3)),
+            ("horizontal -", CropAdjustments(horizontalPerspective: -0.3)),
+        ] {
+            let image = try await frame(crop)
+            XCTAssertEqual(image.width, identity.width, name)
+            XCTAssertEqual(image.height, identity.height, name)
+            XCTAssertNotEqual(try Pixels.bytes(of: image), identityBytes,
+                              "\(name) interactive perspective must change the frame")
+        }
+    }
+}
+
 @MainActor
 final class CropWorkflowTests: TempDirectoryTestCase {
     private enum WaitError: Error {
@@ -800,6 +831,57 @@ final class CropWorkflowTests: TempDirectoryTestCase {
                 && request.document.crop.verticalPerspective == 0.2
                 && request.document.crop.horizontalPerspective == -0.15
         }
+    }
+
+    /// KRMA-1081: real engine, real view model. Each live perspective value must reach the
+    /// presented surface as a new frame whose pixels differ from the previous one.
+    func testLivePerspectiveReachesThePresentedSurfaceOnBothAxes() async throws {
+        let size = 160
+        let context = try XCTUnwrap(CGContext(
+            data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.setFillColor(CGColor(gray: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: size, height: size))
+        context.setFillColor(CGColor(gray: 0, alpha: 1))
+        for step in stride(from: 8, to: size, by: 24) {
+            context.fill(CGRect(x: step, y: 0, width: 6, height: size))
+            context.fill(CGRect(x: 0, y: step, width: size, height: 6))
+        }
+        let url = try Fixtures.writePNG(
+            try XCTUnwrap(context.makeImage()), named: "grid.png", in: tempDirectory)
+        let viewModel = makeAppViewModel(engine: RenderEngine(), editStore: makeInMemoryEditStore())
+        viewModel.openImage(url: url)
+        try await waitUntil("the source image") { viewModel.sourceImage != nil }
+        try await waitUntil("the first presented frame") { viewModel.previewSurface.image != nil }
+
+        viewModel.beginCrop()
+        viewModel.beginPreviewInteraction()
+        let ciContext = CIContext()
+        func presentedBytes() throws -> [UInt8] {
+            let image = try XCTUnwrap(viewModel.previewSurface.image)
+            let rendered = try XCTUnwrap(ciContext.createCGImage(image, from: image.extent))
+            return try Pixels.bytes(of: rendered)
+        }
+        var previous = try presentedBytes()
+        let changes: [(String, @MainActor () -> Void)] = [
+            ("vertical +", { viewModel.setCropVerticalPerspective(0.3) }),
+            ("vertical -", { viewModel.setCropVerticalPerspective(-0.3) }),
+            ("horizontal +", { viewModel.setCropHorizontalPerspective(0.3) }),
+            ("horizontal -", { viewModel.setCropHorizontalPerspective(-0.3) }),
+        ]
+        for (name, change) in changes {
+            let before = viewModel.previewSurface.revision
+            change()
+            try await waitUntil("\(name) presented frame") {
+                viewModel.previewSurface.revision > before
+            }
+            let current = try presentedBytes()
+            XCTAssertNotEqual(current, previous, "\(name) must visibly change the presented frame")
+            previous = current
+        }
+        viewModel.endPreviewInteraction()
     }
 
     func testCropStraightenUsesViewSpaceRotationWhileThePreviewRequestStaysUnstraightened() async throws {
