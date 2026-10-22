@@ -1146,6 +1146,57 @@ final class CropWorkflowTests: TempDirectoryTestCase {
     }
 }
 
+extension CropWorkflowTests {
+    /// KRMA-1081: perspective values stay transient until Done, survive crop history, and reset
+    /// and cancel restore the intended committed values.
+    func testPerspectiveDraftCommitCancelResetUndoRedoRoundTrips() async throws {
+        let url = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "perspective-workflow.png", in: tempDirectory)
+        let viewModel = makeAppViewModel(
+            engine: FakeRenderEngine(), editStore: makeInMemoryEditStore())
+        viewModel.openImage(url: url)
+        try await waitUntil("the source image") { viewModel.sourceImage != nil }
+
+        viewModel.beginCrop()
+        viewModel.setCropVerticalPerspective(0.35)
+        viewModel.setCropHorizontalPerspective(-0.25)
+        XCTAssertTrue(viewModel.document.crop.isIdentity, "perspective edits must remain a draft")
+        XCTAssertEqual(viewModel.cropVerticalPerspective, 0.35)
+        XCTAssertEqual(viewModel.cropHorizontalPerspective, -0.25)
+
+        viewModel.commitCrop()
+        let committed = CropAdjustments(
+            normalizedRect: CropAdjustments.unitRect,
+            verticalPerspective: 0.35,
+            horizontalPerspective: -0.25
+        )
+        XCTAssertEqual(viewModel.document.crop, committed)
+        viewModel.undo()
+        XCTAssertTrue(viewModel.document.crop.isIdentity)
+        viewModel.redo()
+        XCTAssertEqual(viewModel.document.crop, committed)
+
+        viewModel.beginCrop()
+        viewModel.setCropVerticalPerspective(-0.2)
+        viewModel.setCropHorizontalPerspective(0.15)
+        viewModel.cancelCrop()
+        XCTAssertEqual(viewModel.document.crop, committed, "Cancel must restore committed perspective")
+
+        viewModel.beginCrop()
+        XCTAssertEqual(viewModel.cropVerticalPerspective, 0.35)
+        XCTAssertEqual(viewModel.cropHorizontalPerspective, -0.25)
+        viewModel.setCropVerticalPerspective(0.2)
+        viewModel.setCropHorizontalPerspective(-0.1)
+        viewModel.resetCrop()
+        XCTAssertEqual(viewModel.cropVerticalPerspective, 0)
+        XCTAssertEqual(viewModel.cropHorizontalPerspective, 0)
+        XCTAssertEqual(viewModel.document.crop, committed, "Reset must remain a draft until Done")
+        viewModel.commitCrop()
+        XCTAssertTrue(viewModel.document.crop.isIdentity, "Done must persist the reset draft")
+    }
+
+}
+
 @MainActor
 final class CropOverlayViewTests: XCTestCase {
     private func makeOverlay() -> CropOverlayView {
