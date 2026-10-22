@@ -107,6 +107,27 @@ final class MenuCommandTests: XCTestCase {
         XCTAssertFalse(menuCommands.contains("Button(\"Export Selected...\")"))
     }
 
+    func testCommandCRoutesToSelectiveCopyAsTheStandardCopyCommandAndOptionCommandCCopiesAll() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let surface = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/KeyboardSurface.swift"),
+            encoding: .utf8)
+        let menu = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/MenuCommands.swift"),
+            encoding: .utf8)
+        // A standard copy command sits behind the responder chain, so a focused text control's
+        // own `copy:` wins; a plain Command-C key handler or menu shortcut would shadow it.
+        XCTAssertTrue(surface.contains(".onCopyCommand"))
+        XCTAssertTrue(surface.contains("viewModel.presentSelectiveCopyDialog()"))
+        XCTAssertFalse(menu.contains("Button(\"Copy Edits…\") { run(.selectiveCopy) }\n                .keyboardShortcut"))
+        XCTAssertEqual(KromoraEditTransferShortcuts.modifiers, [.command, .option])
+        XCTAssertEqual(KromoraEditTransferShortcuts.copyKey, "c")
+        XCTAssertTrue(menu.contains("Button(\"Copy All Edits\") { run(.copyAllEdits) }"))
+    }
+
     func testViewMenuRoutesRelocatedEditorActionsAndKeepsComparisonToolbarStable() throws {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent() // KromoraKitTests

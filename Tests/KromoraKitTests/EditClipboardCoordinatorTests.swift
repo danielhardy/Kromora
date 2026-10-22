@@ -18,6 +18,7 @@ final class EditClipboardCoordinatorTests: TempDirectoryTestCase {
         var groupingEnds = 0
         var flushes = 0
         var persisted: [(document: EditDocument, reference: EditSourceReference)] = []
+        var clipboardBaseLoads = 0
 
         init(editor: EditorDocumentCoordinator) { self.editor = editor }
 
@@ -41,7 +42,8 @@ final class EditClipboardCoordinatorTests: TempDirectoryTestCase {
         }
         var durableBases: [PhotoAssetID: EditDocumentLoadResult] = [:]
         func loadClipboardBase(for reference: EditSourceReference) async -> EditDocumentLoadResult {
-            durableBases[reference.assetID]
+            clipboardBaseLoads += 1
+            return durableBases[reference.assetID]
                 ?? EditDocumentLoadResult(document: EditDocument(), found: false, status: .ready)
         }
         func flushClipboardPersistence() { flushes += 1 }
@@ -82,6 +84,102 @@ final class EditClipboardCoordinatorTests: TempDirectoryTestCase {
         XCTAssertEqual(destination.groupingEnds, 0)
         XCTAssertEqual(destination.documentUpdates, 0)
         XCTAssertEqual(destination.flushes, 0)
+    }
+
+    func testContextSourceDialogCopiesOnlyChosenCategoriesFromDurableEdit() async {
+        let (workflow, destination, settings) = makeWorkflow()
+        destination.clipboardActiveSourceReference = reference("active.jpg")
+        let other = reference("other.jpg")
+        var stored = EditDocument()
+        stored.light.exposure = 0.4
+        stored.color.vibrance = 0.6
+        destination.durableBases[other.assetID] = EditDocumentLoadResult(
+            document: stored, found: true, status: .ready)
+
+        workflow.presentSelectiveCopyDialog(for: other, name: "other.jpg")
+        XCTAssertTrue(workflow.isSelectiveCopyDialogPresented)
+        XCTAssertEqual(workflow.selectiveCopySource?.name, "other.jpg")
+        workflow.selectiveCopyCategories = [.light]
+        workflow.confirmSelectiveCopy()
+        XCTAssertFalse(workflow.isSelectiveCopyDialogPresented)
+        XCTAssertNil(workflow.selectiveCopySource)
+        XCTAssertEqual(settings.lastCopyCategories, [.light])
+        let copyTask = Task { @MainActor in
+            while workflow.clipboard == nil { await Task.yield() }
+        }
+        await copyTask.value
+
+        XCTAssertEqual(workflow.clipboard, EditClipboardPayload(document: stored))
+        XCTAssertEqual(workflow.clipboardCategories, [.light])
+        XCTAssertEqual(destination.status, "Copied Light from other.jpg")
+    }
+
+    func testContextSourceDialogForActivePhotoUsesLiveDocument() {
+        let (workflow, destination, _) = makeWorkflow()
+        let active = reference("active.jpg")
+        destination.clipboardActiveSourceReference = active
+        destination.clipboardDocument.light.exposure = 0.9
+
+        workflow.presentSelectiveCopyDialog(for: active, name: "active.jpg")
+        XCTAssertNil(workflow.selectiveCopySource)
+        workflow.selectiveCopyCategories = [.light]
+        workflow.confirmSelectiveCopy()
+
+        XCTAssertEqual(workflow.clipboard, EditClipboardPayload(document: destination.clipboardDocument))
+        XCTAssertEqual(workflow.clipboardCategories, [.light])
+    }
+
+    func testNewActiveCopySupersedesPendingContextSourceRead() async {
+        let (workflow, destination, _) = makeWorkflow()
+        let active = reference("active.jpg")
+        destination.clipboardActiveSourceReference = active
+        destination.clipboardSourceName = "active.jpg"
+        destination.clipboardDocument.color.vibrance = 0.7
+
+        let other = reference("other.jpg")
+        var stored = EditDocument()
+        stored.light.exposure = 0.4
+        destination.durableBases[other.assetID] = EditDocumentLoadResult(
+            document: stored, found: true, status: .ready)
+        workflow.presentSelectiveCopyDialog(for: other, name: "other.jpg")
+        workflow.selectiveCopyCategories = [.light]
+        workflow.confirmSelectiveCopy()
+
+        workflow.presentSelectiveCopyDialog(for: active, name: "active.jpg")
+        workflow.selectiveCopyCategories = [.color]
+        workflow.confirmSelectiveCopy()
+        for _ in 0..<100 where destination.clipboardBaseLoads == 0 { await Task.yield() }
+        await Task.yield()
+
+        XCTAssertEqual(destination.clipboardBaseLoads, 1)
+        XCTAssertEqual(workflow.clipboard, EditClipboardPayload(document: destination.clipboardDocument))
+        XCTAssertEqual(workflow.clipboardCategories, [.color])
+        XCTAssertEqual(destination.status, "Copied Color from active.jpg")
+    }
+
+    func testContextSourceCancelAndReadFailureLeaveClipboardUnchanged() async {
+        let (workflow, destination, _) = makeWorkflow()
+        destination.clipboardDocument.light.exposure = 0.8
+        workflow.copyAllEdits()
+        let copied = workflow.clipboard
+        let other = reference("other.jpg")
+
+        workflow.presentSelectiveCopyDialog(for: other, name: "other.jpg")
+        workflow.cancelSelectiveCopy()
+        XCTAssertNil(workflow.selectiveCopySource)
+        XCTAssertEqual(workflow.clipboard, copied)
+
+        destination.durableBases[other.assetID] = EditDocumentLoadResult(
+            document: EditDocument(), found: false, status: .corrupt("bad"))
+        workflow.presentSelectiveCopyDialog(for: other, name: "other.jpg")
+        workflow.confirmSelectiveCopy()
+        let status = destination
+        let wait = Task { @MainActor in
+            while status.status.hasPrefix("Copied") { await Task.yield() }
+        }
+        await wait.value
+        XCTAssertEqual(destination.status, "Could not read the edits of other.jpg")
+        XCTAssertEqual(workflow.clipboard, copied)
     }
 
     func testSelectiveDialogReseedsPreferencesAndCancelPreservesClipboard() {

@@ -292,10 +292,12 @@ final class LibraryContextMenuTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.collection.selection.activeID, fixture.ids[0])
 
         viewModel.performLibraryContextAction(.copyEditSettings, on: fixture.ids[1])
+        viewModel.confirmSelectiveCopy()
         try await poll("the edit clipboard") { viewModel.canPasteEdits }
 
         XCTAssertEqual(viewModel.editClipboardWorkflow.clipboard, EditClipboardPayload(document: edited))
         XCTAssertEqual(viewModel.statusMessage, "Copied all edits from beta.jpg")
+        XCTAssertFalse(viewModel.isSelectiveCopyDialogPresented)
         XCTAssertEqual(viewModel.collection.selection.selectedIDs, [fixture.ids[1]])
     }
 
@@ -305,6 +307,7 @@ final class LibraryContextMenuTests: TempDirectoryTestCase {
         let edited = EditDocument(adjustments: [.exposure(ev: 0.7)])
         try await fixture.editStore.save(edited, for: fixture.reference(0))
         viewModel.performLibraryContextAction(.copyEditSettings, on: fixture.ids[0])
+        viewModel.confirmSelectiveCopy()
         try await poll("the edit clipboard") { viewModel.canPasteEdits }
         viewModel.selectPortableItem(at: 1)
 
@@ -323,6 +326,7 @@ final class LibraryContextMenuTests: TempDirectoryTestCase {
         let edited = EditDocument(adjustments: [.exposure(ev: 0.7)])
         try await fixture.editStore.save(edited, for: fixture.reference(0))
         viewModel.performLibraryContextAction(.copyEditSettings, on: fixture.ids[0])
+        viewModel.confirmSelectiveCopy()
         try await poll("the edit clipboard") { viewModel.canPasteEdits }
         viewModel.selectPortableItem(at: 1)
         viewModel.selectPortableItem(at: 2, modifiers: [.command])

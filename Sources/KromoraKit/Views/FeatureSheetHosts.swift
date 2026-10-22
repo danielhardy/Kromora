@@ -69,7 +69,7 @@ struct SelectiveCopySheetModifier: ViewModifier {
         return content.sheet(isPresented: $clipboard.isSelectiveCopyDialogPresented) {
             SelectiveCopySheet(
                 categories: $clipboard.selectiveCopyCategories,
-                sourceName: viewModel.sourceName,
+                sourceName: clipboard.selectiveCopySource?.name ?? viewModel.sourceName,
                 onCopy: clipboard.confirmSelectiveCopy,
                 onCancel: clipboard.cancelSelectiveCopy
             )

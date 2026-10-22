@@ -74,8 +74,8 @@ extension AppViewModel {
         case .copyImage:
             exportWorkflow.copySelectedImages()
         case .copyEditSettings:
-            editClipboardWorkflow.copyAllEdits(
-                from: EditSourceReference(
+            editClipboardWorkflow.presentSelectiveCopyDialog(
+                for: EditSourceReference(
                     assetID: id, portableIdentity: item.asset.source.portableIdentity, url: item.url),
                 name: item.displayName)
         case .pasteEditSettings:

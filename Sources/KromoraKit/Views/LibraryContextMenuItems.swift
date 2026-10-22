@@ -20,7 +20,7 @@ struct LibraryContextMenuItems: View {
         Button(count > 1 ? "Copy \(count) Images" : "Copy Image") { run(.copyImage) }
             .disabled(!state.isEnabled(.copyImage))
             .help(state.disabledReason(for: .copyImage) ?? "Copy the developed image")
-        Button("Copy Edit Settings") { run(.copyEditSettings) }
+        Button("Copy Edits…") { run(.copyEditSettings) }
             .disabled(!state.isEnabled(.copyEditSettings))
         Button(count > 1 ? "Paste Edit Settings to \(count) Photos" : "Paste Edit Settings") {
             run(.pasteEditSettings)

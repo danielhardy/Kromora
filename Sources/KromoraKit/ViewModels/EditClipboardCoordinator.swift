@@ -39,6 +39,8 @@ final class EditClipboardCoordinator {
         Set(EditClipboardPayload.Category.allCases)
     var isSelectiveCopyDialogPresented = false
     var selectiveCopyCategories: Set<EditClipboardPayload.Category>
+    /// The photo the open dialog copies from. `nil` means the open photo's live document.
+    private(set) var selectiveCopySource: (reference: EditSourceReference, name: String)?
 
     @ObservationIgnored weak var destination: (any EditClipboardDestination)?
     @ObservationIgnored private let editor: EditorDocumentCoordinator
@@ -65,25 +67,51 @@ final class EditClipboardCoordinator {
             destination.setClipboardStatus("Open an image first")
             return
         }
+        selectiveCopySource = nil
+        selectiveCopyCategories = settings.lastCopyCategories
+        isSelectiveCopyDialogPresented = true
+    }
+
+    /// Opens the dialog for a photo that may not be the open one (the context-menu source). The
+    /// open photo still copies its live document; any other copies its durable edit on confirm.
+    func presentSelectiveCopyDialog(for reference: EditSourceReference, name: String) {
+        guard let destination else { return }
+        if destination.clipboardActiveSourceReference == reference, destination.clipboardHasCopySource {
+            presentSelectiveCopyDialog()
+            return
+        }
+        selectiveCopySource = (reference, name)
         selectiveCopyCategories = settings.lastCopyCategories
         isSelectiveCopyDialogPresented = true
     }
 
     func confirmSelectiveCopy() {
         guard let destination else { return }
+        if let source = selectiveCopySource {
+            let categories = selectiveCopyCategories
+            settings.lastCopyCategories = categories
+            isSelectiveCopyDialogPresented = false
+            selectiveCopySource = nil
+            copy(from: source.reference, name: source.name, categories: categories)
+            return
+        }
         guard destination.clipboardHasCopySource else {
             isSelectiveCopyDialogPresented = false
             destination.setClipboardStatus("Open an image first")
             return
         }
         settings.lastCopyCategories = selectiveCopyCategories
+        cancelPendingCopy()
         copy(document: destination.clipboardDocument, categories: selectiveCopyCategories)
         isSelectiveCopyDialogPresented = false
         let summary = categorySummary(allCategories: "all edits")
         destination.setClipboardStatus("Copied \(summary) from \(destination.clipboardSourceName)")
     }
 
-    func cancelSelectiveCopy() { isSelectiveCopyDialogPresented = false }
+    func cancelSelectiveCopy() {
+        isSelectiveCopyDialogPresented = false
+        selectiveCopySource = nil
+    }
 
     /// Neutral optional RAW settings never transfer the source photo's as-shot decoder seed.
     func copyAllEdits() {
@@ -92,6 +120,7 @@ final class EditClipboardCoordinator {
             destination.setClipboardStatus("Open an image first")
             return
         }
+        cancelPendingCopy()
         copy(document: destination.clipboardDocument, categories: Set(EditClipboardPayload.Category.allCases))
         destination.setClipboardStatus("Copied all edits from \(destination.clipboardSourceName)")
     }
@@ -99,12 +128,19 @@ final class EditClipboardCoordinator {
     /// Copies the durable edit of a photo that is not the open one (the context-menu source).
     /// The open photo copies its live document instead, so unsaved slider changes are included.
     func copyAllEdits(from reference: EditSourceReference, name: String) {
+        copy(from: reference, name: name, categories: Set(EditClipboardPayload.Category.allCases))
+    }
+
+    private func copy(
+        from reference: EditSourceReference, name: String, categories: Set<EditClipboardPayload.Category>
+    ) {
         guard let destination else { return }
+        cancelPendingCopy()
         if destination.clipboardActiveSourceReference == reference, destination.clipboardHasCopySource {
-            copyAllEdits()
+            copy(document: destination.clipboardDocument, categories: categories)
+            destination.setClipboardStatus("Copied \(categorySummary(categories, allCategories: "all edits")) from \(name)")
             return
         }
-        copyTask?.cancel()
         copyTask = Task { @MainActor [weak self] in
             guard let self, let destination = self.destination else { return }
             destination.flushClipboardPersistence()
@@ -112,14 +148,17 @@ final class EditClipboardCoordinator {
             guard !Task.isCancelled else { return }
             switch result.status {
             case .ready, .relinked:
-                self.copy(
-                    document: result.document, categories: Set(EditClipboardPayload.Category.allCases))
-                destination.setClipboardStatus("Copied all edits from \(name)")
+                self.copy(document: result.document, categories: categories)
+                destination.setClipboardStatus(
+                    "Copied \(self.categorySummary(categories, allCategories: "all edits")) from \(name)")
             default:
                 destination.setClipboardStatus("Could not read the edits of \(name)")
             }
         }
     }
+
+    /// A newer confirmed copy supersedes any durable read that has not completed yet.
+    private func cancelPendingCopy() { copyTask?.cancel() }
 
     private func copy(document: EditDocument, categories: Set<EditClipboardPayload.Category>) {
         clipboard = EditClipboardPayload(document: document)
@@ -262,7 +301,13 @@ final class EditClipboardCoordinator {
     }
 
     private func categorySummary(allCategories: String) -> String {
-        if clipboardCategories == Set(EditClipboardPayload.Category.allCases) { return allCategories }
-        return clipboardCategories.sorted { $0.title < $1.title }.map(\.title).joined(separator: ", ")
+        categorySummary(clipboardCategories, allCategories: allCategories)
+    }
+
+    private func categorySummary(
+        _ categories: Set<EditClipboardPayload.Category>, allCategories: String
+    ) -> String {
+        if categories == Set(EditClipboardPayload.Category.allCases) { return allCategories }
+        return categories.sorted { $0.title < $1.title }.map(\.title).joined(separator: ", ")
     }
 }
