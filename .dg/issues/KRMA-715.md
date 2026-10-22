@@ -12,7 +12,7 @@ labels:
   - interaction
   - ui
 created: 2026-09-29T16:44:14.772Z
-updated: 2026-10-03T19:19:25.549Z
+updated: 2026-10-22T16:20:30.103Z
 blockers:
   - id: evt_mun4xehs_zc41fz
     type: human
@@ -101,3 +101,8 @@ Release visual verification completed in the packaged Release app. Procedure: in
 
 ### COmment - Human @ 2026-10-03
 Closing ticket as this has mostly be resolved with other performance updates.
+
+
+### Comment — claude @ 2026-10-22T16:20:30.101Z
+
+Unblock path (da58340a): scripts/disposable-app.sh start <package.kromoralibrary> launches the dev app on an APFS clone of a package with its own bundle id and preferences, and never opens the personal library (stop removes the clone). It is the unsandboxed dev launcher, so it covers UI behavior; signed-app facts still need scripts/app-store-build.sh and the packaged smoke. The 'confirm a disposable profile' part of this blocker is now answered by the script. The live UI step still needs an unlocked display, so it can be run by an agent with computer-use access or by a person in about a minute; see docs/TESTING.md 'Live checks on a disposable library'.
