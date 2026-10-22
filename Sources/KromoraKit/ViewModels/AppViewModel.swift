@@ -1137,7 +1137,8 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         self.export = ExportCoordinator(
             engine: engine,
             maskResolver: CoordinatorLocalMaskResolver(coordinator: analysisCoordinator),
-            editStore: effectiveEditStore
+            editStore: effectiveEditStore,
+            sheets: sheets
         )
         self.exportWorkflow = ExportWorkflowCoordinator(export: self.export)
         self.previewCoordinator = PreviewCoordinator(engine: engine, scheduler: workScheduler)
