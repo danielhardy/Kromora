@@ -22,6 +22,9 @@ final class LibraryHandoffState {
     /// True from the start of an entrance until the photo has reached the canvas. The editor
     /// holds its inspector and filmstrip back for this window, then brings them in as stage two.
     var isEntering = false
+    /// The editor's canvas stays invisible from the start of an entrance until the photo lands, so
+    /// the flight is the only copy of the image on screen instead of growing over an identical one.
+    var isCanvasHeld = false
     /// The asset whose Library cell the return flight should land on. Only that cell reports its
     /// frame, so the grid pays nothing while it scrolls.
     var returnTargetID: PhotoAssetID?
@@ -31,7 +34,9 @@ final class LibraryHandoffState {
     @ObservationIgnored private(set) var canvasFrameRevision = 0
     @ObservationIgnored var pendingOpenFrame: CGRect?
     @ObservationIgnored private(set) var returnCellFrame: CGRect?
+    @ObservationIgnored private var returnCellFrameChangedAt: ContinuousClock.Instant?
 
+    @ObservationIgnored private var isTrackingCanvas = false
     @ObservationIgnored private var task: Task<Void, Never>?
 
     /// Every report bumps the revision, even an unchanged frame, so an entrance can tell the
@@ -39,17 +44,36 @@ final class LibraryHandoffState {
     func updateCanvasFrame(_ frame: CGRect) {
         canvasFrame = frame
         canvasFrameRevision &+= 1
+        // While the chrome arrives the canvas shrinks to its final size; the dissolving flight
+        // follows it so the two copies of the photo stay registered instead of ghosting.
+        guard isTrackingCanvas, let flight, frame.width > 0 else { return }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            self.flight?.frame = Self.fittedRect(imageSize: flight.image.size, in: frame)
+        }
     }
 
     func updateReturnCellFrame(_ frame: CGRect, for id: PhotoAssetID) {
-        guard id == returnTargetID else { return }
+        guard id == returnTargetID, frame != returnCellFrame else { return }
         returnCellFrame = frame
+        returnCellFrameChangedAt = .now
     }
 
     func beginReturnTarget(_ id: PhotoAssetID) {
         returnCellFrame = nil
+        returnCellFrameChangedAt = nil
         returnTargetID = id
     }
+
+    /// The cell has reported one frame for long enough that the grid is no longer relaying out
+    /// (for example while the inspector retracts and the columns widen), so it is a safe landing.
+    private var returnCellFrameIsSettled: Bool {
+        guard returnCellFrame != nil, let changed = returnCellFrameChangedAt else { return false }
+        return changed.duration(to: .now) >= Self.returnSettleInterval
+    }
+
+    private static let returnSettleInterval: Duration = .milliseconds(200)
 
     /// Grows `image` from its Library cell to the Edit canvas, then lets the inspector and
     /// filmstrip follow. The caller has already started the (asynchronous) open.
@@ -57,6 +81,7 @@ final class LibraryHandoffState {
         task?.cancel()
         flight = Flight(image: image, frame: cell, cornerRadius: 6, opacity: 1)
         isEntering = true
+        isCanvasHeld = true
         let revision = canvasFrameRevision
         task = Task { @MainActor [self] in
             for _ in 0..<25 where canvasFrameRevision == revision {
@@ -71,10 +96,13 @@ final class LibraryHandoffState {
                 }
             }
             guard !Task.isCancelled else { return }
-            // Stage two: the photo is on the canvas, so the chrome slides in as it dissolves.
+            // Stage two: the photo is on the canvas, so the chrome slides in as it dissolves and
+            // the real canvas is revealed beneath it.
+            isTrackingCanvas = true
             await animate(.smooth(duration: 0.35)) {
                 self.flight?.opacity = 0
                 self.isEntering = false
+                self.isCanvasHeld = false
             }
             guard !Task.isCancelled else { return }
             finish()
@@ -86,13 +114,18 @@ final class LibraryHandoffState {
     func runReturn(image: NSImage, assetID: PhotoAssetID) {
         task?.cancel()
         isEntering = false
-        guard canvasFrame.width > 0 else { finish(); return }
+        guard canvasFrame.width > 0 else {
+            finish()
+            return
+        }
         flight = Flight(
             image: image, frame: Self.fittedRect(imageSize: image.size, in: canvasFrame),
             cornerRadius: 0, opacity: 1)
         beginReturnTarget(assetID)
         task = Task { @MainActor [self] in
-            for _ in 0..<20 where returnCellFrame == nil {
+            // The grid is still relaying out while the editor chrome leaves, so the cell's first
+            // frame is not where it ends up. Land on the settled frame, within a bounded wait.
+            for _ in 0..<40 where !returnCellFrameIsSettled {
                 try? await Task.sleep(for: .milliseconds(20))
             }
             guard !Task.isCancelled else { return }
@@ -129,6 +162,8 @@ final class LibraryHandoffState {
         returnCellFrame = nil
         pendingOpenFrame = nil
         isEntering = false
+        isCanvasHeld = false
+        isTrackingCanvas = false
     }
 
     /// The rectangle `image` occupies when aspect-fit inside `bounds`.

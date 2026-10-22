@@ -221,10 +221,15 @@ public struct ContentView: View {
         let cell = handoff.pendingOpenFrame
         handoff.pendingOpenFrame = nil
         let image = collection.items.first { $0.id == assetID }?.thumbnail
+        let flies = !accessibilityReduceMotion && cell != nil && image != nil
+        // Set before the open so the workspace swap is instant and the editor mounts with its
+        // chrome already held back, rather than flashing it for a frame.
+        handoff.isEntering = flies
         viewModel.openLibraryImageForEditing(assetID: assetID)
-        guard !accessibilityReduceMotion, viewModel.navigation.isEdit,
-            let cell, let image
-        else { return }
+        guard flies, viewModel.navigation.isEdit, let cell, let image else {
+            handoff.isEntering = false
+            return
+        }
         handoff.runEntrance(image: image, from: cell)
     }
 
@@ -275,6 +280,7 @@ public struct ContentView: View {
                             reduceMotion: accessibilityReduceMotion
                         ) { surfaceSize in
                             PreviewView(viewModel: viewModel, surfaceHeight: surfaceSize.height)
+                                .opacity(viewModel.libraryHandoff.isCanvasHeld ? 0 : 1)
                                 .onGeometryChange(for: CGRect.self) {
                                     $0.frame(in: .global)
                                 } action: {
@@ -320,9 +326,7 @@ public struct ContentView: View {
             value: collection.isActive)
         .animation(chromeAnimation, value: canvasState.isCropToolActive)
         .animation(chromeAnimation, value: chrome.isSourceBrowserPresented)
-        .animation(
-            .easeInOut(duration: 0.2).respectingReduceMotion(accessibilityReduceMotion),
-            value: viewModel.navigation.mode)
+        .animation(modeSwapAnimation, value: viewModel.navigation.mode)
         .toolbar {
             // Each cluster is its own toolbar item so the system draws one frosted group,
             // the same material as the Library/Edit picker. A fixed spacer keeps the groups
@@ -351,6 +355,17 @@ public struct ContentView: View {
                 }
             }
         }
+    }
+
+    /// Returning to Library with a flight swaps instantly: a cross-fade would reflow the grid
+    /// (columns re-pack while the inspector leaves) under the contracting photo. Entering keeps the
+    /// quick cross-fade so the grid fades out behind the growing photo; so do changes with no flight,
+    /// such as the toolbar picker.
+    private var modeSwapAnimation: Animation? {
+        let returnsWithFlight = !accessibilityReduceMotion && viewModel.navigation.isGrid
+            && collection.selectedItem?.thumbnail != nil
+        guard !returnsWithFlight else { return nil }
+        return .easeInOut(duration: 0.2).respectingReduceMotion(accessibilityReduceMotion)
     }
 
     private var chromeAnimation: Animation? {
