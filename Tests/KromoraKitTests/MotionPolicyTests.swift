@@ -12,4 +12,12 @@ final class MotionPolicyTests: XCTestCase {
         let animation = Animation.easeInOut(duration: 0.2)
         XCTAssertEqual(animation.respectingReduceMotion(false), animation)
     }
+
+    func testFilmstripCentersEntryItemIncludingEdges() {
+        let ids = ["a", "b", "c"]
+        XCTAssertEqual(FilmstripLayout.centeredItemID(ids: ids, selectedIndex: 0), "a")
+        XCTAssertEqual(FilmstripLayout.centeredItemID(ids: ids, selectedIndex: 2), "c")
+        XCTAssertNil(FilmstripLayout.centeredItemID(ids: ids, selectedIndex: 3))
+        XCTAssertNil(FilmstripLayout.centeredItemID(ids: [String](), selectedIndex: 0))
+    }
 }

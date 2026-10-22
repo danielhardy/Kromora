@@ -69,7 +69,16 @@ struct FilmstripView: View {
             // The strip owns its settings observation so a caption toggle resizes it without
             // invalidating the root view model.
             .frame(height: FilmstripLayout.stripHeight(showPhotoNames: settings.showPhotoNames))
-            .onAppear { collection.beginThumbnailDemand() }
+            .onAppear {
+                collection.beginThumbnailDemand()
+                // The Library selection is set before the strip mounts, so `onChange` never fires
+                // for the entry photo; center it immediately, without animation.
+                if let id = FilmstripLayout.centeredItemID(
+                    ids: collection.items.map(\.id), selectedIndex: collection.selectedIndex
+                ) {
+                    proxy.scrollTo(id, anchor: .center)
+                }
+            }
             .onChange(of: collection.selectedIndex) { _, newIndex in
                 guard collection.items.indices.contains(newIndex) else { return }
                 withAnimation(
@@ -85,6 +94,11 @@ struct FilmstripView: View {
 /// Geometry for the Edit filmstrip. The strip height is derived from the cell and optional
 /// caption so status badges do not reserve a second row below every thumbnail.
 enum FilmstripLayout {
+    /// The item the strip should center for `selectedIndex`, or nil when the index is out of range.
+    static func centeredItemID<ID>(ids: [ID], selectedIndex: Int) -> ID? {
+        ids.indices.contains(selectedIndex) ? ids[selectedIndex] : nil
+    }
+
     static let thumbnailSize: CGFloat = 96
     static let horizontalContentInset: CGFloat = 12
     static let stripVerticalPadding: CGFloat = 3

@@ -610,6 +610,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
     }
     let status = StatusState()
     let libraryPresentation = LibraryPresentationState()
+    let libraryHandoff = LibraryHandoffState()
     let chrome = ChromePresentationState()
     var statusMessage: String { get { status.message } set { status.message = newValue } }
     var errorMessage: String? { get { status.errorMessage } set { status.errorMessage = newValue } }

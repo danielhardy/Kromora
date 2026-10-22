@@ -266,7 +266,7 @@ final class KeyboardCommandRouter {
         return true
     }
 
-    /// Cancel crop first, then deselect/exit the active canvas tool.
+    /// Cancel crop first, then deselect/exit the active canvas tool, then return to Library.
     private func handleEscape(_ input: KeyInput, vm: AppViewModel) -> Bool {
         guard !input.hasSystemModifier else { return false }
         guard input.isDown else { return true }
@@ -287,8 +287,11 @@ final class KeyboardCommandRouter {
         } else if vm.isRetouchCanvasActive {
             vm.retouchWorkflow.setArmed(false)
             vm.inspectorState.select(.info)
+        } else if vm.navigation.isEdit {
+            // No submode left to dismiss: Escape leaves Edit for the Library.
+            _ = vm.navigate(to: .grid)
         }
-        // Nothing to cancel is an intentional no-op, still claimed.
+        // Anywhere else, nothing to cancel is an intentional no-op, still claimed.
         return true
     }
 

@@ -193,8 +193,15 @@ public struct ContentView: View {
             detailContent
         }
         .background(KromoraTheme.windowBackground)
+        .overlay { LibraryHandoffOverlay(handoff: viewModel.libraryHandoff) }
+        .onChange(of: viewModel.navigation.mode) { old, new in
+            if old == .edit, new == .grid { startReturnHandoff() }
+        }
         .inspector(isPresented: Binding(
-            get: { canvasState.isCropToolActive || inspectorState.isPresented },
+            get: {
+                canvasState.isCropToolActive
+                    || (inspectorState.isPresented && !viewModel.libraryHandoff.isEntering)
+            },
             set: { isPresented in
                 // Crop owns the inspector for the duration of the mode.
                 if !canvasState.isCropToolActive {
@@ -207,6 +214,30 @@ public struct ContentView: View {
         }
     }
 
+    /// A pointer open flies the clicked cell's photo into the editor. Reduce Motion, a missing
+    /// thumbnail, or an unknown cell frame opens immediately, exactly as before.
+    private func openFromLibrary(_ assetID: PhotoAssetID) {
+        let handoff = viewModel.libraryHandoff
+        let cell = handoff.pendingOpenFrame
+        handoff.pendingOpenFrame = nil
+        let image = collection.items.first { $0.id == assetID }?.thumbnail
+        viewModel.openLibraryImageForEditing(assetID: assetID)
+        guard !accessibilityReduceMotion, viewModel.navigation.isEdit,
+            let cell, let image
+        else { return }
+        handoff.runEntrance(image: image, from: cell)
+    }
+
+    private func startReturnHandoff() {
+        guard !accessibilityReduceMotion, let item = collection.selectedItem,
+            let image = item.thumbnail
+        else {
+            viewModel.libraryHandoff.finish()
+            return
+        }
+        viewModel.libraryHandoff.runReturn(image: image, assetID: item.id)
+    }
+
     private var detailContent: some View {
         Group {
             if viewModel.navigation.isGrid {
@@ -214,7 +245,7 @@ public struct ContentView: View {
                     LibraryGridView(
                         collection: collection,
                         viewModel: viewModel,
-                        onOpen: viewModel.openLibraryImageForEditing
+                        onOpen: openFromLibrary
                     )
                     StatusBar(viewModel: viewModel, photosImportCoordinator: photosImportCoordinator,
                               export: exportCoordinator, collection: collection,
@@ -240,10 +271,15 @@ public struct ContentView: View {
 
                     VStack(spacing: 0) {
                         EditorCanvasLayout(
-                            isChromeHidden: canvasState.isCropToolActive,
+                            isChromeHidden: canvasState.isCropToolActive || viewModel.libraryHandoff.isEntering,
                             reduceMotion: accessibilityReduceMotion
                         ) { surfaceSize in
                             PreviewView(viewModel: viewModel, surfaceHeight: surfaceSize.height)
+                                .onGeometryChange(for: CGRect.self) {
+                                    $0.frame(in: .global)
+                                } action: {
+                                    viewModel.libraryHandoff.updateCanvasFrame($0)
+                                }
                         } chrome: {
                             if collection.isActive {
                                 VStack(spacing: 0) {
@@ -619,3 +655,26 @@ private struct CropToolbarControls: View {
 
 // The File menu, its notification names, and `MenuCommandReceivers` live in
 // MenuCommands.swift.
+
+
+/// Draws the handoff photo above the whole window. It never takes hits or accessibility focus.
+private struct LibraryHandoffOverlay: View {
+    let handoff: LibraryHandoffState
+
+    var body: some View {
+        GeometryReader { proxy in
+            if let flight = handoff.flight {
+                let origin = proxy.frame(in: .global).origin
+                Image(nsImage: flight.image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: flight.frame.width, height: flight.frame.height)
+                    .clipShape(RoundedRectangle(cornerRadius: flight.cornerRadius))
+                    .opacity(flight.opacity)
+                    .position(x: flight.frame.midX - origin.x, y: flight.frame.midY - origin.y)
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}

@@ -331,9 +331,25 @@ private struct LibraryGridRow: View {
                     .overlay {
                         LibraryCellClickSurface(
                             onSelect: { onSelect(item.id, $0) },
-                            onOpen: { onOpen(item.id) }
+                            onOpen: { onOpen(item.id) },
+                            onOpenFrame: { frame in
+                                viewModel.libraryHandoff.pendingOpenFrame = frame.map {
+                                    CGRect(x: $0.minX, y: $0.minY, width: cellEdge, height: cellEdge)
+                                }
+                            }
                         )
                         .accessibilityHidden(true)
+                    }
+                    .background {
+                        // Only the return target reports its frame, so scrolling stays free.
+                        if viewModel.libraryHandoff.returnTargetID == item.id {
+                            Color.clear.onGeometryChange(for: CGRect.self) {
+                                let frame = $0.frame(in: .global)
+                                return CGRect(x: frame.minX, y: frame.minY, width: cellEdge, height: cellEdge)
+                            } action: { frame in
+                                viewModel.libraryHandoff.updateReturnCellFrame(frame, for: item.id)
+                            }
+                        }
                     }
                     .overlay {
                         LibraryContextClickRetarget {

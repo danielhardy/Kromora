@@ -322,7 +322,23 @@ final class KeyboardCommandRouterTests: TempDirectoryTestCase {
             viewModel.document.crop,
             CropAdjustments(normalizedRect: CGRect(x: 0.1, y: 0.2, width: 0.7, height: 0.6))
         )
-        XCTAssertTrue(press(router, .escape), "with nothing to cancel Esc is a claimed no-op")
+        XCTAssertTrue(press(router, .escape), "outside Edit with nothing to cancel Esc is a claimed no-op")
+    }
+
+    func testEscapeInEditReturnsToLibraryOnlyAfterSubmodesAreDismissed() {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        viewModel.sourceImage = grayImage()
+        viewModel.collection.isActive = true
+        XCTAssertTrue(viewModel.navigate(to: .edit))
+        let router = router(viewModel)
+
+        viewModel.beginCrop()
+        XCTAssertTrue(press(router, .escape))
+        XCTAssertFalse(viewModel.isCropToolActive)
+        XCTAssertTrue(viewModel.navigation.isEdit, "Esc cancels crop before leaving Edit")
+
+        XCTAssertTrue(press(router, .escape))
+        XCTAssertTrue(viewModel.navigation.isGrid, "with no submode left Esc returns to Library")
     }
 
     func testRetouchShortcutsArmCycleOverlayAndExitInTwoSteps() {
