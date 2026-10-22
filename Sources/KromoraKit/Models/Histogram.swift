@@ -37,6 +37,18 @@ struct HistogramData: Equatable, Sendable {
     let sampleWidth: Int
     let sampleHeight: Int
 
+    /// Content identity of the sample set, so sample-based scopes can crossfade between photos.
+    /// Cache it at construction instead of hashing the full sample buffer on every view update.
+    let sampleIdentity: Int
+
+    private static func identity(samples: [UInt8], width: Int, height: Int) -> Int {
+        var hasher = Hasher()
+        hasher.combine(width)
+        hasher.combine(height)
+        hasher.combine(samples)
+        return hasher.finalize()
+    }
+
     /// Channels a histogram view can draw.
     enum Channel: CaseIterable {
         case red, green, blue, luma
@@ -67,6 +79,7 @@ struct HistogramData: Equatable, Sendable {
         self.samples = samples
         self.sampleWidth = sampleWidth
         self.sampleHeight = sampleHeight
+        sampleIdentity = Self.identity(samples: samples, width: sampleWidth, height: sampleHeight)
         self.clippedHighlights = clippedHighlights
         self.clippedShadows = clippedShadows
         self.clippedRed = clippedRed

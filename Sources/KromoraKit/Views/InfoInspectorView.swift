@@ -387,11 +387,17 @@ struct InfoInspectorView: View {
     @ViewBuilder
     private var histogramPlot: some View {
         if let histogram = viewModel.info.histogram {
-            HistogramChart(data: histogram, channel: channel)
-                .animation(
-                    accessibilityReduceMotion ? nil : .easeInOut(duration: 0.45),
-                    value: histogram
-                )
+            // Curve modes morph through `HistogramChart.animatableData`; sample-based scopes have no
+            // point correspondence between photos, so a new photo's samples crossfade in instead.
+            ZStack {
+                HistogramChart(data: histogram, channel: channel)
+                    .id(channel.isSampleBased ? histogram.sampleIdentity : 0)
+                    .transition(.opacity)
+            }
+            .animation(
+                accessibilityReduceMotion ? nil : .easeInOut(duration: 0.45),
+                value: histogram
+            )
         } else if viewModel.info.isHistogramLoading {
             ProgressView().controlSize(.small)
         } else {
@@ -559,6 +565,13 @@ struct HistogramChart: View, @MainActor Animatable {
             }
         }
 
+        var isSampleBased: Bool {
+            switch self {
+            case .waveform, .parade, .vectorscope: true
+            case .rgb, .luma, .red, .green, .blue: false
+            }
+        }
+
         var accessibilityName: String {
             switch self {
             case .rgb: "RGB"
@@ -575,16 +588,23 @@ struct HistogramChart: View, @MainActor Animatable {
 
     let data: HistogramData
     let channel: Mode
-    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
-    @State private var animatedValues: HistogramPlotValues?
+    /// The in-flight interpolated bins. SwiftUI writes intermediate values through `animatableData`,
+    /// and `body` plots this stored value directly so every animation frame draws what was set.
+    private var plot: HistogramPlotValues
+
+    init(data: HistogramData, channel: Mode) {
+        self.data = data
+        self.channel = channel
+        plot = HistogramPlotValues(data: data)
+    }
 
     var animatableData: HistogramPlotValues {
-        get { HistogramPlotValues(data: data) }
-        set { animatedValues = newValue }
+        get { plot }
+        set { plot = newValue }
     }
 
     var body: some View {
-        let values = animatedValues ?? HistogramPlotValues(data: data)
+        let values = plot
         Canvas { context, size in
             switch channel {
             case .rgb:
@@ -700,7 +720,7 @@ struct HistogramChart: View, @MainActor Animatable {
 /// normalized display space makes each transition independent of the source photo's pixel count.
 struct HistogramPlotValues: VectorArithmetic {
     private static let binsPerChannel = 256
-    private var bins: [CGFloat]
+    private(set) var bins: [CGFloat]
 
     var red: [CGFloat] { Array(bins[0..<Self.binsPerChannel]) }
     var green: [CGFloat] { Array(bins[Self.binsPerChannel..<(2 * Self.binsPerChannel)]) }
