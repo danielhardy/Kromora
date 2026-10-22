@@ -5,8 +5,7 @@ import XCTest
 @testable import KromoraKit
 
 /// KRMA-972: records how many times each inspector/chrome view body re-evaluates when one
-/// `AppViewModel` property changes. The numbers feed the Baseline table in
-/// `docs/APP_VIEWMODEL_OBSERVATION_PLAN.md`; counts are logical evaluations, not timings.
+/// `AppViewModel` property changes. Counts are logical evaluations, not timings.
 ///
 /// The test asserts only determinism and two positive controls. It deliberately does not assert
 /// that unrelated views re-evaluate: that is the over-invalidation the migration removes.

@@ -3,8 +3,7 @@ import SwiftUI
 
 @testable import KromoraKit
 
-/// Window-independent view-body counting for the `@Observable` migration
-/// (`docs/APP_VIEWMODEL_OBSERVATION_PLAN.md`).
+/// Window-independent view-body counting for `@Observable` view-update tests.
 ///
 /// A wrapper view's `body` does not count the evaluations of the view it wraps, so there is no
 /// generic "probe around the real view". Views that already count themselves through
