@@ -50,6 +50,7 @@ struct ColorInspectorView: View {
                             }
                         }
                     }
+                    .neutralMenu()
                     .disabled(viewModel.sourceIsRAW && viewModel.capabilities.rawCapabilities == nil)
                     .accessibilityLabel("White balance preset")
                     Button {

@@ -44,6 +44,7 @@ struct RetouchInspectorView: View {
                                 }
                             }
                             .labelsHidden()
+                            .neutralMenu()
                             .frame(width: 115)
                         }
                         slider("Size", value: spotRadiusBinding, range: 0.0005...0.25, format: "%.3f")
@@ -54,6 +55,7 @@ struct RetouchInspectorView: View {
                             Text("Drag the pin to move it; drag its source ring to choose a source.")
                                 .font(.caption).foregroundStyle(.secondary)
                             Button("Delete Spot", role: .destructive) { removeSpot(spot.wrappedValue.id) }
+                                .neutralActionButton()
                         } else {
                             Text("Paint on the photo to add a spot. Press Q to arm the brush.")
                                 .font(.caption).foregroundStyle(.secondary)
@@ -72,19 +74,23 @@ struct RetouchInspectorView: View {
                             set: { viewModel.setRetouchVisualizationThreshold($0) }
                         ), range: 0.005...0.12, format: "%.3f")
                         Button("Detect Dust") { viewModel.detectRetouchDust() }
+                            .neutralActionButton()
                             .disabled(viewModel.previewSurface.image == nil)
                         if !interaction.dustSuggestions.isEmpty {
                             HStack {
                                 Text("\(interaction.dustSuggestions.count) suggestions").font(.caption)
                                 Spacer()
                                 Button("Accept All") { viewModel.retouchWorkflow.acceptAllDustSuggestions() }
+                                    .neutralActionButton()
                                 Button("Dismiss") { viewModel.retouchWorkflow.dismissAllDustSuggestions() }
+                                    .neutralActionButton()
                             }
                             ForEach(interaction.dustSuggestions.prefix(12)) { suggestion in
                                 HStack(spacing: 5) {
                                     Text(String(format: "%.0f%%", suggestion.confidence * 100)).font(.caption2)
                                     Spacer()
                                     Button("Accept") { viewModel.retouchWorkflow.acceptDustSuggestion(suggestion.id) }
+                                        .neutralActionButton()
                                     Button("×") { viewModel.retouchWorkflow.dismissDustSuggestion(suggestion.id) }
                                         .buttonStyle(.plain).help("Dismiss suggestion")
                                 }
@@ -107,11 +113,14 @@ struct RetouchInspectorView: View {
                         .pickerStyle(.segmented)
                         HStack {
                             Button { addEye() } label: { Label("Add Eye", systemImage: "plus.circle") }
+                                .neutralActionButton()
                             Spacer()
                             Button { selectEye(-1) } label: { Image(systemName: "chevron.left") }
+                                .neutralActionButton()
                                 .disabled(viewModel.document.retouch.eyes.isEmpty)
                                 .help("Previous eye")
                             Button { selectEye(1) } label: { Image(systemName: "chevron.right") }
+                                .neutralActionButton()
                                 .disabled(viewModel.document.retouch.eyes.isEmpty)
                                 .help("Next eye")
                         }
@@ -124,6 +133,7 @@ struct RetouchInspectorView: View {
                             slider("Pupil size", value: eyeBinding(\.pupilSize), range: 0...100, format: "%.0f%%")
                             slider("Darkening", value: eyeBinding(\.darken), range: 0...100, format: "%.0f%%")
                             Button("Delete Eye", role: .destructive) { removeEye(eye.wrappedValue.id) }
+                                .neutralActionButton()
                         } else {
                             Text("Add an eye correction and tune pupil size and darkening.")
                                 .font(.caption).foregroundStyle(.secondary)

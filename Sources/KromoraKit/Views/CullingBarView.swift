@@ -169,6 +169,7 @@ struct LibraryFilterControls: View {
             .labelsHidden()
             .pickerStyle(.menu)
             .controlSize(isCompact ? .small : .regular)
+            .neutralMenu()
             .focusable(false)
             .help("Filter by pick or reject status")
 
@@ -185,6 +186,7 @@ struct LibraryFilterControls: View {
             .labelsHidden()
             .pickerStyle(.menu)
             .controlSize(isCompact ? .small : .regular)
+            .neutralMenu()
             .focusable(false)
             .help("Filter by star rating")
 

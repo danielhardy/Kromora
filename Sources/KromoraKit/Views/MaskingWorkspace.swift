@@ -94,6 +94,7 @@ struct MaskingWorkspace: View {
         } label: {
             Image(systemName: "plus")
         }
+        .neutralMenu()
         .fixedSize()
         .accessibilityLabel("Add Mask")
         .help("Add Mask")
@@ -486,6 +487,7 @@ struct MaskingWorkspace: View {
                 mode == .subtract ? "Subtract" : "Add",
                 systemImage: mode == .subtract ? "minus.circle" : "plus.circle")
         }
+        .neutralMenu()
         .fixedSize()
         .accessibilityLabel(mode == .subtract ? "Subtract from mask" : "Add to mask")
         .help(mode == .subtract
@@ -1182,6 +1184,7 @@ private struct MaskLayerRow: View {
                 Image(systemName: "ellipsis.circle")
             }
             .menuStyle(.borderlessButton)
+            .neutralMenu()
             .menuIndicator(.hidden)
             .fixedSize()
             .opacity(isHovered || isSelected ? 1 : 0)
@@ -1351,6 +1354,7 @@ private struct MaskPartRow: View {
                 Image(systemName: "ellipsis.circle")
             }
             .menuStyle(.borderlessButton)
+            .neutralMenu()
             .menuIndicator(.hidden)
             .fixedSize()
             .opacity(isHovered || isSelected ? 1 : 0)

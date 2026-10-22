@@ -95,6 +95,7 @@ struct CropInspectorView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .menuStyle(.borderlessButton)
+            .neutralMenu()
             .accessibilityLabel("Crop aspect ratio")
             .accessibilityValue(displayedAspectLabel)
             .accessibilityHint("Choose the crop frame ratio")

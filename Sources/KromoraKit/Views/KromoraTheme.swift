@@ -262,4 +262,10 @@ extension View {
     func neutralActionButton() -> some View {
         buttonStyle(.bordered).tint(nil)
     }
+
+    /// Resets the inherited copper tint on a `Menu` or `.menu`-style `Picker`. Choosing from a
+    /// menu is a passive choice, not an on/selected state, so it reads as an ordinary macOS control.
+    func neutralMenu() -> some View {
+        tint(nil)
+    }
 }
