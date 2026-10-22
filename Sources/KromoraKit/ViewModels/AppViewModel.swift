@@ -2594,6 +2594,25 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
                 previewPresentation.advanceComparisonRevision()
                 scheduleAdjacentPreviewPrefetch()
             }
+        } else if request.sourceRevision == sourceRevision, request.assetID == activeAssetID,
+            let session = editorDocument.session(for: request.assetID),
+            session.document != document
+        {
+            // A session-only write (a category paste that landed while this read was pending)
+            // owns the document but never reached the panel. The retained session is
+            // authoritative, so publish it; the next edit then composes on the merged document.
+            document = session.document
+            comparisonBaselineDocument = document.comparisonBaseline
+            editorDocument.activate(session: session, for: request.assetID)
+            collection.setPresentedCrop(
+                document.crop, rotation: document.rotation, for: request.assetID)
+            sourceSize = document.rotation.orientedExtent(imageSource?.nativeExtent ?? sourceSize)
+            restoreMaskSelection()
+            refreshLUTResolutionStatus()
+            documentRevision &+= 1
+            previewPresentation.advanceComparisonRevision()
+            scheduleAdjacentPreviewPrefetch()
+            scheduleCorrectivePreview()
         }
         storedEditLook = stored.lookSignature
         resolveProvisionalSourceGeometry(for: request.sourceRevision)

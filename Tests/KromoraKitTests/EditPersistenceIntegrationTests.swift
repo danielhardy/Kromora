@@ -493,11 +493,22 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         XCTAssertEqual(
             viewModel.editorDocument.revision(for: idB), revisionAfterPaste,
             "the late read must not re-adopt over the pasted session")
+        XCTAssertEqual(
+            viewModel.document, expected,
+            "the Edit panel reflects the merged saved document and pasted category")
+
+        // A separate edit composes on the merged document instead of replacing it with identity.
+        viewModel.updateDocument { $0.color.saturation = 12 }
+        let composed = EditDocument(
+            color: .init(saturation: 12),
+            adjustments: [.exposure(ev: 0.5), .vibrance(amount: 0.2)]
+        )
+        XCTAssertEqual(viewModel.document, composed)
 
         let flushed = await viewModel.flushPendingWrites()
         XCTAssertEqual(flushed, .success)
         let storedB = await container.store().load(for: EditSourceReference(assetID: idB, url: urlB))
-        XCTAssertEqual(storedB.document, expected)
+        XCTAssertEqual(storedB.document, composed)
         let storedA = await container.store().load(for: EditSourceReference(assetID: idA, url: urlA))
         XCTAssertEqual(
             storedA.document.adjustments, [.exposure(ev: 0.5), .vibrance(amount: 0.9)],
