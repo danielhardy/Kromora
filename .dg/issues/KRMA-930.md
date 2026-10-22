@@ -39,7 +39,7 @@ labels:
   - must-fix
   - ci
 created: 2026-10-13T14:47:40.853Z
-updated: 2026-10-22T19:08:28.659Z
+updated: 2026-10-22T20:08:12.012Z
 parent: KRMA-922
 depends_on:
   - KRMA-927
@@ -141,6 +141,10 @@ Actions run https://github.com/danielhardy/Kromora/actions/runs/39834730308 on 6
 ### Comment — codex @ 2026-10-22T19:08:28.657Z
 
 The current local branch contains c00d5692 (KRMA-930: harden smoke dialog polling), but Actions run 39834730308 tested the earlier SHA 6a7bdcc4b23cb4ddd89e73f5af591ac036797c40. The local commit is outside this run and still needs a human push and separate CI verification.
+
+### Comment — codex @ 2026-10-22T20:08:12.010Z
+
+The smoke failure output supplied by the user is: “System Events got an error: Can’t get window 1 of process 1 whose unix id = 11537. Invalid index. (-1719).” This is consistent with a transient accessibility query during a window or sheet transition. Local commit c00d56926450c7a17a12434e387ebad77b365511 adds retry guards around Open Image sheet polling and passes zsh syntax validation. Run 39834730308 tested earlier SHA 6a7bdcc4b23cb4ddd89e73f5af591ac036797c40, so it does not verify c00d5692.
 
 ## Agent log
 
