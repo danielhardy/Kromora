@@ -39,7 +39,7 @@ labels:
   - must-fix
   - ci
 created: 2026-10-13T14:47:40.853Z
-updated: 2026-10-22T20:08:12.012Z
+updated: 2026-10-22T23:46:35.494Z
 parent: KRMA-922
 depends_on:
   - KRMA-927
@@ -145,6 +145,10 @@ The current local branch contains c00d5692 (KRMA-930: harden smoke dialog pollin
 ### Comment — codex @ 2026-10-22T20:08:12.010Z
 
 The smoke failure output supplied by the user is: “System Events got an error: Can’t get window 1 of process 1 whose unix id = 11537. Invalid index. (-1719).” This is consistent with a transient accessibility query during a window or sheet transition. Local commit c00d56926450c7a17a12434e387ebad77b365511 adds retry guards around Open Image sheet polling and passes zsh syntax validation. Run 39834730308 tested earlier SHA 6a7bdcc4b23cb4ddd89e73f5af591ac036797c40, so it does not verify c00d5692.
+
+### Comment — codex @ 2026-10-22T23:46:35.492Z
+
+Actions run https://github.com/danielhardy/Kromora/actions/runs/39872317432 on 328a3fb1b66d4ecaf507ad84ca514aa779953c21 completed with FAILURE. Failed: Swift-format (changed files), Tests (Core Image/render/AppKit/UI, serial), and Application smoke path. Passed: Tests (deterministic/model, parallel), Package/sign/verify app, and Build/verify Xcode app. Job summaries show the failed steps, but GitHub denied log retrieval (HTTP 403: admin rights required; the serial job details also hit the unauthenticated API rate limit). The smoke error from the prior run was an invalid System Events window index (-1719); the current run needs logs before we can confirm whether it is the same failure.
 
 ## Agent log
 
