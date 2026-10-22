@@ -100,7 +100,7 @@ as recorded in the supplied export; no skin-quality claim is made. Brick was not
 | Signed app opens test package and saved recipe | Pass | App showed 27 assets; selected 01-sky-dust-auto-heal had one saved repair |
 | Signed app File export | Pass: full resolution, readable PNG | `ui-exports/01-sky-dust-auto-heal.png.png`, 8064 × 6048; app displayed Export complete |
 | Signed app repair after normal quit/reopen | Pass: saved recipe present | Reopened the same photo; Heal inspector showed 1 spot. This checks saved recipe presence, not a second export after relaunch |
-| Signed app export versus harness full-frame pixels | Not exact | 2,023 of 48,771,072 pixels differ, confined to the repair at inclusive bounds x=4646–4707, y=756–815; maximum RGB channel difference 2/255. All other pixels match. No visual acceptance inferred. KRMA-1085 found no differences among twelve in-process SwiftPM replay variants; this does not isolate the signed app because its export was not rerun with those variants. Cause remains unknown (see "KRMA-1076 reconciliation" below). |
+| Signed app export versus harness full-frame pixels | Pre-fix difference explained; no tolerance inferred | Before the fix, 2,023 of 48,771,072 pixels differed in the repair at inclusive bounds x=4646–4707, y=756–815; maximum RGB channel difference 2/255. KRMA-1086 captured the app export's zero `nativeExtent` and reproduced the app pixels with that extent versus the harness pixels with 8064 × 6048. After the fix, both extents reproduce the archived harness pixels exactly in the saved-package replay. The signed app was not re-exported after the fix. Human visual approval is separate (see "KRMA-1076 reconciliation" below). |
 | Restore original default library | Pass | Settings > Use Default Library > Relaunch; default path shown and Use Default disabled; replacement app showed 56 of 56 photos |
 
 `package-reopen.json` also contains three excluded case-09 calibration checks; those are not counted
@@ -221,11 +221,21 @@ maximum byte delta of 1/255 in each build.
 KRMA-1085 separately replayed the package's saved 8064 × 6048 automatic Heal asset and revision-1
 document. Six variants each in SwiftPM Debug and Release changed renderer warmth, portable source
 identity, `assetID`, and in-memory versus streamed output. Every one of the twelve outputs decoded to
-the same sRGB RGB pixels as the archived harness export. The archived signed-app PNG still differs by
-2,023 pixels, inclusive bounds x=4646–4707, y=756–815, maximum channel delta 2/255. These results
-establish that the tested variants do not change the in-process outputs; they do not isolate effects
-specific to the signed Xcode app because that app export was not rerun with the variants. The saved
-package remains at revision 1, but the app's export-time request was not captured. The cause remains
-unknown. The general observation in `PixelAssertions.swift` that occasional bytes move by 1 does not
-establish a 2/255 tolerance for this result. Do not call it numeric noise or publish a cross-build
-tolerance; no human visual verdict is established by this pixel comparison.
+the same sRGB RGB pixels as the archived harness export.
+
+KRMA-1086 then reran the disposable package through a signed Release app and an unsandboxed SwiftPM
+Release launcher before the fix. Both outputs were identical to each other and to the archived signed-app
+PNG. The captured export request used the persisted revision-1 document and the same lossless full-size
+PNG options; the app's `ImageSource` had `nativeExtent == .zero`, while the harness declared 8064 × 6048.
+Replaying with those extents reproduced the two outputs exactly: zero extent matched the app, and the
+declared extent matched the harness. The zero extent skipped analysis-proxy downscaling and source-offset
+snapping/refinement, changing the automatic Heal source selection. This attributes the 2,023-pixel,
+maximum-2/255 repair-region difference to an export source-geometry defect, not expected numeric noise.
+
+The localized fix resolves missing standard-image geometry from ImageIO metadata and RAW geometry from
+the renderer's decoded extent before automatic Heal analysis; regression tests pin source-selection and
+exact export-pixel invariance when `nativeExtent` is absent. A post-fix replay of the saved revision with
+zero and declared extents matches the archived harness export (0 differing pixels). The signed app itself
+was not re-exported after the fix, and the archived signed-app PNG predates it, so this does not claim a
+post-fix app-versus-harness comparison. No cross-build tolerance is published, and no human visual
+verdict is established or changed by these pixel comparisons.
