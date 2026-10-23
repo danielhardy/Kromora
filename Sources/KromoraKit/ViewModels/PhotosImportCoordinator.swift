@@ -214,7 +214,9 @@ final class PhotosPickerImportProvider: PhotosImportProviding {
         let options = PHAssetResourceRequestOptions()
         options.isNetworkAccessAllowed = true
         let lastPercent = Mutex(-1)
-        options.progressHandler = { fraction in
+        // Photos calls this on its XPC queue. The enclosing type is `@MainActor`, so an unannotated
+        // closure would inherit that isolation and trap at the runtime executor check.
+        options.progressHandler = { @Sendable fraction in
             let percent = Int((min(1, max(0, fraction)) * 100).rounded(.down))
             let advanced = lastPercent.withLock { last in
                 guard percent > last else { return false }
