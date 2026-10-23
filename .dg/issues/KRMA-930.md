@@ -38,7 +38,7 @@ labels:
   - must-fix
   - ci
 created: 2026-10-13T14:47:40.853Z
-updated: 2026-10-23T03:57:09.552Z
+updated: 2026-10-23T03:58:27.055Z
 parent: KRMA-922
 depends_on:
   - KRMA-927
@@ -177,6 +177,12 @@ Follow-up CI fix committed as 91b95b83. Run 39892049431 had one serial-test fail
 Actions run https://github.com/danielhardy/Kromora/actions/runs/39893920950 on 91b95b83 passed formatting, smoke, packaging/signing, Xcode build, and the serial test lane, but the deterministic/model parallel lane failed two tests. PortableLibrarySessionTests.testAsynchronousStartupRebuildPublishesFirstPageAndReleasesLeaseOnShutdown saw 25 assets instead of 550 after a fixed 20,000-yield loop; the sequential-open thumbnail test incorrectly required navigation loading to remain true after a valid provisional thumbnail could already be presented. Both assumptions now use bounded, lifecycle-correct verification.
 
 The local full parallel lane additionally exposed a 2-second image-open deadline and Retina screenshot tests using point coordinates as pixel coordinates. Those tests now use the shared bounded wait and scale sample points to bitmap pixels. Local verification passed all five affected tests together and scripts/ci-tests.sh fast (2,001 required tests), plus changed-file Swift format and git diff --check. A new hosted Actions run is still required after a human pushes the implementation commit.
+
+### Comment — codex @ 2026-10-23T03:58:27.053Z
+
+Commit 76c41250b138010019ef2f3d6bcc274882d6a0b0 fixes the two failures in Actions run 39893920950 and three host-sensitive test assumptions found during local full-lane verification. The async startup test now waits for index completion; the sequential-open test accounts for a valid provisional frame ending navigation loading; the image-open test uses its bounded suite helper; and the color-wheel/library-grid screenshot tests scale point coordinates to Retina bitmap pixels.
+
+Validation passed locally: five focused tests, scripts/ci-tests.sh fast (2,001 required tests), changed-file Swift format, and git diff --check. Hosted verification still needs a human push of 76c41250 and a fresh Actions run.
 
 ## Agent log
 
