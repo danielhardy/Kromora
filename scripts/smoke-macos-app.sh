@@ -76,8 +76,8 @@ find_app_pid() {
 # Only the instance this script launched (matched by pid and executable path) is closed, and only
 # harness-owned fixtures are removed.
 cleanup() {
-  local exit_code=$?
-  if [[ $exit_code -ne 0 && $exit_code -ne 2 ]]; then
+  local exit_status=$?
+  if [[ $exit_status -ne 0 && $exit_status -ne 2 ]]; then
     print -u2 "FAILED at stage: $stage"
   fi
   if [[ -n "$app_pid" ]]; then
@@ -103,6 +103,7 @@ trap cleanup EXIT
 # wait is a bounded repeat loop that raises an error naming what never appeared.
 ui_stage() {
   stage="$1"
+  print -- "Running UI smoke stage: $stage"
   KROMORA_SMOKE_PID="$app_pid" KROMORA_SMOKE_INPUT="$input_png" \
     KROMORA_SMOKE_EXPORT_DIR="$export_dir" /usr/bin/osascript
 }
@@ -197,27 +198,43 @@ tell application "System Events"
         end repeat
         if not openCommandReady then error "Open Image command did not become available"
         click menu item "Open Image…" of menu 1 of menu bar item "File" of menu bar 1
+        set openPanelPresented to false
         repeat 20 times
-            if (count of sheets of window 1) > 0 then exit repeat
+            try
+                if (count of sheets of window 1) > 0 then
+                    set openPanelPresented to true
+                    exit repeat
+                end if
+            end try
             delay 1
         end repeat
-        if (count of sheets of window 1) = 0 then error "Open Image panel did not appear"
+        if not openPanelPresented then error "Open Image panel did not appear as a sheet"
         keystroke "g" using {command down, shift down}
+        set locationSheetPresented to false
         repeat 20 times
-            if (count of sheets of sheet 1 of window 1) > 0 then exit repeat
+            try
+                if (count of sheets of sheet 1 of window 1) > 0 then
+                    set locationSheetPresented to true
+                    exit repeat
+                end if
+            end try
             delay 1
         end repeat
-        if (count of sheets of sheet 1 of window 1) = 0 then error "Open Image location sheet did not appear"
+        if not locationSheetPresented then error "Open Image location sheet did not appear"
         set value of text field 1 of sheet 1 of sheet 1 of window 1 to inputPath
         key code 36
+        set openFileReady to false
         repeat 20 times
-            if (count of sheets of sheet 1 of window 1) = 0 then
-                if enabled of button "Open" of splitter group 1 of sheet 1 of window 1 then exit repeat
-            end if
+            try
+                if (count of sheets of sheet 1 of window 1) = 0 and ¬
+                    enabled of button "Open" of splitter group 1 of sheet 1 of window 1 then
+                    set openFileReady to true
+                    exit repeat
+                end if
+            end try
             delay 1
         end repeat
-        if (count of sheets of sheet 1 of window 1) > 0 then error "Open Image file did not become selectable"
-        if not (enabled of button "Open" of splitter group 1 of sheet 1 of window 1) then error "Open Image file did not become selectable"
+        if not openFileReady then error "Open Image file did not become selectable"
         click button "Open" of splitter group 1 of sheet 1 of window 1
     end tell
 end tell
