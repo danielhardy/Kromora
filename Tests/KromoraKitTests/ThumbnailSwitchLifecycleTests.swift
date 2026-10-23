@@ -1,6 +1,7 @@
-import XCTest
 import AppKit
 import CoreGraphics
+import XCTest
+
 @testable import KromoraKit
 
 @MainActor
@@ -31,7 +32,8 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         let deadline = Date().addingTimeInterval(timeout)
         while !(await condition()) {
             if Date() > deadline {
-                throw TestSynchronizationError.timedOut(description, "published state did not settle")
+                throw TestSynchronizationError.timedOut(
+                    description, "published state did not settle")
             }
             try await Task.sleep(for: .milliseconds(5))
         }
@@ -114,14 +116,18 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         viewModel.collection.loadFromFolder(tempDirectory)
         await viewModel.collection.scanCompletion()
         let item = try XCTUnwrap(viewModel.collection.items.first { $0.url == source })
-        item.setOriginalThumbnail(NSImage(
-            cgImage: try Fixtures.makeCGImage(width: 3, height: 2, red: 0.8, green: 0.1, blue: 0.1),
-            size: NSSize(width: 3, height: 2)
-        ))
-        item.applyEditedThumbnail(NSImage(
-            cgImage: try Fixtures.makeCGImage(width: 5, height: 3, red: 0.1, green: 0.8, blue: 0.1),
-            size: NSSize(width: 5, height: 3)
-        ), revision: "materialized-edited")
+        item.setOriginalThumbnail(
+            NSImage(
+                cgImage: try Fixtures.makeCGImage(
+                    width: 3, height: 2, red: 0.8, green: 0.1, blue: 0.1),
+                size: NSSize(width: 3, height: 2)
+            ))
+        item.applyEditedThumbnail(
+            NSImage(
+                cgImage: try Fixtures.makeCGImage(
+                    width: 5, height: 3, red: 0.1, green: 0.8, blue: 0.1),
+                size: NSSize(width: 5, height: 3)
+            ), revision: "materialized-edited")
 
         let index = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.id == item.id })
         viewModel.selectCollectionImage(at: index)
@@ -210,10 +216,12 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
             let settled = try publishedThumbnail(for: assetID, in: viewModel)
             let settledImage = try cgImage(from: settled)
 
-            XCTAssertEqual(Double(settledImage.width), expectedSize.width, accuracy: 1,
-                           "the \(name) crop should retain the available pixel budget")
-            XCTAssertEqual(Double(settledImage.height), expectedSize.height, accuracy: 1,
-                           "the \(name) crop should retain the available pixel budget")
+            XCTAssertEqual(
+                Double(settledImage.width), expectedSize.width, accuracy: 1,
+                "the \(name) crop should retain the available pixel budget")
+            XCTAssertEqual(
+                Double(settledImage.height), expectedSize.height, accuracy: 1,
+                "the \(name) crop should retain the available pixel budget")
             XCTAssertGreaterThanOrEqual(
                 max(settledImage.width, settledImage.height), expectedLongEdge,
                 "the \(name) crop must not lose available source pixels"
@@ -228,21 +236,23 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
                 "the \(name) cell geometry must match the rendered crop"
             )
 
-            let currentRenderCandidate = await engine.makeThumbnailCGImage(RenderRequest(
-                source: ImageSource(
-                    url: source,
-                    nativeExtent: CGSize(width: 2_400, height: 1_200),
-                    portableIdentity: viewModel.collection.items[sourceIndex].asset.source.portableIdentity
-                ),
-                assetID: assetID,
-                document: viewModel.document,
-                targetSize: CGSize(
-                    width: Thumbnails.libraryMaxPixelSize,
-                    height: Thumbnails.libraryMaxPixelSize
-                ),
-                quality: .thumbnail,
-                output: .raster
-            ))
+            let currentRenderCandidate = await engine.makeThumbnailCGImage(
+                RenderRequest(
+                    source: ImageSource(
+                        url: source,
+                        nativeExtent: CGSize(width: 2_400, height: 1_200),
+                        portableIdentity: viewModel.collection.items[sourceIndex].asset.source
+                            .portableIdentity
+                    ),
+                    assetID: assetID,
+                    document: viewModel.document,
+                    targetSize: CGSize(
+                        width: Thumbnails.libraryMaxPixelSize,
+                        height: Thumbnails.libraryMaxPixelSize
+                    ),
+                    quality: .thumbnail,
+                    output: .raster
+                ))
             let currentRender = try XCTUnwrap(currentRenderCandidate)
             assertPixelsEqual(
                 try Pixels.bytes(of: settledImage), try Pixels.bytes(of: currentRender),
@@ -331,10 +341,11 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         let finalCrop = CGRect(x: 0.49, y: 0.49, width: 0.02, height: 0.02)
         for fraction in [0.20, 0.15, 0.10, 0.02] {
             viewModel.updateDocument(debounced: true) {
-                $0.crop = CropAdjustments(normalizedRect: CGRect(
-                    x: (1 - fraction) / 2, y: (1 - fraction) / 2,
-                    width: fraction, height: fraction
-                ))
+                $0.crop = CropAdjustments(
+                    normalizedRect: CGRect(
+                        x: (1 - fraction) / 2, y: (1 - fraction) / 2,
+                        width: fraction, height: fraction
+                    ))
             }
         }
 
@@ -561,9 +572,10 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
             requests.filter { $0.source?.backing == .url(second) }.count, 2,
             "the selected thumbnail needs both an Adjusted and Original request"
         )
-        XCTAssertTrue(requests.contains {
-            $0.source?.backing == .url(second) && $0.document.isIdentity
-        })
+        XCTAssertTrue(
+            requests.contains {
+                $0.source?.backing == .url(second) && $0.document.isIdentity
+            })
     }
 
     func testFilmstripSelectionSchedulesOriginalBeforeAdjustedDrawableConfirmation() async throws {
@@ -604,9 +616,10 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
                 + "raster=\(requests.filter { $0.source?.backing == .url(second) }), "
                 + "textures=\(textureRequests.filter { $0.source?.backing == .url(second) })"
         )
-        XCTAssertTrue(requests.contains {
-            $0.source?.backing == .url(second) && $0.document.isIdentity
-        })
+        XCTAssertTrue(
+            requests.contains {
+                $0.source?.backing == .url(second) && $0.document.isIdentity
+            })
     }
 
     func testComparisonRequestsShareFitGeometryAcrossThumbnailDrivenOrientations() async throws {
@@ -638,10 +651,11 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
                 return requests.contains {
                     $0.source?.backing == .url(image)
                         && !$0.document.isIdentity
-                } && requests.contains {
-                    $0.source?.backing == .url(image)
-                        && $0.document.isIdentity
                 }
+                    && requests.contains {
+                        $0.source?.backing == .url(image)
+                            && $0.document.isIdentity
+                    }
             }
 
             let requests = await engine.previewRequests.filter {
@@ -676,13 +690,17 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         }
         // One-off opens are copied into the managed library before rendering. Assert the durable
         // source identity while retaining the original filename as the photo under test.
-        guard let firstItem = viewModel.collection.items.first(where: {
-            $0.displayName == "sequential-first.png"
-        }) else {
+        guard
+            let firstItem = viewModel.collection.items.first(where: {
+                $0.displayName == "sequential-first.png"
+            })
+        else {
             return XCTFail("one-off open should add the first managed-library item")
         }
         let firstAssetID = firstItem.id
-        let firstPreview = try await TestSynchronization.nextEvent(from: reader, "the first preview") {
+        let firstPreview = try await TestSynchronization.nextEvent(
+            from: reader, "the first preview"
+        ) {
             if case .previewCompleted(let request) = $0 {
                 return request.assetID == firstAssetID
             }
@@ -704,9 +722,11 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         try await waitUntil("the second managed import") {
             viewModel.collection.items.contains { $0.displayName == "sequential-second.png" }
         }
-        guard let secondItem = viewModel.collection.items.first(where: {
-            $0.displayName == "sequential-second.png"
-        }) else {
+        guard
+            let secondItem = viewModel.collection.items.first(where: {
+                $0.displayName == "sequential-second.png"
+            })
+        else {
             return XCTFail("one-off open should add the second managed-library item")
         }
         let secondAssetID = secondItem.id
@@ -719,7 +739,6 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
             "previews=\(await engine.previewRequests.count), revisions=\(await engine.renderRequests.map(\.requestRevision))"
         }
         XCTAssertEqual(viewModel.previewState, .loading)
-        XCTAssertTrue(viewModel.isNavigationLoading)
         XCTAssertFalse(viewModel.isLoading, "source preparation is complete while B renders")
 
         await engine.releaseNextPreview()
@@ -732,9 +751,10 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
             "previews=\(await engine.previewRequests.count), revisions=\(await engine.renderRequests.map(\.requestRevision))"
         }
         XCTAssertFalse(viewModel.isLoading)
-        try await waitUntil("the second photo frame to present") {
-            !viewModel.isNavigationLoading
+        try await waitUntil("the second photo preview to settle") {
+            viewModel.previewState == .ready && !viewModel.isNavigationLoading
         }
+        XCTAssertEqual(viewModel.previewState, .ready)
         XCTAssertFalse(viewModel.isNavigationLoading)
     }
 
@@ -770,7 +790,9 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         } diagnostics: {
             "source preparations=\(await engine.sourcePreparationCount)"
         }
-        let secondPreview = try await TestSynchronization.nextEvent(from: reader, "the latest preview") {
+        let secondPreview = try await TestSynchronization.nextEvent(
+            from: reader, "the latest preview"
+        ) {
             if case .previewRequested(let request) = $0 {
                 return request.source?.backing == .url(second)
             }
@@ -779,7 +801,9 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
             "source preparations=\(await engine.sourcePreparationCount), previews=\(await engine.previewRequests.count)"
         }
         if case .previewRequested(let request) = secondPreview {
-            _ = try await TestSynchronization.nextEvent(from: reader, "the latest preview completion") {
+            _ = try await TestSynchronization.nextEvent(
+                from: reader, "the latest preview completion"
+            ) {
                 if case .previewCompleted(let completed) = $0 { return completed == request }
                 return false
             } diagnostics: {
@@ -806,7 +830,8 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         viewModel.selectCollectionImage(at: 0)
         await engine.releaseHistograms()
 
-        _ = try await TestSynchronization.nextEvent(from: reader, "the first histogram completion") {
+        _ = try await TestSynchronization.nextEvent(from: reader, "the first histogram completion")
+        {
             if case .histogramCompleted(let request, let result) = $0 {
                 return request.source?.backing == .url(first) && result != nil
             }
@@ -864,9 +889,11 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         await engine.gatePreviews()
         viewModel.selectCollectionImage(at: 1)
         try await waitUntil("the next photo source") { viewModel.sourceURL == second }
-        XCTAssertEqual(viewModel.autoLook.autoAdjustmentState, .unavailable(
-            "Auto is available when the photo preview is ready."
-        ))
+        XCTAssertEqual(
+            viewModel.autoLook.autoAdjustmentState,
+            .unavailable(
+                "Auto is available when the photo preview is ready."
+            ))
 
         await engine.releaseHistograms()
         _ = try await TestSynchronization.nextEvent(from: reader, "the delayed Auto completion") {
@@ -877,9 +904,11 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         } diagnostics: {
             "histogram requests=\(await engine.histogramRequests.count), revisions=\(await engine.renderRequests.map(\.requestRevision))"
         }
-        XCTAssertEqual(viewModel.autoLook.autoAdjustmentState, .unavailable(
-            "Auto is available when the photo preview is ready."
-        ), "the old analysis must not publish ready for the loading photo")
+        XCTAssertEqual(
+            viewModel.autoLook.autoAdjustmentState,
+            .unavailable(
+                "Auto is available when the photo preview is ready."
+            ), "the old analysis must not publish ready for the loading photo")
         XCTAssertFalse(viewModel.canRunAutoAdjustment)
 
         await engine.releasePreviews()

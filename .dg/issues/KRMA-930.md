@@ -38,7 +38,7 @@ labels:
   - must-fix
   - ci
 created: 2026-10-13T14:47:40.853Z
-updated: 2026-10-23T03:11:45.363Z
+updated: 2026-10-23T03:57:09.552Z
 parent: KRMA-922
 depends_on:
   - KRMA-927
@@ -167,6 +167,16 @@ Fixes are committed on main as 0c91ee95a1ba5543047def4e44339eebbe0f2bc4 (KRMA-93
 ### Comment — codex @ 2026-10-23T03:11:45.361Z
 
 Run 39892049431 on 0c91ee95a1ba5543047def4e44339eebbe0f2bc4 passed the smoke path, Swift-format, packaging/signing, Xcode build, and deterministic/model lane. The only failure was one serial test: PreviewSurfaceTests.testStaleSettledReplacementCrossfadesFor120MillisecondsThenReleasesOldTexture, where a fixed 145 ms sleep expired before the main-actor crossfade cleanup task released its texture. Replaced the fixed sleep with a bounded wait for the release condition. The retouch stress corpus also prints rows marked FAIL, but its XCTest passed; those are report metrics. Local validation passed the focused test, all 53 PreviewSurfaceTests, strict formatting, and git diff --check. A human push and a new Actions run are still required for hosted verification.
+
+### Comment — codex @ 2026-10-23T03:13:33.920Z
+
+Follow-up CI fix committed as 91b95b83. Run 39892049431 had one serial-test failure: PreviewSurfaceTests.testStaleSettledReplacementCrossfadesFor120MillisecondsThenReleasesOldTexture timed out its fixed 145 ms assumption. The test now waits up to 2 s for the actual crossfade texture release. Local focused test, all 53 PreviewSurfaceTests, repository changed-file formatter, and diff check passed. This commit still needs a human push and a fresh hosted run.
+
+### Comment — codex @ 2026-10-23T03:57:09.550Z
+
+Actions run https://github.com/danielhardy/Kromora/actions/runs/39893920950 on 91b95b83 passed formatting, smoke, packaging/signing, Xcode build, and the serial test lane, but the deterministic/model parallel lane failed two tests. PortableLibrarySessionTests.testAsynchronousStartupRebuildPublishesFirstPageAndReleasesLeaseOnShutdown saw 25 assets instead of 550 after a fixed 20,000-yield loop; the sequential-open thumbnail test incorrectly required navigation loading to remain true after a valid provisional thumbnail could already be presented. Both assumptions now use bounded, lifecycle-correct verification.
+
+The local full parallel lane additionally exposed a 2-second image-open deadline and Retina screenshot tests using point coordinates as pixel coordinates. Those tests now use the shared bounded wait and scale sample points to bitmap pixels. Local verification passed all five affected tests together and scripts/ci-tests.sh fast (2,001 required tests), plus changed-file Swift format and git diff --check. A new hosted Actions run is still required after a human pushes the implementation commit.
 
 ## Agent log
 

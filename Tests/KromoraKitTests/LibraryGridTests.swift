@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import XCTest
+
 @testable import KromoraKit
 
 @MainActor
@@ -16,7 +17,8 @@ final class LibraryGridTests: TempDirectoryTestCase {
             XCTAssertLessThanOrEqual(metrics.cellEdge, 300, "width \(width)")
             XCTAssertGreaterThanOrEqual(metrics.columns, previousColumns, "width \(width)")
             previousColumns = metrics.columns
-            let used = metrics.cellEdge * Double(metrics.columns)
+            let used =
+                metrics.cellEdge * Double(metrics.columns)
                 + layout.spacing * Double(metrics.columns - 1)
             XCTAssertLessThanOrEqual(used, width + 0.001, "cells must not overflow the row")
         }
@@ -45,7 +47,8 @@ final class LibraryGridTests: TempDirectoryTestCase {
     func testLibraryThumbnailPixelsCoverRetinaSquareFillAcrossCommonAspectRatios() {
         let layout = LibraryGridLayout()
         for ratio in [16.0 / 9.0, 2.0, 9.0 / 16.0, 0.5] {
-            let shortSide = Double(PlatformThumbnailProvider.libraryMaxPixelSize)
+            let shortSide =
+                Double(PlatformThumbnailProvider.libraryMaxPixelSize)
                 / max(ratio, 1.0 / ratio)
             XCTAssertGreaterThanOrEqual(
                 shortSide, layout.maximumCellEdge * 2, "aspect ratio \(ratio)"
@@ -61,14 +64,18 @@ final class LibraryGridTests: TempDirectoryTestCase {
         await viewModel.openImagesAndWait(urls: [source])
         let deadline = Date().addingTimeInterval(5)
         while viewModel.collection.items.first?.thumbnail == nil {
-            if Date() > deadline { XCTFail("the visible grid thumbnail did not arrive"); break }
+            if Date() > deadline {
+                XCTFail("the visible grid thumbnail did not arrive")
+                break
+            }
             try await Task.sleep(for: .milliseconds(10))
         }
 
         for appearance in [ColorScheme.light, .dark] {
-            let hosting = NSHostingView(rootView: LibraryGridView(
-                collection: viewModel.collection, viewModel: viewModel, onOpen: { _ in }
-            ).environment(\.colorScheme, appearance))
+            let hosting = NSHostingView(
+                rootView: LibraryGridView(
+                    collection: viewModel.collection, viewModel: viewModel, onOpen: { _ in }
+                ).environment(\.colorScheme, appearance))
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 720, height: 560),
                 styleMask: [.titled], backing: .buffered, defer: false
@@ -83,10 +90,22 @@ final class LibraryGridTests: TempDirectoryTestCase {
             window.displayIfNeeded()
             let bitmap = try XCTUnwrap(hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds))
             hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
+            let pixelsPerPointX = Double(bitmap.pixelsWide) / Double(hosting.bounds.width)
+            let pixelsPerPointY = Double(bitmap.pixelsHigh) / Double(hosting.bounds.height)
             // ImageRenderer only paints this ScrollView's chrome without hosting its lazy rows.
             // Check real pixels inside the tile and outside it for both appearances.
-            let tile = try XCTUnwrap(bitmap.colorAt(x: 100, y: 200)?.usingColorSpace(.deviceRGB))
-            let background = try XCTUnwrap(bitmap.colorAt(x: 300, y: 200)?.usingColorSpace(.deviceRGB))
+            let tile = try XCTUnwrap(
+                bitmap.colorAt(
+                    x: Int((100 * pixelsPerPointX).rounded()),
+                    y: Int((200 * pixelsPerPointY).rounded())
+                )?.usingColorSpace(.deviceRGB)
+            )
+            let background = try XCTUnwrap(
+                bitmap.colorAt(
+                    x: Int((300 * pixelsPerPointX).rounded()),
+                    y: Int((200 * pixelsPerPointY).rounded())
+                )?.usingColorSpace(.deviceRGB)
+            )
             XCTAssertGreaterThan(tile.redComponent - tile.greenComponent, 0.2)
             if appearance == .light {
                 XCTAssertGreaterThan(background.redComponent, 0.7)
@@ -100,14 +119,17 @@ final class LibraryGridTests: TempDirectoryTestCase {
     func testPackedThumbnailKeysEmbedTheRasterSize() throws {
         let assetID = PortablePhotoAssetID()
         let size = PlatformThumbnailProvider.libraryMaxPixelSize
-        XCTAssertTrue(try XCTUnwrap(ThumbnailFrameStore.key(.original, for: assetID)).hasSuffix("-o\(size)"))
-        XCTAssertTrue(try XCTUnwrap(ThumbnailFrameStore.key(.edited, for: assetID)).hasSuffix("-e\(size)"))
+        XCTAssertTrue(
+            try XCTUnwrap(ThumbnailFrameStore.key(.original, for: assetID)).hasSuffix("-o\(size)"))
+        XCTAssertTrue(
+            try XCTUnwrap(ThumbnailFrameStore.key(.edited, for: assetID)).hasSuffix("-e\(size)"))
     }
 
     func testRowHeightIsIndependentOfItemContent() {
         let layout = LibraryGridLayout()
         let metrics = layout.metrics(for: 1_000)
-        XCTAssertEqual(layout.rowHeight(for: metrics), metrics.cellEdge + LibraryGridLayout.captionBlock)
+        XCTAssertEqual(
+            layout.rowHeight(for: metrics), metrics.cellEdge + LibraryGridLayout.captionBlock)
         XCTAssertEqual(layout.rowCount(itemCount: 0, columns: metrics.columns), 0)
         XCTAssertEqual(layout.rowCount(itemCount: metrics.columns, columns: metrics.columns), 1)
         XCTAssertEqual(layout.rowCount(itemCount: metrics.columns + 1, columns: metrics.columns), 2)
@@ -207,14 +229,15 @@ final class LibraryGridTests: TempDirectoryTestCase {
         )
 
         // Pixel dimensions already known: the stored ratio must not replace them.
-        let known = ImageCollection.Item(asset: PhotoAsset(
-            source: PhotoAssetSource(data: Data([0x01]), id: PhotoAssetID(rawValue: "known")),
-            filename: "known.jpg", fileType: "jpg",
-            metadata: PhotoAssetMetadata(
-                dimensions: PhotoPixelDimensions(width: 800, height: 1_000)
-            ),
-            presentedAspectRatio: nil
-        ))
+        let known = ImageCollection.Item(
+            asset: PhotoAsset(
+                source: PhotoAssetSource(data: Data([0x01]), id: PhotoAssetID(rawValue: "known")),
+                filename: "known.jpg", fileType: "jpg",
+                metadata: PhotoAssetMetadata(
+                    dimensions: PhotoPixelDimensions(width: 800, height: 1_000)
+                ),
+                presentedAspectRatio: nil
+            ))
         XCTAssertFalse(known.adoptStoredOriginalAspect(geometry))
         XCTAssertEqual(known.libraryAspectRatio, 0.8, accuracy: 1e-9)
 
@@ -231,9 +254,11 @@ final class LibraryGridTests: TempDirectoryTestCase {
             url: tempDirectory.appendingPathComponent("bad.jpg"),
             displayName: "bad.jpg", imageData: nil
         )
-        XCTAssertFalse(bad.adoptStoredOriginalAspect(PresentedGeometry(
-            crop: CropAdjustments(), rotation: .zero, orientedAspectRatio: .nan
-        )))
+        XCTAssertFalse(
+            bad.adoptStoredOriginalAspect(
+                PresentedGeometry(
+                    crop: CropAdjustments(), rotation: .zero, orientedAspectRatio: .nan
+                )))
         XCTAssertFalse(bad.hasResolvedLibraryAspect)
     }
 
@@ -281,20 +306,23 @@ final class LibraryGridTests: TempDirectoryTestCase {
             )
         }
 
-        let scheduler = ImageWorkScheduler(configuration: .init(
-            maxConcurrentThumbnails: 1,
-            maxQueuedThumbnails: 4
-        ))
+        let scheduler = ImageWorkScheduler(
+            configuration: .init(
+                maxConcurrentThumbnails: 1,
+                maxQueuedThumbnails: 4
+            ))
         let collection = makeTestCollection(scheduler: scheduler)
         collection.beginThumbnailDemand()
         // The folder compatibility fixture selects the first item after loading, which also
         // prepares adjacent filmstrip thumbnails. Keep this grid test unselected so only
         // materialized-cell demand can admit thumbnail work.
-        collection.loadPortableAssets((0..<64).map { index in
-            PhotoAsset(url: tempDirectory.appendingPathComponent(
-                String(format: "photo-%03d.jpg", index)
-            ))
-        })
+        collection.loadPortableAssets(
+            (0..<64).map { index in
+                PhotoAsset(
+                    url: tempDirectory.appendingPathComponent(
+                        String(format: "photo-%03d.jpg", index)
+                    ))
+            })
         await collection.scanCompletion()
 
         XCTAssertEqual(collection.items.count, 64)
@@ -308,7 +336,9 @@ final class LibraryGridTests: TempDirectoryTestCase {
 
         let deadline = Date().addingTimeInterval(5)
         while collection.items.first?.thumbnail == nil {
-            if Date() > deadline { return XCTFail("the materialized cell thumbnail did not arrive") }
+            if Date() > deadline {
+                return XCTFail("the materialized cell thumbnail did not arrive")
+            }
             try await Task.sleep(for: .milliseconds(10))
         }
 
@@ -366,9 +396,12 @@ final class LibraryGridTests: TempDirectoryTestCase {
         collection.requestVisibleThumbnails(for: visible)
 
         let deadline = Date().addingTimeInterval(5)
-        while Set(demanded) != Set(visible) || collection.items.prefix(9).contains(where: { $0.thumbnail == nil }) {
+        while Set(demanded) != Set(visible)
+            || collection.items.prefix(9).contains(where: { $0.thumbnail == nil })
+        {
             if Date() > deadline {
-                return XCTFail("the visible window did not admit every photo and its edited thumbnail")
+                return XCTFail(
+                    "the visible window did not admit every photo and its edited thumbnail")
             }
             await Task.yield()
         }
@@ -386,7 +419,8 @@ final class LibraryGridTests: TempDirectoryTestCase {
     /// to the original must load one instead of leaving the cell on a spinner.
     func testRevertingToOriginalLoadsTheOriginalRasterForACellThatNeverHadOne() async throws {
         let image = try Fixtures.makeCGImage(width: 64, height: 48)
-        let collection = ImageCollection(originalThumbnailProvider: { _, _, _, _, _, _, _ in image })
+        let collection = ImageCollection(originalThumbnailProvider: { _, _, _, _, _, _, _ in image }
+        )
         let asset = PhotoAsset(url: tempDirectory.appendingPathComponent("edited.jpg"))
         collection.loadPortableWindow(
             assets: [asset], totalCount: 1, pageIndex: 0, pageSize: 1, query: .all
@@ -460,10 +494,12 @@ final class LibraryGridTests: TempDirectoryTestCase {
     func testLargeColdLibraryBoundsDecodeWorkAndReleaseCancelsQueuedDecodes() async throws {
         let image = try Fixtures.makeCGImage(width: 64, height: 48)
         let scheduler = ImageWorkScheduler()
-        let collection = ImageCollection(scheduler: scheduler, originalThumbnailProvider: { _, _, _, _, _, _, _ in
-            try? await Task.sleep(for: .milliseconds(50))
-            return image
-        })
+        let collection = ImageCollection(
+            scheduler: scheduler,
+            originalThumbnailProvider: { _, _, _, _, _, _, _ in
+                try? await Task.sleep(for: .milliseconds(50))
+                return image
+            })
         let assets = (0..<400).map {
             PhotoAsset(url: tempDirectory.appendingPathComponent("cold-\($0).jpg"))
         }
@@ -483,7 +519,8 @@ final class LibraryGridTests: TempDirectoryTestCase {
 
     func testPortableWindowReloadReRequestsPreviouslyVisibleThumbnails() async throws {
         let image = try Fixtures.makeCGImage(width: 64, height: 48)
-        let collection = ImageCollection(originalThumbnailProvider: { _, _, _, _, _, _, _ in image })
+        let collection = ImageCollection(originalThumbnailProvider: { _, _, _, _, _, _, _ in image }
+        )
         let assets = (0..<11).map {
             PhotoAsset(url: tempDirectory.appendingPathComponent("photo-\($0).jpg"))
         }
@@ -507,9 +544,12 @@ final class LibraryGridTests: TempDirectoryTestCase {
         await collection.shutdown()
     }
 
-    func testPortableWindowReloadPreservesFilmstripDemandIncludingPreparedAndCachedCells() async throws {
+    func testPortableWindowReloadPreservesFilmstripDemandIncludingPreparedAndCachedCells()
+        async throws
+    {
         let image = try Fixtures.makeCGImage(width: 64, height: 48)
-        let collection = ImageCollection(originalThumbnailProvider: { _, _, _, _, _, _, _ in image })
+        let collection = ImageCollection(originalThumbnailProvider: { _, _, _, _, _, _, _ in image }
+        )
         let assets = (0..<11).map {
             PhotoAsset(url: tempDirectory.appendingPathComponent("photo-\($0).jpg"))
         }
@@ -517,10 +557,11 @@ final class LibraryGridTests: TempDirectoryTestCase {
             assets: Array(assets.prefix(8)), totalCount: 8, pageIndex: 0,
             pageSize: 8, query: .all
         )
-        collection.beginThumbnailDemand() // Prepares indices 0...2 without explicit cell demand.
+        collection.beginThumbnailDemand()  // Prepares indices 0...2 without explicit cell demand.
         try await waitForThumbnails(in: collection, ids: Array(assets.prefix(3).map(\.id)))
         // A packed or edited frame may already have painted before a cell's onAppear.
-        collection.items[5].setOriginalThumbnail(NSImage(cgImage: image, size: NSSize(width: 64, height: 48)))
+        collection.items[5].setOriginalThumbnail(
+            NSImage(cgImage: image, size: NSSize(width: 64, height: 48)))
         collection.items[5].asset.thumbnailState = .ready
         let visible = Array(assets.prefix(6).map(\.id))
         for id in visible { collection.requestThumbnail(for: id, priority: .adjacentFilmstrip) }
@@ -535,9 +576,12 @@ final class LibraryGridTests: TempDirectoryTestCase {
         await collection.shutdown()
     }
 
-    func testPortableAppendRetainsDemandAndReloadDropsReleasedRemovedAndSpeculativeIDs() async throws {
+    func testPortableAppendRetainsDemandAndReloadDropsReleasedRemovedAndSpeculativeIDs()
+        async throws
+    {
         let image = try Fixtures.makeCGImage(width: 64, height: 48)
-        let collection = ImageCollection(originalThumbnailProvider: { _, _, _, _, _, _, _ in image })
+        let collection = ImageCollection(originalThumbnailProvider: { _, _, _, _, _, _, _ in image }
+        )
         let assets = (0..<11).map {
             PhotoAsset(url: tempDirectory.appendingPathComponent("photo-\($0).jpg"))
         }
@@ -549,7 +593,8 @@ final class LibraryGridTests: TempDirectoryTestCase {
         for index in 3...5 { collection.requestThumbnail(for: assets[index].id) }
         try await waitForThumbnails(in: collection, ids: Array(assets.prefix(6).map(\.id)))
         let retainedItem = collection.items[3]
-        XCTAssertTrue(collection.appendPortableWindow(assets: Array(assets.suffix(3)), pageIndex: 1))
+        XCTAssertTrue(
+            collection.appendPortableWindow(assets: Array(assets.suffix(3)), pageIndex: 1))
         XCTAssertTrue(collection.items[3] === retainedItem)
         XCTAssertNotNil(retainedItem.thumbnail)
         XCTAssertTrue(collection.items.suffix(3).allSatisfy { $0.thumbnail == nil })
@@ -561,13 +606,15 @@ final class LibraryGridTests: TempDirectoryTestCase {
             pageSize: survivors.count, query: .all
         )
         try await waitForThumbnails(in: collection, ids: [assets[3].id])
-        XCTAssertTrue(collection.items.filter { $0.id != assets[3].id }.allSatisfy { $0.thumbnail == nil })
+        XCTAssertTrue(
+            collection.items.filter { $0.id != assets[3].id }.allSatisfy { $0.thumbnail == nil })
         await collection.shutdown()
     }
 
     func testReleasingDecodedThumbnailDropsPixelsAndLaterPageKeepsNone() async throws {
         let image = try Fixtures.makeCGImage(width: 64, height: 48)
-        let collection = ImageCollection(originalThumbnailProvider: { _, _, _, _, _, _, _ in image })
+        let collection = ImageCollection(originalThumbnailProvider: { _, _, _, _, _, _, _ in image }
+        )
         let assets = (0..<12).map {
             PhotoAsset(url: tempDirectory.appendingPathComponent("evict-\($0).jpg"))
         }
@@ -592,11 +639,13 @@ final class LibraryGridTests: TempDirectoryTestCase {
         XCTAssertNil(item.editedThumbnailRevision)
         XCTAssertEqual(item.id, far, "identity survives eviction")
 
-        XCTAssertTrue(collection.appendPortableWindow(assets: Array(assets.suffix(4)), pageIndex: 1))
+        XCTAssertTrue(
+            collection.appendPortableWindow(assets: Array(assets.suffix(4)), pageIndex: 1))
         XCTAssertTrue(collection.items[7] === item)
-        XCTAssertTrue(collection.items.suffix(5).allSatisfy {
-            $0.thumbnail == nil && $0.editedThumbnailForPresentation == nil
-        })
+        XCTAssertTrue(
+            collection.items.suffix(5).allSatisfy {
+                $0.thumbnail == nil && $0.editedThumbnailForPresentation == nil
+            })
         await collection.shutdown()
     }
 
@@ -605,7 +654,8 @@ final class LibraryGridTests: TempDirectoryTestCase {
         let frameStore = ThumbnailFrameStore(
             directory: tempDirectory.appendingPathComponent("revisit-frames")
         )
-        let collection = ImageCollection(originalThumbnailProvider: { _, _, _, _, _, _, _ in image })
+        let collection = ImageCollection(originalThumbnailProvider: { _, _, _, _, _, _, _ in image }
+        )
         collection.thumbnailFrameStore = frameStore
         let assets = (0..<8).map {
             PhotoAsset(url: tempDirectory.appendingPathComponent("revisit-\($0).jpg"))
@@ -634,7 +684,8 @@ final class LibraryGridTests: TempDirectoryTestCase {
         let assets = (0..<40).map {
             PhotoAsset(url: tempDirectory.appendingPathComponent("window-\($0).jpg"))
         }
-        let collection = ImageCollection(originalThumbnailProvider: { _, _, _, _, _, _, _ in image })
+        let collection = ImageCollection(originalThumbnailProvider: { _, _, _, _, _, _, _ in image }
+        )
         collection.loadPortableWindow(
             assets: assets, totalCount: assets.count, pageIndex: 0,
             pageSize: assets.count, query: .all
@@ -669,9 +720,10 @@ final class LibraryGridTests: TempDirectoryTestCase {
             }
             try await Task.sleep(for: .milliseconds(5))
         }
-        XCTAssertTrue(collection.items.filter { wanted.contains($0.id) }.allSatisfy {
-            $0.asset.thumbnailState == .ready
-        })
+        XCTAssertTrue(
+            collection.items.filter { wanted.contains($0.id) }.allSatisfy {
+                $0.asset.thumbnailState == .ready
+            })
     }
 
     func testScriptedScrollEvaluatesGridBodyOncePerRowCrossing() throws {
@@ -682,9 +734,10 @@ final class LibraryGridTests: TempDirectoryTestCase {
         collection.loadPortableWindow(
             assets: assets, totalCount: 500, pageIndex: 0, pageSize: 500, query: .all)
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
-        let hosting = NSHostingView(rootView: LibraryGridView(
-            collection: collection, viewModel: viewModel, onOpen: { _ in }
-        ))
+        let hosting = NSHostingView(
+            rootView: LibraryGridView(
+                collection: collection, viewModel: viewModel, onOpen: { _ in }
+            ))
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 720, height: 560),
             styleMask: [.titled], backing: .buffered, defer: false
@@ -710,7 +763,8 @@ final class LibraryGridTests: TempDirectoryTestCase {
         }
         Self.pumpRunLoop()
         let evaluations = RenderDiagnostics.snapshot.gridBodyEvaluations
-        XCTAssertGreaterThan(clip.bounds.origin.y, maxOffset / 2, "the scripted scroll must move the content")
+        XCTAssertGreaterThan(
+            clip.bounds.origin.y, maxOffset / 2, "the scripted scroll must move the content")
         XCTAssertGreaterThan(
             evaluations, 0,
             "crossing row boundaries must publish coarse scroll updates to the grid"
@@ -732,7 +786,8 @@ final class LibraryGridTests: TempDirectoryTestCase {
         var best: NSScrollView?
         func visit(_ node: NSView) {
             if let scroll = node as? NSScrollView,
-               (scroll.documentView?.frame.height ?? 0) > (best?.documentView?.frame.height ?? 0) {
+                (scroll.documentView?.frame.height ?? 0) > (best?.documentView?.frame.height ?? 0)
+            {
                 best = scroll
             }
             node.subviews.forEach(visit)
@@ -772,7 +827,8 @@ final class LibraryGridRowWindowTests: XCTestCase {
         for first in stride(from: 0, to: rowCount, by: 7) {
             let window = layout.rowWindow(
                 rowCount: rowCount, firstVisibleRow: first, viewportHeight: viewport, pitch: pitch)
-            let rows = LibraryGridRowModel.rows(in: window, itemCount: itemCount, columns: columns, entries: entries)
+            let rows = LibraryGridRowModel.rows(
+                in: window, itemCount: itemCount, columns: columns, entries: entries)
             maxRows = max(maxRows, rows.count)
             XCTAssertEqual(rows.first?.indices.lowerBound, window.lowerBound * columns)
             seen.formUnion(rows.map(\.id))
@@ -782,9 +838,13 @@ final class LibraryGridRowWindowTests: XCTestCase {
         XCTAssertLessThan(maxRows, rowCount / 100)
         // Identity is the first asset: stable regardless of which window produced the row.
         let end = layout.rowWindow(
-            rowCount: rowCount, firstVisibleRow: rowCount - 1, viewportHeight: viewport, pitch: pitch)
-        let tail = LibraryGridRowModel.rows(in: end, itemCount: itemCount, columns: columns, entries: entries)
+            rowCount: rowCount, firstVisibleRow: rowCount - 1, viewportHeight: viewport,
+            pitch: pitch)
+        let tail = LibraryGridRowModel.rows(
+            in: end, itemCount: itemCount, columns: columns, entries: entries)
         XCTAssertEqual(tail.last?.indices.upperBound, itemCount)
-        XCTAssertEqual(layout.rowWindow(rowCount: 0, firstVisibleRow: 0, viewportHeight: viewport, pitch: pitch), 0..<0)
+        XCTAssertEqual(
+            layout.rowWindow(
+                rowCount: 0, firstVisibleRow: 0, viewportHeight: viewport, pitch: pitch), 0..<0)
     }
 }

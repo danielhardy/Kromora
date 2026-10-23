@@ -27,12 +27,15 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         init(_ value: Date) { self.value = value }
 
         func now() -> Date {
-            lock.lock(); defer { lock.unlock() }
+            lock.lock()
+            defer { lock.unlock() }
             return value
         }
 
         func advance(_ seconds: TimeInterval) {
-            lock.lock(); value = value.addingTimeInterval(seconds); lock.unlock()
+            lock.lock()
+            value = value.addingTimeInterval(seconds)
+            lock.unlock()
         }
     }
 
@@ -73,7 +76,8 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
             KromoraStorage.cacheDirectory(named: "Masks").path.contains("Caches/Kromora/Masks")
         )
         XCTAssertTrue(
-            LatestPreviewFrameStore.packageDirectory(for: packageURL).path.hasPrefix(packageURL.path)
+            LatestPreviewFrameStore.packageDirectory(for: packageURL).path.hasPrefix(
+                packageURL.path)
         )
         XCTAssertEqual(
             LatestPreviewFrameStore.packageDirectory(for: packageURL).deletingLastPathComponent(),
@@ -229,7 +233,8 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
             package.readMembershipShard(shardName).entries
                 .first { $0.assetID == assetID }?.summary.sourceFingerprint
         )
-        XCTAssertEqual(repaired, try package.readAssetRecord(for: assetID).identity.sourceFingerprint)
+        XCTAssertEqual(
+            repaired, try package.readAssetRecord(for: assetID).identity.sourceFingerprint)
         await session.shutdown()
     }
 
@@ -259,7 +264,8 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         var firstPublishedRatio: Double?
         session.onIndexLoadingStateChange = { state in
             guard state.isComplete, firstPublishedRatio == nil else { return }
-            firstPublishedRatio = session.queryController.index.entries
+            firstPublishedRatio =
+                session.queryController.index.entries
                 .first { $0.assetID == assetID }?.summary.presentedAspectRatio
         }
         for _ in 0..<20_000 where session.isLoadingIndex { await Task.yield() }
@@ -284,7 +290,8 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
     }
 
     func testPackageOpenRepairsLegacyPresentedGeometryAndSecondOpenSkipsTheGate() async throws {
-        let packageURL = tempDirectory.appendingPathComponent("LegacyPresentedGeometry.kromoralibrary")
+        let packageURL = tempDirectory.appendingPathComponent(
+            "LegacyPresentedGeometry.kromoralibrary")
         let indexURL = tempDirectory.appendingPathComponent("LegacyPresentedGeometry.index")
         let package = try PortableLibraryPackage.create(at: packageURL)
         let setupLease = try PortablePackageLease.acquire(at: packageURL)
@@ -306,9 +313,10 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
                 rotation: .clockwise90
             ),
             EditDocument(
-                crop: CropAdjustments(normalizedRect: CGRect(x: 0.1, y: 0, width: 0.75, height: 0.5)),
+                crop: CropAdjustments(
+                    normalizedRect: CGRect(x: 0.1, y: 0, width: 0.75, height: 0.5)),
                 rotation: .counterClockwise90
-            )
+            ),
         ]
         var expectedRatios: [PortablePhotoAssetID: Double] = [:]
         for (index, pair) in zip(imported.imported, documents).enumerated() {
@@ -319,7 +327,8 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
                 shard.entries.firstIndex { $0.assetID == asset.assetID }
             )
             let width = 30 + index * 2
-            shard.entries[entryIndex].summary.dimensions = PhotoPixelDimensions(width: width, height: 12)
+            shard.entries[entryIndex].summary.dimensions = PhotoPixelDimensions(
+                width: width, height: 12)
             shard.entries[entryIndex].summary.aspectRatio = Double(width) / 12
             try package.writeMembershipShard(shard)
             let commit = try package.commitEditRevision(
@@ -329,12 +338,14 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
                 commit.membership?.summary.presentedAspectRatio
             )
         }
-        for shardName in Set(imported.imported.map {
-            PortableLibraryPackage.shard(for: $0.assetID)
-        }) {
+        for shardName in Set(
+            imported.imported.map {
+                PortableLibraryPackage.shard(for: $0.assetID)
+            })
+        {
             var shard = try package.readMembershipShard(shardName)
             for index in shard.entries.indices
-                where expectedRatios[shard.entries[index].assetID] != nil {
+            where expectedRatios[shard.entries[index].assetID] != nil {
                 shard.entries[index].summary.presentedAspectRatio = nil
             }
             try package.writeMembershipShard(shard)
@@ -344,12 +355,13 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         let scheduler = ImageWorkScheduler()
         let blockerStarted = OSAllocatedUnfairLock(initialState: false)
         let blockerRelease = OSAllocatedUnfairLock(initialState: false)
-        XCTAssertTrue(scheduler.enqueuePackageIO(
-            id: .init("presented-geometry-test-blocker"), lane: .maintenance
-        ) {
-            blockerStarted.withLock { $0 = true }
-            await holdUntilReleased { blockerRelease.withLock { $0 } }
-        })
+        XCTAssertTrue(
+            scheduler.enqueuePackageIO(
+                id: .init("presented-geometry-test-blocker"), lane: .maintenance
+            ) {
+                blockerStarted.withLock { $0 = true }
+                await holdUntilReleased { blockerRelease.withLock { $0 } }
+            })
         try await pollUntil("package IO blocker to start") { blockerStarted.withLock { $0 } }
         XCTAssertTrue(blockerStarted.withLock { $0 })
 
@@ -421,9 +433,10 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         let secondSession = try PortableLibrarySession(
             at: packageURL, indexURL: indexURL, scheduler: secondScheduler
         )
-        XCTAssertFalse(secondScheduler.admissionLog.contains {
-            $0.id.rawValue.hasPrefix("portable-package-presented-aspect-ratio-repair-")
-        }, "a complete projection must skip ratio repair on the next open")
+        XCTAssertFalse(
+            secondScheduler.admissionLog.contains {
+                $0.id.rawValue.hasPrefix("portable-package-presented-aspect-ratio-repair-")
+            }, "a complete projection must skip ratio repair on the next open")
         await secondSession.shutdown()
     }
 
@@ -437,7 +450,8 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         let id = try XCTUnwrap(session.queryController.index.entries.first?.assetID)
         let prior = try session.package.readAssetRecord(for: id).identity
         let replacement = PortablePhotoSourceFingerprint.data(
-            Data("replacement bytes".utf8), sourceRevision: prior.sourceFingerprint.sourceRevision + 1,
+            Data("replacement bytes".utf8),
+            sourceRevision: prior.sourceFingerprint.sourceRevision + 1,
             decoderVersion: prior.sourceFingerprint.decoderVersion,
             geometry: prior.sourceFingerprint.geometry
         )
@@ -491,11 +505,12 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         let restored = try XCTUnwrap(reopened.materializedAssets().first)
         XCTAssertEqual(restored.source.portableIdentity.assetID, assetID)
         let reopenedStore = EditDocumentStore(package: reopened.package, lease: reopened.lease)
-        let loaded = await reopenedStore.load(for: EditSourceReference(
-            assetID: .file(try XCTUnwrap(restored.url)),
-            portableIdentity: restored.source.portableIdentity,
-            url: restored.url
-        ))
+        let loaded = await reopenedStore.load(
+            for: EditSourceReference(
+                assetID: .file(try XCTUnwrap(restored.url)),
+                portableIdentity: restored.source.portableIdentity,
+                url: restored.url
+            ))
         XCTAssertEqual(loaded.document.adjustments, [.exposure(ev: 0.5)])
         XCTAssertTrue(loaded.found)
         try reopened.lease.release()
@@ -509,7 +524,8 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         let indexURL = tempDirectory.appendingPathComponent("Index/LibraryIndex.store")
         let sources = try (0..<4).map {
             try Fixtures.writeJPEG(
-                width: 16 + $0, height: 12, orientation: 1, named: "photo\($0).jpg", in: tempDirectory)
+                width: 16 + $0, height: 12, orientation: 1, named: "photo\($0).jpg",
+                in: tempDirectory)
         }
         let session = try PortableLibrarySession(at: packageURL, indexURL: indexURL)
         let imported = try session.importURLs(sources).imported.map(\.assetID)
@@ -520,11 +536,16 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         // Persist an index that predates the last two imports and still lists the removed photo.
         let stale = try LibraryIndexProjection(
             libraryID: session.package.manifest.libraryID,
-            entries: session.queryController.index.entries.filter { imported[0...1].contains($0.assetID) }
-                + [LibraryIndexEntry(from: try XCTUnwrap(
-                    try session.package.readMembershipShard(
-                        PortableLibraryPackage.shard(for: removedID)
-                    ).entries.first { $0.assetID == removedID }))]
+            entries: session.queryController.index.entries.filter {
+                imported[0...1].contains($0.assetID)
+            }
+                + [
+                    LibraryIndexEntry(
+                        from: try XCTUnwrap(
+                            try session.package.readMembershipShard(
+                                PortableLibraryPackage.shard(for: removedID)
+                            ).entries.first { $0.assetID == removedID }))
+                ]
         )
         try stale.write(to: indexURL)
         try session.lease.release()
@@ -550,7 +571,9 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
 
         do {
             let session = try PortableLibrarySession(at: packageURL)
-            XCTAssertTrue(FileManager.default.fileExists(atPath: packageURL.appendingPathComponent("manifest.json").path))
+            XCTAssertTrue(
+                FileManager.default.fileExists(
+                    atPath: packageURL.appendingPathComponent("manifest.json").path))
             let result = try session.importURLs([sourceURL])
             assetID = try XCTUnwrap(result.imported.first?.assetID)
             XCTAssertEqual(session.assetCount, 1)
@@ -705,7 +728,8 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         clock.advance(3)
         try FileManager.default.removeItem(at: packageURL.appendingPathComponent("manifest.lock"))
 
-        XCTAssertThrowsError(try session.importData(Data("dirty snapshot".utf8), name: "lost.jpg")) {
+        XCTAssertThrowsError(try session.importData(Data("dirty snapshot".utf8), name: "lost.jpg"))
+        {
             XCTAssertEqual($0 as? PortablePackageLeaseError, .lostDuringSession)
         }
         await session.shutdown()
@@ -747,7 +771,8 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         } catch {
             XCTAssertEqual(error as? PortablePackageLeaseError, .lostDuringSession)
         }
-        XCTAssertNoThrow(try PortableLibraryPackage.open(at: packageURL).readAssetRecord(for: assetID))
+        XCTAssertNoThrow(
+            try PortableLibraryPackage.open(at: packageURL).readAssetRecord(for: assetID))
         do {
             _ = try await session.removeFromLibraryOffMain(assetID)
             XCTFail("the session stays read-only after the loss")
@@ -787,7 +812,9 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
             )
         )
         session.renewAfterWake()
-        XCTAssertFalse(scheduler.contains(.init("portable-package-lease-heartbeat-\(session.lease.ownerID.uuidString)")))
+        XCTAssertFalse(
+            scheduler.contains(
+                .init("portable-package-lease-heartbeat-\(session.lease.ownerID.uuidString)")))
     }
 
     func testAsyncImportPublishesProgressAndAppliesMembershipDelta() async throws {
@@ -817,7 +844,9 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         XCTAssertEqual(stoppedScopes.withLock { $0 }, 1)
         XCTAssertEqual(session.assetCount, 1)
         for _ in 0..<5_000 {
-            if !scheduler.contains(.init("portable-package-index-write-\(session.lease.ownerID.uuidString)")) {
+            if !scheduler.contains(
+                .init("portable-package-index-write-\(session.lease.ownerID.uuidString)"))
+            {
                 break
             }
             await Task.yield()
@@ -905,10 +934,11 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         // Occupy the single package-I/O slot so the import below stays queued.
         let blockerStarted = OSAllocatedUnfairLock(initialState: false)
         let blockerRelease = OSAllocatedUnfairLock(initialState: false)
-        XCTAssertTrue(scheduler.enqueuePackageIO(id: .init("verification-blocker"), lane: .maintenance) {
-            blockerStarted.withLock { $0 = true }
-            await holdUntilReleased { blockerRelease.withLock { $0 } }
-        })
+        XCTAssertTrue(
+            scheduler.enqueuePackageIO(id: .init("verification-blocker"), lane: .maintenance) {
+                blockerStarted.withLock { $0 = true }
+                await holdUntilReleased { blockerRelease.withLock { $0 } }
+            })
         for _ in 0..<1_000 {
             if blockerStarted.withLock({ $0 }) { break }
             await Task.yield()
@@ -988,10 +1018,11 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         let scheduler = ImageWorkScheduler()
         let blockerStarted = OSAllocatedUnfairLock(initialState: false)
         let blockerRelease = OSAllocatedUnfairLock(initialState: false)
-        XCTAssertTrue(scheduler.enqueuePackageIO(id: .init("startup-test-blocker"), lane: .maintenance) {
-            blockerStarted.withLock { $0 = true }
-            await holdUntilReleased { blockerRelease.withLock { $0 } }
-        })
+        XCTAssertTrue(
+            scheduler.enqueuePackageIO(id: .init("startup-test-blocker"), lane: .maintenance) {
+                blockerStarted.withLock { $0 = true }
+                await holdUntilReleased { blockerRelease.withLock { $0 } }
+            })
         try await pollUntil("package IO blocker to start") { blockerStarted.withLock { $0 } }
         XCTAssertTrue(blockerStarted.withLock { $0 })
 
@@ -1004,9 +1035,8 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         session.onIndexLoadingStateChange = { states.append($0) }
         blockerRelease.withLock { $0 = true }
 
-        for _ in 0..<20_000 {
-            if session.indexLoadingState?.isComplete == true { break }
-            await Task.yield()
+        try await waitUntil("asynchronous startup index rebuild") {
+            session.indexLoadingState?.isComplete == true
         }
         XCTAssertTrue(states.contains { !$0.isComplete })
         XCTAssertEqual(session.assetCount, 550)
@@ -1023,7 +1053,7 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
             at: packageURL, indexURL: indexURL, pageSize: 25,
             asynchronousIndexLoading: true
         )
-        for _ in 0..<20_000 where warm.isLoadingIndex { await Task.yield() }
+        try await waitUntil("warm asynchronous index load") { !warm.isLoadingIndex }
         XCTAssertFalse(warm.isLoadingIndex)
         XCTAssertEqual(warm.assetCount, 550)
         XCTAssertEqual(warm.indexLoadingState?.errorMessage, nil)
@@ -1040,10 +1070,11 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         let scheduler = ImageWorkScheduler()
         let blockerStarted = OSAllocatedUnfairLock(initialState: false)
         let blockerRelease = OSAllocatedUnfairLock(initialState: false)
-        XCTAssertTrue(scheduler.enqueuePackageIO(id: .init("cancel-startup-blocker"), lane: .maintenance) {
-            blockerStarted.withLock { $0 = true }
-            await holdUntilReleased { blockerRelease.withLock { $0 } }
-        })
+        XCTAssertTrue(
+            scheduler.enqueuePackageIO(id: .init("cancel-startup-blocker"), lane: .maintenance) {
+                blockerStarted.withLock { $0 = true }
+                await holdUntilReleased { blockerRelease.withLock { $0 } }
+            })
         try await pollUntil("package IO blocker to start") { blockerStarted.withLock { $0 } }
         XCTAssertTrue(blockerStarted.withLock { $0 })
         let session = try PortableLibrarySession(

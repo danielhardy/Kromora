@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import XCTest
+
 @testable import KromoraKit
 
 @MainActor
@@ -19,7 +20,8 @@ final class ColorInspectorTests: TempDirectoryTestCase {
     }
 
     private func openStandardImage(_ viewModel: AppViewModel) async throws {
-        let url = try Fixtures.writeGradientPNG(width: 32, height: 24, named: "color.png", in: tempDirectory)
+        let url = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "color.png", in: tempDirectory)
         viewModel.openImage(url: url)
         try await waitUntil("the image to load") { viewModel.sourceImage != nil }
     }
@@ -65,9 +67,11 @@ final class ColorInspectorTests: TempDirectoryTestCase {
         viewModel.gradingBinding(for: .shadows, control: .saturation).wrappedValue = 40
         viewModel.gradingGlobalBinding(for: .balance).wrappedValue = -15
 
-        XCTAssertEqual(viewModel.mixerChannelValue(.blue), ColorMixerChannel(hue: -18, luminance: 23))
+        XCTAssertEqual(
+            viewModel.mixerChannelValue(.blue), ColorMixerChannel(hue: -18, luminance: 23))
         XCTAssertEqual(viewModel.mixerChannelValue(.red), .neutral)
-        XCTAssertEqual(viewModel.gradingWheelValue(.shadows), ColorGradingWheel(hue: 220, saturation: 40))
+        XCTAssertEqual(
+            viewModel.gradingWheelValue(.shadows), ColorGradingWheel(hue: 220, saturation: 40))
         XCTAssertEqual(viewModel.gradingWheelValue(.highlights), .neutral)
         XCTAssertEqual(viewModel.gradingGlobalValue(for: .balance), -15, accuracy: 1e-12)
     }
@@ -168,6 +172,8 @@ final class ColorInspectorTests: TempDirectoryTestCase {
         let bitmap = try XCTUnwrap(
             hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds))
         hostingView.cacheDisplay(in: hostingView.bounds, to: bitmap)
+        let pixelsPerPointX = Double(bitmap.pixelsWide) / Double(side)
+        let pixelsPerPointY = Double(bitmap.pixelsHigh) / Double(side)
 
         let samples: [(hue: Double, expected: String)] = [
             (0, "red"),
@@ -180,8 +186,9 @@ final class ColorInspectorTests: TempDirectoryTestCase {
             let radians = sample.hue * .pi / 180
             let point = ColorGradingWheelPoint(x: cos(radians), y: sin(radians))
             let radius = Double(side) * 0.42
-            let x = Int((Double(side) / 2 + point.x * radius).rounded())
-            let topOriginY = Int((Double(side) / 2 - point.y * radius).rounded())
+            let x = Int(((Double(side) / 2 + point.x * radius) * pixelsPerPointX).rounded())
+            let topOriginY = Int(
+                ((Double(side) / 2 - point.y * radius) * pixelsPerPointY).rounded())
             let color = try XCTUnwrap(bitmap.colorAt(x: x, y: topOriginY))
                 .usingColorSpace(.deviceRGB)
             let red = try XCTUnwrap(color?.redComponent)
@@ -247,7 +254,8 @@ final class ColorInspectorTests: TempDirectoryTestCase {
         viewModel.resetWhiteBalance()
 
         XCTAssertFalse(viewModel.hasWhiteBalanceAdjustments)
-        XCTAssertEqual(viewModel.adjustmentValue(for: .temperature), AdjustmentControl.temperature.neutral)
+        XCTAssertEqual(
+            viewModel.adjustmentValue(for: .temperature), AdjustmentControl.temperature.neutral)
         XCTAssertEqual(viewModel.adjustmentValue(for: .tint), AdjustmentControl.tint.neutral)
     }
 }
