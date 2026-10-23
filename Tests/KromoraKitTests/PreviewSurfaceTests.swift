@@ -25,24 +25,28 @@ final class PreviewSurfaceTests: XCTestCase {
         XCTAssertNotNil(KromoraKitResourceBundle.metalSource(named: "PreviewSurface"))
     }
 
-    func testStaleSettledReplacementCrossfadesFor120MillisecondsThenReleasesOldTexture() async throws {
+    func testStaleSettledReplacementCrossfadesFor120MillisecondsThenReleasesOldTexture()
+        async throws
+    {
         let surface = PreviewSurface()
         let oldDigest = PerceptualDigest(
             bytes: Data(repeating: 0, count: PerceptualDigest.byteCount))!
         let newDigest = PerceptualDigest(
             bytes: Data(repeating: 255, count: PerceptualDigest.byteCount))!
         let extent = CGRect(x: 0, y: 0, width: 32, height: 24)
-        XCTAssertTrue(surface.present(
-            CIImage(color: .black).cropped(to: extent), quality: .preview,
-            coversPresentationExtent: true, perceptualDigest: oldDigest
-        ))
+        XCTAssertTrue(
+            surface.present(
+                CIImage(color: .black).cropped(to: extent), quality: .preview,
+                coversPresentationExtent: true, perceptualDigest: oldDigest
+            ))
         let oldTexture = try await waitForPresentationTexture(surface)
         surface.prepareStaleRefinement(using: oldDigest)
 
-        XCTAssertTrue(surface.present(
-            CIImage(color: .white).cropped(to: extent), quality: .preview,
-            coversPresentationExtent: true, perceptualDigest: newDigest
-        ))
+        XCTAssertTrue(
+            surface.present(
+                CIImage(color: .white).cropped(to: extent), quality: .preview,
+                coversPresentationExtent: true, perceptualDigest: newDigest
+            ))
         _ = try await waitForPresentationTexture(surface)
         XCTAssertTrue(surface.retainsTransitionTexture)
         XCTAssertFalse(surface.presentationTexture === oldTexture)
@@ -65,7 +69,7 @@ final class PreviewSurfaceTests: XCTestCase {
         XCTAssertGreaterThan(centerPixel.0, 0, "the old black frame must fade out")
         XCTAssertLessThan(centerPixel.0, 255, "the new white frame must fade in")
 
-        try await Task.sleep(for: .milliseconds(145))
+        try await waitForTransitionTextureRelease(surface)
         XCTAssertFalse(surface.retainsTransitionTexture)
         XCTAssertNil(surface.crossfadeProgress())
     }
@@ -75,16 +79,18 @@ final class PreviewSurfaceTests: XCTestCase {
         let digest = PerceptualDigest(
             bytes: Data(repeating: 0, count: PerceptualDigest.byteCount))!
         let extent = CGRect(x: 0, y: 0, width: 32, height: 24)
-        XCTAssertTrue(surface.present(
-            CIImage(color: .black).cropped(to: extent), quality: .preview,
-            coversPresentationExtent: true, perceptualDigest: digest
-        ))
+        XCTAssertTrue(
+            surface.present(
+                CIImage(color: .black).cropped(to: extent), quality: .preview,
+                coversPresentationExtent: true, perceptualDigest: digest
+            ))
         _ = try await waitForPresentationTexture(surface)
         surface.prepareStaleRefinement(using: digest)
-        XCTAssertTrue(surface.present(
-            CIImage(color: .white).cropped(to: extent), quality: .preview,
-            coversPresentationExtent: true
-        ))
+        XCTAssertTrue(
+            surface.present(
+                CIImage(color: .white).cropped(to: extent), quality: .preview,
+                coversPresentationExtent: true
+            ))
         _ = try await waitForPresentationTexture(surface)
         XCTAssertFalse(surface.retainsTransitionTexture)
     }
@@ -96,17 +102,19 @@ final class PreviewSurfaceTests: XCTestCase {
         let white = PerceptualDigest(
             bytes: Data(repeating: 255, count: PerceptualDigest.byteCount))!
         let extent = CGRect(x: 0, y: 0, width: 32, height: 24)
-        XCTAssertTrue(surface.present(
-            CIImage(color: .black).cropped(to: extent), quality: .preview,
-            coversPresentationExtent: true, perceptualDigest: black
-        ))
+        XCTAssertTrue(
+            surface.present(
+                CIImage(color: .black).cropped(to: extent), quality: .preview,
+                coversPresentationExtent: true, perceptualDigest: black
+            ))
         _ = try await waitForPresentationTexture(surface)
         surface.prepareStaleRefinement(using: black)
         surface.setReduceMotion(true)
-        XCTAssertTrue(surface.present(
-            CIImage(color: .white).cropped(to: extent), quality: .preview,
-            coversPresentationExtent: true, perceptualDigest: white
-        ))
+        XCTAssertTrue(
+            surface.present(
+                CIImage(color: .white).cropped(to: extent), quality: .preview,
+                coversPresentationExtent: true, perceptualDigest: white
+            ))
         _ = try await waitForPresentationTexture(surface)
         XCTAssertFalse(surface.retainsTransitionTexture)
     }
@@ -132,7 +140,8 @@ final class PreviewSurfaceTests: XCTestCase {
                 .frame(width: 320, height: 240)
         )
         XCTAssertEqual(
-            try hostedPreviewView(in: canvasHosting, size: CGSize(width: 320, height: 240)).frame.size,
+            try hostedPreviewView(in: canvasHosting, size: CGSize(width: 320, height: 240)).frame
+                .size,
             CGSize(width: 320, height: 240)
         )
 
@@ -140,7 +149,8 @@ final class PreviewSurfaceTests: XCTestCase {
             rootView: PreviewSurfaceView(surface: surface).frame(height: 130)
         )
         XCTAssertEqual(
-            try hostedPreviewView(in: overlayHosting, size: CGSize(width: 280, height: 130)).frame.size,
+            try hostedPreviewView(in: overlayHosting, size: CGSize(width: 280, height: 130)).frame
+                .size,
             CGSize(width: 280, height: 130)
         )
     }
@@ -176,7 +186,8 @@ final class PreviewSurfaceTests: XCTestCase {
             return nil
         }
 
-        return try XCTUnwrap(findPreview(in: hostingView), "hosting layout should create PreviewMTKView")
+        return try XCTUnwrap(
+            findPreview(in: hostingView), "hosting layout should create PreviewMTKView")
     }
 
     func testDoubleClickMouseDownTogglesCanvasAfterLeavingCropTool() throws {
@@ -185,17 +196,18 @@ final class PreviewSurfaceTests: XCTestCase {
             frame: CGRect(x: 0, y: 0, width: 320, height: 240), device: nil)
         view.onDoubleClick = { _, _ in navigation.toggleFitAndRememberedZoom() }
 
-        let doubleClick = try XCTUnwrap(NSEvent.mouseEvent(
-            with: .leftMouseDown,
-            location: CGPoint(x: 160, y: 120),
-            modifierFlags: [],
-            timestamp: 1,
-            windowNumber: 0,
-            context: nil,
-            eventNumber: 1,
-            clickCount: 2,
-            pressure: 1
-        ))
+        let doubleClick = try XCTUnwrap(
+            NSEvent.mouseEvent(
+                with: .leftMouseDown,
+                location: CGPoint(x: 160, y: 120),
+                modifierFlags: [],
+                timestamp: 1,
+                windowNumber: 0,
+                context: nil,
+                eventNumber: 1,
+                clickCount: 2,
+                pressure: 1
+            ))
 
         let canvasState = CanvasInteractionState()
         XCTAssertTrue(canvasState.beginCrop(using: CropAdjustments()))
@@ -218,7 +230,8 @@ final class PreviewSurfaceTests: XCTestCase {
             frame: CGRect(x: 0, y: 0, width: 320, height: 240), device: nil)
         view.viewportSize = CGSize(width: 320, height: 130)
         XCTAssertNotNil(view.hitTest(CGPoint(x: 100, y: 200)))
-        XCTAssertNil(view.hitTest(CGPoint(x: 100, y: 100)), "chrome-covered pixels must decline hits")
+        XCTAssertNil(
+            view.hitTest(CGPoint(x: 100, y: 100)), "chrome-covered pixels must decline hits")
         var receivedPoint: CGPoint?
         var receivedSize: CGSize?
         view.onDoubleClick = { point, size in
@@ -241,10 +254,14 @@ final class PreviewSurfaceTests: XCTestCase {
 
         view.isWhiteBalanceSampling = false
         var delta: CGSize?
-        view.onPan = { pan, size in delta = pan; receivedSize = size }
+        view.onPan = { pan, size in
+            delta = pan
+            receivedSize = size
+        }
         view.mouseDown(with: try mouseEvent(at: CGPoint(x: 100, y: 200), clickCount: 1))
-        view.mouseDragged(with: try mouseEvent(
-            at: CGPoint(x: 110, y: 190), clickCount: 1, type: .leftMouseDragged))
+        view.mouseDragged(
+            with: try mouseEvent(
+                at: CGPoint(x: 110, y: 190), clickCount: 1, type: .leftMouseDragged))
         view.mouseUp(with: try mouseEvent(at: CGPoint(x: 110, y: 190), clickCount: 1))
         XCTAssertEqual(delta, CGSize(width: 10, height: 10))
         XCTAssertEqual(receivedSize, CGSize(width: 320, height: 130))
@@ -252,9 +269,10 @@ final class PreviewSurfaceTests: XCTestCase {
 
     func testRetainedTextureFitsContinuouslyInsideAStableTopAlignedDrawable() async throws {
         let surface = PreviewSurface()
-        XCTAssertTrue(surface.present(
-            CIImage(color: .white).cropped(to: CGRect(x: 0, y: 0, width: 400, height: 300)),
-            quality: .preview))
+        XCTAssertTrue(
+            surface.present(
+                CIImage(color: .white).cropped(to: CGRect(x: 0, y: 0, width: 400, height: 300)),
+                quality: .preview))
         let retained = try await waitForPresentationTexture(surface)
         let revision = surface.revision
         let coordinator = PreviewSurfaceView.Coordinator()
@@ -264,29 +282,33 @@ final class PreviewSurfaceTests: XCTestCase {
         let heights = stride(from: 160, through: 240, by: 10).map { $0 }
         for height in heights + heights.reversed() {
             let viewport = CGSize(width: 320, height: height)
-            let texture = try XCTUnwrap(coordinator.renderRetainedTexture(
-                surface: surface, navigation: CanvasNavigation(), destinationSize: fullSize,
-                appearance: appearance, viewportSize: viewport))
+            let texture = try XCTUnwrap(
+                coordinator.renderRetainedTexture(
+                    surface: surface, navigation: CanvasNavigation(), destinationSize: fullSize,
+                    appearance: appearance, viewportSize: viewport))
             XCTAssertEqual(texture.width, 320)
             XCTAssertEqual(texture.height, 240)
             let transform = CanvasNavigation().transform(
                 imageExtent: CGRect(x: 0, y: 0, width: 400, height: 300), viewportSize: viewport)
             var pixels = [UInt8](repeating: 0, count: 320 * 240 * 4)
             pixels.withUnsafeMutableBytes { raw in
-                texture.getBytes(raw.baseAddress!, bytesPerRow: 320 * 4,
-                                 from: MTLRegionMake2D(0, 0, 320, 240), mipmapLevel: 0)
+                texture.getBytes(
+                    raw.baseAddress!, bytesPerRow: 320 * 4,
+                    from: MTLRegionMake2D(0, 0, 320, 240), mipmapLevel: 0)
             }
             // The photo reaches the visible top/bottom and stays 4:3 at every sample.
             let left = Int(transform.origin.x.rounded(.up)) + 2
             XCTAssertGreaterThan(bgraPixel(in: pixels, width: 320, at: (left, 2)).0, 250)
             XCTAssertGreaterThan(bgraPixel(in: pixels, width: 320, at: (160, height - 2)).0, 250)
             if left > 4 {
-                XCTAssertEqual(Double(bgraPixel(in: pixels, width: 320, at: (left - 4, 2)).0),
-                               background.blue * 255, accuracy: 1)
+                XCTAssertEqual(
+                    Double(bgraPixel(in: pixels, width: 320, at: (left - 4, 2)).0),
+                    background.blue * 255, accuracy: 1)
             }
             if height < 240 {
-                XCTAssertEqual(Double(bgraPixel(in: pixels, width: 320, at: (160, height + 1)).0),
-                               background.blue * 255, accuracy: 1)
+                XCTAssertEqual(
+                    Double(bgraPixel(in: pixels, width: 320, at: (160, height + 1)).0),
+                    background.blue * 255, accuracy: 1)
             }
             XCTAssertTrue(surface.presentationTexture === retained)
             XCTAssertEqual(surface.revision, revision)
@@ -310,19 +332,23 @@ final class PreviewSurfaceTests: XCTestCase {
         XCTAssertEqual(began, 0)
         XCTAssertTrue(deltas.isEmpty)
 
-        view.mouseDragged(with: try mouseEvent(
-            at: CGPoint(x: 148, y: 132), clickCount: 1, type: .leftMouseDragged
-        ))
+        view.mouseDragged(
+            with: try mouseEvent(
+                at: CGPoint(x: 148, y: 132), clickCount: 1, type: .leftMouseDragged
+            ))
         XCTAssertEqual(began, 1)
         XCTAssertEqual(ended, 0)
         XCTAssertFalse(deltas.isEmpty, "the photo must move during the drag, not on mouse-up")
-        let total = deltas.reduce(CGSize.zero) { CGSize(width: $0.width + $1.width, height: $0.height + $1.height) }
+        let total = deltas.reduce(CGSize.zero) {
+            CGSize(width: $0.width + $1.width, height: $0.height + $1.height)
+        }
         XCTAssertEqual(total.width, -12, accuracy: 0.001)
         XCTAssertEqual(total.height, -12, accuracy: 0.001)
 
-        view.mouseUp(with: try mouseEvent(
-            at: CGPoint(x: 148, y: 132), clickCount: 1, type: .leftMouseUp
-        ))
+        view.mouseUp(
+            with: try mouseEvent(
+                at: CGPoint(x: 148, y: 132), clickCount: 1, type: .leftMouseUp
+            ))
         XCTAssertEqual(ended, 1)
         XCTAssertEqual(deltas.count, 1, "mouse-up must not apply another pan sample")
     }
@@ -339,17 +365,19 @@ final class PreviewSurfaceTests: XCTestCase {
         view.onCanvasInteractionEnded = { ended += 1 }
 
         view.mouseDown(with: try mouseEvent(at: CGPoint(x: 160, y: 120), clickCount: 1))
-        view.mouseDragged(with: try mouseEvent(
-            at: CGPoint(x: 160, y: 80), clickCount: 1, type: .leftMouseDragged
-        ))
+        view.mouseDragged(
+            with: try mouseEvent(
+                at: CGPoint(x: 160, y: 80), clickCount: 1, type: .leftMouseDragged
+            ))
         XCTAssertEqual(total.width, 0, accuracy: 0.001)
         XCTAssertEqual(total.height, 40, accuracy: 0.001)
 
         // A y-down hosting view can deliver mouseUp with the vertical axis flipped relative to
         // mouseDragged. That used to apply approximately -2× the drag and jump the photo.
-        view.mouseUp(with: try mouseEvent(
-            at: CGPoint(x: 160, y: 160), clickCount: 1, type: .leftMouseUp
-        ))
+        view.mouseUp(
+            with: try mouseEvent(
+                at: CGPoint(x: 160, y: 160), clickCount: 1, type: .leftMouseUp
+            ))
         XCTAssertEqual(ended, 1)
         XCTAssertEqual(total.width, 0, accuracy: 0.001)
         XCTAssertEqual(total.height, 40, accuracy: 0.001)
@@ -383,9 +411,10 @@ final class PreviewSurfaceTests: XCTestCase {
         view.mouseDown(with: try mouseEvent(at: CGPoint(x: 160, y: 120), clickCount: 1))
         // AppKit y-up: increasing y is upward. A downward drag decreases y and must become a
         // positive canvas delta so the photo moves down with the pointer (KRMA-439).
-        view.mouseDragged(with: try mouseEvent(
-            at: CGPoint(x: 180, y: 90), clickCount: 1, type: .leftMouseDragged
-        ))
+        view.mouseDragged(
+            with: try mouseEvent(
+                at: CGPoint(x: 180, y: 90), clickCount: 1, type: .leftMouseDragged
+            ))
         XCTAssertEqual(total.width, 20, accuracy: 0.001)
         XCTAssertEqual(total.height, 30, accuracy: 0.001)
     }
@@ -393,7 +422,8 @@ final class PreviewSurfaceTests: XCTestCase {
     func testCoordinatorBuildsAPresentationPipelineFromBundledMetallib() {
         XCTAssertNotNil(
             KromoraKitResourceBundle.presentationMetallibURL(),
-            "KromoraPresentation.metallib must ship in the bundle — run scripts/build-metal-libraries.sh")
+            "KromoraPresentation.metallib must ship in the bundle — run scripts/build-metal-libraries.sh"
+        )
         let coordinator = PreviewSurfaceView.Coordinator()
         XCTAssertTrue(
             coordinator.hasPresentationPipeline,
@@ -429,7 +459,8 @@ final class PreviewSurfaceTests: XCTestCase {
         let coordinator = PreviewSurfaceView.Coordinator()
         let texture = try XCTUnwrap(
             coordinator.renderRetainedTexture(
-                surface: surface, navigation: CanvasNavigation(), destinationSize: CGSize(width: 40, height: 30),
+                surface: surface, navigation: CanvasNavigation(),
+                destinationSize: CGSize(width: 40, height: 30),
                 viewSpaceRotationAngle: 24
             ))
         let corner = try pixel(from: texture, at: (4, 0))
@@ -1075,9 +1106,10 @@ final class PreviewSurfaceTests: XCTestCase {
             PreviewSurfaceView.Coordinator.presentationImage(
                 image, navigation: navigation, destination: destination
             ))
-        let fallbackPixels = try Pixels.bytes(of: XCTUnwrap(
-            RenderEngine.presentationContext.createCGImage(fallback, from: destination)
-        ))
+        let fallbackPixels = try Pixels.bytes(
+            of: XCTUnwrap(
+                RenderEngine.presentationContext.createCGImage(fallback, from: destination)
+            ))
         let metal = try XCTUnwrap(
             PreviewSurfaceView.Coordinator().renderRetainedTexture(
                 surface: surface, navigation: navigation, destinationSize: size
@@ -1597,17 +1629,18 @@ final class PreviewSurfaceTests: XCTestCase {
     private func mouseEvent(
         at location: CGPoint, clickCount: Int, type: NSEvent.EventType = .leftMouseDown
     ) throws -> NSEvent {
-        try XCTUnwrap(NSEvent.mouseEvent(
-            with: type,
-            location: location,
-            modifierFlags: [],
-            timestamp: 1,
-            windowNumber: 0,
-            context: nil,
-            eventNumber: 1,
-            clickCount: clickCount,
-            pressure: 1
-        ))
+        try XCTUnwrap(
+            NSEvent.mouseEvent(
+                with: type,
+                location: location,
+                modifierFlags: [],
+                timestamp: 1,
+                windowNumber: 0,
+                context: nil,
+                eventNumber: 1,
+                clickCount: clickCount,
+                pressure: 1
+            ))
     }
 
     private func waitForPresentationTexture(_ surface: PreviewSurface) async throws -> MTLTexture {
@@ -1620,6 +1653,14 @@ final class PreviewSurfaceTests: XCTestCase {
         return try XCTUnwrap(
             surface.presentationTexture,
             "async presentation texture did not complete")
+    }
+
+    private func waitForTransitionTextureRelease(_ surface: PreviewSurface) async throws {
+        for _ in 0..<200 {
+            if !surface.retainsTransitionTexture { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTFail("transition texture was not released after the crossfade completed")
     }
 
     /// `renderRetainedTexture` targets are `.bgra8Unorm`. Channel 0 is blue.

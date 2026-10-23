@@ -38,7 +38,7 @@ labels:
   - must-fix
   - ci
 created: 2026-10-13T14:47:40.853Z
-updated: 2026-10-23T02:51:28.231Z
+updated: 2026-10-23T03:11:45.363Z
 parent: KRMA-922
 depends_on:
   - KRMA-927
@@ -159,6 +159,14 @@ Reproduced on a fresh isolated development profile: the first-run welcome sheet 
 Run 39883149380 also reported formatting violations in ContentView.swift and LibraryHandoffStateTests.swift; these are formatted. The formatter passed on 39888846287 because that merge introduced no changed Swift files, rather than because the old files had been corrected. The earlier serial failure from run 39872317432 is now accessible: NeutralOriginSliderTests.testPhotoSwitchHoldsSliderAtOutgoingValueUntilIncomingDocumentArrives asserted -0.5 while the slider was still at -0.462538 after a fixed delay. Replaced that final delay with the existing bounded completion wait, preserving the intermediate animation assertions.
 
 Local verification passed: current SwiftPM Release build; 36 focused LibraryHandoffStateTests, NeutralOriginSliderTests, and OnboardingTests; strict formatting for all four changed Swift files; zsh syntax; compilation of all seven AppleScript stages; git diff check. The complete smoke harness passed against the rebuilt unsandboxed development app with its own bundle ID, preferences, and temporary library: a fresh profile exported 000-Kromora-Smoke.jpg and a repeat launch with saved naming exported pre-000-Kromora-Smoke-sfx.jpg, both decoded as 256x256 JPEGs. These are local development-app checks; the signed hosted-runner path still needs a new Actions run after a human push. No passing CI run is claimed.
+
+### Comment — codex @ 2026-10-23T02:53:14.350Z
+
+Fixes are committed on main as 0c91ee95a1ba5543047def4e44339eebbe0f2bc4 (KRMA-930: fix fresh-profile CI smoke and slider timing). All local checks recorded above passed, including fresh-profile and saved-naming smoke runs. A human must push this commit for the next signed hosted-runner verification; the latest Actions run remains failed and does not contain these fixes.
+
+### Comment — codex @ 2026-10-23T03:11:45.361Z
+
+Run 39892049431 on 0c91ee95a1ba5543047def4e44339eebbe0f2bc4 passed the smoke path, Swift-format, packaging/signing, Xcode build, and deterministic/model lane. The only failure was one serial test: PreviewSurfaceTests.testStaleSettledReplacementCrossfadesFor120MillisecondsThenReleasesOldTexture, where a fixed 145 ms sleep expired before the main-actor crossfade cleanup task released its texture. Replaced the fixed sleep with a bounded wait for the release condition. The retouch stress corpus also prints rows marked FAIL, but its XCTest passed; those are report metrics. Local validation passed the focused test, all 53 PreviewSurfaceTests, strict formatting, and git diff --check. A human push and a new Actions run are still required for hosted verification.
 
 ## Agent log
 
