@@ -6,9 +6,11 @@ import XCTest
 final class LibraryHandoffStateTests: XCTestCase {
     func testFittedRectLetterboxesWideAndTallImagesInsideBounds() {
         let bounds = CGRect(x: 100, y: 50, width: 800, height: 400)
-        let wide = LibraryHandoffState.fittedRect(imageSize: CGSize(width: 400, height: 100), in: bounds)
+        let wide = LibraryHandoffState.fittedRect(
+            imageSize: CGSize(width: 400, height: 100), in: bounds)
         XCTAssertEqual(wide, CGRect(x: 100, y: 150, width: 800, height: 200))
-        let tall = LibraryHandoffState.fittedRect(imageSize: CGSize(width: 100, height: 400), in: bounds)
+        let tall = LibraryHandoffState.fittedRect(
+            imageSize: CGSize(width: 100, height: 400), in: bounds)
         XCTAssertEqual(tall, CGRect(x: 450, y: 50, width: 100, height: 400))
     }
 

@@ -413,7 +413,9 @@ final class NeutralOriginSliderTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(180))
         XCTAssertGreaterThan(slider.doubleValue, -0.5)
         XCTAssertLessThan(slider.doubleValue, 0.75)
-        try await Task.sleep(for: .milliseconds(260))
+        try await waitUntil("the incoming photo's slider animation to finish") {
+            abs(slider.doubleValue + 0.5) < 0.0001
+        }
         XCTAssertEqual(slider.doubleValue, -0.5, accuracy: 0.0001)
     }
 

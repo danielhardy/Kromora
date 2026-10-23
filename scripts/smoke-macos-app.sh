@@ -104,8 +104,9 @@ trap cleanup EXIT
 ui_stage() {
   stage="$1"
   print -- "Running UI smoke stage: $stage"
+  # zsh can skip the EXIT trap on errexit inside a function; exit explicitly so cleanup still runs.
   KROMORA_SMOKE_PID="$app_pid" KROMORA_SMOKE_INPUT="$input_png" \
-    KROMORA_SMOKE_EXPORT_DIR="$export_dir" /usr/bin/osascript
+    KROMORA_SMOKE_EXPORT_DIR="$export_dir" KROMORA_SMOKE_EXPECT_WELCOME="$expects_welcome" /usr/bin/osascript || exit $?
 }
 
 if find_app_pid >/dev/null; then
@@ -115,6 +116,11 @@ fi
 
 stage="fixture"
 /usr/bin/sips -s format png -z $expected_size $expected_size App/Branding/KromoraIcon.svg --out "$input_png" >/dev/null
+
+# Read the first-run state before launch so an enabled menu cannot race the welcome sheet's
+# presentation. The harness exercises onboarding on a fresh profile without seeding preferences.
+expects_welcome=1
+[[ "$(/usr/bin/defaults read "$bundle_id" hasSeenWelcome 2>/dev/null || true)" == "1" ]] && expects_welcome=0
 
 stage="launch"
 # KROMORA_LIBRARY_PACKAGE (an absolute path to a disposable library clone) is forwarded so the
@@ -154,38 +160,55 @@ tell application "System Events"
 end tell
 APPLESCRIPT
 
+ui_stage "first-run onboarding" <<'APPLESCRIPT'
+set appPID to (do shell script "printf '%s' \"$KROMORA_SMOKE_PID\"") as integer
+set expectsWelcome to do shell script "printf '%s' \"$KROMORA_SMOKE_EXPECT_WELCOME\""
+if expectsWelcome is not "1" then return
+tell application "System Events"
+    tell first process whose unix id is appPID
+        set frontmost to true
+        set welcomeClicked to false
+        repeat 30 times
+            try
+                -- SwiftUI nests the buttons in a group and exposes attributed labels that
+                -- System Events cannot resolve by name. The identifier is a plain AX string.
+                set windowElements to entire contents of window 1
+                repeat with elementReference in windowElements
+                    set targetElement to contents of elementReference
+                    try
+                        if value of attribute "AXIdentifier" of targetElement is "welcome.startEmpty" then
+                            click targetElement
+                            set welcomeClicked to true
+                            exit repeat
+                        end if
+                    end try
+                end repeat
+            end try
+            if welcomeClicked then exit repeat
+            delay 1
+        end repeat
+        if not welcomeClicked then error "first-run welcome button did not become available"
+        set welcomeDismissed to false
+        repeat 30 times
+            try
+                if (count of sheets of window 1) = 0 then
+                    set welcomeDismissed to true
+                    exit repeat
+                end if
+            end try
+            delay 1
+        end repeat
+        if not welcomeDismissed then error "first-run welcome sheet did not dismiss"
+    end tell
+end tell
+APPLESCRIPT
+
 ui_stage "import (Open Image panel)" <<'APPLESCRIPT'
 set appPID to (do shell script "printf '%s' \"$KROMORA_SMOKE_PID\"") as integer
 set inputPath to do shell script "printf '%s' \"$KROMORA_SMOKE_INPUT\""
 tell application "System Events"
     tell first process whose unix id is appPID
         set frontmost to true
-
-        -- A clean CI profile shows the first-run welcome sheet. Dismiss it explicitly, then wait
-        -- until the asynchronously opened library enables the File > Open Image command.
-        set welcomeShown to false
-        try
-            if exists button "Start with an empty library" of sheet 1 of window 1 then
-                set welcomeShown to true
-                click button "Start with an empty library" of sheet 1 of window 1
-            end if
-        end try
-        if welcomeShown then
-            set welcomeDismissed to false
-            repeat 30 times
-                try
-                    if (count of sheets of window 1) = 0 then
-                        set welcomeDismissed to true
-                        exit repeat
-                    end if
-                on error
-                    set welcomeDismissed to true
-                    exit repeat
-                end try
-                delay 1
-            end repeat
-            if not welcomeDismissed then error "first-run welcome sheet did not dismiss"
-        end if
         set openCommandReady to false
         repeat 60 times
             try
@@ -210,19 +233,19 @@ tell application "System Events"
         end repeat
         if not openPanelPresented then error "Open Image panel did not appear as a sheet"
         keystroke "g" using {command down, shift down}
-        set locationSheetPresented to false
+        -- The sheet becomes visible before its path field is accessible. Wait for the control
+        -- and enter the path in the same retry, rather than treating the sheet count as ready.
+        set locationEntered to false
         repeat 20 times
             try
-                if (count of sheets of sheet 1 of window 1) > 0 then
-                    set locationSheetPresented to true
-                    exit repeat
-                end if
+                set value of text field 1 of sheet 1 of sheet 1 of window 1 to inputPath
+                key code 36
+                set locationEntered to true
+                exit repeat
             end try
             delay 1
         end repeat
-        if not locationSheetPresented then error "Open Image location sheet did not appear"
-        set value of text field 1 of sheet 1 of sheet 1 of window 1 to inputPath
-        key code 36
+        if not locationEntered then error "Open Image location field did not become ready"
         set openFileReady to false
         repeat 20 times
             try
@@ -285,21 +308,27 @@ tell application "System Events"
     tell first process whose unix id is appPID
         set frontmost to true
         click menu item "Export…" of menu 1 of menu bar item "File" of menu bar 1
+        set exportSetupReady to false
         repeat 20 times
-            if (count of sheets of window 1) > 0 then
-                if exists button "Continue" of sheet 1 of window 1 then exit repeat
-            end if
+            try
+                if exists button "Continue" of sheet 1 of window 1 then
+                    set exportSetupReady to true
+                    exit repeat
+                end if
+            end try
             delay 1
         end repeat
-        if not (exists button "Continue" of sheet 1 of window 1) then error "Export setup sheet did not appear"
+        if not exportSetupReady then error "Export setup sheet did not appear"
         if not (exists static text "Export 1 Photo" of sheet 1 of window 1) then error "Export setup sheet is not the one-photo setup"
         set exampleName to ""
         repeat 10 times
             -- The label is a direct child of the sheet; `entire contents` returns nothing for it.
-            repeat with element in (UI elements of sheet 1 of window 1)
+            set sheetElements to UI elements of sheet 1 of window 1
+            repeat with elementReference in sheetElements
+                set targetElement to contents of elementReference
                 try
-                    if role of element is "AXStaticText" and description of element is "Example filename" then
-                        set exampleName to value of element
+                    if role of targetElement is "AXStaticText" and description of targetElement is "Example filename" then
+                        set exampleName to value of targetElement
                         exit repeat
                     end if
                 end try
@@ -322,34 +351,53 @@ set appPID to (do shell script "printf '%s' \"$KROMORA_SMOKE_PID\"") as integer
 set exportDirectory to do shell script "printf '%s' \"$KROMORA_SMOKE_EXPORT_DIR\""
 tell application "System Events"
     tell first process whose unix id is appPID
+        set exportChooserReady to false
         repeat 20 times
-            if (count of sheets of window 1) > 0 then
-                if exists button "Export Here" of splitter group 1 of sheet 1 of window 1 then exit repeat
-            end if
+            try
+                if exists button "Export Here" of splitter group 1 of sheet 1 of window 1 then
+                    set exportChooserReady to true
+                    exit repeat
+                end if
+            end try
             delay 1
         end repeat
-        if not (exists button "Export Here" of splitter group 1 of sheet 1 of window 1) then error "Export folder chooser did not appear"
+        if not exportChooserReady then error "Export folder chooser did not appear"
         keystroke "g" using {command down, shift down}
+        set locationEntered to false
         repeat 20 times
-            if (count of sheets of sheet 1 of window 1) > 0 then exit repeat
+            try
+                set value of text field 1 of sheet 1 of sheet 1 of window 1 to exportDirectory
+                key code 36
+                set locationEntered to true
+                exit repeat
+            end try
             delay 1
         end repeat
-        if (count of sheets of sheet 1 of window 1) = 0 then error "Export location sheet did not appear"
-        set value of text field 1 of sheet 1 of sheet 1 of window 1 to exportDirectory
-        key code 36
+        if not locationEntered then error "Export location field did not become ready"
+        set exportDestinationReady to false
         repeat 20 times
-            if (count of sheets of sheet 1 of window 1) = 0 then
-                if enabled of button "Export Here" of splitter group 1 of sheet 1 of window 1 then exit repeat
-            end if
+            try
+                if (count of sheets of sheet 1 of window 1) = 0 and ¬
+                    enabled of button "Export Here" of splitter group 1 of sheet 1 of window 1 then
+                    set exportDestinationReady to true
+                    exit repeat
+                end if
+            end try
             delay 1
         end repeat
-        if (count of sheets of sheet 1 of window 1) > 0 then error "Export destination did not become selectable"
+        if not exportDestinationReady then error "Export destination did not become selectable"
         click button "Export Here" of splitter group 1 of sheet 1 of window 1
+        set exportChooserDismissed to false
         repeat 20 times
-            if (count of sheets of window 1) = 0 then exit repeat
+            try
+                if (count of sheets of window 1) = 0 then
+                    set exportChooserDismissed to true
+                    exit repeat
+                end if
+            end try
             delay 1
         end repeat
-        if (count of sheets of window 1) > 0 then error "Export folder chooser remained open after Export Here"
+        if not exportChooserDismissed then error "Export folder chooser remained open after Export Here"
     end tell
 end tell
 APPLESCRIPT

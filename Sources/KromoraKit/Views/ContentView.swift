@@ -1,5 +1,5 @@
-import SwiftUI
 import PhotosUI
+import SwiftUI
 
 /// Main window layout: sidebar + preview + toolbar.
 ///
@@ -60,7 +60,8 @@ public struct ContentView: View {
 
     public var body: some View {
         let _ = RenderDiagnostics.noteContentViewBody()
-        return mainContent
+        return
+            mainContent
             .navigationTitle("")
             .tint(KromoraTheme.primaryAccent)
             .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
@@ -81,23 +82,34 @@ public struct ContentView: View {
                 }
             }
             .modifier(FeatureSheetsModifier(viewModel: viewModel))
-            .sheet(isPresented: Binding(
-                get: { viewModel.photosImportReview.isPresented },
-                set: { if !$0 { viewModel.photosImportReview.cancel() } }
-            )) {
+            .sheet(
+                isPresented: Binding(
+                    get: { viewModel.photosImportReview.isPresented },
+                    set: { if !$0 { viewModel.photosImportReview.cancel() } }
+                )
+            ) {
                 PhotosImportReviewView(review: viewModel.photosImportReview)
             }
             .modifier(SelectiveCopySheetModifier(viewModel: viewModel))
-            .sheet(isPresented: $isWelcomePresented, onDismiss: { FirstRunOnboarding.markWelcomeSeen() }) {
+            .sheet(
+                isPresented: $isWelcomePresented,
+                onDismiss: { FirstRunOnboarding.markWelcomeSeen() }
+            ) {
                 WelcomeView(
                     canImportIntoLibrary: viewModel.canImportIntoPortableLibrary,
                     onImport: {
                         isWelcomePresented = false
-                        Task { @MainActor in await Task.yield(); viewModel.openImageDialog() }
+                        Task { @MainActor in
+                            await Task.yield()
+                            viewModel.openImageDialog()
+                        }
                     },
                     onPhotos: {
                         isWelcomePresented = false
-                        Task { @MainActor in await Task.yield(); viewModel.importFromPhotos() }
+                        Task { @MainActor in
+                            await Task.yield()
+                            viewModel.importFromPhotos()
+                        }
                     },
                     onSamples: {
                         isWelcomePresented = false
@@ -111,15 +123,19 @@ public struct ContentView: View {
                 )
             }
             .sheet(isPresented: $isTourPresented) {
-                WorkflowTourView(onAction: { page in
-                    switch page {
-                    case .library: _ = viewModel.navigate(to: .grid)
-                    case .edit: _ = viewModel.navigate(to: .edit)
-                    case .export:
-                        isTourPresented = false
-                        Task { @MainActor in await Task.yield(); viewModel.shareDialog() }
-                    }
-                }, onDone: { isTourPresented = false })
+                WorkflowTourView(
+                    onAction: { page in
+                        switch page {
+                        case .library: _ = viewModel.navigate(to: .grid)
+                        case .edit: _ = viewModel.navigate(to: .edit)
+                        case .export:
+                            isTourPresented = false
+                            Task { @MainActor in
+                                await Task.yield()
+                                viewModel.shareDialog()
+                            }
+                        }
+                    }, onDone: { isTourPresented = false })
             }
             .sheet(isPresented: $isShortcutReferencePresented) {
                 KeyboardShortcutReferenceView()
@@ -155,7 +171,8 @@ public struct ContentView: View {
                 titleVisibility: .visible
             ) {
                 if let confirmation = libraryPresentation.deletionConfirmation {
-                    let actionTitle = confirmation.count == 1
+                    let actionTitle =
+                        confirmation.count == 1
                         ? "Delete Photo" : "Delete \(confirmation.count) Photos"
                     Button(
                         actionTitle,
@@ -197,18 +214,20 @@ public struct ContentView: View {
         .onChange(of: viewModel.navigation.mode) { old, new in
             if old == .edit, new == .grid { startReturnHandoff() }
         }
-        .inspector(isPresented: Binding(
-            get: {
-                canvasState.isCropToolActive
-                    || (inspectorState.isPresented && !viewModel.libraryHandoff.isEntering)
-            },
-            set: { isPresented in
-                // Crop owns the inspector for the duration of the mode.
-                if !canvasState.isCropToolActive {
-                    inspectorState.isPresented = isPresented
+        .inspector(
+            isPresented: Binding(
+                get: {
+                    canvasState.isCropToolActive
+                        || (inspectorState.isPresented && !viewModel.libraryHandoff.isEntering)
+                },
+                set: { isPresented in
+                    // Crop owns the inspector for the duration of the mode.
+                    if !canvasState.isCropToolActive {
+                        inspectorState.isPresented = isPresented
+                    }
                 }
-            }
-        )) {
+            )
+        ) {
             InfoInspectorView(viewModel: viewModel, inspectorState: inspectorState)
                 .inspectorColumnWidth(min: 240, ideal: 280, max: 360)
         }
@@ -252,16 +271,18 @@ public struct ContentView: View {
                         viewModel: viewModel,
                         onOpen: openFromLibrary
                     )
-                    StatusBar(viewModel: viewModel, photosImportCoordinator: photosImportCoordinator,
-                              export: exportCoordinator, collection: collection,
-                              onCancelImport: cancelPhotosImport,
-                              onCancelExport: viewModel.cancelExport,
-                              onCancelAuto: viewModel.cancelAutoAdjustment)
+                    StatusBar(
+                        viewModel: viewModel, photosImportCoordinator: photosImportCoordinator,
+                        export: exportCoordinator, collection: collection,
+                        onCancelImport: cancelPhotosImport,
+                        onCancelExport: viewModel.cancelExport,
+                        onCancelAuto: viewModel.cancelAutoAdjustment)
                 }
             } else {
                 HStack(spacing: 0) {
                     if !canvasState.isCropToolActive,
-                        chrome.isSourceBrowserPresented && !collection.items.isEmpty {
+                        chrome.isSourceBrowserPresented && !collection.items.isEmpty
+                    {
                         // This is a transient image browser beside the active editor, sharing
                         // selection with the filmstrip; it is not a navigation hierarchy for the
                         // Grid/Edit workspaces. Keep its independent toggle and crop-mode behavior.
@@ -276,7 +297,8 @@ public struct ContentView: View {
 
                     VStack(spacing: 0) {
                         EditorCanvasLayout(
-                            isChromeHidden: canvasState.isCropToolActive || viewModel.libraryHandoff.isEntering,
+                            isChromeHidden: canvasState.isCropToolActive
+                                || viewModel.libraryHandoff.isEntering,
                             reduceMotion: accessibilityReduceMotion
                         ) { surfaceSize in
                             PreviewView(viewModel: viewModel, surfaceHeight: surfaceSize.height)
@@ -300,7 +322,8 @@ public struct ContentView: View {
                                         settings: viewModel.settings,
                                         viewModel: viewModel
                                     ) { index, modifiers in
-                                        viewModel.selectCollectionImage(at: index, modifiers: modifiers)
+                                        viewModel.selectCollectionImage(
+                                            at: index, modifiers: modifiers)
                                     }
                                 }
                             }
@@ -323,7 +346,8 @@ public struct ContentView: View {
         }
         .animation(
             .easeInOut(duration: 0.25).respectingReduceMotion(accessibilityReduceMotion),
-            value: collection.isActive)
+            value: collection.isActive
+        )
         .animation(chromeAnimation, value: canvasState.isCropToolActive)
         .animation(chromeAnimation, value: chrome.isSourceBrowserPresented)
         .animation(modeSwapAnimation, value: viewModel.navigation.mode)
@@ -362,7 +386,8 @@ public struct ContentView: View {
     /// quick cross-fade so the grid fades out behind the growing photo; so do changes with no flight,
     /// such as the toolbar picker.
     private var modeSwapAnimation: Animation? {
-        let returnsWithFlight = !accessibilityReduceMotion && viewModel.navigation.isGrid
+        let returnsWithFlight =
+            !accessibilityReduceMotion && viewModel.navigation.isGrid
             && collection.selectedItem?.thumbnail != nil
         guard !returnsWithFlight else { return nil }
         return .easeInOut(duration: 0.2).respectingReduceMotion(accessibilityReduceMotion)
@@ -379,10 +404,13 @@ public struct ContentView: View {
     }
 
     private var workspaceModePicker: some View {
-        Picker("Workspace", selection: Binding(
-            get: { viewModel.navigation.mode },
-            set: { viewModel.navigate(to: $0) }
-        )) {
+        Picker(
+            "Workspace",
+            selection: Binding(
+                get: { viewModel.navigation.mode },
+                set: { viewModel.navigate(to: $0) }
+            )
+        ) {
             ForEach(NavigationState.Mode.allCases) { mode in
                 Text(mode.title)
                     .tag(mode)
@@ -411,7 +439,9 @@ public struct ContentView: View {
                 viewModel.runAutoAdjustment()
             }
             .accessibilityLabel("Auto photo adjustment")
-            .accessibilityHint("Analyze the source and replace global Light and Color controls; other edits remain unchanged")
+            .accessibilityHint(
+                "Analyze the source and replace global Light and Color controls; other edits remain unchanged"
+            )
             .help(viewModel.autoAdjustmentHelp)
             .disabled(
                 !viewModel.toolbarPhotoActionsAvailable
@@ -445,7 +475,9 @@ public struct ContentView: View {
             .accessibilityLabel("Comparison view")
             .accessibilityValue(viewModel.isSideBySide ? "Side by side" : "Single photo")
             .accessibilityHint("Switch comparison view (V)")
-            .help("Switch between single-photo and side-by-side comparison (V). Hold ⌘\\ or Space to show original in single view.")
+            .help(
+                "Switch between single-photo and side-by-side comparison (V). Hold ⌘\\ or Space to show original in single view."
+            )
             .tint(viewModel.isSideBySide ? KromoraTheme.primaryAccent : nil)
             .disabled(!viewModel.toolbarPhotoActionsAvailable)
 
@@ -458,7 +490,9 @@ public struct ContentView: View {
 
     private var resetToolbarButton: some View {
         Menu {
-            Button(canvasState.isCropToolActive ? "Reset Crop" : "Reset " + inspectorState.tab.title) {
+            Button(
+                canvasState.isCropToolActive ? "Reset Crop" : "Reset " + inspectorState.tab.title
+            ) {
                 if canvasState.isCropToolActive {
                     viewModel.resetCrop()
                 } else {
@@ -670,7 +704,6 @@ private struct CropToolbarControls: View {
 
 // The File menu, its notification names, and `MenuCommandReceivers` live in
 // MenuCommands.swift.
-
 
 /// Draws the handoff photo above the whole window. It never takes hits or accessibility focus.
 private struct LibraryHandoffOverlay: View {

@@ -62,6 +62,7 @@ struct WelcomeView: View {
             HStack(spacing: 12) {
                 Button("Start with an empty library", action: onDismiss)
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("welcome.startEmpty")
                 Text("·")
                     .foregroundStyle(.tertiary)
                     .accessibilityHidden(true)
@@ -131,7 +132,8 @@ struct WelcomeView: View {
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
-        .accessibilityLabel(recommended ? "Import Photos, recommended. \(detail)" : "\(title). \(detail)")
+        .accessibilityLabel(
+            recommended ? "Import Photos, recommended. \(detail)" : "\(title). \(detail)")
     }
 }
 
@@ -149,9 +151,12 @@ struct WorkflowTourView: View {
 
         var detail: String {
             switch self {
-            case .library: "Import photos into your open library, then browse, rate, and pick the frames you want to develop."
-            case .edit: "Choose a photo to open the editor. Adjustments are non-destructive and each guided step can be undone."
-            case .export: "Export the edited photo with ⌘S. Your library keeps the original and edit history together."
+            case .library:
+                "Import photos into your open library, then browse, rate, and pick the frames you want to develop."
+            case .edit:
+                "Choose a photo to open the editor. Adjustments are non-destructive and each guided step can be undone."
+            case .export:
+                "Export the edited photo with ⌘S. Your library keeps the original and edit history together."
             }
         }
 
@@ -254,22 +259,34 @@ struct KeyboardShortcutReferenceView: View {
 
 @MainActor
 struct GuidedEditStep: Identifiable {
-        let id: String
-        let title: String
-        let note: String
-        let symbol: String
-        let apply: (inout EditDocument) -> Void
+    let id: String
+    let title: String
+    let note: String
+    let symbol: String
+    let apply: (inout EditDocument) -> Void
 
     static let all: [GuidedEditStep] = [
-        GuidedEditStep(id: "exposure", title: "Brighten the image", note: "Exposure moves the whole image up or down.", symbol: "sun.max") {
-            $0.light.exposure = min(LightAdjustments.exposureRange.upperBound, $0.light.exposure + 0.35)
+        GuidedEditStep(
+            id: "exposure", title: "Brighten the image",
+            note: "Exposure moves the whole image up or down.", symbol: "sun.max"
+        ) {
+            $0.light.exposure = min(
+                LightAdjustments.exposureRange.upperBound, $0.light.exposure + 0.35)
         },
-        GuidedEditStep(id: "shadows", title: "Open the shadows", note: "Shadows bring detail out of darker areas.", symbol: "sun.haze") {
+        GuidedEditStep(
+            id: "shadows", title: "Open the shadows",
+            note: "Shadows bring detail out of darker areas.", symbol: "sun.haze"
+        ) {
             $0.light.shadows = min(LightAdjustments.shadowsRange.upperBound, $0.light.shadows + 22)
         },
-        GuidedEditStep(id: "contrast", title: "Add a little contrast", note: "Contrast increases separation between dark and bright tones.", symbol: "circle.lefthalf.filled") {
-            $0.light.contrast = min(LightAdjustments.contrastRange.upperBound, $0.light.contrast + 0.12)
-        }
+        GuidedEditStep(
+            id: "contrast", title: "Add a little contrast",
+            note: "Contrast increases separation between dark and bright tones.",
+            symbol: "circle.lefthalf.filled"
+        ) {
+            $0.light.contrast = min(
+                LightAdjustments.contrastRange.upperBound, $0.light.contrast + 0.12)
+        },
     ]
 }
 
@@ -284,7 +301,9 @@ struct GuidedEditCards: View {
                     Label("Try a first edit", systemImage: "wand.and.stars")
                         .font(.headline)
                     Spacer()
-                    Button { dismissed = true } label: {
+                    Button {
+                        dismissed = true
+                    } label: {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)

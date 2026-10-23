@@ -4,7 +4,6 @@ title: Get CI green on the release candidate (push main, fix CI-only failures)
 type: task
 status: verification
 priority: high
-human_review_required: true
 verification_report:
   verdict: blocker
   acceptance_criteria:
@@ -39,7 +38,7 @@ labels:
   - must-fix
   - ci
 created: 2026-10-13T14:47:40.853Z
-updated: 2026-10-22T23:46:35.494Z
+updated: 2026-10-23T02:51:28.231Z
 parent: KRMA-922
 depends_on:
   - KRMA-927
@@ -80,6 +79,7 @@ board: product
 blocked_reason: The smoke and AppKit test fixes are committed locally; full CI verification requires a human push.
 blocked_action: Push commit d158e448849e993bb531672e3845d7494a9b7e40 to main and share the new GitHub Actions run URL.
 blocked_from_status: ready
+human_review_required: true
 ---
 
 ## Objective
@@ -149,6 +149,16 @@ The smoke failure output supplied by the user is: “System Events got an error:
 ### Comment — codex @ 2026-10-22T23:46:35.492Z
 
 Actions run https://github.com/danielhardy/Kromora/actions/runs/39872317432 on 328a3fb1b66d4ecaf507ad84ca514aa779953c21 completed with FAILURE. Failed: Swift-format (changed files), Tests (Core Image/render/AppKit/UI, serial), and Application smoke path. Passed: Tests (deterministic/model, parallel), Package/sign/verify app, and Build/verify Xcode app. Job summaries show the failed steps, but GitHub denied log retrieval (HTTP 403: admin rights required; the serial job details also hit the unauthenticated API rate limit). The smoke error from the prior run was an invalid System Events window index (-1719); the current run needs logs before we can confirm whether it is the same failure.
+
+### Comment — codex @ 2026-10-23T02:51:28.229Z
+
+Run https://github.com/danielhardy/Kromora/actions/runs/39888846287 on 423c1e4adce70b3d5f8ba6510cdbf4d0d44a90f4 finished with five passing jobs and only Application smoke path failing. The smoke error is the same invalid text-field index (-1719) as run 39883149380 on fa14407572711e98401778e05383260638c8358c.
+
+Reproduced on a fresh isolated development profile: the first-run welcome sheet remained open because its SwiftUI buttons are nested in a group and their attributed accessibility labels are not readable by System Events as button names. Open Image then opened over the welcome sheet, invalidating the harness's assumed sheet hierarchy. Added welcome.startEmpty to the empty-library action, explicitly wait for and dismiss onboarding before import, and wait for actionable file-dialog controls. AppleScript element lists are resolved before iteration. UI-stage failures now exit explicitly so zsh runs the cleanup trap.
+
+Run 39883149380 also reported formatting violations in ContentView.swift and LibraryHandoffStateTests.swift; these are formatted. The formatter passed on 39888846287 because that merge introduced no changed Swift files, rather than because the old files had been corrected. The earlier serial failure from run 39872317432 is now accessible: NeutralOriginSliderTests.testPhotoSwitchHoldsSliderAtOutgoingValueUntilIncomingDocumentArrives asserted -0.5 while the slider was still at -0.462538 after a fixed delay. Replaced that final delay with the existing bounded completion wait, preserving the intermediate animation assertions.
+
+Local verification passed: current SwiftPM Release build; 36 focused LibraryHandoffStateTests, NeutralOriginSliderTests, and OnboardingTests; strict formatting for all four changed Swift files; zsh syntax; compilation of all seven AppleScript stages; git diff check. The complete smoke harness passed against the rebuilt unsandboxed development app with its own bundle ID, preferences, and temporary library: a fresh profile exported 000-Kromora-Smoke.jpg and a repeat launch with saved naming exported pre-000-Kromora-Smoke-sfx.jpg, both decoded as 256x256 JPEGs. These are local development-app checks; the signed hosted-runner path still needs a new Actions run after a human push. No passing CI run is claimed.
 
 ## Agent log
 
