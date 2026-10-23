@@ -359,7 +359,11 @@ final class NeutralOriginSliderTests: XCTestCase {
         XCTAssertLessThan(intermediateValue, 1)
 
         coordinator.present(1, on: slider, animated: true)
-        try await Task.sleep(for: .milliseconds(260))
+        // Leave enough scheduling slack for the animation task to apply its exact endpoint while
+        // keeping the deadline shorter than a restarted 380 ms animation.
+        try await waitUntil("the original same-target animation to finish", timeout: 0.32) {
+            abs(slider.doubleValue - 1) < 0.0001
+        }
 
         XCTAssertEqual(slider.doubleValue, 1, accuracy: 0.0001)
     }

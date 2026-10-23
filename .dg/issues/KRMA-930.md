@@ -38,7 +38,7 @@ labels:
   - must-fix
   - ci
 created: 2026-10-13T14:47:40.853Z
-updated: 2026-10-23T03:58:27.055Z
+updated: 2026-10-23T12:29:42.111Z
 parent: KRMA-922
 depends_on:
   - KRMA-927
@@ -183,6 +183,10 @@ The local full parallel lane additionally exposed a 2-second image-open deadline
 Commit 76c41250b138010019ef2f3d6bcc274882d6a0b0 fixes the two failures in Actions run 39893920950 and three host-sensitive test assumptions found during local full-lane verification. The async startup test now waits for index completion; the sequential-open test accounts for a valid provisional frame ending navigation loading; the image-open test uses its bounded suite helper; and the color-wheel/library-grid screenshot tests scale point coordinates to Retina bitmap pixels.
 
 Validation passed locally: five focused tests, scripts/ci-tests.sh fast (2,001 required tests), changed-file Swift format, and git diff --check. Hosted verification still needs a human push of 76c41250 and a fresh Actions run.
+
+### Comment — codex @ 2026-10-23T12:29:42.109Z
+
+Actions run https://github.com/danielhardy/Kromora/actions/runs/39898513497 on 76c41250b138010019ef2f3d6bcc274882d6a0b0 failed only in the serial render/UI lane. The sole failure was NeutralOriginSliderTests.testRepeatedPresentationOfTheSameTargetDoesNotRestartAnimation at NeutralOriginSliderTests.swift:364: after a fixed 440 ms, the slider was at 0.9936407415575286 instead of exactly 1.0. The 380 ms animation updates on a main-actor task and applies its exact endpoint only after that task resumes; the hosted runner reached the assertion before endpoint cleanup ran. Replaced the fixed 260 ms post-repeat sleep with a bounded endpoint wait (320 ms), preserving a deadline before a restarted 380 ms animation could finish. Local validation: all 25 NeutralOriginSliderTests passed, the formerly failing test passed five consecutive runs, changed-file Swift format passed, and git diff --check passed. Hosted verification still needs a human push and a fresh Actions run.
 
 ## Agent log
 
