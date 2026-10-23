@@ -39,6 +39,28 @@ final class LibraryHandoffStateTests: XCTestCase {
         XCTAssertNil(state.returnTargetID)
     }
 
+    func testEntranceHoldsTheCanvasUntilFinished() {
+        let state = LibraryHandoffState()
+        state.runEntrance(
+            image: NSImage(size: CGSize(width: 40, height: 30)),
+            from: CGRect(x: 0, y: 0, width: 20, height: 20))
+        XCTAssertTrue(state.isEntering)
+        XCTAssertTrue(state.isCanvasHeld, "the flight must be the only copy of the photo on screen")
+        state.finish()
+        XCTAssertFalse(state.isEntering)
+        XCTAssertFalse(state.isCanvasHeld)
+        XCTAssertNil(state.flight)
+    }
+
+    func testReturnWithoutACanvasFinishesWithoutAFlight() {
+        let state = LibraryHandoffState()
+        state.runReturn(
+            image: NSImage(size: CGSize(width: 40, height: 30)),
+            assetID: PhotoAssetID(rawValue: UUID().uuidString))
+        XCTAssertNil(state.flight, "no measured canvas means there is nothing to contract from")
+        XCTAssertNil(state.returnTargetID)
+    }
+
     func testCanvasFrameUpdatesAlwaysAdvanceRevision() {
         let state = LibraryHandoffState()
         let frame = CGRect(x: 0, y: 0, width: 10, height: 10)
