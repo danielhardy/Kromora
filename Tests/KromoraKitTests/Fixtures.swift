@@ -806,7 +806,9 @@ class TempDirectoryTestCase: XCTestCase {
         leaseRecoveryConfirmer: (any PortablePackageLeaseRecoveryConfirming)? = nil,
         persistenceCheckpointWait: EditPersistenceCoordinator.CheckpointWait? = nil,
         packageOpener: any PackageOpening = PortablePackageOpener(),
-        shareRoot: URL? = nil
+        shareRoot: URL? = nil,
+        reviewPresenter: any ReviewPromptPresenting = FakeReviewPresenter(),
+        isCoveredByUI: Bool = false
     ) -> AppViewModel {
         let isolatedPreferences: UserDefaults
         if let preferences {
@@ -845,8 +847,11 @@ class TempDirectoryTestCase: XCTestCase {
             asynchronousPortableLibraryIndexLoading: asynchronousPortableLibraryIndexLoading,
             defersLibraryOpen: defersLibraryOpen,
             packageOpener: packageOpener,
-            shareRoot: shareRoot
+            shareRoot: shareRoot,
+            reviewPromptNow: { Date(timeIntervalSince1970: 1_800_000_000) },
+            reviewPresenter: reviewPresenter
         )
+        viewModel.isSheetOrActivityCoveringWindow = { isCoveredByUI }
         appViewModels.append(viewModel)
         return viewModel
     }
@@ -870,5 +875,15 @@ class TempDirectoryTestCase: XCTestCase {
         }
         tempDirectory = nil
         try await super.tearDown()
+    }
+}
+
+
+@MainActor
+final class FakeReviewPresenter: ReviewPromptPresenting {
+    private(set) var requestCount = 0
+    func requestReview() -> Bool {
+        requestCount += 1
+        return true
     }
 }
