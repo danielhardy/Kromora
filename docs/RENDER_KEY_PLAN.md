@@ -265,7 +265,7 @@ Every child must:
    - Compute it at most once per document value, off the main actor where the consumer is async.
    - Serve it to every remaining consumer: frame signatures and classification, edited thumbnails,
      Look-strip keys, Auto, measurement, and the Apple reference.
-3. **KRMA-1100 — `RenderDocumentIdentity` and its engine memo.**
+3. **KRMA-1100 — `RenderDocumentIdentity` and its engine memo.** *(Landed: memoized build after an exposure tick 0.058 ms on the large recipe; cold 86.9 ms.)*
    - Add the value type and the equality-reuse memo, with no call-site changes yet.
    - Add the custom-`==` audit test.
 4. **KRMA-1101 — Thread `RenderDocumentIdentity` through the render path.**
