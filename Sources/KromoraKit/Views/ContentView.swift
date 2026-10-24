@@ -1,3 +1,4 @@
+import AppKit
 import PhotosUI
 import SwiftUI
 
@@ -82,6 +83,15 @@ public struct ContentView: View {
                 }
             }
             .modifier(FeatureSheetsModifier(viewModel: viewModel))
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.willBeginSheetNotification)) { _ in
+                viewModel.cancelPendingReviewPrompt()
+            }
+            .onChange(of: chrome.isPhotosPickerPresented) { _, isPresented in
+                if isPresented { viewModel.cancelPendingReviewPrompt() }
+            }
+            .onChange(of: libraryPresentation.deletionConfirmation != nil) { _, isPresented in
+                if isPresented { viewModel.cancelPendingReviewPrompt() }
+            }
             .sheet(
                 isPresented: Binding(
                     get: { viewModel.photosImportReview.isPresented },
@@ -160,6 +170,9 @@ public struct ContentView: View {
                 Button("OK", role: .cancel) { status.errorMessage = nil }
             } message: { message in
                 Text(message)
+            }
+            .onChange(of: status.errorMessage != nil) { _, isPresented in
+                if isPresented { viewModel.cancelPendingReviewPrompt() }
             }
             .confirmationDialog(
                 libraryPresentation.deletionConfirmation?.title

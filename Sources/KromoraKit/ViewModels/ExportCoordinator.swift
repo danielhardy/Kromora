@@ -64,6 +64,8 @@ final class ExportCoordinator {
     var onStatus: ((String) -> Void)?
     var onError: ((String) -> Void)?
     var onExportCompleted: ((URL) -> Void)?
+    /// Called after a batch has finished and its summary status is posted.
+    var onBatchSettled: ((BatchOutcome) -> Void)?
     var onActivityChanged: ((Bool) -> Void)?
 
     /// The renderer. `any RenderEngining` rather than the concrete actor for the same reason
@@ -258,11 +260,14 @@ final class ExportCoordinator {
         let total: Int
         let cancelled: Bool
         let photosFailed: Int
+        /// Written items whose document had edits (`isIdentity == false`).
+        let editedExportCount: Int
 
         init(
             exported: Int, failed: Int, total: Int, cancelled: Bool = false,
-            photosFailed: Int = 0
+            photosFailed: Int = 0, editedExportCount: Int = 0
         ) {
+            self.editedExportCount = editedExportCount
             self.exported = exported
             self.failed = failed
             self.total = total
@@ -650,6 +655,7 @@ final class ExportCoordinator {
         var exported = 0
         var failed = 0
         var photosFailed = 0
+        var editedExportCount = 0
         var cancelled = false
 
         // Reserve destinations in selection order before each render starts. The batch remains
@@ -723,6 +729,7 @@ final class ExportCoordinator {
                     try Task.checkCancellation()
                     guard !isCancellationRequested(jobID) else { throw CancellationError() }
                     exported += 1
+                    if !itemDocument.isIdentity { editedExportCount += 1 }
                     if let photos = options.photos, let delivery = photosDelivery {
                         do {
                             let result = try await delivery.deliver(
@@ -764,7 +771,8 @@ final class ExportCoordinator {
             failed: failed,
             total: total,
             cancelled: cancelled,
-            photosFailed: photosFailed
+            photosFailed: photosFailed,
+            editedExportCount: editedExportCount
         )
         batchProgress = 0
         batchCompleted = 0
@@ -772,6 +780,7 @@ final class ExportCoordinator {
         batchCurrentItem = nil
         finishJob(jobID, outcome: cancelled ? .cancelled : .completed)
         onStatus?(Self.summary(for: outcome, folder: folder))
+        onBatchSettled?(outcome)
         return outcome
     }
 

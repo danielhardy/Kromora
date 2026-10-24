@@ -226,6 +226,20 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
         XCTAssertEqual(coordinator.batchProgress, 0, "progress should reset when the run ends")
     }
 
+    func testBatchOutcomeCountsCommittedEditedExports() async throws {
+        let coordinator = ExportCoordinator()
+        var document = EditDocument()
+        document.light.exposure = 0.5
+
+        let items = try makeSources(["edited-a", "edited-b"])
+        let outcome = await coordinator.performBatchExport(
+            items, document: document, lut: nil, format: .png, to: try destinationFolder()
+        )
+
+        XCTAssertEqual(outcome.editedExportCount, items.count)
+        XCTAssertTrue(ReviewPromptPolicy.qualifies(outcome))
+    }
+
     func testBatchExportAppliesTheLUTToTheFilenames() async throws {
         let coordinator = ExportCoordinator()
         let lutURL = try Fixtures.writeCube(

@@ -880,6 +880,16 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         inspectorState.isPresented = true
     }
     private let preferences: UserDefaults
+    private let reviewPolicy: ReviewPromptPolicy
+    private let reviewPresenter: any ReviewPromptPresenting
+    /// Reports whether an AppKit/SwiftUI sheet or modal is up. Injected so tests control it.
+    @ObservationIgnored var isSheetOrActivityCoveringWindow: () -> Bool = {
+        !NSApp.isActive || NSApp.keyWindow == nil
+            || NSApp.windows.contains { $0.attachedSheet != nil }
+            || NSApp.modalWindow != nil
+    }
+    @ObservationIgnored private var reviewPromptTask: Task<Void, Never>?
+    static let reviewPromptDelay: Duration = .seconds(1)
     /// An injected edit store is a non-production composition boundary. It may be used while a
     /// second model is inspecting the same package, so source navigation can fall back to the
     /// caller-owned URL if the package writer lease is already held by the first model.
@@ -1031,7 +1041,9 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         asynchronousPortableLibraryIndexLoading: Bool = false,
         defersLibraryOpen: Bool = false,
         packageOpener: any PackageOpening = PortablePackageOpener(),
-        shareRoot: URL? = nil
+        shareRoot: URL? = nil,
+        reviewPromptNow: @escaping () -> Date = Date.init,
+        reviewPresenter: any ReviewPromptPresenting = SystemReviewPromptPresenter()
     ) {
         var interval = KromoraSignpostInterval(.launch, context: .unknown)
         defer { interval.end() }
@@ -1042,6 +1054,9 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
             photoAnalysisCoordinator ?? PhotoAnalysisCoordinator(engine: engine)
         self.photoAnalysisCoordinator = analysisCoordinator
         self.preferences = preferences
+        self.reviewPolicy = ReviewPromptPolicy(defaults: preferences, now: reviewPromptNow)
+        self.reviewPolicy.recordLaunch()
+        self.reviewPresenter = reviewPresenter
         self.usesInjectedEditStore = editStore != nil
         let normalizedPortablePackageURL = portablePackageURL.standardizedFileURL
         self.portablePackageURL = normalizedPortablePackageURL
@@ -1501,6 +1516,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         export.onActivityChanged = { [weak self] isActive in
             guard let self else { return }
             if isActive {
+                self.cancelPendingReviewPrompt()
                 self.cancelIdlePreviewBuild()
             } else {
                 self.scheduleIdlePreviewBuild()
@@ -1512,6 +1528,9 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         }
         export.onExportCompleted = { [weak self] url in
             self?.exportWorkflow.exportCompleted(at: url)
+        }
+        export.onBatchSettled = { [weak self] outcome in
+            self?.exportBatchSettled(outcome)
         }
         export.defaultFolderURL = { [weak self] in self?.settings.ensureDefaultExportFolder() }
 
@@ -1598,8 +1617,39 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
     /// status bar. Used for hard failures (load / export / derive / save);
     /// transient preview hiccups stay status-bar-only to avoid alert spam.
     func presentError(_ message: String) {
+        cancelPendingReviewPrompt()
         statusMessage = message
         errorMessage = message
+    }
+
+    // MARK: - Review prompt
+
+    /// Counts a clean edited export and, when the policy and quiet-app gates allow, asks the
+    /// system for a review about a second later. A busy app is never retried later.
+    func exportBatchSettled(_ outcome: ExportCoordinator.BatchOutcome) {
+        guard !isShuttingDown, ReviewPromptPolicy.qualifies(outcome),
+              reviewPolicy.recordQualifyingFinish() else { return }
+        cancelPendingReviewPrompt()
+        reviewPromptTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.reviewPromptDelay)
+            guard !Task.isCancelled, let self else { return }
+            self.reviewPromptTask = nil
+            self.requestReviewIfQuiet()
+        }
+    }
+
+    /// A presentation that starts during the settling delay makes this finish ineligible. Do not
+    /// retain the task so dismissing that presentation cannot trigger a delayed request.
+    func cancelPendingReviewPrompt() {
+        reviewPromptTask?.cancel()
+        reviewPromptTask = nil
+    }
+
+    private func requestReviewIfQuiet() {
+        guard !isShuttingDown, !export.isExporting, errorMessage == nil,
+              !FirstRunOnboarding.shouldPresentWelcome(in: preferences),
+              !isSheetOrActivityCoveringWindow() else { return }
+        if reviewPresenter.requestReview() { reviewPolicy.recordRequest() }
     }
 
     // MARK: - Auto adjustment
@@ -4369,6 +4419,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
     public func shutdown() async {
         guard !isShuttingDown else { return }
         isShuttingDown = true
+        cancelPendingReviewPrompt()
         // Before anything else: an open still in flight must finish unwinding (binding is refused
         // once `isShuttingDown` is set, so it releases its lease) before the lease owner is torn down.
         await libraryOpen.cancelAndWait()
@@ -4405,6 +4456,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         export.onStatus = nil
         export.onError = nil
         export.onExportCompleted = nil
+        export.onBatchSettled = nil
         export.onActivityChanged = nil
         derive.onStatus = nil
         derive.onError = nil
