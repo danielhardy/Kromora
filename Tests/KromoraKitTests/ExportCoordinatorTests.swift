@@ -487,7 +487,7 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
             items, document: EditDocument(), lut: nil, format: .png, to: try destinationFolder()
         )
 
-        XCTAssertEqual(outcome, .init(exported: 2, failed: 0, total: 2))
+        XCTAssertEqual(outcome, .init(exported: 2, failed: 0, total: 2, editedExportCount: 2))
         let requests = await fake.encodeRequests
         XCTAssertEqual(requests.count, 2)
         XCTAssertTrue(
@@ -590,7 +590,7 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
             format: .png, to: try destinationFolder()
         )
 
-        XCTAssertEqual(outcome, .init(exported: 2, failed: 1, total: 3))
+        XCTAssertEqual(outcome, .init(exported: 2, failed: 1, total: 3, editedExportCount: 1))
         let requests = await fake.encodeRequests
         XCTAssertEqual(requests.count, 2)
         XCTAssertTrue(requests.contains {
@@ -698,7 +698,7 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
             format: .png,
             to: try destinationFolder()
         )
-        XCTAssertEqual(outcome, .init(exported: 2, failed: 0, total: 2))
+        XCTAssertEqual(outcome, .init(exported: 2, failed: 0, total: 2, editedExportCount: 2))
         let requests = await fake.encodeRequests
         XCTAssertEqual(requests.count, 2)
         let diagnostics = requests.map(Self.exportRequestDiagnostics).joined(separator: ", ")

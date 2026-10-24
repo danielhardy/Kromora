@@ -1,6 +1,4 @@
-import AppKit
 import Foundation
-import StoreKit
 
 /// Decides when Kromora may ask the system to show its App Store review sheet.
 ///
@@ -58,21 +56,4 @@ struct ReviewPromptPolicy {
     }
 
     private var launchCount: Int { defaults.integer(forKey: Self.launchCountKey) }
-}
-
-/// The system call behind the policy, so tests never present the real sheet.
-@MainActor
-protocol ReviewPromptPresenting {
-    /// Returns whether a request was actually made.
-    func requestReview() -> Bool
-}
-
-@MainActor
-struct SystemReviewPromptPresenter: ReviewPromptPresenting {
-    func requestReview() -> Bool {
-        // On macOS the API is scoped to a view controller, not a scene.
-        guard let controller = NSApp.keyWindow?.contentViewController else { return false }
-        AppStore.requestReview(in: controller)
-        return true
-    }
 }

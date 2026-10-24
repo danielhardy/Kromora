@@ -880,16 +880,10 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         inspectorState.isPresented = true
     }
     private let preferences: UserDefaults
-    private let reviewPolicy: ReviewPromptPolicy
-    private let reviewPresenter: any ReviewPromptPresenting
+    @ObservationIgnored private var reviewPrompts: ReviewPromptCoordinator!
     /// Reports whether an AppKit/SwiftUI sheet or modal is up. Injected so tests control it.
-    @ObservationIgnored var isSheetOrActivityCoveringWindow: () -> Bool = {
-        !NSApp.isActive || NSApp.keyWindow == nil
-            || NSApp.windows.contains { $0.attachedSheet != nil }
-            || NSApp.modalWindow != nil
-    }
-    @ObservationIgnored private var reviewPromptTask: Task<Void, Never>?
-    static let reviewPromptDelay: Duration = .seconds(1)
+    @ObservationIgnored var isSheetOrActivityCoveringWindow = ReviewPromptCoordinator.isWindowCovered
+    static let reviewPromptDelay = ReviewPromptCoordinator.delay
     /// An injected edit store is a non-production composition boundary. It may be used while a
     /// second model is inspecting the same package, so source navigation can fall back to the
     /// caller-owned URL if the package writer lease is already held by the first model.
@@ -961,6 +955,13 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         }
         let reason = portableLibraryOpenError ?? "The library package is unavailable."
         return "\(reason) Resolve the library issue and relaunch Kromora before importing."
+    }
+
+    /// Reports the unavailable-library message and returns false when no package is open.
+    func requirePortableLibrary() -> Bool {
+        if portableLibrary != nil { return true }
+        reportPortableLibraryUnavailable()
+        return false
     }
 
     func reportPortableLibraryUnavailable() {
@@ -1054,9 +1055,8 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
             photoAnalysisCoordinator ?? PhotoAnalysisCoordinator(engine: engine)
         self.photoAnalysisCoordinator = analysisCoordinator
         self.preferences = preferences
-        self.reviewPolicy = ReviewPromptPolicy(defaults: preferences, now: reviewPromptNow)
-        self.reviewPolicy.recordLaunch()
-        self.reviewPresenter = reviewPresenter
+        let reviewPolicy = ReviewPromptPolicy(defaults: preferences, now: reviewPromptNow)
+        reviewPolicy.recordLaunch()
         self.usesInjectedEditStore = editStore != nil
         let normalizedPortablePackageURL = portablePackageURL.standardizedFileURL
         self.portablePackageURL = normalizedPortablePackageURL
@@ -1419,6 +1419,9 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
             self.presentPendingImportOutcome()
         }
 
+        self.reviewPrompts = ReviewPromptCoordinator(
+            policy: reviewPolicy, presenter: reviewPresenter,
+            canRequestNow: { [weak self] in self?.canRequestReviewNow() ?? false })
         wireCoordinators()
         libraryOpen.onStateChange = { [weak self] state in self?.libraryOpenStateDidChange(state) }
         if let openedPortableLibrary {
@@ -1624,32 +1627,11 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
 
     // MARK: - Review prompt
 
-    /// Counts a clean edited export and, when the policy and quiet-app gates allow, asks the
-    /// system for a review about a second later. A busy app is never retried later.
     func exportBatchSettled(_ outcome: ExportCoordinator.BatchOutcome) {
-        guard !isShuttingDown, ReviewPromptPolicy.qualifies(outcome),
-              reviewPolicy.recordQualifyingFinish() else { return }
-        guard canRequestReviewNow() else { return }
-        cancelPendingReviewPrompt()
-        reviewPromptTask = Task { [weak self] in
-            try? await Task.sleep(for: Self.reviewPromptDelay)
-            guard !Task.isCancelled, let self else { return }
-            self.reviewPromptTask = nil
-            self.requestReviewIfQuiet()
-        }
+        if !isShuttingDown { reviewPrompts.batchSettled(outcome) }
     }
 
-    /// A presentation that starts during the settling delay makes this finish ineligible. Do not
-    /// retain the task so dismissing that presentation cannot trigger a delayed request.
-    func cancelPendingReviewPrompt() {
-        reviewPromptTask?.cancel()
-        reviewPromptTask = nil
-    }
-
-    private func requestReviewIfQuiet() {
-        guard canRequestReviewNow() else { return }
-        if reviewPresenter.requestReview() { reviewPolicy.recordRequest() }
-    }
+    func cancelPendingReviewPrompt() { reviewPrompts.cancelPending() }
 
     private func canRequestReviewNow() -> Bool {
         !isShuttingDown && !export.isExporting && errorMessage == nil
@@ -1692,9 +1674,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         return "Auto is available when the photo preview is ready."
     }
 
-    private func publishAutoAdjustmentState(
-        _ state: AutoAdjustmentState, progress: Double? = nil
-    ) {
+    private func publishAutoAdjustmentState(_ state: AutoAdjustmentState, progress: Double? = nil) {
         autoLook.publishAuto(state, progress: progress)
     }
 
@@ -1722,14 +1702,13 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
             },
             onState: { [weak self] state, progress in
                 self?.publishAutoAdjustmentState(state, progress: progress)
-                if state == .analyzing {
-                    self?.statusMessage =
-                        "Analyzing \(self?.sourceName ?? "photo") for Auto adjustments…"
+                switch state {
+                case .analyzing:
+                    self?.statusMessage = "Analyzing \(self?.sourceName ?? "photo") for Auto adjustments…"
+                case .renderingCandidates: self?.statusMessage = "Rendering Auto candidates…"
+                case .validating: self?.statusMessage = "Validating Auto candidates…"
+                default: break
                 }
-                if state == .renderingCandidates {
-                    self?.statusMessage = "Rendering Auto candidates…"
-                }
-                if state == .validating { self?.statusMessage = "Validating Auto candidates…" }
             },
             completion: { [weak self] invocationRevision, outcome in
                 guard let self, self.autoWorkflowCoordinator.isCurrent(invocationRevision) else {
@@ -2724,10 +2703,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
     func openImageDialog() -> Task<Void, Never> {
         Task { [weak self] in
             guard let self else { return }
-            guard self.portableLibrary != nil else {
-                self.reportPortableLibraryUnavailable()
-                return
-            }
+            guard self.requirePortableLibrary() else { return }
             guard let urls = await self.fileDialog.chooseImages(
                 startingAt: self.settings.defaultSourceFolderURL
             ) else { return }
@@ -2825,10 +2801,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
 
     func openImage(data: Data, name: String) {
         let operationID = beginImportOperation()
-        guard portableLibrary != nil else {
-            reportPortableLibraryUnavailable()
-            return
-        }
+        guard requirePortableLibrary() else { return }
         do {
             let handle = try libraryImportCoordinator.startImportData(data, name: name)
             packageSourceImports.observe(
@@ -2866,10 +2839,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
     }
 
     func importFromPhotos() {
-        guard portableLibrary != nil else {
-            reportPortableLibraryUnavailable()
-            return
-        }
+        guard requirePortableLibrary() else { return }
         isPhotosPickerPresented = true
     }
 
@@ -2882,10 +2852,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
             packageWasEmpty: collection.items.isEmpty,
             packageAvailable: portableLibrary != nil
         )
-        guard portableLibrary != nil else {
-            reportPortableLibraryUnavailable()
-            return
-        }
+        guard requirePortableLibrary() else { return }
     }
 
     func insertPhotosImport(
@@ -2965,18 +2932,12 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
     }
 
     func importFromRemovableMedia() {
-        guard portableLibrary != nil else {
-            reportPortableLibraryUnavailable()
-            return
-        }
+        guard requirePortableLibrary() else { return }
         libraryMediaWorkflow.importFromRemovableMedia()
     }
 
     func openRemovableMedia(_ volume: MediaVolume) {
-        guard portableLibrary != nil else {
-            reportPortableLibraryUnavailable()
-            return
-        }
+        guard requirePortableLibrary() else { return }
         libraryMediaWorkflow.openRemovableMedia(volume)
     }
 
@@ -3001,10 +2962,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
     }
 
     func importSelectedRemovableMedia() {
-        guard portableLibrary != nil else {
-            reportPortableLibraryUnavailable()
-            return
-        }
+        guard requirePortableLibrary() else { return }
         libraryMediaWorkflow.importSelectedRemovableMedia()
     }
 
@@ -3019,10 +2977,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
     func chooseSourceFolder() -> Task<Void, Never> {
         Task { [weak self] in
             guard let self else { return }
-            guard self.portableLibrary != nil else {
-                self.reportPortableLibraryUnavailable()
-                return
-            }
+            guard self.requirePortableLibrary() else { return }
             await self.libraryMediaWorkflow.chooseSourceFolder(
                 startingAt: self.settings.defaultSourceFolderURL
             )
@@ -3036,10 +2991,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
     }
 
     func handleDrop(_ payload: ImageDrop.Payload) {
-        guard portableLibrary != nil else {
-            reportPortableLibraryUnavailable()
-            return
-        }
+        guard requirePortableLibrary() else { return }
         switch payload {
         case .urls(let urls):
             libraryMediaWorkflow.handleDroppedURLs(urls)
@@ -3164,9 +3116,6 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         loadRequestGeneration &+= 1
         sourceSession.cancel()
         previewAdmissionCoordinator.cancelAdjacentPreviewPrefetch()
-        autoWorkflowCoordinator.invalidate { [weak self] state, progress in
-            self?.publishAutoAdjustmentState(state, progress: progress)
-        }
         documentRevision &+= 1
         previewPresentation.advanceDisplayRevision()
         cancelPendingPreviewDebounce()
