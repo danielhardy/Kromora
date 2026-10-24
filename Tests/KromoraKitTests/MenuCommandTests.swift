@@ -186,7 +186,7 @@ final class MenuCommandTests: XCTestCase {
         let transferPill = try XCTUnwrap(
             contentView.components(separatedBy: "private var transferToolbarPill: some View {")
                 .dropFirst().first?
-                .components(separatedBy: "private var cropToolbarPill: some View {").first
+                .components(separatedBy: "private func cropToolbarButton(").first
         )
         XCTAssertTrue(transferPill.contains("ControlGroup {"))
         XCTAssertTrue(transferPill.contains(".controlGroupStyle(.navigation)"))
@@ -220,7 +220,7 @@ final class MenuCommandTests: XCTestCase {
             contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/ContentView.swift"),
             encoding: .utf8
         )
-        XCTAssertTrue(contentView.contains("private var cropToolbarPill: some View"))
+        XCTAssertTrue(contentView.contains("private func cropToolbarButton("))
         XCTAssertTrue(contentView.contains("CropToolbarControls("))
         XCTAssertTrue(
             contentView.contains("ToolbarItem(placement: .navigation)"),
@@ -234,7 +234,9 @@ final class MenuCommandTests: XCTestCase {
         XCTAssertTrue(contentView.contains("ToolbarSpacer(.flexible)"))
         XCTAssertTrue(contentView.contains(".toolbarBackgroundVisibility(.visible, for: .windowToolbar)"))
         XCTAssertTrue(contentView.contains(".toolbarBackground(KromoraTheme.toolbarChrome, for: .windowToolbar)"))
-        XCTAssertTrue(contentView.contains("GlassEffectContainer(spacing: 10)"))
+        XCTAssertTrue(contentView.contains("cropToolbarButton(.cancel)"))
+        XCTAssertTrue(contentView.contains("cropToolbarButton(.done)"), "Cancel and Done are separate toolbar items")
+        XCTAssertFalse(contentView.contains("cropToolbarPill"), "no shared capsule for Cancel and Done")
         XCTAssertTrue(contentView.contains(".buttonStyle(.glass)"))
         XCTAssertTrue(contentView.contains(".buttonStyle(.glassProminent)"))
         XCTAssertFalse(contentView.contains("#available(macOS 26.0"))

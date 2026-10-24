@@ -322,8 +322,14 @@ public struct ContentView: View {
             }
             ToolbarSpacer(.flexible)
             if Self.toolbarMode(isCropToolActive: canvasState.isCropToolActive) == .crop {
+                // Cancel and Done are separate toolbar items so the system draws two capsules;
+                // one shared item would tint Cancel with Done's prominent fill.
                 ToolbarItem(placement: .primaryAction) {
-                    cropToolbarPill
+                    cropToolbarButton(.cancel)
+                }
+                ToolbarSpacer(.fixed)
+                ToolbarItem(placement: .primaryAction) {
+                    cropToolbarButton(.done)
                 }
             } else {
                 ToolbarItem(placement: .primaryAction) {
@@ -602,14 +608,13 @@ public struct ContentView: View {
         .fixedSize()
     }
 
-    private var cropToolbarPill: some View {
-        GlassEffectContainer(spacing: 10) {
-            CropToolbarControls(
-                viewModel: viewModel,
-                hasImage: viewModel.toolbarPhotoActionsAvailable
-            )
-            .buttonStyle(.glass)
-        }
+    private func cropToolbarButton(_ role: CropToolbarControls.Role) -> some View {
+        CropToolbarControls(
+            role: role,
+            viewModel: viewModel,
+            hasImage: viewModel.toolbarPhotoActionsAvailable
+        )
+        .labelStyle(.iconOnly)
         .transition(.opacity)
         .animation(chromeAnimation, value: canvasState.isCropToolActive)
     }
@@ -695,24 +700,28 @@ struct EditorSidebarToolbarButton: View {
     }
 }
 
-/// Crop owns the window toolbar while its draft is open: Cancel, then Done. Done is the only
+/// Crop owns the window toolbar while its draft is open: Cancel, then Done, in separate toolbar
+/// items. Done is the only
 /// control that keeps the window accent; Cancel resets the inherited tint. Undo stays available
 /// through Edit > Undo and Cmd-Z, which re-seed the draft from the restored history state.
 private struct CropToolbarControls: View {
+    enum Role {
+        case cancel
+        case done
+    }
+
+    let role: Role
     let viewModel: AppViewModel
     let hasImage: Bool
 
     var body: some View {
-        // An explicit row of two separate glass buttons. They are deliberately not unioned: a
-        // shared glass shape lets Done's prominent tint fill Cancel too and merges their hover
-        // hit areas.
-        HStack(spacing: 10) {
-            buttons
+        switch role {
+        case .cancel: cancelButton
+        case .done: doneButton
         }
     }
 
-    @ViewBuilder
-    private var buttons: some View {
+    private var cancelButton: some View {
         Button {
             viewModel.cancelCrop()
         } label: {
@@ -720,9 +729,12 @@ private struct CropToolbarControls: View {
         }
         .accessibilityLabel("Cancel")
         .help("Cancel the current crop (Escape)")
+        .buttonStyle(.glass)
         .tint(nil)
         .disabled(!hasImage)
+    }
 
+    private var doneButton: some View {
         Button {
             viewModel.commitCrop()
         } label: {
