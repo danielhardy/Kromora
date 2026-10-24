@@ -868,6 +868,22 @@ Apple M4 Pro, macOS 27.2, 30 iterations; medians:
 `docs/RENDER_KEY_PLAN.md` interprets the numbers and stages the fix. Child tickets record their
 before/after numbers from the same benchmark.
 
+**KRMA-1098 main-actor identity (2026-10-24).** `markingManualEdits`, `AutoWorkflowCoordinator`'s
+change check, and `PreviewFrameIdentity` now compare documents with `==` (Auto fingerprint cleared
+via `EditDocument.visibleEditValue`) instead of `renderingHash`/`editHash`. The benchmark's
+`main_actor_tick_ms` times one `markingManualEdits` plus one frame-identity construction. Before:
+two `renderingHash` calls plus one `editHash` per presented frame (about 87.6 ms on the large
+recipe at 29.204 ms each; plain about 0.15 ms). After (Release, M4 Pro, macOS 27.2, medians):
+
+| Recipe | `main_actor_tick_ms` before | after |
+| --- | ---: | ---: |
+| Plain document | about 0.15 | 0.0005 |
+| 5 brush masks | about 2.4 | 0.0007 |
+| 5 brush masks, large recipe | about 87.6 | 0.0007 |
+
+`EditDocumentIdentityTests` pins the durable `editHash` bytes for a fixture with a brush mask, a
+Look, and an excluded Auto fingerprint.
+
 ### Persisted package identity hash reuse (KRMA-753, 2026-10-01)
 
 Release last-known-frame capture after reusing the asset record's content hash for an unchanged

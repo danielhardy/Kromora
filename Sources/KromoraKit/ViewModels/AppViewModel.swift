@@ -4671,7 +4671,7 @@ extension AppViewModel: PreviewPublicationDestination {
     ) -> Bool {
         let detailIdentity = PreviewFrameIdentity(
             sourceToken: request.source.traceToken,
-            documentHash: request.document.editHash,
+            document: request.document.visibleEditValue,
             space: request.space
         )
         let rasterSource: PresentationRasterSource = request.quality == .interactive

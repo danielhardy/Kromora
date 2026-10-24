@@ -799,7 +799,7 @@ final class PreviewSurfaceTests: XCTestCase {
     func testNavigationCannotReplaceAValidSharperFrameWithALowerDetailFrame() throws {
         let surface = PreviewSurface()
         let identity = PreviewFrameIdentity(
-            sourceToken: "source", documentHash: "document", space: .current)
+            sourceToken: "source", document: EditDocument(), space: .current)
         let sharp = CIImage(color: .red)
         let cheap = CIImage(color: .blue)
 
@@ -818,7 +818,7 @@ final class PreviewSurfaceTests: XCTestCase {
     func testARetainedROIFrameDoesNotRefuseTheCompletePhoto() throws {
         let surface = PreviewSurface()
         let identity = PreviewFrameIdentity(
-            sourceToken: "source", documentHash: "document", space: .current)
+            sourceToken: "source", document: EditDocument(), space: .current)
         let zoomedROI = CIImage(color: .red).cropped(
             to: CGRect(x: 0, y: 0, width: 400, height: 300))
         let completePhoto = CIImage(color: .blue).cropped(
@@ -881,7 +881,7 @@ final class PreviewSurfaceTests: XCTestCase {
     func testPartialROIFollowsLivePanOnRetainedCompleteFrameWithoutGaps() async throws {
         let surface = PreviewSurface()
         let identity = PreviewFrameIdentity(
-            sourceToken: "source", documentHash: "document", space: .current)
+            sourceToken: "source", document: EditDocument(), space: .current)
         let complete = CIImage(color: .blue).cropped(
             to: CGRect(x: 0, y: 0, width: 800, height: 600))
         var publishedNavigation = CanvasNavigation()

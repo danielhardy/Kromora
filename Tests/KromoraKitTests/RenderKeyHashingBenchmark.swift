@@ -206,6 +206,22 @@ final class RenderKeyHashingBenchmark: TempDirectoryTestCase {
             // computes this at least twice per slider tick in `markingManualEdits`.
             let editHash = Self.time(iterations) { _ = document.editHash }
 
+            // Main-actor cost per presented slider tick: one `markingManualEdits` plus one
+            // frame-identity construction. Before KRMA-1098 this was two `renderingHash` calls
+            // plus one `editHash`; it is now `==` on the documents.
+            let tickBase = document
+            var tickEdited = document
+            tickEdited.light.exposure += 0.01
+            let mainActorTick = Self.time(iterations) {
+                _ = EditDocument.markingManualEdits(from: tickBase, to: tickEdited)
+                _ = PreviewFrameIdentity(
+                    sourceToken: source.traceToken, document: tickEdited.visibleEditValue,
+                    space: .current)
+            }
+            print(String(
+                format: "recipe=%@ main_actor_tick_ms=%.4f p95=%.4f",
+                recipe.name as NSString, mainActorTick.median, mainActorTick.p95))
+
             // Candidate costs for the plan. An exposure tick leaves `localAdjustments` sharing
             // storage with the previous value, so `==` takes Array's buffer-identity fast path.
             var ticked = document

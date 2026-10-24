@@ -203,7 +203,7 @@ final class ProductionAutoWorkflow: AutoWorkflowRunning {
         proposed.light = evaluated.light
         proposed.color.vibrance = evaluated.color.vibrance
         proposed.color.saturation = evaluated.color.saturation
-        guard proposed.renderingHash != current.renderingHash else {
+        guard !proposed.hasSameVisibleEdits(as: current) else {
             return outcome(
                 .unchanged, current, path: .degraded(reason),
                 message: "No further improvement found (degraded mode: \(reason))")

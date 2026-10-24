@@ -6,7 +6,8 @@ import SwiftUI
 /// interactive frame does not invalidate the application's broad observation graph.
 struct PreviewFrameIdentity: Equatable, Sendable {
     let sourceToken: String
-    let documentHash: String
+    /// In-memory structural identity (Auto metadata cleared); compared with `==`, never persisted.
+    let document: EditDocument
     let space: WorkingSpace
 }
 

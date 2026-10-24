@@ -121,16 +121,26 @@ struct EditDocument: Codable, Sendable, Equatable {
     var editHash: String { renderingHash }
 
     /// Stable visible-edit identity. Auto provenance is review metadata, not a render input.
-    var renderingHash: String {
+    var renderingHash: String { RenderCacheHash.digest(visibleEditValue) }
+
+    /// The document with review-only Auto metadata cleared. Its `==` is the in-memory equivalent of
+    /// comparing `renderingHash` values, without JSON-encoding or hashing; use it for session-local
+    /// change checks and never persist it.
+    var visibleEditValue: Self {
         var copy = self
         copy.lastAutoRunFingerprint = nil
-        return RenderCacheHash.digest(copy)
+        return copy
+    }
+
+    /// True when both documents render identically (Auto provenance is ignored).
+    func hasSameVisibleEdits(as other: Self) -> Bool {
+        visibleEditValue == other.visibleEditValue
     }
 
     /// Applies a value produced by a normal editor control. Auto metadata is invalidated when a
     /// visible edit changes, and a touched Auto layer becomes user-owned before it is persisted.
     static func markingManualEdits(from old: Self, to proposed: Self) -> Self {
-        guard old.renderingHash != proposed.renderingHash else { return proposed }
+        guard !old.hasSameVisibleEdits(as: proposed) else { return proposed }
         var updated = proposed
         updated.lastAutoRunFingerprint = nil
         for index in updated.localAdjustments.indices {

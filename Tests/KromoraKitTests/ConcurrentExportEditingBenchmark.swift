@@ -165,7 +165,7 @@ final class ConcurrentExportEditingBenchmark: XCTestCase {
             let request = publication.request
             let detailIdentity = PreviewFrameIdentity(
                 sourceToken: request.source.traceToken,
-                documentHash: request.document.editHash,
+                document: request.document.visibleEditValue,
                 space: request.space
             )
             let detailFactor = request.renderScale.factor(for: request.source.nativeExtent)
