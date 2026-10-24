@@ -52,11 +52,17 @@ final class EditDocumentIdentityTests: XCTestCase {
         XCTAssertEqual(base.editHash, fixture().editHash)
         XCTAssertTrue(base.hasSameVisibleEdits(as: fixture()))
         let edits: [(String, (inout EditDocument) -> Void)] = [
+            ("version", { $0.version += 1 }),
+            ("rawDevelop", { $0.rawDevelop.exposure = 0.25 }),
             ("light", { $0.light.exposure += 0.01 }),
             ("color", { $0.color.vibrance += 1 }),
+            ("effects", { $0.effects.texture = 1 }),
+            ("crop", { $0.crop.flipHorizontal = true }),
+            ("rotation", { $0.rotation = .clockwise90 }),
+            ("adjustments", { $0.adjustments = [.exposure(ev: 0.1)] }),
             ("lut", { $0.lut.intensity = 0.2 }),
             ("mask", { $0.localAdjustments[0].adjustments.exposure = 0.9 }),
-            ("contrast", { $0.light.contrast = 99 }),
+            ("retouch", { $0.retouch = RetouchSettings(spots: [RetouchSpot(seed: 1)]) }),
         ]
         for (name, edit) in edits {
             var changed = base
