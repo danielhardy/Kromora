@@ -301,7 +301,8 @@ final class XcodeProjectInvariantTests: XCTestCase {
 
     private func objectBody(_ id: String, in section: String, isa: String) throws -> String? {
         let escapedID = NSRegularExpression.escapedPattern(for: id)
-        let pattern = "(?s)(?:^|\\n)\\s*\(escapedID)(?:\\s+/\\*[^\\n]*?\\*/)?\\s*=\\s*\\{(.*?)\\};"
+        // Xcode may emit nested dictionaries inline (such as explicitFileTypes = {}).
+        let pattern = "(?s)(?:^|\\n)\\s*\(escapedID)(?:\\s+/\\*[^\\n]*?\\*/)?\\s*=\\s*\\{((?:[^{}]|\\{[^{}]*\\})*)\\};"
         guard
             let body = try firstCapture(pattern, in: section),
             body.contains("isa = \(isa);")
