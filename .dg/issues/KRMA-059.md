@@ -9,17 +9,26 @@ labels:
   - epic:quality
   - phase:10
 created: 2026-08-30T18:30:37.650Z
-updated: 2026-10-19T17:03:30.238Z
+updated: 2026-10-24T14:25:58.055Z
 depends_on:
-  - KRMA-058
   - KRMA-056
   - KRMA-1016
   - KRMA-1066
 blockers: []
 estimate: 5
-order: 3dhzzzzx
+order: 4p1kcis6
 board: product
-context: {"files": [".context/2026-10-19-release-readiness-review.md"], "docs": ["docs/PRODUCT_SCOPE.md", "docs/APP_STORE_ACCEPTANCE.md"], "issues": ["KRMA-1051", "KRMA-1016", "KRMA-1066"], "commands": []}
+context:
+  files:
+    - .context/2026-10-19-release-readiness-review.md
+  docs:
+    - docs/PRODUCT_SCOPE.md
+    - docs/APP_STORE_ACCEPTANCE.md
+  issues:
+    - KRMA-1051
+    - KRMA-1016
+    - KRMA-1066
+  commands: []
 ---
 
 ## Objective

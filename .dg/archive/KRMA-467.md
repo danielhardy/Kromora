@@ -44,11 +44,11 @@ labels:
   - maintainability
   - appviewmodel
 created: 2026-09-19T16:27:24.296Z
-updated: 2026-09-26T15:39:13.834Z
+updated: 2026-10-24T13:00:36.006Z
 depends_on:
   - KRMA-562
 blockers: []
-order: a0
+order: 6lsqf6xk
 board: product
 context:
   files:

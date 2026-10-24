@@ -48,10 +48,10 @@ labels:
   - rendering
   - metal
 created: 2026-09-21T20:33:05.437Z
-updated: 2026-09-26T15:39:28.848Z
+updated: 2026-10-24T13:01:25.346Z
 blockers: []
 estimate: 8
-order: a0
+order: d1ng6lsh
 board: product
 ---
 

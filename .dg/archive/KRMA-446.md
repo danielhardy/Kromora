@@ -32,9 +32,9 @@ labels:
   - ui
   - editor
 created: 2026-09-18T02:23:05.137Z
-updated: 2026-09-18T19:45:20.148Z
+updated: 2026-09-28T14:41:28.086Z
 blockers: []
-order: a0
+order: 4akh69wm
 board: product
 ---
 

@@ -2,33 +2,32 @@
 id: KRMA-930
 title: Get CI green on the release candidate (push main, fix CI-only failures)
 type: task
-status: verification
+status: done
 priority: high
+human_review_required: true
 verification_report:
-  verdict: blocker
+  verdict: pass
   acceptance_criteria:
     - criterion: A human pushes the release-candidate commit and shares its Actions URL
       result: pass
-      notes: Run 39834730308 is on 6a7bdcc4b23cb4ddd89e73f5af591ac036797c40.
+      notes: Actions run 39956187906 was triggered by a push to main on 653f600dd11dc801c3f186583dfe3fa4b969de57.
     - criterion: All CI jobs pass on the pushed commit
-      result: fail
-      notes: Only Application smoke path failed; formatting, both test lanes, packaging/signing, and Xcode build passed.
-    - criterion: Record a passing run URL and SHA on this ticket
-      result: fail
-      notes: The run URL and SHA are recorded, but the run is not passing.
+      result: pass
+      notes: All six configured jobs completed successfully, including Application smoke path and both test lanes.
+    - criterion: Record the passing run URL and commit SHA in a comment on this ticket
+      result: pass
+      notes: The issue comment dated 2026-10-23T13:14:47.185Z records https://github.com/danielhardy/Kromora/actions/runs/39956187906 and the full commit SHA.
   checks_run:
-    - gh run view 39834730308 --json url,headSha,status,conclusion,jobs
-    - gh run view 39834730308 --job 120019923858
-    - gh run view 39834730308 --log-failed (HTTP 403 rate limit)
-  findings:
-    - Application smoke path failed at Launch, import, Settings/menu, and export smoke path; bundle build passed.
-    - Failed-step log retrieval is blocked by GitHub unauthenticated API rate limiting and an invalid configured gh token.
+    - gh run view 39956187906 --json event,headBranch,headSha,status,conclusion,jobs
+    - git diff --check
+    - Independent review of the KRMA-930 CI fixes and hosted run
+  findings: []
   fixes: []
   verification_commits: []
   actor: codex
   resolved_model: gpt-6-luna
-  completed_at: 2026-10-22T19:07:28.148Z
-  session: 01MVJWDZAJDXXVAK13
+  completed_at: 2026-10-24T12:49:26.780Z
+  session: 01MVME99SO5RBKEKE7
 creation_provenance:
   runner: claude
   model: sonnet
@@ -38,12 +37,9 @@ labels:
   - must-fix
   - ci
 created: 2026-10-13T14:47:40.853Z
-updated: 2026-10-23T13:14:47.187Z
+updated: 2026-10-24T13:05:09.129Z
 parent: KRMA-922
 depends_on:
-  - KRMA-927
-  - KRMA-928
-  - KRMA-929
   - KRMA-1090
 blockers:
   - id: evt_mv7149c2_hsxffw
@@ -79,7 +75,6 @@ board: product
 blocked_reason: The smoke and AppKit test fixes are committed locally; full CI verification requires a human push.
 blocked_action: Push commit d158e448849e993bb531672e3845d7494a9b7e40 to main and share the new GitHub Actions run URL.
 blocked_from_status: ready
-human_review_required: true
 ---
 
 ## Objective
@@ -219,3 +214,24 @@ Actor: codex
 Resolved model: gpt-6-luna
 Pickup session: 01MVJWDZAJDXXVAK13
 Summary: CI verification is blocked: the app smoke path failed, but GitHub will not provide its logs until CLI authentication is repaired.
+
+- 2026-10-24T12:49:26.780Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] A human pushes the release-candidate commit and shares its Actions URL (pass) — Actions run 39956187906 was triggered by a push to main on 653f600dd11dc801c3f186583dfe3fa4b969de57.
+- [x] All CI jobs pass on the pushed commit (pass) — All six configured jobs completed successfully, including Application smoke path and both test lanes.
+- [x] Record the passing run URL and commit SHA in a comment on this ticket (pass) — The issue comment dated 2026-10-23T13:14:47.185Z records https://github.com/danielhardy/Kromora/actions/runs/39956187906 and the full commit SHA.
+Checks run:
+- gh run view 39956187906 --json event,headBranch,headSha,status,conclusion,jobs
+- git diff --check
+- Independent review of the KRMA-930 CI fixes and hosted run
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: codex
+Resolved model: gpt-6-luna
+Pickup session: 01MVME99SO5RBKEKE7
+Summary: Verification passed: Actions run 39956187906 succeeded on 653f600dd11dc801c3f186583dfe3fa4b969de57; all six CI jobs passed.

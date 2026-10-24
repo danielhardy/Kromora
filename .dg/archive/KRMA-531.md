@@ -54,12 +54,12 @@ labels:
   - simplification
   - persistence
 created: 2026-09-21T20:33:11.210Z
-updated: 2026-09-26T15:39:27.920Z
+updated: 2026-10-24T13:01:22.018Z
 depends_on:
   - KRMA-545
 blockers: []
 estimate: 8
-order: "6"
+order: 05y0ns2n
 board: product
 ---
 

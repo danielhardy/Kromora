@@ -45,10 +45,10 @@ labels:
   - crop
   - performance
 created: 2026-09-21T15:18:34.638Z
-updated: 2026-09-21T17:28:31.982Z
+updated: 2026-09-28T14:41:30.694Z
 parent: KRMA-508
 blockers: []
-order: a0
+order: bq3awd7d
 board: product
 commits:
   - "0692053"

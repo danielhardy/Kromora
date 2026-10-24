@@ -56,10 +56,10 @@ labels:
   - architecture
   - app-model
 created: 2026-09-21T20:33:09.664Z
-updated: 2026-09-26T15:39:30.258Z
+updated: 2026-10-24T13:01:30.312Z
 blockers: []
 estimate: 13
-order: y
+order: qx0zo3y5
 board: product
 commits:
   - 5f1903d

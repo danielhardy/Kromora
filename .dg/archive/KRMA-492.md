@@ -53,9 +53,9 @@ labels:
   - ux
   - editor
 created: 2026-09-20T22:35:14.339Z
-updated: 2026-09-20T23:02:11.769Z
+updated: 2026-09-28T14:41:29.754Z
 blockers: []
-order: a0
+order: 92z0bw15
 board: product
 commits:
   - dc54bac

@@ -15,10 +15,10 @@ labels:
   - localization
   - needs-decomposition
 created: 2026-10-13T14:48:10.444Z
-updated: 2026-10-14T16:10:59.914Z
+updated: 2026-10-24T14:25:58.188Z
 parent: KRMA-922
 blockers: []
-order: hzzzzzzk
+order: 9e34p1kc
 board: product
 context:
   files: []

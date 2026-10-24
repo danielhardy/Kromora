@@ -14,9 +14,9 @@ labels:
   - readiness-2026-10-14
   - epic
 created: 2026-10-14T16:08:51.303Z
-updated: 2026-10-19T17:03:31.171Z
+updated: 2026-10-24T14:25:58.231Z
 blockers: []
-order: nmhzzzzf
+order: ayfnh7tq
 board: product
 context:
   files:

@@ -48,9 +48,9 @@ labels:
   - ux
   - color
 created: 2026-09-20T22:12:08.130Z
-updated: 2026-09-20T22:48:11.837Z
+updated: 2026-09-28T14:41:29.578Z
 blockers: []
-order: a0
+order: 8l4ycjt8
 board: product
 commits:
   - 98d314c

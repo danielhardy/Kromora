@@ -44,9 +44,9 @@ labels:
   - maintainability
   - appviewmodel
 created: 2026-09-19T16:27:23.427Z
-updated: 2026-09-26T15:39:13.447Z
+updated: 2026-10-24T13:00:35.312Z
 blockers: []
-order: a0
+order: 6fupreux
 board: product
 context:
   files:

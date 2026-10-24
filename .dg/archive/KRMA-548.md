@@ -36,11 +36,11 @@ creation_provenance:
 labels:
   - verification
 created: 2026-09-23T02:42:27.013Z
-updated: 2026-09-26T15:39:34.215Z
+updated: 2026-10-24T13:01:44.699Z
 depends_on:
   - KRMA-554
 blockers: []
-order: zx
+order: w79kt2al
 board: product
 ---
 

@@ -12,7 +12,7 @@ labels:
   - interaction
   - ui
 created: 2026-09-29T16:44:14.772Z
-updated: 2026-10-22T16:20:30.103Z
+updated: 2026-10-24T13:09:51.528Z
 blockers:
   - id: evt_mun4xehs_zc41fz
     type: human
@@ -33,7 +33,9 @@ blockers:
     reason: The focused tests pass, but live visual verification of the clarified Edit-view photo-selection transition is blocked by a visible macOS Terminal media-library permission prompt covering Kromora.
     action: Dismiss the open Terminal media-library permission prompt using your preferred choice, then bring Kromora to the foreground in Edit view so the unedited-to-edited image transition can be visually checked.
     created_at: 2026-09-29T23:37:00.657Z
-order: zh
+    resolved_at: 2026-10-24T13:09:44.850Z
+    resolved_by: web
+order: zzzzzzy
 board: product
 blocked_reason: The focused tests pass, but live visual verification of the clarified Edit-view photo-selection transition is blocked by a visible macOS Terminal media-library permission prompt covering Kromora.
 blocked_action: Dismiss the open Terminal media-library permission prompt using your preferred choice, then bring Kromora to the foreground in Edit view so the unedited-to-edited image transition can be visually checked.

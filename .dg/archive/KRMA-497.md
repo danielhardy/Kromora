@@ -46,9 +46,9 @@ labels:
   - ux
   - toolbar
 created: 2026-09-21T01:31:14.155Z
-updated: 2026-09-21T01:36:32.969Z
+updated: 2026-09-28T14:41:30.034Z
 blockers: []
-order: a0
+order: 9wp3msec
 board: product
 commits:
   - b756865

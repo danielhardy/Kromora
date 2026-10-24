@@ -52,10 +52,10 @@ labels:
   - documentation
   - architecture
 created: 2026-09-21T20:33:14.597Z
-updated: 2026-09-26T15:39:31.096Z
+updated: 2026-10-24T13:01:34.151Z
 blockers: []
 estimate: 3
-order: zv
+order: uprev1mu
 board: product
 commits:
   - e2489bf

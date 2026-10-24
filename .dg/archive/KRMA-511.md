@@ -47,9 +47,9 @@ labels:
   - ui
   - ux
 created: 2026-09-21T19:09:09.427Z
-updated: 2026-09-21T20:05:25.938Z
+updated: 2026-09-28T14:41:30.797Z
 blockers: []
-order: a0
+order: c1zc7xcn
 board: product
 commits:
   - d581365

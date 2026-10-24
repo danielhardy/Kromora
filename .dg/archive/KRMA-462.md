@@ -41,9 +41,9 @@ labels:
   - chrome
   - toolbar
 created: 2026-09-19T15:39:03.830Z
-updated: 2026-09-19T16:13:26.484Z
+updated: 2026-09-28T14:41:28.711Z
 blockers: []
-order: a0
+order: 63yofupn
 board: product
 ---
 

@@ -39,9 +39,9 @@ labels:
   - auto
   - photo-analysis
 created: 2026-09-20T12:06:39.636Z
-updated: 2026-09-20T14:04:53.431Z
+updated: 2026-09-28T14:41:29.123Z
 blockers: []
-order: a0
+order: 79kt2b84
 board: product
 ---
 

@@ -47,9 +47,9 @@ labels:
   - performance
   - ui
 created: 2026-09-20T22:08:22.152Z
-updated: 2026-09-20T22:16:11.367Z
+updated: 2026-09-28T14:41:29.415Z
 blockers: []
-order: a0
+order: 83awd7lb
 board: product
 commits:
   - 88562ba

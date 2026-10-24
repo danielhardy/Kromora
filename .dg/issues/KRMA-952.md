@@ -12,11 +12,9 @@ creation_provenance:
 labels:
   - performance
 created: 2026-10-13T14:48:02.806Z
-updated: 2026-10-15T02:34:31.347Z
-depends_on:
-  - KRMA-1002
+updated: 2026-10-24T14:25:58.275Z
 blockers: []
-order: zzzh
+order: cis69e34
 board: product
 context:
   files: []

@@ -51,9 +51,9 @@ labels:
   - ui
   - ux
 created: 2026-09-20T15:28:39.566Z
-updated: 2026-09-20T15:48:13.558Z
+updated: 2026-09-28T14:41:29.307Z
 blockers: []
-order: a0
+order: 7rev1ng1
 board: product
 ---
 

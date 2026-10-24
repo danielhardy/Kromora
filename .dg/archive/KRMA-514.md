@@ -44,12 +44,12 @@ labels:
   - chrome
   - filmstrip
 created: 2026-09-21T19:16:36.275Z
-updated: 2026-09-21T20:12:28.726Z
+updated: 2026-09-28T14:41:35.169Z
 parent: KRMA-512
 depends_on:
   - KRMA-515
 blockers: []
-order: t
+order: ofupreuk
 board: product
 commits:
   - 04ff35a

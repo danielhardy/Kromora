@@ -48,9 +48,9 @@ labels:
   - decoder
   - correctness
 created: 2026-09-18T22:38:54.707Z
-updated: 2026-09-19T01:16:12.803Z
+updated: 2026-09-28T14:41:28.310Z
 blockers: []
-order: a0
+order: 4ycjte76
 board: product
 ---
 

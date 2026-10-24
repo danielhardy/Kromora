@@ -47,9 +47,9 @@ labels:
   - crop
   - editor
 created: 2026-09-19T22:18:54.945Z
-updated: 2026-09-26T15:39:15.637Z
+updated: 2026-10-24T13:00:42.715Z
 blockers: []
-order: w
+order: prev1nfo
 board: product
 ---
 

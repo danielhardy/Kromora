@@ -42,9 +42,9 @@ labels:
   - crop
   - editor
 created: 2026-09-19T22:18:54.081Z
-updated: 2026-09-26T15:39:15.301Z
+updated: 2026-10-24T13:00:40.846Z
 blockers: []
-order: t
+order: o9wp3mrx
 board: product
 ---
 

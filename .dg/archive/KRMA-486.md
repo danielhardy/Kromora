@@ -48,9 +48,9 @@ labels:
   - ui
   - regression
 created: 2026-09-20T22:10:24.269Z
-updated: 2026-09-20T22:21:02.736Z
+updated: 2026-09-28T14:41:29.468Z
 blockers: []
-order: a0
+order: 898x0zny
 board: product
 commits:
   - 8bca889

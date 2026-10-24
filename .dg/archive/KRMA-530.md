@@ -45,12 +45,12 @@ labels:
   - architecture
   - rendering
 created: 2026-09-21T20:33:10.575Z
-updated: 2026-09-26T15:39:29.171Z
+updated: 2026-10-24T13:01:27.279Z
 depends_on:
   - KRMA-550
 blockers: []
 estimate: 8
-order: zh
+order: te79kt1q
 board: product
 ---
 
