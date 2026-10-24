@@ -1,5 +1,6 @@
 import Foundation
 import Photos
+import Synchronization
 
 /// The user-facing states relevant to adding an export to Photos.
 enum PhotosAuthorizationState: String, Codable, Sendable, Equatable {
@@ -131,19 +132,23 @@ final class PhotoKitDelivery: PhotosDelivering {
     }
 
     private func createAsset(data: Data, filename: String, format: ExportFormat) async throws -> String {
-        var identifier: String?
-        try await library.performChanges {
+        let identifier = Mutex<String?>(nil)
+        let uniformTypeIdentifier = format.utType.identifier
+        // PhotoKit invokes change blocks on an arbitrary serial queue. Keep this block explicitly
+        // nonisolated so it cannot inherit the adapter's MainActor isolation.
+        try await library.performChanges { @Sendable in
             let request = PHAssetCreationRequest.forAsset()
             let resourceOptions = PHAssetResourceCreationOptions()
             resourceOptions.originalFilename = filename
-            resourceOptions.uniformTypeIdentifier = format.utType.identifier
+            resourceOptions.uniformTypeIdentifier = uniformTypeIdentifier
             request.addResource(with: .photo, data: data, options: resourceOptions)
-            identifier = request.placeholderForCreatedAsset?.localIdentifier
+            let createdIdentifier = request.placeholderForCreatedAsset?.localIdentifier
+            identifier.withLock { $0 = createdIdentifier }
         }
-        guard let identifier, !identifier.isEmpty else {
+        guard let assetIdentifier = identifier.withLock({ $0 }), !assetIdentifier.isEmpty else {
             throw PhotosDeliveryError.assetCreationFailed("Photos did not return an asset identifier.")
         }
-        return identifier
+        return assetIdentifier
     }
 
     private func addAsset(withIdentifier identifier: String, toAlbumNamed name: String) async throws {
@@ -165,20 +170,20 @@ final class PhotoKitDelivery: PhotosDelivering {
         if let existing {
             // `PHAssetCollectionChangeRequest(for:)` also requires an active change block. The
             // closure cannot throw, so report an unavailable request through a flag.
-            var requestAvailable = false
-            try await library.performChanges {
+            let requestAvailable = Mutex(false)
+            try await library.performChanges { @Sendable in
                 guard let change = PHAssetCollectionChangeRequest(for: existing) else { return }
                 change.addAssets(NSArray(object: asset))
-                requestAvailable = true
+                requestAvailable.withLock { $0 = true }
             }
-            guard requestAvailable else {
+            guard requestAvailable.withLock({ $0 }) else {
                 throw PhotosDeliveryError.libraryUnavailable("the album cannot be edited")
             }
         } else {
             // `creationRequestForAssetCollection` must be called from within the change block
             // itself, like every other PHChangeRequest factory — calling it beforehand and only
             // mutating it inside `performChanges` violates PhotoKit's transaction contract.
-            try await library.performChanges {
+            try await library.performChanges { @Sendable in
                 let creation = PHAssetCollectionChangeRequest.creationRequestForAssetCollection(
                     withTitle: name
                 )

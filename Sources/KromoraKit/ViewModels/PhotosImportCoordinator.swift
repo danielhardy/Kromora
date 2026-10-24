@@ -213,10 +213,27 @@ final class PhotosPickerImportProvider: PhotosImportProviding {
             at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         let options = PHAssetResourceRequestOptions()
         options.isNetworkAccessAllowed = true
+        options.progressHandler = PhotosDownloadProgress.handler(deliveringTo: progress)
+        do {
+            try await PHAssetResourceManager.default().writeData(for: resource, toFile: file, options: options)
+        } catch {
+            throw PhotosOriginalError.unavailable(error.localizedDescription)
+        }
+        try Task.checkCancellation()
+    }
+}
+
+/// Builds the PhotoKit download progress handler. PhotoKit calls it on its XPC queue, so it must be
+/// nonisolated: declared outside any `@MainActor` type, a closure literal cannot inherit main-actor
+/// isolation and trap at the runtime executor check. Percent steps are throttled to whole,
+/// strictly increasing values and delivered to `deliver` on the main actor. Internal so tests can
+/// invoke the production closure from a non-main queue.
+enum PhotosDownloadProgress {
+    static func handler(
+        deliveringTo deliver: @escaping @MainActor @Sendable (Double) -> Void
+    ) -> @Sendable (Double) -> Void {
         let lastPercent = Mutex(-1)
-        // Photos calls this on its XPC queue. The enclosing type is `@MainActor`, so an unannotated
-        // closure would inherit that isolation and trap at the runtime executor check.
-        options.progressHandler = { @Sendable fraction in
+        return { fraction in
             let percent = Int((min(1, max(0, fraction)) * 100).rounded(.down))
             let advanced = lastPercent.withLock { last in
                 guard percent > last else { return false }
@@ -224,14 +241,8 @@ final class PhotosPickerImportProvider: PhotosImportProviding {
                 return true
             }
             guard advanced else { return }
-            Task { @MainActor in progress(Double(percent) / 100) }
+            Task { @MainActor in deliver(Double(percent) / 100) }
         }
-        do {
-            try await PHAssetResourceManager.default().writeData(for: resource, toFile: file, options: options)
-        } catch {
-            throw PhotosOriginalError.unavailable(error.localizedDescription)
-        }
-        try Task.checkCancellation()
     }
 }
 

@@ -1,3 +1,4 @@
+import Synchronization
 import XCTest
 @testable import KromoraKit
 
@@ -928,5 +929,32 @@ private final class MismatchDestination: PhotosImportDestination {
         XCTAssertEqual(failure(true, resource: false), .noOriginalResource)
         XCTAssertNil(failure(true))
         XCTAssertTrue(PhotosOriginalError.accessDenied.localizedDescription.contains("System Settings"))
+    }
+}
+
+/// KRMA-1069: PhotoKit calls the progress handler on its XPC queue, never the main queue.
+final class PhotosDownloadProgressTests: XCTestCase {
+
+    @MainActor
+    func testHandlerRunsOffMainQueueAndDeliversThrottledProgressOnMainActor() async {
+        let delivered = Mutex<[Double]>([])
+        let offMainDeliveries = Mutex(0)
+        let handler = PhotosDownloadProgress.handler { value in
+            MainActor.preconditionIsolated()
+            if !Thread.isMainThread { offMainDeliveries.withLock { $0 += 1 } }
+            delivered.withLock { $0.append(value) }
+        }
+        let queue = DispatchQueue(label: "test.photos.xpc")
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            queue.async {
+                for fraction in [-1, 0.104, 0.109, 0.5, 0.3, 2.0] { handler(fraction) }
+                done.resume()
+            }
+        }
+        for _ in 0..<100 where delivered.withLock({ $0.count }) < 4 {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(delivered.withLock { $0 }, [0, 0.10, 0.50, 1.0])
+        XCTAssertEqual(offMainDeliveries.withLock { $0 }, 0)
     }
 }
