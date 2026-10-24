@@ -83,4 +83,37 @@ final class EditDocumentIdentityTests: XCTestCase {
         edited.light.exposure += 0.1
         XCTAssertNil(EditDocument.markingManualEdits(from: old, to: edited).lastAutoRunFingerprint)
     }
+
+    /// KRMA-1099: a 30-tick drag with every durable consumer reading the hash computes one digest
+    /// per distinct document value, and the bytes match the uncached digest.
+    func testMemoComputesOneDigestPerDistinctDocumentDuringDrag() {
+        let memo = DurableEditIdentityMemo()
+        var document = fixture()
+        for tick in 0..<30 {
+            document.light.exposure = 0.01 * Double(tick)
+            // Preview classification, canonical write, thumbnail, Look strip, Auto, measurement.
+            let digests = (0..<6).map { _ in memo.digest(for: document) }
+            XCTAssertEqual(Set(digests).count, 1)
+            XCTAssertEqual(digests[0], RenderCacheHash.digest(document.visibleEditValue))
+        }
+        XCTAssertEqual(memo.computationCount, 30)
+    }
+
+    func testMemoIgnoresAutoFingerprintAndSurvivesEviction() {
+        let memo = DurableEditIdentityMemo(capacity: 2)
+        let fingerprint = AutoRunFingerprint(
+            sourceFingerprint: "s", documentHash: "d", renderIdentity: "r")
+        _ = memo.digest(for: fixture())
+        _ = memo.digest(for: fixture(fingerprint: fingerprint))
+        XCTAssertEqual(memo.computationCount, 1)
+        for index in 1...3 {
+            var other = fixture()
+            other.light.exposure = Double(index)
+            _ = memo.digest(for: other)
+        }
+        XCTAssertNil(memo.cachedDigest(for: fixture()))
+        XCTAssertEqual(
+            memo.digest(for: fixture()),
+            "41715f91641cbe0a84a4e25f63bc295843c05380451d9328d60909d333335b70")
+    }
 }

@@ -884,6 +884,17 @@ recipe at 29.204 ms each; plain about 0.15 ms). After (Release, M4 Pro, macOS 27
 `EditDocumentIdentityTests` pins the durable `editHash` bytes for a fixture with a brush mask, a
 Look, and an excluded Auto fingerprint.
 
+**KRMA-1099 durable editHash memo (2026-10-24).** `EditDocument.editHash`/`renderingHash` read
+`DurableEditIdentityMemo.shared`, a bounded (8) in-memory memo matched by `==` on `visibleEditValue`.
+The bytes are unchanged (golden test), so no stored frame, revision, or cache is invalidated. Every
+remaining consumer (preview classification and canonical writes, thumbnails, idle warmer, Look
+strip, Auto fingerprint, measurement, Apple reference) now shares one digest per distinct document
+value; `EditDocumentIdentityTests` asserts one computation per value over a 30-tick drag with six
+consumers per tick (was six per tick). The first read of a new value still costs one digest
+(about 29 ms on the large recipe, about 0.05 ms plain); repeat reads cost an `==` (about
+15 µs worst case, < 0.01 µs on shared storage). The Release benchmark was not re-run for this
+change; the per-tick repeat cost above comes from the plan's `==` measurements.
+
 ### Persisted package identity hash reuse (KRMA-753, 2026-10-01)
 
 Release last-known-frame capture after reusing the asset record's content hash for an unchanged

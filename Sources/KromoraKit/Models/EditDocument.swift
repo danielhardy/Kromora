@@ -121,7 +121,7 @@ struct EditDocument: Codable, Sendable, Equatable {
     var editHash: String { renderingHash }
 
     /// Stable visible-edit identity. Auto provenance is review metadata, not a render input.
-    var renderingHash: String { RenderCacheHash.digest(visibleEditValue) }
+    var renderingHash: String { DurableEditIdentityMemo.shared.digest(for: self) }
 
     /// The document with review-only Auto metadata cleared. Its `==` is the in-memory equivalent of
     /// comparing `renderingHash` values, without JSON-encoding or hashing; use it for session-local
