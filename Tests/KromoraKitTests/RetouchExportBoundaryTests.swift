@@ -98,6 +98,39 @@ final class RetouchExportBoundaryTests: TempDirectoryTestCase {
         ImageSource(url: url, nativeExtent: .zero)
     }
 
+    // KRMA-1094: a resolved automatic Heal set is reused, and re-picked when the set changes.
+    func testAutomaticHealSourcesAreCachedAcrossBuilds() async throws {
+        let (source, _) = try makeSource()
+        var doc = document()
+        let engine = RenderEngine(maskResolver: DefaultLocalMaskResolver())
+        func render(_ d: EditDocument) async throws -> [UInt8] {
+            try decode(try await engine.render(RenderRequest(
+                source: source, document: d, quality: .export, output: .encoded(format: .png, quality: 1))).data)
+        }
+        let first = try await render(doc)
+        let picks = await engine.retouchPickCount
+        XCTAssertGreaterThan(picks, 0)
+        let second = try await render(doc)
+        let afterSecond = await engine.retouchPickCount
+        XCTAssertEqual(afterSecond, picks, "unchanged document must not re-pick")
+        XCTAssertEqual(first, second)
+
+        doc.retouch.spots[0].opacity = 0.5
+        _ = try await render(doc)
+        let afterOpacity = await engine.retouchPickCount
+        XCTAssertEqual(afterOpacity, picks, "nonzero opacity does not change blocker participation")
+
+        doc.retouch.spots[0].opacity = 0
+        _ = try await render(doc)
+        let afterZeroOpacity = await engine.retouchPickCount
+        XCTAssertGreaterThan(afterZeroOpacity, afterOpacity, "a zero-opacity spot no longer blocks picks")
+
+        doc.retouch.spots[0].feather = 0.6
+        _ = try await render(doc)
+        let afterFeather = await engine.retouchPickCount
+        XCTAssertGreaterThan(afterFeather, afterZeroOpacity, "feather change must re-pick")
+    }
+
     func testAutomaticHealSourceDoesNotDependOnDeclaredNativeExtent() async throws {
         let (declared, url) = try makeSource()
         let hintless = undeclared(declared, at: url)

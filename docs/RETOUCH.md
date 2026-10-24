@@ -369,3 +369,14 @@ replay of the saved asset with and without the declared extent matches the archi
 (0 differing pixels); the signed app itself was not re-exported after the fix, and the archived
 signed-app PNG predates it. Human visual approval is recorded separately and is not implied by this
 comparison.
+
+## Automatic Heal source cache (KRMA-1094)
+
+`RenderEngine.resolvingAutomaticRetouchSources` caches the resolved set of automatic picks as one
+unit (picks depend on the other spots), single-entry, in memory only. Key (`RetouchPickKey`): source
+fingerprint, resolved native extent, picker algorithm version (`RetouchPickKey.algorithmVersion`;
+bump it when `RetouchSourcePicker` scoring changes), and per spot id, mode, region, feather,
+blocker participation (`!RetouchSpot.isIdentity`), and stored source. Nonzero opacity and seed do not
+otherwise reach the picker. A zero-opacity spot is an identity and no longer blocks candidate
+sources, so that state is part of the key. Any change to the set re-resolves the whole set; a
+different source replaces the entry. Picks are not persisted into the edit revision.

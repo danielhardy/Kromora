@@ -597,6 +597,7 @@ actor RenderEngine: RenderEngining {
     func pickRetouchSource(
         source declared: ImageSource, settings: RetouchSettings, spotID: UUID, rank: Int
     ) async -> RetouchSource? {
+        retouchPickCount += 1
         let source = await sourceWithResolvedExtent(declared)
         guard let spot = settings.spots.first(where: { $0.id == spotID }),
               !Task.isCancelled,
@@ -700,6 +701,30 @@ actor RenderEngine: RenderEngining {
     /// All non-Sendable GPU and cache resources live in this actor-confined storage boundary.
     let resources: RenderEngineResources
     private var retouchAnalysisCache: (fingerprint: String, proxy: RetouchAnalysisProxy)?
+    /// Last resolved automatic Heal set (KRMA-1094). Picks depend on the whole spot set, so the set
+    /// is cached as one unit; single-entry, so a replaced source never reuses picks.
+    private var resolvedRetouchSources: (key: RetouchPickKey, sources: [RetouchSource?])?
+    /// Number of `pickRetouchSource` searches run; tests assert that repeat builds do not add to it.
+    private(set) var retouchPickCount = 0
+
+    /// Everything that changes an automatic pick, including blocker participation of other spots.
+    struct RetouchPickKey: Equatable, Sendable {
+        /// Bump when `RetouchSourcePicker` scoring changes.
+        static let algorithmVersion = 1
+        struct Spot: Equatable, Sendable {
+            var id: UUID
+            var mode: RetouchMode
+            var region: RetouchRegion
+            var feather: Double
+            /// `RetouchSourcePicker` excludes identity spots from its blockers; zero opacity matters.
+            var blocksOtherSpots: Bool
+            var source: RetouchSource?
+        }
+        var fingerprint: String
+        var extent: CGSize
+        var version = algorithmVersion
+        var spots: [Spot]
+    }
 
     // These narrow aliases keep the render algorithm readable while making ownership explicit in
     // `RenderEngineResources`. They are actor-isolated through their enclosing engine. Not
@@ -755,11 +780,18 @@ actor RenderEngine: RenderEngining {
     /// One-shot test seam for exercising actor re-entry between Metal completion and cache insert.
     private var processingPrefixCompletionHook: (@Sendable () async -> Void)?
     private var nextPrefixFlightToken: UInt64 = 0
+    private var documentIdentityMemo = RenderDocumentIdentityMemo()
     private var processingPrefixFlights: [ProcessingPrefixCacheKey: PrefixMaterializationFlight] = [:]
     private var nextDevelopedSourceFlightToken: UInt64 = 0
     private var developedSourceFlights: [DevelopedSourceCacheKey: DevelopedSourceFlight] = [:]
     private var thumbnailDevelopedSourceFlights: [DevelopedSourceCacheKey: DevelopedSourceFlight] = [:]
     private var memoryPressureSource: DispatchSourceMemoryPressure?
+    /// Session identity for `document`, reusing component digests the memo already holds. Not yet
+    /// consumed by the render path (KRMA-1101).
+    func documentIdentity(for document: EditDocument, source: RenderSourceFingerprint) -> RenderDocumentIdentity {
+        documentIdentityMemo.identity(for: document, source: source)
+    }
+
     /// Pixel-affecting mask topology, deliberately excluding both the global look and the local
     /// adjustment values applied through the resolved mask. A layer dropping out of the visible
     /// graph still changes the identity, while an exposure/contrast tick on an active layer does
@@ -780,18 +812,11 @@ actor RenderEngine: RenderEngining {
 
         let layers: [Layer]
 
-    private var documentIdentityMemo = RenderDocumentIdentityMemo()
         init(_ layers: [LocalAdjustmentLayer]) {
             self.layers = layers.filter(\.hasVisibleLook).map { layer in
                 Layer(
                     id: layer.id,
                     isInverted: layer.isInverted,
-    /// Session identity for `document`, reusing component digests the memo already holds. Not yet
-    /// consumed by the render path (KRMA-1101).
-    func documentIdentity(for document: EditDocument, source: RenderSourceFingerprint) -> RenderDocumentIdentity {
-        documentIdentityMemo.identity(for: document, source: source)
-    }
-
                     components: layer.components.filter(\.isUsable).map { component in
                         Component(
                             id: component.id, mode: component.mode,
@@ -1636,7 +1661,21 @@ actor RenderEngine: RenderEngining {
         _ settings: RetouchSettings, source: ImageSource
     ) async -> RetouchSettings {
         guard settings.spots.contains(where: { $0.source == nil }) else { return settings }
+        let declared = source
+        let source = await sourceWithResolvedExtent(declared)
+        let key = RetouchPickKey(
+            fingerprint: source.cacheFingerprint, extent: source.nativeExtent,
+            spots: settings.spots.map {
+                .init(id: $0.id, mode: $0.mode, region: $0.region, feather: $0.feather,
+                      blocksOtherSpots: !$0.isIdentity, source: $0.source)
+            })
         var resolved = settings
+        if let cached = resolvedRetouchSources, cached.key == key {
+            for index in resolved.spots.indices where resolved.spots[index].source == nil {
+                resolved.spots[index].source = cached.sources[index]
+            }
+            return resolved
+        }
         for index in resolved.spots.indices {
             let spot = resolved.spots[index]
             guard spot.source == nil else { continue }
@@ -1644,6 +1683,7 @@ actor RenderEngine: RenderEngining {
                 resolved.spots[index].source = picked
             }
         }
+        if !Task.isCancelled { resolvedRetouchSources = (key, resolved.spots.map(\.source)) }
         return resolved
     }
 
