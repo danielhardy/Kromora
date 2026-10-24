@@ -22,7 +22,6 @@ public struct ContentView: View {
     @State private var isTourPresented = false
     @State private var isShortcutReferencePresented = false
     @State private var keyboardRouter: KeyboardCommandRouter
-    @Namespace private var toolbarGlassNamespace
 
     /// The window toolbar has a deliberately small crop-mode surface. Keep this as a named seam
     /// so the crop branch cannot accidentally grow the normal Edit chrome back into the workspace.
@@ -607,8 +606,7 @@ public struct ContentView: View {
         GlassEffectContainer(spacing: 10) {
             CropToolbarControls(
                 viewModel: viewModel,
-                hasImage: viewModel.toolbarPhotoActionsAvailable,
-                glassNamespace: toolbarGlassNamespace
+                hasImage: viewModel.toolbarPhotoActionsAvailable
             )
             .buttonStyle(.glass)
         }
@@ -703,12 +701,11 @@ struct EditorSidebarToolbarButton: View {
 private struct CropToolbarControls: View {
     let viewModel: AppViewModel
     let hasImage: Bool
-    let glassNamespace: Namespace.ID
 
     var body: some View {
-        // An explicit row: the glass buttons are unioned into one capsule, and without a
-        // stack of their own the toolbar and GlassEffectContainer are free to lay them out
-        // vertically, which draws one tall pill that hides the buttons.
+        // An explicit row of two separate glass buttons. They are deliberately not unioned: a
+        // shared glass shape lets Done's prominent tint fill Cancel too and merges their hover
+        // hit areas.
         HStack(spacing: 10) {
             buttons
         }
@@ -725,7 +722,6 @@ private struct CropToolbarControls: View {
         .help("Cancel the current crop (Escape)")
         .tint(nil)
         .disabled(!hasImage)
-        .glassEffectUnion(id: "crop", namespace: glassNamespace)
 
         Button {
             viewModel.commitCrop()
@@ -736,7 +732,6 @@ private struct CropToolbarControls: View {
         .accessibilityLabel("Done")
         .help("Apply the crop and return to Edit (Return)")
         .disabled(!hasImage)
-        .glassEffectUnion(id: "crop", namespace: glassNamespace)
     }
 }
 

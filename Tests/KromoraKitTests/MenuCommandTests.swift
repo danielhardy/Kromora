@@ -263,6 +263,12 @@ final class MenuCommandTests: XCTestCase {
         XCTAssertTrue(doneButton.contains(".disabled(!hasImage)"))
         XCTAssertTrue(cancelButton.contains(".tint(nil)"), "Cancel uses secondary styling")
         XCTAssertFalse(doneButton.contains(".tint(nil)"), "Done retains the copper accent")
+        XCTAssertFalse(
+            cropSource.contains("glassEffectUnion"),
+            "Cancel and Done keep separate glass so only Done is prominent and hover stays per-button"
+        )
+        XCTAssertFalse(cancelButton.contains(".glassProminent"))
+        XCTAssertTrue(doneButton.contains(".glassProminent"))
         XCTAssertFalse(cancelButton.contains(".buttonStyle(.glassProminent)"))
         XCTAssertTrue(doneButton.contains(".buttonStyle(.glassProminent)"), "Done is the only primary action")
 
