@@ -326,7 +326,7 @@ actor EditDocumentStore {
                 return finishLoad(document: EditDocument(), found: false, status: .ready)
             }
 
-            let sidecar = try package.readEditSidecar(for: source.portableAssetID)
+            let sidecar = try package.readEditSidecar(for: source.portableAssetID, record: record)
             if let entry = cache[source.portableAssetID],
                entry.revision == record.currentRevision,
                sidecar.native.revision == entry.revision

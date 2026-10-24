@@ -712,11 +712,15 @@ struct PortableLibraryPackage: Sendable {
                 throw PortablePackageError.invalidRelativePath(record.source.relativePath ?? "<referenced>")
             }
         }
-        for pointer in record.editHistory.edits where (try? packageURL(for: pointer.relativePath)) == nil {
-            throw PortablePackageError.invalidRelativePath(pointer.relativePath)
-        }
+        // Revision pointers are checked lexically only. `packageURL(for:)` resolves symlinks for
+        // every path component, so running it over a long edit history made each record read cost
+        // O(revisions) filesystem work (a load reads the record several times). The containment
+        // check still runs when a pointer's file is actually opened.
         for pointer in record.editHistory.edits {
-            if let xmpPath = pointer.xmpRelativePath, (try? packageURL(for: xmpPath)) == nil {
+            guard PackagePath.isLexicallySafe(pointer.relativePath) else {
+                throw PortablePackageError.invalidRelativePath(pointer.relativePath)
+            }
+            if let xmpPath = pointer.xmpRelativePath, !PackagePath.isLexicallySafe(xmpPath) {
                 throw PortablePackageError.invalidRelativePath(xmpPath)
             }
         }

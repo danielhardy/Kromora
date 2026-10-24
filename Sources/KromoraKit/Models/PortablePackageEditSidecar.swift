@@ -832,11 +832,14 @@ extension PortableLibraryPackage {
         return highest
     }
 
+    /// `record` lets a caller that already holds the asset record skip re-reading and re-decoding
+    /// `asset.json`, whose size grows with the edit history.
     func readEditRevision(
         for assetID: PortablePhotoAssetID,
-        revision requestedRevision: UInt64? = nil
+        revision requestedRevision: UInt64? = nil,
+        record: PortablePackageAssetRecord? = nil
     ) throws -> PortablePackageEditRevision {
-        let pointer = try editPointer(for: assetID, revision: requestedRevision)
+        let pointer = try editPointer(for: assetID, revision: requestedRevision, record: record)
         let data = try Data(contentsOf: packageURL(for: pointer.relativePath))
         let revision = try PackageJSONCoder.decode(PortablePackageEditRevision.self, from: data)
         guard revision.assetID == assetID, revision.revision == pointer.revision else {
@@ -851,7 +854,7 @@ extension PortableLibraryPackage {
         let record = try readAssetRecord(for: assetID)
         return try record.editHistory.edits
             .sorted { $0.revision < $1.revision }
-            .map { try readEditRevision(for: assetID, revision: $0.revision) }
+            .map { try readEditRevision(for: assetID, revision: $0.revision, record: record) }
     }
 
     /// Moves the package's current edit position without creating a new revision. Returns the
@@ -903,10 +906,12 @@ extension PortableLibraryPackage {
 
     func readEditSidecar(
         for assetID: PortablePhotoAssetID,
-        revision requestedRevision: UInt64? = nil
+        revision requestedRevision: UInt64? = nil,
+        record suppliedRecord: PortablePackageAssetRecord? = nil
     ) throws -> PortablePackageEditSidecar {
-        let native = try readEditRevision(for: assetID, revision: requestedRevision)
-        let pointer = try editPointer(for: assetID, revision: native.revision)
+        let record = try suppliedRecord ?? readAssetRecord(for: assetID)
+        let native = try readEditRevision(for: assetID, revision: requestedRevision, record: record)
+        let pointer = try editPointer(for: assetID, revision: native.revision, record: record)
         guard let xmpRelativePath = pointer.xmpRelativePath else {
             throw PortablePackageError.malformedXMP("revision has no XMP pointer")
         }
@@ -967,9 +972,10 @@ extension PortableLibraryPackage {
 
     private func editPointer(
         for assetID: PortablePhotoAssetID,
-        revision requestedRevision: UInt64?
+        revision requestedRevision: UInt64?,
+        record suppliedRecord: PortablePackageAssetRecord? = nil
     ) throws -> PortablePackageEditPointer {
-        let record = try readAssetRecord(for: assetID)
+        let record = try suppliedRecord ?? readAssetRecord(for: assetID)
         let revision = requestedRevision ?? record.editHistory.currentRevision
         guard revision > 0,
               let pointer = record.editHistory.edits.first(where: { $0.revision == revision }) else {
