@@ -87,6 +87,19 @@ final class ReviewPromptWiringTests: TempDirectoryTestCase {
         XCTAssertEqual(presenter.requestCount, 0)
     }
 
+    func testCoveredFinishDoesNotRetryAfterPresentationDismisses() async throws {
+        let presenter = FakeReviewPresenter()
+        let defaults = defaultsWithPriorFinish()
+        let viewModel = makeAppViewModel(preferences: defaults, reviewPresenter: presenter)
+        viewModel.isSheetOrActivityCoveringWindow = { true }
+        viewModel.exportBatchSettled(edited)
+        viewModel.isSheetOrActivityCoveringWindow = { false }
+        try await Task.sleep(for: AppViewModel.reviewPromptDelay + .milliseconds(100))
+
+        XCTAssertEqual(defaults.integer(forKey: ReviewPromptPolicy.finishCountKey), 2)
+        XCTAssertEqual(presenter.requestCount, 0)
+    }
+
     func testErrorCancelsPendingAsk() async throws {
         let presenter = FakeReviewPresenter()
         let viewModel = makeAppViewModel(

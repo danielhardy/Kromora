@@ -1629,6 +1629,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
     func exportBatchSettled(_ outcome: ExportCoordinator.BatchOutcome) {
         guard !isShuttingDown, ReviewPromptPolicy.qualifies(outcome),
               reviewPolicy.recordQualifyingFinish() else { return }
+        guard canRequestReviewNow() else { return }
         cancelPendingReviewPrompt()
         reviewPromptTask = Task { [weak self] in
             try? await Task.sleep(for: Self.reviewPromptDelay)
@@ -1646,10 +1647,14 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
     }
 
     private func requestReviewIfQuiet() {
-        guard !isShuttingDown, !export.isExporting, errorMessage == nil,
-              !FirstRunOnboarding.shouldPresentWelcome(in: preferences),
-              !isSheetOrActivityCoveringWindow() else { return }
+        guard canRequestReviewNow() else { return }
         if reviewPresenter.requestReview() { reviewPolicy.recordRequest() }
+    }
+
+    private func canRequestReviewNow() -> Bool {
+        !isShuttingDown && !export.isExporting && errorMessage == nil
+            && !FirstRunOnboarding.shouldPresentWelcome(in: preferences)
+            && !isSheetOrActivityCoveringWindow()
     }
 
     // MARK: - Auto adjustment
