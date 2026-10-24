@@ -20,9 +20,10 @@ struct WelcomeView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             HStack(spacing: 16) {
-                Image(systemName: "camera.aperture")
-                    .font(.system(size: 36, weight: .regular))
-                    .foregroundStyle(KromoraTheme.primaryAccent)
+                Image(nsImage: NSApplication.shared.applicationIconImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 56, height: 56)
                     .accessibilityHidden(true)
                 Text("Welcome to Kromora")
                     .font(.largeTitle.weight(.semibold))

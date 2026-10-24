@@ -57,4 +57,20 @@ final class OnboardingTests: XCTestCase {
         FirstRunOnboarding.reset(in: defaults)
         XCTAssertTrue(FirstRunOnboarding.shouldPresentWelcome(in: defaults))
     }
+
+    func testWelcomeHeaderUsesApplicationIconInsteadOfApertureSymbol() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/OnboardingViews.swift"),
+            encoding: .utf8
+        )
+        let welcome = try XCTUnwrap(source.components(separatedBy: "struct WelcomeView").last)
+
+        XCTAssertTrue(welcome.contains("Image(nsImage: NSApplication.shared.applicationIconImage)"))
+        XCTAssertTrue(welcome.contains(".accessibilityHidden(true)"))
+        XCTAssertFalse(welcome.contains("camera.aperture"))
+    }
 }
