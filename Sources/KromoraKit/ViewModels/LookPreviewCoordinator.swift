@@ -36,9 +36,11 @@ final class LookPreviewCoordinator {
         let widthBits: UInt64
         let heightBits: UInt64
 
-        init(source: ImageSource, document: EditDocument, look: CubeLUT, targetSize: CGSize) {
+        init(
+            source: ImageSource, documentHash: String, look: CubeLUT, targetSize: CGSize
+        ) {
             self.source = RenderSourceFingerprint(source)
-            self.documentHash = document.editHash
+            self.documentHash = documentHash
             self.lutFingerprint = look.cacheFingerprint
             self.widthBits = Double(targetSize.width).bitPattern
             self.heightBits = Double(targetSize.height).bitPattern
@@ -47,6 +49,7 @@ final class LookPreviewCoordinator {
 
     private let engine: any RenderEngining
     private let scheduler: ImageWorkScheduler
+    private let durableEditIdentityMemo: DurableEditIdentityMemo
     private let cache = BoundedLRUCache<CacheKey, CGImage>(
         maxEntries: LookPreviewLayout.cacheMaxEntries,
         maxCostBytes: LookPreviewLayout.cacheMaxCostBytes
@@ -85,13 +88,21 @@ final class LookPreviewCoordinator {
     }
 
     private var inFlight: [WorkKey: InFlight] = [:]
+    /// Latest request accepted for each logical Look slot. Digest lookup suspends this main-actor
+    /// method, so an older document generation must not replace a newer one when it resumes.
+    private var requestTokens: [WorkKey: UInt64] = [:]
     private var nextToken: UInt64 = 0
     private var activeSource: RenderSourceFingerprint?
     private var isShutdown = false
 
-    init(engine: any RenderEngining, scheduler: ImageWorkScheduler) {
+    init(
+        engine: any RenderEngining,
+        scheduler: ImageWorkScheduler,
+        durableEditIdentityMemo: DurableEditIdentityMemo = .shared
+    ) {
         self.engine = engine
         self.scheduler = scheduler
+        self.durableEditIdentityMemo = durableEditIdentityMemo
     }
 
     /// Render one candidate Look without touching the active document.
@@ -121,14 +132,31 @@ final class LookPreviewCoordinator {
             source: source, document: document, look: look, targetSize: targetSize
         )
         let previewDocument = preview.candidateDocument
-        let key = CacheKey(
-            source: source, document: previewDocument, look: look, targetSize: targetSize
-        )
         let workKey = WorkKey(source: source, look: look, targetSize: targetSize)
+        nextToken &+= 1
+        let requestToken = nextToken
+        requestTokens[workKey] = requestToken
+        defer {
+            if requestTokens[workKey] == requestToken {
+                requestTokens.removeValue(forKey: workKey)
+            }
+        }
+
+        // Look rows restart this task for each document revision. A new large recipe can take
+        // tens of milliseconds to hash, so get its durable key off the main actor before making
+        // the cache lookup or admitting render work.
+        let documentHash = await durableEditIdentityMemo.digestOffCaller(for: previewDocument)
+        guard !Task.isCancelled, !isShutdown,
+              activeSource == sourceFingerprint,
+              requestTokens[workKey] == requestToken
+        else { return nil }
+        let key = CacheKey(
+            source: source, documentHash: documentHash, look: look, targetSize: targetSize
+        )
 
         if let cached = cache.value(for: key) { return cached }
         if let existing = inFlight[workKey], existing.cacheKey == key {
-            return await withTaskCancellationHandler(
+            let image = await withTaskCancellationHandler(
                 operation: {
                     await existing.task.value
                 },
@@ -138,6 +166,10 @@ final class LookPreviewCoordinator {
                         scheduler.cancel(id: existing.jobID)
                     }
                 })
+            guard !Task.isCancelled, activeSource == sourceFingerprint,
+                  requestTokens[workKey] == requestToken
+            else { return nil }
+            return image
         }
 
         // A document revision changes the pixels, but not the logical source/Look slot. Cancel its
@@ -150,8 +182,7 @@ final class LookPreviewCoordinator {
             inFlight.removeValue(forKey: workKey)
         }
 
-        nextToken &+= 1
-        let token = nextToken
+        let token = requestToken
         let jobID = workKey.schedulerID
         let task = Task<CGImage?, Never> { @MainActor [engine, scheduler, preview] in
             // The row task identity can change on every pointer tick. Hold admission for the same
@@ -215,6 +246,7 @@ final class LookPreviewCoordinator {
         if let image {
             cache.insert(image, for: key, cost: Self.cost(of: image))
         }
+        guard requestTokens[workKey] == requestToken else { return nil }
         return image
     }
 

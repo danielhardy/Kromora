@@ -892,21 +892,21 @@ strip, Auto fingerprint, measurement, Apple reference) now shares one digest per
 value; `EditDocumentIdentityTests` asserts one computation per value over a 30-tick drag with six
 consumers per tick (was six per tick). Concurrent first reads of one value coalesce on a per-value
 slot, so simultaneous consumers share one computation (`testConcurrentMissesCoalesceIntoOneDigest`).
-The async durable writes (canonical preview frame, idle-warmer write, edited-thumbnail signature and
-revision, `storedFrameIsExact`) read `digestOffCaller(for:)`, which computes a miss on the concurrent
-pool and never on the main actor. `testStoredFrameWithGoldenHashClassifiesExactAfterRoundTrip`
+The Look preview cache key and async durable writes (canonical preview frame, idle-warmer write,
+edited-thumbnail signature and revision, `storedFrameIsExact`) read `digestOffCaller(for:)`, which
+computes a miss on the concurrent pool and never on the main actor. `testStoredFrameWithGoldenHashClassifiesExactAfterRoundTrip`
 round-trips a frame signed with the golden pre-memo digest through `FrameClassifier` as `.exact`.
-Synchronous main-actor reads (open-time stored-frame classification, Look strip key, Auto) still hash
-a brand-new value on the caller; they are not per-tick paths.
+Remaining synchronous main-actor reads (open-time stored-frame classification and Auto) are not
+per-tick paths.
 
 First-miss cost over 30 distinct drag values (Release, M4 Pro, macOS 27.2, medians; "before" is the
 digest computed on the caller, "after" is the work left on the calling actor, the memo lookup):
 
 | Recipe | before: first miss on caller ms | after: main-actor ms | off-caller end to end ms |
 | --- | ---: | ---: | ---: |
-| Plain document | 0.049 | 0.0005 | 0.049 |
-| 5 brush masks | 0.798 | 0.0006 | 0.799 |
-| 5 brush masks, large recipe | 28.481 | 0.0017 | 28.526 |
+| Plain document | 0.050 | 0.0005 | 0.050 |
+| 5 brush masks | 0.797 | 0.0006 | 0.797 |
+| 5 brush masks, large recipe | 28.482 | 0.0018 | 28.439 |
 
 Repeat reads of a memoized value cost an `==` (about 15 µs worst case, < 0.01 µs on shared storage).
 

@@ -393,17 +393,29 @@ final class IdleFrameWarmerCoordinator {
         } ?? false
 
         let editedRequired = !document.isIdentity
+        let editHash: String?
+        if editedRequired {
+            editHash = await DurableEditIdentityMemo.shared.digestOffCaller(for: document)
+            guard canContinue(generation: scheduledGeneration) else { return .cancelled }
+        } else {
+            editHash = nil
+        }
         let editedMetadata = editedRequired
             ? await thumbnailStore.metadata(.edited, for: candidate.identity) : nil
-        let editedIsExact = !editedRequired || editedMetadata.map {
-            FrameClassifier.classify(
-                $0,
+        let editedIsExact: Bool
+        if !editedRequired {
+            editedIsExact = true
+        } else if let editedMetadata, let editHash {
+            editedIsExact = FrameClassifier.classify(
+                editedMetadata,
                 against: FrameCurrentInputs(
-                    source: candidate.identity, editHash: document.editHash,
+                    source: candidate.identity, editHash: editHash,
                     look: storedLook, workingSpace: .current
                 )
             ) == .exact
-        } == true
+        } else {
+            editedIsExact = false
+        }
 
         let previewRequest: RenderRequest? = storedLook.permitsExactReuse
             ? destination?.idleFrameWarmerCanonicalRequest(
@@ -458,8 +470,9 @@ final class IdleFrameWarmerCoordinator {
                let image = await engine.makeThumbnailCGImage(request),
                canContinue(generation: scheduledGeneration)
             {
+                guard let editHash else { return .completed }
                 let signature = FrameSignature(
-                    source: candidate.identity, editHash: document.editHash,
+                    source: candidate.identity, editHash: editHash,
                     look: request.lookSignature, workingSpace: request.space,
                     pixelEpoch: RenderPipeline.pixelEpoch
                 )

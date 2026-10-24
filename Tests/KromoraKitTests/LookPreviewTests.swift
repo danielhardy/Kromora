@@ -83,7 +83,10 @@ final class LookPreviewTests: XCTestCase {
 
     func testRapidDocumentGenerationsWaitForTheThumbnailCadence() async throws {
         let engine = DirectLookRenderEngine()
-        let coordinator = LookPreviewCoordinator(engine: engine, scheduler: ImageWorkScheduler())
+        let memo = DurableEditIdentityMemo()
+        let coordinator = LookPreviewCoordinator(
+            engine: engine, scheduler: ImageWorkScheduler(), durableEditIdentityMemo: memo
+        )
         let source = ImageSource(
             data: Data([19, 20, 21]), nativeExtent: CGSize(width: 1200, height: 800))
         let look = TestImages.warmLUT()
@@ -110,6 +113,7 @@ final class LookPreviewTests: XCTestCase {
         for task in tasks { _ = await task.value }
         let finalCallCount = await engine.directCalls.count
         XCTAssertEqual(finalCallCount, 1, "the burst should render only its latest generation")
+        XCTAssertEqual(memo.computationCount, 12, "each distinct row revision gets one digest")
     }
 
     func testNewerDocumentGenerationSupersedesQueuedLookPreview() async throws {
