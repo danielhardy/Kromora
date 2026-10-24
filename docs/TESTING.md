@@ -848,6 +848,23 @@ Proposed targets (proposals only; nothing is adopted in code, and KRMA-952 decid
 
 Reproduce with the command above; do not run `scripts/run-kromora-capture.sh` for this question.
 
+### Render-key hashing baseline (KRMA-954, 2026-10-24)
+
+`RenderKeyHashingBenchmark` (optional lane; `KROMORA_RENDER_KEY_BENCHMARK=1 swift test -c release
+--filter RenderKeyHashingBenchmark`, `KROMORA_RENDER_KEY_ITERATIONS` defaults to 30) uses a real
+`RenderEngine` and no window. It times the JSON + SHA-256 cache-identity digests one masked
+interactive request computes, plus one durable `editHash`, beside a 30-tick exposure drag.
+Measured on Release, Apple M4 Pro, macOS 27.2, commit `eee736b5`. Medians:
+
+| Recipe | Digest ms / request | `editHash` | Engine ms / request |
+| --- | ---: | ---: | ---: |
+| Plain document | 0.15 | 0.05 ms | 3.2 |
+| 5 brush masks (480 samples) | 4.7 | 0.81 ms | 173 |
+| 5 brush masks, large recipe (20,480 samples) | 170.9 | 28.7 ms | 626 |
+
+`docs/RENDER_KEY_PLAN.md` interprets the numbers and stages the fix. Child tickets record their
+before/after numbers from the same benchmark.
+
 ### Persisted package identity hash reuse (KRMA-753, 2026-10-01)
 
 Release last-known-frame capture after reusing the asset record's content hash for an unchanged
