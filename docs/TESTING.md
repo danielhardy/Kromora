@@ -890,10 +890,42 @@ The bytes are unchanged (golden test), so no stored frame, revision, or cache is
 remaining consumer (preview classification and canonical writes, thumbnails, idle warmer, Look
 strip, Auto fingerprint, measurement, Apple reference) now shares one digest per distinct document
 value; `EditDocumentIdentityTests` asserts one computation per value over a 30-tick drag with six
-consumers per tick (was six per tick). The first read of a new value still costs one digest
-(about 29 ms on the large recipe, about 0.05 ms plain); repeat reads cost an `==` (about
-15 µs worst case, < 0.01 µs on shared storage). The Release benchmark was not re-run for this
-change; the per-tick repeat cost above comes from the plan's `==` measurements.
+consumers per tick (was six per tick). Concurrent first reads of one value coalesce on a per-value
+slot, so simultaneous consumers share one computation (`testConcurrentMissesCoalesceIntoOneDigest`).
+The async durable writes (canonical preview frame, idle-warmer write, edited-thumbnail signature and
+revision, `storedFrameIsExact`) read `digestOffCaller(for:)`, which computes a miss on the concurrent
+pool and never on the main actor. `testStoredFrameWithGoldenHashClassifiesExactAfterRoundTrip`
+round-trips a frame signed with the golden pre-memo digest through `FrameClassifier` as `.exact`.
+Synchronous main-actor reads (open-time stored-frame classification, Look strip key, Auto) still hash
+a brand-new value on the caller; they are not per-tick paths.
+
+First-miss cost over 30 distinct drag values (Release, M4 Pro, macOS 27.2, medians; "before" is the
+digest computed on the caller, "after" is the work left on the calling actor, the memo lookup):
+
+| Recipe | before: first miss on caller ms | after: main-actor ms | off-caller end to end ms |
+| --- | ---: | ---: | ---: |
+| Plain document | 0.049 | 0.0005 | 0.049 |
+| 5 brush masks | 0.798 | 0.0006 | 0.799 |
+| 5 brush masks, large recipe | 28.481 | 0.0017 | 28.526 |
+
+Repeat reads of a memoized value cost an `==` (about 15 µs worst case, < 0.01 µs on shared storage).
+
+**KRMA-1100 `RenderDocumentIdentity` and engine memo (2026-10-24).** Adds the session-tier
+identity value and `RenderDocumentIdentityMemo` (owned by `RenderEngine.documentIdentity(for:source:)`)
+with no production call-site change; KRMA-1101 threads it through the render path. The benchmark's
+`identity_build_ms` reports a cold build and a memoized build after an exposure tick (Release,
+M4 Pro, macOS 27.2, 30 iterations, medians; the render path today still pays the 19 warm digests
+above until KRMA-1101 lands):
+
+| Recipe | cold build ms | memoized after exposure tick ms (p95) |
+| --- | ---: | ---: |
+| Plain document | 0.069 | 0.056 (0.059) |
+| 5 brush masks | 2.280 | 0.056 (0.059) |
+| 5 brush masks, large recipe | 86.897 | 0.058 (0.066) |
+
+`RenderDocumentIdentityTests` covers equal documents (including a JSON round trip), per-component
+digest changes, memo miss versus cold build, a `NaN` field never reusing a digest, memo bounds,
+and the `==` audit over representative `EditDocument` field edits.
 
 ### Persisted package identity hash reuse (KRMA-753, 2026-10-01)
 

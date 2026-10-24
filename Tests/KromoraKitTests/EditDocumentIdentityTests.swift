@@ -116,4 +116,50 @@ final class EditDocumentIdentityTests: XCTestCase {
             memo.digest(for: fixture()),
             "41715f91641cbe0a84a4e25f63bc295843c05380451d9328d60909d333335b70")
     }
+
+    /// KRMA-1099: simultaneous consumers of one new document value share a single computation.
+    func testConcurrentMissesCoalesceIntoOneDigest() async {
+        let memo = DurableEditIdentityMemo()
+        let document = fixture()
+        let digests = await withTaskGroup(of: String.self) { group in
+            for index in 0..<16 {
+                group.addTask {
+                    index.isMultiple(of: 2)
+                        ? memo.digest(for: document) : await memo.digestOffCaller(for: document)
+                }
+            }
+            return await group.reduce(into: Set<String>()) { $0.insert($1) }
+        }
+        XCTAssertEqual(digests.count, 1)
+        XCTAssertEqual(memo.computationCount, 1)
+    }
+
+    func testDigestOffCallerMatchesSynchronousDigest() async {
+        let memo = DurableEditIdentityMemo()
+        let document = fixture()
+        let off = await memo.digestOffCaller(for: document)
+        XCTAssertEqual(off, RenderCacheHash.digest(document.visibleEditValue))
+        XCTAssertEqual(memo.cachedDigest(for: document), off)
+        XCTAssertEqual(memo.computationCount, 1)
+    }
+
+    /// KRMA-1099: a frame signed with the pre-memo golden digest, round-tripped through its
+    /// persisted encoding, still classifies exact against the memoized hash of the same document.
+    func testStoredFrameWithGoldenHashClassifiesExactAfterRoundTrip() throws {
+        let golden = "41715f91641cbe0a84a4e25f63bc295843c05380451d9328d60909d333335b70"
+        let identity = FrameFixtures.identity()
+        let stored = FrameFixtures.metadata(identity: identity, edit: golden)
+        let decoded = try JSONDecoder().decode(
+            PresentationFrameMetadata.self, from: JSONEncoder().encode(stored))
+        let inputs = FrameCurrentInputs(
+            source: identity, editHash: fixture().editHash, look: LookSignature.none,
+            workingSpace: .sRGB)
+        XCTAssertEqual(FrameClassifier.classify(decoded, against: inputs), .exact)
+        var edited = fixture()
+        edited.light.exposure += 0.01
+        let staleInputs = FrameCurrentInputs(
+            source: identity, editHash: edited.editHash, look: LookSignature.none,
+            workingSpace: .sRGB)
+        XCTAssertNotEqual(FrameClassifier.classify(decoded, against: staleInputs), .exact)
+    }
 }

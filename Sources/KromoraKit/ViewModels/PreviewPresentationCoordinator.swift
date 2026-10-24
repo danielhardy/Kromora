@@ -500,7 +500,8 @@ final class PreviewPresentationCoordinator {
             look = savedLookSignature
         }
         let inputs = FrameCurrentInputs(
-            source: identity, editHash: request.document.editHash,
+            source: identity,
+            editHash: await DurableEditIdentityMemo.shared.digestOffCaller(for: request.document),
             look: look, workingSpace: request.space
         )
         return FrameClassifier.classify(metadata, against: inputs) == .exact
@@ -529,10 +530,6 @@ final class PreviewPresentationCoordinator {
         let extent = image.extent
         guard extent.width > 0, extent.height > 0 else { return }
         canonicalWriteAdmissionCount += 1
-        let signature = FrameSignature(
-            source: identity, editHash: request.document.editHash, look: look,
-            workingSpace: request.space, pixelEpoch: RenderPipeline.pixelEpoch
-        )
         let geometry = PresentedGeometry(
             crop: request.document.crop, rotation: request.document.rotation,
             orientedAspectRatio: Self.persistedAspectRatio(rendered: extent, request: request)
@@ -541,11 +538,18 @@ final class PreviewPresentationCoordinator {
         let store = self.store
         let engine = self.engine
         canonicalWriteTasks[identity.assetID] = Task(priority: .userInitiated) { [weak self] in
+            // The durable digest of a new document value is computed off the main actor, so a
+            // slider tick never pays for it here (KRMA-1099).
             guard !Task.isCancelled,
                   let raster = await engine.makeCanonicalPreviewRaster(
                       image, space: request.space, longEdge: LatestPreviewFrameStore.canonicalLongEdge
-                  ), !Task.isCancelled,
-                  let self, self.acceptsCanonicalWrites else { return }
+                  ), !Task.isCancelled else { return }
+            let editHash = await DurableEditIdentityMemo.shared.digestOffCaller(for: request.document)
+            guard !Task.isCancelled, let self, self.acceptsCanonicalWrites else { return }
+            let signature = FrameSignature(
+                source: identity, editHash: editHash, look: look,
+                workingSpace: request.space, pixelEpoch: RenderPipeline.pixelEpoch
+            )
             let frame = PresentationFrame(
                 metadata: PresentationFrameMetadata(
                     identity: identity, kind: .preview2048, signature: signature,
@@ -597,11 +601,12 @@ final class PreviewPresentationCoordinator {
             image, space: request.space, longEdge: LatestPreviewFrameStore.canonicalLongEdge
         ), !Task.isCancelled else { return false }
         let identity = request.source.portableIdentity
+        let editHash = await DurableEditIdentityMemo.shared.digestOffCaller(for: request.document)
         let frame = PresentationFrame(
             metadata: PresentationFrameMetadata(
                 identity: identity, kind: .preview2048,
                 signature: FrameSignature(
-                    source: identity, editHash: request.document.editHash, look: look,
+                    source: identity, editHash: editHash, look: look,
                     workingSpace: request.space, pixelEpoch: RenderPipeline.pixelEpoch
                 ),
                 geometry: PresentedGeometry(

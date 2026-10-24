@@ -263,8 +263,15 @@ final class EditedThumbnailCoordinator {
             // saved revision's own. Pixels rendered here are always labelled with `look`, so an
             // ungraded provisional render can never claim the saved Look's identity.
             let frameLook = look.permitsExactReuse ? look : (savedLook ?? look)
-            let revision = self.editedThumbnailRevision(document: document, look: look)
-            let frameRevision = self.editedThumbnailRevision(document: document, look: frameLook)
+            let editHash = await DurableEditIdentityMemo.shared.digestOffCaller(for: document)
+            guard !Task.isCancelled, await self.isCurrentEditedThumbnailRequest(
+                assetID: assetID, generation: generation,
+                sourceRevision: thumbnailSourceRevision,
+                documentRevision: thumbnailDocumentRevision,
+                sourceIdentity: thumbnailSourceIdentity
+            ) else { return }
+            let revision = Self.editedThumbnailRevision(editHash: editHash, look: look)
+            let frameRevision = Self.editedThumbnailRevision(editHash: editHash, look: frameLook)
             let materialized = MaterializedThumbnail(
                 sourceIdentity: thumbnailSourceIdentity, revision: frameRevision, look: frameLook
             )
@@ -311,7 +318,7 @@ final class EditedThumbnailCoordinator {
                         hit.frame.metadata,
                         against: FrameCurrentInputs(
                             source: thumbnailSourceIdentity,
-                            editHash: document.editHash,
+                            editHash: editHash,
                             look: frameLook
                         )
                     )
@@ -397,7 +404,7 @@ final class EditedThumbnailCoordinator {
             // would replace a good stored one.
             if let frameStore = self.frameStore, look.permitsExactReuse {
                 let signature = FrameSignature(
-                    source: thumbnailSourceIdentity, editHash: document.editHash, look: look,
+                    source: thumbnailSourceIdentity, editHash: editHash, look: look,
                     workingSpace: request.space, pixelEpoch: RenderPipeline.pixelEpoch
                 )
                 let crop = document.crop
@@ -486,7 +493,11 @@ final class EditedThumbnailCoordinator {
     }
 
     private func editedThumbnailRevision(document: EditDocument, look: LookSignature) -> String {
-        document.editHash + ":" + look.cacheComponent
+        Self.editedThumbnailRevision(editHash: document.editHash, look: look)
+    }
+
+    private static func editedThumbnailRevision(editHash: String, look: LookSignature) -> String {
+        editHash + ":" + look.cacheComponent
     }
 
     /// Keep the active photo's badge out of the shared renderer while a preview burst is active.

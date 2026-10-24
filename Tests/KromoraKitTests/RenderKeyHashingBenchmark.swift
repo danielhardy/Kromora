@@ -218,6 +218,37 @@ final class RenderKeyHashingBenchmark: TempDirectoryTestCase {
                     sourceToken: source.traceToken, document: tickEdited.visibleEditValue,
                     space: .current)
             }
+            // KRMA-1099: first-miss cost for 30 distinct drag values. `sync` is what a consumer on
+            // the main actor paid before the off-caller path (the digest on the caller). The
+            // off-caller figure is the only work left on the calling actor before the digest hops to
+            // the concurrent pool: the memo lookup, which is a miss for a new value.
+            let dragMemo = DurableEditIdentityMemo()
+            let syncMemo = DurableEditIdentityMemo()
+            var dragDocument = document
+            var syncMisses: [Double] = []
+            var callerLookups: [Double] = []
+            var offCallerEndToEnd: [Double] = []
+            let missClock = ContinuousClock()
+            for tick in 0..<30 {
+                dragDocument.light.exposure = 0.01 * Double(tick + 1)
+                syncMisses.append(Self.milliseconds(missClock.measure {
+                    _ = syncMemo.digest(for: dragDocument)
+                }))
+                callerLookups.append(Self.milliseconds(missClock.measure {
+                    _ = dragMemo.cachedDigest(for: dragDocument)
+                }))
+                offCallerEndToEnd.append(Self.milliseconds(await missClock.measure {
+                    _ = await dragMemo.digestOffCaller(for: dragDocument)
+                }))
+            }
+            XCTAssertEqual(dragMemo.computationCount, 30)
+            XCTAssertEqual(syncMemo.computationCount, 30)
+            print(String(
+                format: "recipe=%@ first_miss_sync_ms=%.3f first_miss_main_actor_ms=%.4f " +
+                    "first_miss_off_caller_end_to_end_ms=%.3f digests_per_distinct_value=1",
+                recipe.name as NSString, Self.median(syncMisses), Self.median(callerLookups),
+                Self.median(offCallerEndToEnd)))
+
             print(String(
                 format: "recipe=%@ main_actor_tick_ms=%.4f p95=%.4f",
                 recipe.name as NSString, mainActorTick.median, mainActorTick.p95))
@@ -239,6 +270,22 @@ final class RenderKeyHashingBenchmark: TempDirectoryTestCase {
             let changedComponent = Self.time(iterations) {
                 _ = RenderCacheHash.digest(ticked.light)
             }
+
+            // KRMA-1100: `RenderDocumentIdentity` cold build versus a memoized build after an
+            // exposure tick (only the changed component is digested).
+            let coldIdentity = Self.time(iterations) { _ = RenderDocumentIdentity(document) }
+            let fingerprint = RenderSourceFingerprint(source)
+            var identityMemo = RenderDocumentIdentityMemo()
+            _ = identityMemo.identity(for: document, source: fingerprint)
+            var identityTick = document
+            let memoizedIdentity = Self.time(iterations) {
+                identityTick.light.exposure += 0.01
+                _ = identityMemo.identity(for: identityTick, source: fingerprint)
+            }
+            print(String(
+                format: "recipe=%@ identity_build_ms cold=%.4f memoized_exposure_tick=%.4f p95=%.4f",
+                recipe.name as NSString, coldIdentity.median, memoizedIdentity.median,
+                memoizedIdentity.p95))
 
             // Real engine, interactive exposure ticks: masks hit their payload cache after the
             // first tick, while the global change misses the preview raster cache every time.

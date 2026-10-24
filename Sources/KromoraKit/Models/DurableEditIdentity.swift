@@ -9,9 +9,27 @@ import Synchronization
 final class DurableEditIdentityMemo: Sendable {
     static let shared = DurableEditIdentityMemo()
 
-    private struct Entry {
+    /// One distinct document value. The digest is computed under the slot's own lock, so concurrent
+    /// readers of the same value wait for one computation instead of repeating it.
+    private final class Entry: Sendable {
         let document: EditDocument
-        let digest: String
+        private let storage = Mutex<String?>(nil)
+
+        init(document: EditDocument) {
+            self.document = document
+        }
+
+        var cached: String? { storage.withLock { $0 } }
+
+        /// Returns the digest and whether this call computed it.
+        func resolve() -> (digest: String, computed: Bool) {
+            storage.withLock { digest in
+                if let digest { return (digest, false) }
+                let computed = RenderCacheHash.digest(document)
+                digest = computed
+                return (computed, true)
+            }
+        }
     }
 
     private struct State {
@@ -33,32 +51,45 @@ final class DurableEditIdentityMemo: Sendable {
     /// The remembered digest for `document`, without computing one.
     func cachedDigest(for document: EditDocument) -> String? {
         let visible = document.visibleEditValue
-        return state.withLock { state in
-            state.entries.first { $0.document == visible }?.digest
+        let entry = state.withLock { state in
+            state.entries.first { $0.document == visible }
         }
+        return entry?.cached
     }
 
     /// The durable digest for `document`, computed at most once per distinct value while it stays in
-    /// the memo. Safe from any isolation domain; the digest runs outside the lock.
+    /// the memo, even when several threads ask at once. Safe from any isolation domain, but a miss
+    /// hashes on the caller: use `digestOffCaller(for:)` from the main actor.
     func digest(for document: EditDocument) -> String {
         let visible = document.visibleEditValue
-        let hit = state.withLock { state -> String? in
-            guard let index = state.entries.firstIndex(where: { $0.document == visible }) else {
-                return nil
+        let entry = state.withLock { state -> Entry in
+            if let index = state.entries.firstIndex(where: { $0.document == visible }) {
+                let entry = state.entries.remove(at: index)
+                state.entries.insert(entry, at: 0)
+                return entry
             }
-            let entry = state.entries.remove(at: index)
+            let entry = Entry(document: visible)
             state.entries.insert(entry, at: 0)
-            return entry.digest
+            if state.entries.count > capacity { state.entries.removeLast() }
+            return entry
         }
-        if let hit { return hit }
-        let digest = RenderCacheHash.digest(visible)
-        state.withLock { state in
-            state.computations += 1
-            if !state.entries.contains(where: { $0.document == visible }) {
-                state.entries.insert(Entry(document: visible, digest: digest), at: 0)
-                if state.entries.count > capacity { state.entries.removeLast() }
-            }
-        }
+        let (digest, computed) = entry.resolve()
+        if computed { state.withLock { $0.computations += 1 } }
         return digest
+    }
+
+    /// The durable digest, with a miss computed on the concurrent pool so the caller's actor (the
+    /// main actor for the preview and thumbnail write paths) is never blocked by a large recipe.
+    /// A hit returns without hopping.
+    func digestOffCaller(for document: EditDocument) async -> String {
+        if let hit = cachedDigest(for: document) { return hit }
+        return await Self.computeConcurrently(self, document)
+    }
+
+    @concurrent
+    private static func computeConcurrently(
+        _ memo: DurableEditIdentityMemo, _ document: EditDocument
+    ) async -> String {
+        memo.digest(for: document)
     }
 }
