@@ -71,4 +71,22 @@ final class LibraryHandoffStateTests: XCTestCase {
         state.updateCanvasFrame(frame)
         XCTAssertGreaterThan(state.canvasFrameRevision, first)
     }
+
+    func testReduceMotionSkipsBothFlights() {
+        XCTAssertTrue(LibraryHandoffState.entranceFlies(reduceMotion: false, hasCell: true, hasImage: true))
+        XCTAssertFalse(LibraryHandoffState.entranceFlies(reduceMotion: true, hasCell: true, hasImage: true))
+        XCTAssertFalse(LibraryHandoffState.entranceFlies(reduceMotion: false, hasCell: false, hasImage: true))
+        XCTAssertTrue(LibraryHandoffState.returnFlies(reduceMotion: false, hasImage: true))
+        XCTAssertFalse(LibraryHandoffState.returnFlies(reduceMotion: true, hasImage: true))
+        XCTAssertFalse(LibraryHandoffState.returnFlies(reduceMotion: false, hasImage: false))
+    }
+
+    func testFinishReleasesTheEditorKeptOverTheLibrary() {
+        let state = LibraryHandoffState()
+        state.isLeaving = true
+        state.isRetractingChrome = true
+        state.finish()
+        XCTAssertFalse(state.isLeaving)
+        XCTAssertFalse(state.isRetractingChrome)
+    }
 }

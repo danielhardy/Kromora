@@ -253,7 +253,8 @@ public struct ContentView: View {
         let cell = handoff.pendingOpenFrame
         handoff.pendingOpenFrame = nil
         let image = collection.items.first { $0.id == assetID }?.thumbnail
-        let flies = !accessibilityReduceMotion && cell != nil && image != nil
+        let flies = LibraryHandoffState.entranceFlies(
+            reduceMotion: accessibilityReduceMotion, hasCell: cell != nil, hasImage: image != nil)
         // Set before the open so the workspace swap is instant and the editor mounts with its
         // chrome already held back, rather than flashing it for a frame.
         handoff.isEntering = flies
@@ -266,8 +267,11 @@ public struct ContentView: View {
     }
 
     private func startReturnHandoff() {
-        guard !accessibilityReduceMotion, let item = collection.selectedItem,
-            let image = item.thumbnail
+        guard
+            LibraryHandoffState.returnFlies(
+                reduceMotion: accessibilityReduceMotion,
+                hasImage: collection.selectedItem?.thumbnail != nil),
+            let item = collection.selectedItem, let image = item.thumbnail
         else {
             viewModel.libraryHandoff.finish()
             return
@@ -275,86 +279,22 @@ public struct ContentView: View {
         viewModel.libraryHandoff.runReturn(image: image, assetID: item.id)
     }
 
+    /// Library stays mounted beneath the editor for the whole Edit session, so its layout, scroll
+    /// offset, and cells are exactly where the user left them when a flight lands on or leaves one.
+    /// The editor layer is opaque except while a flight is in the air, and the Library is inert
+    /// to pointer and accessibility while the editor covers it.
     private var detailContent: some View {
-        Group {
-            if viewModel.navigation.isGrid {
-                VStack(spacing: 0) {
-                    LibraryGridView(
-                        collection: collection,
-                        viewModel: viewModel,
-                        onOpen: openFromLibrary
-                    )
-                    StatusBar(
-                        viewModel: viewModel, photosImportCoordinator: photosImportCoordinator,
-                        export: exportCoordinator, collection: collection,
-                        onCancelImport: cancelPhotosImport,
-                        onCancelExport: viewModel.cancelExport,
-                        onCancelAuto: viewModel.cancelAutoAdjustment)
-                }
-            } else {
-                HStack(spacing: 0) {
-                    if !canvasState.isCropToolActive,
-                        chrome.isSourceBrowserPresented && !collection.items.isEmpty
-                    {
-                        // This is a transient image browser beside the active editor, sharing
-                        // selection with the filmstrip; it is not a navigation hierarchy for the
-                        // Grid/Edit workspaces. Keep its independent toggle and crop-mode behavior.
-                        // The window toolbar's native safe area docks it below the bar.
-                        HStack(spacing: 0) {
-                            SourceBrowserView(viewModel: viewModel)
-                                .frame(width: 240)
-                            Divider()
-                        }
-                        .transition(sourceBrowserTransition)
-                    }
-
-                    VStack(spacing: 0) {
-                        EditorCanvasLayout(
-                            isChromeHidden: canvasState.isCropToolActive
-                                || viewModel.libraryHandoff.isEntering,
-                            reduceMotion: accessibilityReduceMotion
-                        ) { surfaceSize in
-                            PreviewView(viewModel: viewModel, surfaceHeight: surfaceSize.height)
-                                .opacity(viewModel.libraryHandoff.isCanvasHeld ? 0 : 1)
-                                .onGeometryChange(for: CGRect.self) {
-                                    $0.frame(in: .global)
-                                } action: {
-                                    viewModel.libraryHandoff.updateCanvasFrame($0)
-                                }
-                        } chrome: {
-                            if collection.isActive {
-                                VStack(spacing: 0) {
-                                    CullingBarView(
-                                        viewModel: viewModel,
-                                        collection: collection,
-                                        isCompact: true,
-                                        surface: KromoraTheme.canvasBackground
-                                    )
-                                    FilmstripView(
-                                        collection: collection,
-                                        settings: viewModel.settings,
-                                        viewModel: viewModel
-                                    ) { index, modifiers in
-                                        viewModel.selectCollectionImage(
-                                            at: index, modifiers: modifiers)
-                                    }
-                                }
-                            }
-                        }
-
-                        StatusBar(
-                            viewModel: viewModel,
-                            photosImportCoordinator: photosImportCoordinator,
-                            export: exportCoordinator,
-                            collection: collection,
-                            showsKeyHints: false,
-                            surface: KromoraTheme.canvasBackground,
-                            onCancelImport: cancelPhotosImport,
-                            onCancelExport: viewModel.cancelExport,
-                            onCancelAuto: viewModel.cancelAutoAdjustment
-                        )
-                    }
-                }
+        let handoff = viewModel.libraryHandoff
+        let coversLibrary = viewModel.navigation.isEdit || handoff.isLeaving
+        return ZStack {
+            libraryLayer
+                .allowsHitTesting(!coversLibrary)
+                .accessibilityHidden(coversLibrary)
+            if coversLibrary {
+                editorLayer
+                    .background(KromoraTheme.windowBackground)
+                    .opacity(handoff.isCanvasHeld ? 0 : 1)
+                    .transition(.opacity)
             }
         }
         .animation(
@@ -394,14 +334,99 @@ public struct ContentView: View {
         }
     }
 
+    private var libraryLayer: some View {
+        VStack(spacing: 0) {
+            LibraryGridView(
+                collection: collection,
+                viewModel: viewModel,
+                onOpen: openFromLibrary
+            )
+            StatusBar(
+                viewModel: viewModel, photosImportCoordinator: photosImportCoordinator,
+                export: exportCoordinator, collection: collection,
+                onCancelImport: cancelPhotosImport,
+                onCancelExport: viewModel.cancelExport,
+                onCancelAuto: viewModel.cancelAutoAdjustment)
+        }
+    }
+
+    private var editorLayer: some View {
+        HStack(spacing: 0) {
+            if !canvasState.isCropToolActive,
+                chrome.isSourceBrowserPresented && !collection.items.isEmpty
+            {
+                // This is a transient image browser beside the active editor, sharing
+                // selection with the filmstrip; it is not a navigation hierarchy for the
+                // Grid/Edit workspaces. Keep its independent toggle and crop-mode behavior.
+                // The window toolbar's native safe area docks it below the bar.
+                HStack(spacing: 0) {
+                    SourceBrowserView(viewModel: viewModel)
+                        .frame(width: 240)
+                    Divider()
+                }
+                .transition(sourceBrowserTransition)
+            }
+
+            VStack(spacing: 0) {
+                EditorCanvasLayout(
+                    isChromeHidden: canvasState.isCropToolActive
+                        || viewModel.libraryHandoff.isEntering
+                                || viewModel.libraryHandoff.isRetractingChrome,
+                    reduceMotion: accessibilityReduceMotion
+                ) { surfaceSize in
+                    PreviewView(viewModel: viewModel, surfaceHeight: surfaceSize.height)
+                        .opacity(viewModel.libraryHandoff.isCanvasHeld ? 0 : 1)
+                        .onGeometryChange(for: CGRect.self) {
+                            $0.frame(in: .global)
+                        } action: {
+                            viewModel.libraryHandoff.updateCanvasFrame($0)
+                        }
+                } chrome: {
+                    if collection.isActive {
+                        VStack(spacing: 0) {
+                            CullingBarView(
+                                viewModel: viewModel,
+                                collection: collection,
+                                isCompact: true,
+                                surface: KromoraTheme.canvasBackground
+                            )
+                            FilmstripView(
+                                collection: collection,
+                                settings: viewModel.settings,
+                                viewModel: viewModel
+                            ) { index, modifiers in
+                                viewModel.selectCollectionImage(
+                                    at: index, modifiers: modifiers)
+                            }
+                        }
+                    }
+                }
+
+                StatusBar(
+                    viewModel: viewModel,
+                    photosImportCoordinator: photosImportCoordinator,
+                    export: exportCoordinator,
+                    collection: collection,
+                    showsKeyHints: false,
+                    surface: KromoraTheme.canvasBackground,
+                    onCancelImport: cancelPhotosImport,
+                    onCancelExport: viewModel.cancelExport,
+                    onCancelAuto: viewModel.cancelAutoAdjustment
+                )
+            }
+        }
+    }
+
     /// Returning to Library with a flight swaps instantly: a cross-fade would reflow the grid
     /// (columns re-pack while the inspector leaves) under the contracting photo. Entering keeps the
     /// quick cross-fade so the grid fades out behind the growing photo; so do changes with no flight,
     /// such as the toolbar picker.
     private var modeSwapAnimation: Animation? {
         let returnsWithFlight =
-            !accessibilityReduceMotion && viewModel.navigation.isGrid
-            && collection.selectedItem?.thumbnail != nil
+            viewModel.navigation.isGrid
+            && LibraryHandoffState.returnFlies(
+                reduceMotion: accessibilityReduceMotion,
+                hasImage: collection.selectedItem?.thumbnail != nil)
         guard !returnsWithFlight else { return nil }
         return .easeInOut(duration: 0.2).respectingReduceMotion(accessibilityReduceMotion)
     }

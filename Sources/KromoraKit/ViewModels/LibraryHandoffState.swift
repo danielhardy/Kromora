@@ -25,6 +25,11 @@ final class LibraryHandoffState {
     /// The editor's canvas stays invisible from the start of an entrance until the photo lands, so
     /// the flight is the only copy of the image on screen instead of growing over an identical one.
     var isCanvasHeld = false
+    /// The editor stays mounted over the Library after navigation leaves Edit, so its chrome can
+    /// slide away before the photo flies back. Set synchronously with the navigation change.
+    var isLeaving = false
+    /// The editor's filmstrip and culling bar are retracting ahead of the return flight.
+    var isRetractingChrome = false
     /// The asset whose Library cell the return flight should land on. Only that cell reports its
     /// frame, so the grid pays nothing while it scrolls.
     var returnTargetID: PhotoAssetID?
@@ -34,7 +39,6 @@ final class LibraryHandoffState {
     @ObservationIgnored private(set) var canvasFrameRevision = 0
     @ObservationIgnored var pendingOpenFrame: CGRect?
     @ObservationIgnored private(set) var returnCellFrame: CGRect?
-    @ObservationIgnored private var returnCellFrameChangedAt: ContinuousClock.Instant?
 
     @ObservationIgnored private var isTrackingCanvas = false
     @ObservationIgnored private var task: Task<Void, Never>?
@@ -57,23 +61,12 @@ final class LibraryHandoffState {
     func updateReturnCellFrame(_ frame: CGRect, for id: PhotoAssetID) {
         guard id == returnTargetID, frame != returnCellFrame else { return }
         returnCellFrame = frame
-        returnCellFrameChangedAt = .now
     }
 
     func beginReturnTarget(_ id: PhotoAssetID) {
         returnCellFrame = nil
-        returnCellFrameChangedAt = nil
         returnTargetID = id
     }
-
-    /// The cell has reported one frame for long enough that the grid is no longer relaying out
-    /// (for example while the inspector retracts and the columns widen), so it is a safe landing.
-    private var returnCellFrameIsSettled: Bool {
-        guard returnCellFrame != nil, let changed = returnCellFrameChangedAt else { return false }
-        return changed.duration(to: .now) >= Self.returnSettleInterval
-    }
-
-    private static let returnSettleInterval: Duration = .milliseconds(200)
 
     /// Grows `image` from its Library cell to the Edit canvas, then lets the inspector and
     /// filmstrip follow. The caller has already started the (asynchronous) open.
@@ -118,14 +111,32 @@ final class LibraryHandoffState {
             finish()
             return
         }
-        flight = Flight(
-            image: image, frame: Self.fittedRect(imageSize: image.size, in: canvasFrame),
-            cornerRadius: 0, opacity: 1)
         beginReturnTarget(assetID)
         task = Task { @MainActor [self] in
-            // The grid is still relaying out while the editor chrome leaves, so the cell's first
-            // frame is not where it ends up. Land on the settled frame, within a bounded wait.
-            for _ in 0..<40 where !returnCellFrameIsSettled {
+            // Stage one: the chrome slides away while the Library stays fixed beneath the editor.
+            // A navigation path that did not keep the editor mounted has no chrome to retract.
+            if isLeaving {
+                await animate(.easeInOut(duration: 0.3)) { self.isRetractingChrome = true }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            guard !Task.isCancelled, canvasFrame.width > 0 else {
+                finish()
+                return
+            }
+            // Stage two: swap the editor for a flight over the untouched grid, with no transition.
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                self.flight = Flight(
+                    image: image, frame: Self.fittedRect(imageSize: image.size, in: self.canvasFrame),
+                    cornerRadius: 0, opacity: 1)
+                self.isCanvasHeld = true
+                self.isLeaving = false
+                self.isRetractingChrome = false
+            }
+            // The grid did not move, so its cell reports promptly; the bound only covers a cell
+            // the grid has not laid out, which dissolves in place without scrolling.
+            for _ in 0..<10 where returnCellFrame == nil {
                 try? await Task.sleep(for: .milliseconds(20))
             }
             guard !Task.isCancelled else { return }
@@ -163,7 +174,19 @@ final class LibraryHandoffState {
         pendingOpenFrame = nil
         isEntering = false
         isCanvasHeld = false
+        isLeaving = false
+        isRetractingChrome = false
         isTrackingCanvas = false
+    }
+
+    /// Reduce Motion, a missing thumbnail, or an unknown cell frame opens immediately.
+    static func entranceFlies(reduceMotion: Bool, hasCell: Bool, hasImage: Bool) -> Bool {
+        !reduceMotion && hasCell && hasImage
+    }
+
+    /// Reduce Motion or a missing thumbnail leaves Edit immediately, with no chrome retraction.
+    static func returnFlies(reduceMotion: Bool, hasImage: Bool) -> Bool {
+        !reduceMotion && hasImage
     }
 
     /// The rectangle `image` occupies when aspect-fit inside `bounds`.

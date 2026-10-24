@@ -3076,6 +3076,9 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
             // after the workspace changes, SwiftUI first lays the grid out beside the inspector
             // and then animates its width, rebuilding the grid rows during the return.
             inspectorState.isPresented = false
+            // Keep the editor mounted over the Library until the return handoff decides how to
+            // leave; the view clears this immediately when there is no flight.
+            if navigation.isEdit { libraryHandoff.isLeaving = true }
             navigation.move(to: .grid)
             collection.beginThumbnailDemand()
             scheduleIdlePreviewBuild()
