@@ -341,15 +341,15 @@ struct InfoInspectorView: View {
                     .fixedSize()
                 Spacer(minLength: 4)
                 if let histogram = viewModel.info.histogram {
-                    clippingCount(
-                        histogram.clippedHighlights, systemImage: "sun.max.fill", tint: .orange,
-                        meaning: "sampled pixels at pure white (clipped highlights)")
-                    clippingCount(
-                        histogram.clippedShadows, systemImage: "moon.fill", tint: .cyan,
-                        meaning: "sampled pixels at pure black (crushed shadows)")
+                    clippingPercentage(
+                        histogram.clippedHighlightsFraction, systemImage: "sun.max.fill", tint: .orange,
+                        meaning: "of pixels clipped to pure white (highlight clipping)")
+                    clippingPercentage(
+                        histogram.clippedShadowsFraction, systemImage: "moon.fill", tint: .cyan,
+                        meaning: "of pixels crushed to pure black (crushed shadows)")
                 }
-                // The counts above matter more than this label, so it is what gives way when the
-                // inspector is narrow.
+                // The percentages above matter more than this label, so it is what gives way when
+                // the inspector is narrow.
                 HistogramSourceBadge(viewModel: viewModel)
             }
             .padding(.horizontal, 12)
@@ -368,20 +368,28 @@ struct InfoInspectorView: View {
         }
     }
 
-    /// A compact count ("50.8K") that never wraps; the exact number and its meaning are in the
-    /// tooltip and the accessibility label.
-    private func clippingCount(
-        _ count: Int, systemImage: String, tint: Color, meaning: String
+    /// A compact percentage ("0.25%") that never wraps; a nonzero share below the displayed
+    /// precision reads "<0.01%" rather than "0%". The meaning is in the tooltip and the
+    /// accessibility label.
+    private func clippingPercentage(
+        _ fraction: Double, systemImage: String, tint: Color, meaning: String
     ) -> some View {
-        let exact = "\(count.formatted()) \(meaning)"
-        return Label(count.formatted(.number.notation(.compactName)), systemImage: systemImage)
+        let text = Self.clippingPercentText(fraction)
+        let described = "\(text) \(meaning)"
+        return Label(text, systemImage: systemImage)
             .lineLimit(1)
             .fixedSize()
             .layoutPriority(1)
-            .foregroundStyle(count > 0 ? tint : .secondary)
-            .help(exact)
+            .foregroundStyle(fraction > 0 ? tint : .secondary)
+            .help(described)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(exact)
+            .accessibilityLabel(described)
+    }
+
+    nonisolated static func clippingPercentText(_ fraction: Double) -> String {
+        let clamped = min(1, max(0, fraction))
+        if clamped > 0, clamped < 0.0001 { return "<0.01%" }
+        return clamped.formatted(.percent.precision(.fractionLength(0...2)))
     }
 
     @ViewBuilder

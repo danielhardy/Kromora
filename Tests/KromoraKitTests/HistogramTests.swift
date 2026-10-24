@@ -48,8 +48,28 @@ final class HistogramTests: TempDirectoryTestCase {
         XCTAssertEqual(histogram.clippedRed, width * height)
         XCTAssertEqual(histogram.clippedGreen, 0)
         XCTAssertEqual(histogram.clippedShadows, 0)
+        XCTAssertEqual(histogram.clippedHighlightsFraction, 1)
+        XCTAssertEqual(histogram.clippedShadowsFraction, 0)
         XCTAssertEqual(histogram.sampleWidth, width)
         XCTAssertEqual(histogram.sampleHeight, height)
+    }
+
+    func testClippingFractionsCountEachPixelOnceAgainstTheSampleTotal() throws {
+        let pixels: [[UInt8]] = [
+            [255, 255, 255, 255], // Multiple clipped channels still count once.
+            [255, 17, 0, 255],
+            [0, 0, 0, 255],
+            [0, 0, 255, 255],
+            [1, 2, 3, 255],
+        ]
+        let bytes = pixels.flatMap { $0 }
+        let histogram = try XCTUnwrap(HistogramData(rgba8: bytes, width: pixels.count, height: 1))
+
+        XCTAssertEqual(histogram.totalPixelCount, pixels.count)
+        XCTAssertEqual(histogram.clippedHighlights, 3)
+        XCTAssertEqual(histogram.clippedShadows, 1)
+        XCTAssertEqual(histogram.clippedHighlightsFraction, 0.6, accuracy: 0.0001)
+        XCTAssertEqual(histogram.clippedShadowsFraction, 0.2, accuracy: 0.0001)
     }
 
     /// Rows can be padded, and reading past the end of a row would silently tally the wrong bytes.
@@ -303,5 +323,12 @@ final class HistogramTests: TempDirectoryTestCase {
             space: .current, maxDimension: 64
         )
         XCTAssertNil(histogram)
+    }
+
+    func testClippingPercentText() {
+        XCTAssertEqual(InfoInspectorView.clippingPercentText(0), "0%")
+        XCTAssertEqual(InfoInspectorView.clippingPercentText(0.00001), "<0.01%")
+        XCTAssertEqual(InfoInspectorView.clippingPercentText(0.0025), "0.25%")
+        XCTAssertEqual(InfoInspectorView.clippingPercentText(1.5), "100%")
     }
 }

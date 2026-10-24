@@ -68,6 +68,20 @@ struct HistogramData: Equatable, Sendable {
 
     var binCount: Int { red.count }
 
+    /// Pixels represented by the bins; every pixel lands in exactly one luma bin.
+    var totalPixelCount: Int { luma.reduce(0, +) }
+
+    /// Share of pixels with any RGB channel at 255, in 0...1.
+    var clippedHighlightsFraction: Double { Self.fraction(clippedHighlights, of: totalPixelCount) }
+
+    /// Share of pixels with all RGB channels at 0, in 0...1.
+    var clippedShadowsFraction: Double { Self.fraction(clippedShadows, of: totalPixelCount) }
+
+    private static func fraction(_ count: Int, of total: Int) -> Double {
+        guard total > 0 else { return 0 }
+        return min(1, max(0, Double(count) / Double(total)))
+    }
+
     init(red: [Int], green: [Int], blue: [Int], luma: [Int],
          samples: [UInt8] = [], sampleWidth: Int = 0, sampleHeight: Int = 0,
          clippedHighlights: Int = 0, clippedShadows: Int = 0,
