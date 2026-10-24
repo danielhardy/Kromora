@@ -8,10 +8,11 @@ import XCTest
 /// hashing the edit document, mask recipes, and RAW-develop settings for cache identity.
 ///
 /// Not an assertion — a measurement for `docs/RENDER_KEY_PLAN.md`. It drives a real `RenderEngine`
-/// (no `NSWindow`) for the per-request wall time, and times the exact `RenderCacheHash.digest`
-/// inputs the engine derives for one masked interactive request. The digest set is mirrored from
-/// `RenderEngine` call sites rather than counted inside the engine, so the benchmark adds no
-/// production instrumentation; keep `requestDigestSet` in step with those sites when they move.
+/// (no `NSWindow`) for warm per-request wall time, and times the exact `RenderCacheHash.digest`
+/// inputs the engine derives for one warm masked interactive request. It also measures the extra
+/// default-resolver digest work on a cache miss. The digest sets are mirrored from `RenderEngine`
+/// call sites rather than counted inside the engine, so the benchmark adds no production
+/// instrumentation; keep `requestDigestSet` in step with those sites when they move.
 ///
 /// Opt-in: `KROMORA_RENDER_KEY_BENCHMARK=1 swift test -c release --filter RenderKeyHashingBenchmark`.
 final class RenderKeyHashingBenchmark: TempDirectoryTestCase {
@@ -88,9 +89,12 @@ final class RenderKeyHashingBenchmark: TempDirectoryTestCase {
         )
     }
 
-    /// Every `RenderCacheHash.digest` a cache-missing, masked, interactive standard-source preview
-    /// computes before any mask raster is rendered, with its `RenderEngine` call site.
-    private static func requestDigestSet(_ document: EditDocument) -> [(String, () -> String)] {
+    /// Every `RenderCacheHash.digest` in a warm masked interactive standard-source preview.
+    /// A cache miss additionally hashes each definition inside `DefaultLocalMaskResolver.resolve`.
+    private static func requestDigestSet(
+        _ document: EditDocument,
+        includeDefaultResolver: Bool = false
+    ) -> [(String, () -> String)] {
         var set: [(String, () -> String)] = [
             ("previewCacheKey document", { RenderCacheHash.digest(document) }),
             ("plan maskIdentity", {
@@ -104,8 +108,16 @@ final class RenderKeyHashingBenchmark: TempDirectoryTestCase {
         guard !document.localAdjustments.isEmpty else { return set }
         for layer in document.localAdjustments {
             for component in layer.components {
-                // Payload resolution and composition each digest the component definition.
-                set.append(("mask resolve definition", { RenderCacheHash.digest(component.source) }))
+                // The engine hashes for payload-cache lookup and again during composition.
+                set.append(("mask cache lookup definition", {
+                    RenderCacheHash.digest(component.source)
+                }))
+                if includeDefaultResolver {
+                    // A payload-cache miss also hashes the definition in the default resolver.
+                    set.append(("mask resolver definition", {
+                        RenderCacheHash.digest(component.source)
+                    }))
+                }
                 set.append(("mask compose definition", { RenderCacheHash.digest(component.source) }))
             }
         }
@@ -179,11 +191,16 @@ final class RenderKeyHashingBenchmark: TempDirectoryTestCase {
         for recipe in Self.recipes {
             let document = Self.document(recipe)
             let json = try JSONEncoder().encode(document)
-            let digestSet = Self.requestDigestSet(document)
+            let warmDigestSet = Self.requestDigestSet(document)
+            let coldDigestSet = Self.requestDigestSet(document, includeDefaultResolver: true)
 
-            // Per-request digest cost, every call in the set, as the engine performs them.
-            let perRequest = Self.time(iterations) {
-                for (_, digest) in digestSet { _ = digest() }
+            // A warm slider tick hits cached mask payloads but still hashes their definitions for
+            // cache lookup and composition. The resolver hash is paid only on a payload miss.
+            let warmPerRequest = Self.time(iterations) {
+                for (_, digest) in warmDigestSet { _ = digest() }
+            }
+            let coldPerRequest = Self.time(iterations) {
+                for (_, digest) in coldDigestSet { _ = digest() }
             }
             // One whole-document durable identity: `editHash`/`renderingHash`. The main actor
             // computes this at least twice per slider tick in `markingManualEdits`.
@@ -237,14 +254,17 @@ final class RenderKeyHashingBenchmark: TempDirectoryTestCase {
 
             print(
                 String(
-                    format: "recipe=%@ masks=%d samples=%d json_bytes=%d digests_per_request=%d " +
-                        "digest_ms_per_request=%.3f p95=%.3f edit_hash_ms=%.3f " +
-                        "render_ms_per_request=%.2f p95=%.2f digest_share=%.1f%% " +
+                    format: "recipe=%@ masks=%d samples=%d json_bytes=%d " +
+                        "warm_digests_per_request=%d warm_digest_ms_per_request=%.3f " +
+                        "warm_p95=%.3f cold_digests_per_request=%d " +
+                        "cold_digest_ms_per_request=%.3f edit_hash_ms=%.3f " +
+                        "render_ms_per_warm_request=%.2f p95=%.2f digest_share=%.1f%% " +
                         "unchanged_eq_us=%.2f deep_eq_us=%.1f changed_component_digest_us=%.1f",
                     recipe.name as NSString, recipe.masks, recipe.sampleCount, json.count,
-                    digestSet.count, perRequest.median, perRequest.p95, editHash.median,
+                    warmDigestSet.count, warmPerRequest.median, warmPerRequest.p95,
+                    coldDigestSet.count, coldPerRequest.median, editHash.median,
                     renderMedian, Self.p95(renderSamples),
-                    perRequest.median / renderMedian * 100,
+                    warmPerRequest.median / renderMedian * 100,
                     unchangedCompare.median * 1_000, deepCompare.median * 1_000,
                     changedComponent.median * 1_000
                 )

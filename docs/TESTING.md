@@ -852,15 +852,18 @@ Reproduce with the command above; do not run `scripts/run-kromora-capture.sh` fo
 
 `RenderKeyHashingBenchmark` (optional lane; `KROMORA_RENDER_KEY_BENCHMARK=1 swift test -c release
 --filter RenderKeyHashingBenchmark`, `KROMORA_RENDER_KEY_ITERATIONS` defaults to 30) uses a real
-`RenderEngine` and no window. It times the JSON + SHA-256 cache-identity digests one masked
-interactive request computes, plus one durable `editHash`, beside a 30-tick exposure drag.
-Measured on Release, Apple M4 Pro, macOS 27.2, commit `eee736b5`. Medians:
+`RenderEngine` and no window. It times the JSON + SHA-256 cache-identity digests in a warm
+interactive request, one durable `editHash`, and the extra component hashes on a first mask-payload
+cache miss, beside a 30-tick exposure drag. The warm request has 19 digests for five masks; the
+first request has 24 because `DefaultLocalMaskResolver` hashes each component definition once more.
+The real-engine drag recorded 150 payload-cache hits and five misses. Verification rerun on Release,
+Apple M4 Pro, macOS 27.2, 30 iterations; medians:
 
-| Recipe | Digest ms / request | `editHash` | Engine ms / request |
-| --- | ---: | ---: | ---: |
-| Plain document | 0.15 | 0.05 ms | 3.2 |
-| 5 brush masks (480 samples) | 4.7 | 0.81 ms | 173 |
-| 5 brush masks, large recipe (20,480 samples) | 170.9 | 28.7 ms | 626 |
+| Recipe | Warm digests / ms | Cold digests / ms | `editHash` | Engine ms / warm request (p95) |
+| --- | ---: | ---: | ---: | ---: |
+| Plain document | 6 / 0.153 | 6 / 0.152 | 0.049 ms | 3.02 (3.64) |
+| 5 brush masks (480 samples) | 19 / 4.763 | 24 / 5.483 | 0.810 ms | 168.62 (221.23) |
+| 5 brush masks, large recipe (20,480 samples) | 19 / 173.573 | 24 / 202.743 | 29.204 ms | 636.64 (657.61) |
 
 `docs/RENDER_KEY_PLAN.md` interprets the numbers and stages the fix. Child tickets record their
 before/after numbers from the same benchmark.

@@ -11,12 +11,14 @@ history.
 JSON-encodes a value with `.sortedKeys` and SHA-256-hashes the bytes. That is the only identity
 function for edit state, so it runs again for every key that mentions the document:
 
-- **Render actor, per request** (`RenderEngine`): `RenderBuildPlan.make` (`maskIdentity`, the
+- **Render actor, per warm request** (`RenderEngine`): `RenderBuildPlan.make` (`maskIdentity`, the
   whole-document `documentIdentity`), `previewCacheKey` (whole document again), the developed-source
   key and both processing-prefix keys (`rawDevelop`, three times), `prefixDocumentHash` (a synthetic
   copy of the document, twice), the post-local prefix (`localAdjustments`), and mask resolution plus
   composition (each usable component's `MaskSource`, twice per component). For a five-mask document
-  that comes to 19 digests per request, and only the global exposure changed.
+  that comes to 19 digests on each repeated exposure tick. On the first request, a cache miss also
+  hashes each component once inside `DefaultLocalMaskResolver`, for 24 digests total; subsequent
+  ticks hit the mask-payload cache and return to 19.
 - **Main actor, per edit and per presented frame**: `EditDocument.markingManualEdits` computes
   `renderingHash` for the old and the new document on every `updateDocument`.
   `AppViewModel.presentAdjustedFrame` computes `editHash` for every presented frame.
@@ -36,41 +38,42 @@ real `RenderEngine`, a 1600×1200 procedural PNG, and no `NSWindow`:
 KROMORA_RENDER_KEY_BENCHMARK=1 swift test -c release --filter RenderKeyHashingBenchmark
 ```
 
-The benchmark times the exact digest inputs that the engine derives for one cache-missing, masked,
-interactive request. That digest set is mirrored from the engine's call sites, so the engine stays
-uninstrumented. It also times one `editHash` and a 30-tick real-engine exposure drag. Layer,
-component and stroke IDs stay stable across the drag, so mask payloads hit their cache (150 hits,
-5 misses) while the preview raster misses on every tick. Finally, it times the candidate
-replacement operations.
+The benchmark mirrors the digest inputs from the engine call sites without production
+instrumentation. It measures the 19-digest warm request on each repeated exposure tick and the
+additional five default-resolver hashes on a first mask-payload cache miss. It also times one
+`editHash` and a 30-tick real-engine exposure drag. Layer, component and stroke IDs stay stable
+across the drag, so the engine records 150 payload-cache hits and five misses while the preview
+raster misses on every tick. Finally, it times the candidate replacement operations.
 
-The table below is from Release on an Apple M4 Pro with macOS 27.2, at commit `eee736b5` plus this
-benchmark, with 30 iterations and medians. Three consecutive runs agreed within 2%. The large
-digest set measured 168.8–170.9 ms.
+The table below is a verification run on Release, Apple M4 Pro, macOS 27.2, with 30 iterations and
+medians. The engine timings below are warm-tick timings; the first five-mask cache miss is reflected
+in the separate cold-digest column.
 
-| Recipe | Brush samples | JSON bytes | Digests / request | Digest ms / request (p95) | One `editHash` | Real-engine ms / request (p95) | Digest share |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Plain document (global Light + Color) | 0 | 1.9 KB | 6 | 0.15 (0.18) | 0.05 ms | 3.2 (4.1) | 4.7% |
-| 5 brush masks, 2 strokes × 48 samples | 480 | 44 KB | 19 | 4.7 (4.8) | 0.81 ms | 173 (221) | 2.7% |
-| **5 brush masks, 8 strokes × 512 samples (large recipe)** | 20,480 | 1.65 MB | 19 | **170.9 (172.3)** | **28.7 ms** | 626 (648) | **27.3%** |
+| Recipe | Brush samples | JSON bytes | Warm digests / request | Warm digest ms (p95) | Cold digests / request + ms | One `editHash` | Real-engine ms / request (p95) | Warm digest share |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Plain document (global Light + Color) | 0 | 1.9 KB | 6 | 0.153 (0.165) | 6 / 0.152 | 0.049 ms | 3.02 (3.64) | 5.1% |
+| 5 brush masks, 2 strokes × 48 samples | 480 | 44 KB | 19 | 4.763 (4.990) | 24 / 5.483 | 0.810 ms | 168.62 (221.23) | 2.8% |
+| **5 brush masks, 8 strokes × 512 samples (large recipe)** | 20,480 | 1.65 MB | 19 | **173.573 (176.063)** | **24 / 202.743** | **29.204 ms** | 636.64 (657.61) | **27.3%** |
 
 Candidate replacement costs, measured on the large recipe:
 
 | Operation | Cost |
 | --- | ---: |
 | `==` on unchanged `localAdjustments` after an exposure tick (shared array storage) | < 0.01 µs |
-| `==` on equal `localAdjustments` with distinct storage (a decoded copy, or undo to an older value) | 15 µs |
-| Digest of one small changed component (`LightAdjustments`) | 17 µs |
+| `==` on equal `localAdjustments` with distinct storage (a decoded copy, or undo to an older value) | 15.0 µs |
+| Digest of one small changed component (`LightAdjustments`) | 17.3 µs |
 
 Reading the numbers:
 
-- With the large recipe, identity costs about 171 ms of the 626 ms the render actor spends on an
-  exposure tick. Of the 19 digests, 14 are linear in the brush payload.
+- With the large recipe, warm identity costs 174 ms of the 637 ms the render actor spends on an
+  exposure tick. Of the 19 warm digests, 14 are linear in the brush payload. The first request
+  costs 203 ms across 24 digests because each component also gets hashed in the resolver.
 - The main actor carries the same cost on every tick: at least two `renderingHash` calls in
-  `markingManualEdits` and one `editHash` per presented frame, so ≥ 86 ms per tick with the large
+  `markingManualEdits` and one `editHash` per presented frame, so ≥ 87.6 ms per tick with the large
   recipe. That is a dropped-frame problem independent of the render actor.
-- A plain document is cheap (0.15 ms), so a neutral or global-only benchmark hides this cost
+- A plain document is cheap (0.153 ms), so a neutral or global-only benchmark hides this cost
   entirely, as the review warned.
-- The rest of the small-brush tick (≈ 170 ms) is local-layer compositing on the GPU, not identity.
+- The rest of the small-brush tick (≈ 164 ms) is local-layer compositing on the GPU, not identity.
   It is out of scope here.
 
 ## Constraints
@@ -174,7 +177,10 @@ that differs is encoded and hashed. After an exposure tick, that means only the 
 about 17 µs.
 
 The identity is threaded through `RenderBuildPlan` and every cache key that currently calls
-`RenderCacheHash.digest`, so the 19 digests per request become field reads.
+`RenderCacheHash.digest`, so the 19 warm-request digests and the five first-miss resolver digests
+become field reads. Pass each component's definition digest in `LocalMaskResolveRequest`; the
+default and semantic resolvers use that value for `LocalMaskPayload.definitionHash` and validation
+instead of encoding the source again.
 
 Rules for the session tier:
 
@@ -276,8 +282,8 @@ Dependencies: KRMA-1100 → KRMA-1101 → KRMA-1102. KRMA-1098 and KRMA-1099 are
 
 These are targets, not claims. Each child records its measured number.
 
-- Large-recipe digest work per exposure tick on the render actor: 171 ms → < 1 ms. That is one
+- Large-recipe warm digest work per exposure tick on the render actor: 174 ms → < 1 ms. That is one
   `LightAdjustments` digest plus equality checks.
-- Main-actor identity work per tick with the large recipe: ≥ 86 ms → < 0.1 ms.
-- Plain document: 0.15 ms → ≤ 0.05 ms. It is already cheap, and the gate there is "no regression".
+- Main-actor identity work per tick with the large recipe: ≥ 87.6 ms → < 0.1 ms.
+- Plain document: 0.153 ms → ≤ 0.05 ms. It is already cheap, and the gate there is "no regression".
 - Durable digests and persisted frames: unchanged. The golden test proves it.
