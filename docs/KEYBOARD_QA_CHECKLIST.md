@@ -9,7 +9,7 @@ whenever a shortcut is added.
 
 Open a library with several photos, put focus in each state below, and press the key. The result
 must match the expected cell, and no key may sound a system alert beep. Run the affected rows in the
-signed, sandboxed app (`Kromora` scheme in `Xcode/Kromora.xcodeproj`) after changing key handling.
+signed, sandboxed app (`Kromora` scheme in `Kromora.xcodeproj`) after changing key handling.
 
 Menu commands follow the availability gates in `MenuCommands.swift` (`MenuCommandAvailability` and
 the keyboard context). A command that is unavailable in the current context (for example `H`

@@ -45,7 +45,7 @@ macOS grants at runtime; the required sandboxed checks are listed at the end of 
 
 The checked-in app entitlements enable App Sandbox, user-selected read/write access, read-only
 removable-media access, app-scoped bookmarks, and read/write access to Pictures
-([`Kromora.entitlements`](../App/Kromora.entitlements):5-14). Apple's current App
+([`Kromora.entitlements`](../Kromora/Kromora.entitlements):5-14). Apple's current App
 Sandbox guide says standard `NSOpenPanel`/`NSSavePanel` interactions extend the sandbox to selected
 URLs and start security-scoped access; the app must stop that access when finished. It also documents
 recursive access under a folder selected through a standard system interaction
@@ -127,7 +127,7 @@ back to `KromoraStorage.defaultPortableLibraryPackageURL` at
 and creates it if absent. Access to the default location relies on the Pictures read/write
 entitlement. A chosen package relies on its resolved security-scoped bookmark, which `AppLaunch`
 holds for the session. Code review cannot verify the signed entitlement or package I/O under App
-Sandbox. Evidence: [`KromoraStorage.swift`:89-96](../Sources/KromoraKit/Models/KromoraStorage.swift), [`KromoraSettings.swift`:213-217, 293-299, 451-459](../Sources/KromoraKit/Models/KromoraSettings.swift), [`AppLaunch.swift`](../Sources/KromoraKit/Presentation/AppLaunch.swift), [`PortableLibrarySession.swift`:90-124](../Sources/KromoraKit/Models/PortableLibrarySession.swift), [`Kromora.entitlements`:5-14](../App/Kromora.entitlements).
+Sandbox. Evidence: [`KromoraStorage.swift`:89-96](../Sources/KromoraKit/Models/KromoraStorage.swift), [`KromoraSettings.swift`:213-217, 293-299, 451-459](../Sources/KromoraKit/Models/KromoraSettings.swift), [`AppLaunch.swift`](../Sources/KromoraKit/Presentation/AppLaunch.swift), [`PortableLibrarySession.swift`:90-124](../Sources/KromoraKit/Models/PortableLibrarySession.swift), [`Kromora.entitlements`:5-14](../Kromora/Kromora.entitlements).
 
 ### RAW originals and neighboring sidecars
 
@@ -152,7 +152,7 @@ it, and starts scoped access while scanning. The current import-preflight task r
 under scope, then sends an asynchronous import request; its `defer` stops the scope as that callback
 returns, before the package worker necessarily opens the file. This is a should-fix risk (KRMA-818),
 and whether the removable-media entitlement masks it must be tested on the signed sandbox build.
-Evidence: [`Kromora.entitlements`:7-14](../App/Kromora.entitlements),
+Evidence: [`Kromora.entitlements`:7-14](../Kromora/Kromora.entitlements),
 [`MediaVolume.swift`:141-149, 170-195, 214-259](../Sources/KromoraKit/Models/MediaVolume.swift),
 [`LibraryMediaWorkflowCoordinator.swift`:151-188, 229-285, 322-332](../Sources/KromoraKit/ViewModels/LibraryMediaWorkflowCoordinator.swift),
 [`AppViewModel.swift`:2910-2959](../Sources/KromoraKit/ViewModels/AppViewModel.swift).
@@ -223,12 +223,12 @@ loadTransferable(Data.self). Kromora does not enumerate the Photos library or ru
 read-authorization state machine for this picker path. An empty/cancelled selection starts no
 import; a nil transfer is counted as skipped, and a transfer failure is recorded per item while
 later selections continue. The transferred bytes are staged in the app temporary directory only
-long enough for the package importer to copy them into the library. Info.plist has a Photos usage
+long enough for the package importer to copy them into the library. The `INFOPLIST_KEY_NSPhotoLibraryUsageDescription` build setting supplies a Photos usage
 description for the import and add-to-Photos actions.
 [ContentView.swift:57-65, 177-184](../Sources/KromoraKit/Views/ContentView.swift),
 [PhotosImportCoordinator.swift:50-70, 140-186, 269-301](../Sources/KromoraKit/ViewModels/PhotosImportCoordinator.swift),
 [PortableLibrarySession.swift:950-995](../Sources/KromoraKit/Models/PortableLibrarySession.swift),
-[Info.plist:44-45](../App/Info.plist)
+[Base.xcconfig:29](../Config/Base.xcconfig)
 
 Optional post-export delivery uses PhotoKit read/write authorization. It requests authorization
 only while status is notDetermined, maps authorized, limited, denied, and restricted (plus
@@ -291,8 +291,8 @@ directory lookup returns no URL. There are no hard-coded user-home paths in the 
 
 | Entitlement | Conclusion |
 | --- | --- |
-| com.apple.security.assets.pictures.read-write | YES, required by current filesystem code: production creates/opens the default library package and the default export/Look folders under Pictures. This entitlement grants filesystem access to Pictures. PhotoKit import and delivery do not rely on it; PhotosPicker mediates import and PhotoKit handles delivery authorization. [Kromora.entitlements:5-14](../App/Kromora.entitlements), [KromoraStorage.swift:64-96](../Sources/KromoraKit/Models/KromoraStorage.swift), [AppViewModel.swift:971-992](../Sources/KromoraKit/ViewModels/AppViewModel.swift), [PortableLibrarySession.swift:106-124](../Sources/KromoraKit/Models/PortableLibrarySession.swift), [PhotosDelivery.swift:89-130](../Sources/KromoraKit/Models/PhotosDelivery.swift) |
-| com.apple.security.files.removable-media.read-only | YES, exercised: MountedMediaVolumeProvider discovers removable/ejectable mounts, enumerates and reads supported images and metadata, and the production provider does not write to the source volume. Imports write their copies into the Pictures package. [Kromora.entitlements:5-14](../App/Kromora.entitlements), [MediaVolume.swift:141-149, 155-195, 214-259](../Sources/KromoraKit/Models/MediaVolume.swift), [PortableLibrarySession.swift:886-925](../Sources/KromoraKit/Models/PortableLibrarySession.swift) |
+| com.apple.security.assets.pictures.read-write | YES, required by current filesystem code: production creates/opens the default library package and the default export/Look folders under Pictures. This entitlement grants filesystem access to Pictures. PhotoKit import and delivery do not rely on it; PhotosPicker mediates import and PhotoKit handles delivery authorization. [Kromora.entitlements:5-14](../Kromora/Kromora.entitlements), [KromoraStorage.swift:64-96](../Sources/KromoraKit/Models/KromoraStorage.swift), [AppViewModel.swift:971-992](../Sources/KromoraKit/ViewModels/AppViewModel.swift), [PortableLibrarySession.swift:106-124](../Sources/KromoraKit/Models/PortableLibrarySession.swift), [PhotosDelivery.swift:89-130](../Sources/KromoraKit/Models/PhotosDelivery.swift) |
+| com.apple.security.files.removable-media.read-only | YES, exercised: MountedMediaVolumeProvider discovers removable/ejectable mounts, enumerates and reads supported images and metadata, and the production provider does not write to the source volume. Imports write their copies into the Pictures package. [Kromora.entitlements:5-14](../Kromora/Kromora.entitlements), [MediaVolume.swift:141-149, 155-195, 214-259](../Sources/KromoraKit/Models/MediaVolume.swift), [PortableLibrarySession.swift:886-925](../Sources/KromoraKit/Models/PortableLibrarySession.swift) |
 
 ### Findings
 
@@ -300,7 +300,7 @@ directory lookup returns no URL. There are no hard-coded user-home paths in the 
 | --- | --- | --- | --- |
 | should-fix | Direct Look saves and original-plus-settings bundle creation do not visibly own and release the panel-selected output grant for the complete write. Selecting an external Look folder saves its bookmark, but the immediate scan has no explicit start/stop owner. Single-file export also stages a sibling file in the parent directory while explicitly starting access only on the selected file URL; confirm that the grant covers the parent. | [LookSaveCoordinator.swift:92-140](../Sources/KromoraKit/ViewModels/LookSaveCoordinator.swift), [DeriveCoordinator.swift:183-212](../Sources/KromoraKit/ViewModels/DeriveCoordinator.swift), [AppViewModel.swift:4631-4659, 4799-4808](../Sources/KromoraKit/ViewModels/AppViewModel.swift), [LUTLibrary.swift:232-257](../Sources/KromoraKit/Models/LUTLibrary.swift), [ExportCoordinator.swift:267-272, 606-623](../Sources/KromoraKit/ViewModels/ExportCoordinator.swift) | KRMA-818 (was backlog on 2026-10-04; `review` on 2026-10-14) |
 | should-fix — **resolved in source after 2026-10-04 (KRMA-819, done):** `performSave` now stages a sibling `.tmp` file and renames it over the destination. Text at right is the original observation. | Saving a derived Look removes an existing destination before copying its replacement. If the copy fails, the previous user file is already gone. | [DeriveCoordinator.swift:204-213](../Sources/KromoraKit/ViewModels/DeriveCoordinator.swift) | KRMA-819 (backlog, appstore) |
-| note | The default package is deliberately in Pictures and requires the Pictures filesystem entitlement; PhotoKit authorization is a separate access path. Removable-media read-only access is used for normal mounted-volume discovery and image reads. | [Kromora.entitlements:5-14](../App/Kromora.entitlements), [KromoraStorage.swift:89-96](../Sources/KromoraKit/Models/KromoraStorage.swift), [MediaVolume.swift:170-259](../Sources/KromoraKit/Models/MediaVolume.swift), [PhotosDelivery.swift:89-130](../Sources/KromoraKit/Models/PhotosDelivery.swift) | Verify effective entitlements in the signed app. |
+| note | The default package is deliberately in Pictures and requires the Pictures filesystem entitlement; PhotoKit authorization is a separate access path. Removable-media read-only access is used for normal mounted-volume discovery and image reads. | [Kromora.entitlements:5-14](../Kromora/Kromora.entitlements), [KromoraStorage.swift:89-96](../Sources/KromoraKit/Models/KromoraStorage.swift), [MediaVolume.swift:170-259](../Sources/KromoraKit/Models/MediaVolume.swift), [PhotosDelivery.swift:89-130](../Sources/KromoraKit/Models/PhotosDelivery.swift) | Verify effective entitlements in the signed app. |
 | note | Package records and the local index use stable identities and package-relative paths. External folder and Look paths are operational preferences with bookmarks, not absolute paths embedded in package/index data. | [PortableLibraryPackage.swift:216-278, 292-354](../Sources/KromoraKit/Models/PortableLibraryPackage.swift), [LibraryQueryController.swift:43-75](../Sources/KromoraKit/Models/LibraryQueryController.swift), [KromoraSettings.swift:80-84](../Sources/KromoraKit/Models/KromoraSettings.swift), [LUTLibrary.swift:472-493](../Sources/KromoraKit/Models/LUTLibrary.swift) | No follow-up required for the current package/index format. |
 | note | Single rendered exports fail rather than replace when the destination exists; batch exports add numeric suffixes. LookSaveCoordinator refuses collisions, original-plus-settings bundles refuse an existing package destination, and derived Look saves replaced the destination by deleting it before copying (2026-10-04; since changed to stage-then-rename, KRMA-819). | [ExportCoordinator.swift:606-623, 875-883](../Sources/KromoraKit/ViewModels/ExportCoordinator.swift), [LookSaveCoordinator.swift:125-139](../Sources/KromoraKit/ViewModels/LookSaveCoordinator.swift), [OriginalSettingsBundle.swift:73-83](../Sources/KromoraKit/Models/OriginalSettingsBundle.swift), [DeriveCoordinator.swift:204-213](../Sources/KromoraKit/ViewModels/DeriveCoordinator.swift) | Replacement data-loss risk was KRMA-819 (done). |
 
@@ -358,9 +358,9 @@ resolves it.
 
 | Protected resource or access path | Current API and permission model | Required `Info.plist` usage string |
 | --- | --- | --- |
-| Photos chosen for import and original retrieval | SwiftUI `PhotosPicker` exposes the user's selected items and their local identifiers. Kromora then fetches each selected asset and streams its original resource through PhotoKit, requesting `.readWrite` authorization when undetermined; Photos thumbnails also use PhotoKit. The picker alone does not enumerate the library or authorize those reads. [`ContentView.swift`:69-75, 176-184](../Sources/KromoraKit/Views/ContentView.swift), [`PhotosImportCoordinator.swift`:163-218](../Sources/KromoraKit/ViewModels/PhotosImportCoordinator.swift), [`PhotosThumbnailLoader.swift`:100-112](../Sources/KromoraKit/Models/PhotosThumbnailLoader.swift) | `NSPhotoLibraryUsageDescription` is required for the PhotoKit original and thumbnail reads and is already present at [`Info.plist`:25-26](../App/Info.plist). No Photos authorization is needed for picker-only selection. Apple's [PhotosUI picker documentation](https://developer.apple.com/documentation/swiftui/view/photospicker(ispresented:selection:maxselectioncount:selectionbehavior:matching:preferreditemencoding:photolibrary:)) explains that the person explicitly selects the items. |
-| Save exports to Photos and optionally organize an album | `PhotoKit` checks and requests `.readWrite` authorization, creates an asset, and may fetch/create an album and fetch the new asset. [`PhotosDelivery.swift`:82-87, 127-181](../Sources/KromoraKit/Models/PhotosDelivery.swift) | `NSPhotoLibraryUsageDescription`, already present at [`Info.plist`:25-26](../App/Info.plist). The existing read/write level is appropriate for the album fetch/update path; Apple's [PhotoKit authorization guidance](https://developer.apple.com/documentation/photokit/delivering-an-enhanced-privacy-experience-in-your-photos-app) reserves `NSPhotoLibraryAddUsageDescription` for add-only access. |
-| User-selected and dropped files/folders; package and removable-media files | `NSOpenPanel`/`NSSavePanel`, Finder drops, app-scoped bookmarks, and the App Sandbox file entitlements mediate file access. These are filesystem grants, not protected-resource privacy prompts. [`AppKitFileDialogAdapter.swift`:39-72](../Sources/KromoraKit/Presentation/AppKitFileDialogAdapter.swift), [`ImageDrop.swift`:23-60](../Sources/KromoraKit/Presentation/ImageDrop.swift), [`Kromora.entitlements`:5-14](../App/Kromora.entitlements) | None. No file or folder usage-description string is required for the standard panel and sandbox-entitlement paths. |
+| Photos chosen for import and original retrieval | SwiftUI `PhotosPicker` exposes the user's selected items and their local identifiers. Kromora then fetches each selected asset and streams its original resource through PhotoKit, requesting `.readWrite` authorization when undetermined; Photos thumbnails also use PhotoKit. The picker alone does not enumerate the library or authorize those reads. [`ContentView.swift`:69-75, 176-184](../Sources/KromoraKit/Views/ContentView.swift), [`PhotosImportCoordinator.swift`:163-218](../Sources/KromoraKit/ViewModels/PhotosImportCoordinator.swift), [`PhotosThumbnailLoader.swift`:100-112](../Sources/KromoraKit/Models/PhotosThumbnailLoader.swift) | `NSPhotoLibraryUsageDescription` is required for the PhotoKit original and thumbnail reads and is already present at [`Info.plist`:25-26](../Kromora/Info.plist). No Photos authorization is needed for picker-only selection. Apple's [PhotosUI picker documentation](https://developer.apple.com/documentation/swiftui/view/photospicker(ispresented:selection:maxselectioncount:selectionbehavior:matching:preferreditemencoding:photolibrary:)) explains that the person explicitly selects the items. |
+| Save exports to Photos and optionally organize an album | `PhotoKit` checks and requests `.readWrite` authorization, creates an asset, and may fetch/create an album and fetch the new asset. [`PhotosDelivery.swift`:82-87, 127-181](../Sources/KromoraKit/Models/PhotosDelivery.swift) | `NSPhotoLibraryUsageDescription`, already present at [`Info.plist`:25-26](../Kromora/Info.plist). The existing read/write level is appropriate for the album fetch/update path; Apple's [PhotoKit authorization guidance](https://developer.apple.com/documentation/photokit/delivering-an-enhanced-privacy-experience-in-your-photos-app) reserves `NSPhotoLibraryAddUsageDescription` for add-only access. |
+| User-selected and dropped files/folders; package and removable-media files | `NSOpenPanel`/`NSSavePanel`, Finder drops, app-scoped bookmarks, and the App Sandbox file entitlements mediate file access. These are filesystem grants, not protected-resource privacy prompts. [`AppKitFileDialogAdapter.swift`:39-72](../Sources/KromoraKit/Presentation/AppKitFileDialogAdapter.swift), [`ImageDrop.swift`:23-60](../Sources/KromoraKit/Presentation/ImageDrop.swift), [`Kromora.entitlements`:5-14](../Kromora/Kromora.entitlements) | None. No file or folder usage-description string is required for the standard panel and sandbox-entitlement paths. |
 
 Do not add `NSCameraUsageDescription`, `NSMicrophoneUsageDescription`, `NSLocationUsageDescription`,
 `NSContactsUsageDescription`, `NSCalendarsFullAccessUsageDescription`, or
@@ -377,12 +377,17 @@ covers data-collection practices on all platforms, while required-reason API dec
 only to iOS, iPadOS, tvOS, visionOS, and watchOS; it does not list macOS. Kromora targets
 native macOS only: SwiftPM declares `.macOS(.v26)` in [`Package.swift`](../Package.swift), and the
 Xcode `Kromora` target declares
-`SUPPORTED_PLATFORMS = macosx` in [`project.pbxproj`](../Xcode/Kromora.xcodeproj/project.pbxproj).
+`SUPPORTED_PLATFORMS = macosx` in [`project.pbxproj`](../Kromora.xcodeproj/project.pbxproj).
 Therefore, these source calls are not required-reason blockers for the current Mac App Store target.
 The approved codes below remain useful context if a covered platform is added. Apple separately
 requires privacy manifests for certain third-party SDKs. App Store Connect privacy answers are
 based on actual collection practices and remain separate from this required-reason inventory;
 neither requirement makes the current macOS file-timestamp calls a blocker.
+
+Re-checked 2026-10-24 against the live page (Apple's documentation JSON for the same URL): it
+says data-collection information is required "on all platforms", while the required-reason API
+declarations are required "on iOS, iPadOS, tvOS, visionOS, and watchOS". macOS is still not
+listed, so Kromora does not ship a `PrivacyInfo.xcprivacy` (KRMA-1095).
 
 | Category | Exhaustive source evidence | Apple reason-code fit if a covered platform is added |
 | --- | --- | --- |

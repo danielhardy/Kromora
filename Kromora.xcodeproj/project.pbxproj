@@ -1,26 +1,35 @@
 // !$*UTF8*$!
 {
 	archiveVersion = 1;
-	classes = {};
-	objectVersion = 77;
+	classes = {
+	};
+	objectVersion = 71;
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A79400000000000000000001 /* KromoraApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A79400000000000000000002 /* KromoraApp.swift */; };
 		A79400000000000000000003 /* KromoraKit in Frameworks */ = {isa = PBXBuildFile; productRef = A79400000000000000000004 /* KromoraKit */; };
-		A79400000000000000000021 /* Kromora.icon in Resources */ = {isa = PBXBuildFile; fileRef = A79400000000000000000019 /* Kromora.icon */; };
-		A79400000000000000000022 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A79400000000000000000020 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		A79400000000000000000002 /* KromoraApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KromoraApp.swift; sourceTree = "<group>"; };
 		A79400000000000000000005 /* Kromora.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Kromora.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A79400000000000000000015 /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Base.xcconfig; sourceTree = "<group>"; };
 		A79400000000000000000016 /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		A79400000000000000000017 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
-		A79400000000000000000019 /* Kromora.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.icon; path = ../Kromora.icon; sourceTree = "<group>"; };
-		A79400000000000000000020 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		A79400000000000000000023 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = A7940000000000000000000A /* Kromora */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		A79400000000000000000008 /* Kromora */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (A79400000000000000000023 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = Kromora; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		A79400000000000000000006 /* Frameworks */ = {
@@ -37,20 +46,10 @@
 		A79400000000000000000007 = {
 			isa = PBXGroup;
 			children = (
-				A79400000000000000000008 /* App */,
+				A79400000000000000000008 /* Kromora */,
 				A79400000000000000000018 /* Config */,
-				A79400000000000000000019 /* Kromora.icon */,
 				A79400000000000000000009 /* Products */,
 			);
-			sourceTree = "<group>";
-		};
-		A79400000000000000000008 /* App */ = {
-			isa = PBXGroup;
-			children = (
-				A79400000000000000000002 /* KromoraApp.swift */,
-				A79400000000000000000020 /* Assets.xcassets */,
-			);
-			path = ../App;
 			sourceTree = "<group>";
 		};
 		A79400000000000000000009 /* Products */ = {
@@ -86,6 +85,9 @@
 			);
 			dependencies = (
 			);
+			fileSystemSynchronizedGroups = (
+				A79400000000000000000008 /* Kromora */,
+			);
 			name = Kromora;
 			packageProductDependencies = (
 				A79400000000000000000004 /* KromoraKit */,
@@ -119,7 +121,7 @@
 			);
 			mainGroup = A79400000000000000000007;
 			packageReferences = (
-				A79400000000000000000010 /* XCLocalSwiftPackageReference ".." */,
+				A79400000000000000000010 /* XCLocalSwiftPackageReference "." */,
 			);
 			productRefGroup = A79400000000000000000009 /* Products */;
 			projectDirPath = "";
@@ -135,8 +137,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A79400000000000000000021 /* Kromora.icon in Resources */,
-				A79400000000000000000022 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -147,7 +147,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A79400000000000000000001 /* KromoraApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -216,16 +215,16 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		A79400000000000000000010 /* XCLocalSwiftPackageReference ".." */ = {
+		A79400000000000000000010 /* XCLocalSwiftPackageReference "." */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = ..;
+			relativePath = .;
 		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		A79400000000000000000004 /* KromoraKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = A79400000000000000000010 /* XCLocalSwiftPackageReference ".." */;
+			package = A79400000000000000000010 /* XCLocalSwiftPackageReference "." */;
 			productName = KromoraKit;
 		};
 /* End XCSwiftPackageProductDependency section */

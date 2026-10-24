@@ -26,14 +26,33 @@ executable="$app_bundle/Contents/MacOS/Kromora"
 [[ -f "$info_plist" ]] || { print -u2 "missing app Info.plist: $info_plist"; exit 1; }
 [[ -f "$executable" ]] || { print -u2 "missing app executable: $executable"; exit 1; }
 
-python3 - "$info_plist" <<'PY'
+python3 - "$info_plist" "$project_root/Config/Base.xcconfig" <<'PY'
 import pathlib
 import plistlib
+import re
 import sys
 
 info = plistlib.loads(pathlib.Path(sys.argv[1]).read_bytes())
+xcconfig = pathlib.Path(sys.argv[2]).read_text()
+
+
+def setting(name):
+    match = re.search(rf"^{name}\s*=\s*(.*?)\s*$", xcconfig, re.MULTILINE)
+    if not match:
+        raise SystemExit(f"Config/Base.xcconfig does not set {name}")
+    return match.group(1)
+
+
+# The xcconfig is the single source of identity and version; the built plist must reflect it.
 expected = {
-    "CFBundleIdentifier": "com.last8.kromora.photo",
+    "CFBundleShortVersionString": setting("MARKETING_VERSION"),
+    "CFBundleVersion": setting("CURRENT_PROJECT_VERSION"),
+    "CFBundleName": setting("PRODUCT_NAME"),
+    "CFBundleExecutable": setting("PRODUCT_NAME"),
+    "CFBundlePackageType": "APPL",
+    "NSPrincipalClass": "NSApplication",
+    "NSHighResolutionCapable": True,
+    "CFBundleIdentifier": setting("PRODUCT_BUNDLE_IDENTIFIER"),
     "LSApplicationCategoryType": "public.app-category.photography",
     "ITSAppUsesNonExemptEncryption": False,
     "LSMinimumSystemVersion": "26.0",
@@ -44,12 +63,12 @@ incorrect = {
     if info.get(key) != value or type(info.get(key)) is not type(value)
 }
 usage = info.get("NSPhotoLibraryUsageDescription")
-if not isinstance(usage, str) or not usage.strip():
-    incorrect["NSPhotoLibraryUsageDescription"] = {"actual": usage, "expected": "non-empty string"}
+if not isinstance(usage, str) or not usage.strip() or usage != setting("INFOPLIST_KEY_NSPhotoLibraryUsageDescription"):
+    incorrect["NSPhotoLibraryUsageDescription"] = {"actual": usage, "expected": "the non-empty xcconfig string"}
 if incorrect:
     raise SystemExit(f"Xcode app Info.plist does not match required metadata: {incorrect}")
 
-print("verified bundle identifier, category, encryption flag, Photos usage string, and macOS 26 minimum")
+print("verified bundle identity, versions from xcconfig, principal class, category, encryption flag, Photos usage string, and macOS 26 minimum")
 PY
 
 # Exercise the same Foundation Bundle lookup used by KromoraKitResourceBundle and

@@ -115,7 +115,7 @@ if find_app_pid >/dev/null; then
 fi
 
 stage="fixture"
-/usr/bin/sips -s format png -z $expected_size $expected_size App/Branding/KromoraIcon.svg --out "$input_png" >/dev/null
+/usr/bin/sips -s format png -z $expected_size $expected_size scripts/fixtures/KromoraIcon.svg --out "$input_png" >/dev/null
 
 # Read the first-run state before launch so an enabled menu cannot race the welcome sheet's
 # presentation. The harness exercises onboarding on a fresh profile without seeding preferences.

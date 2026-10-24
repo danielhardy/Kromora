@@ -10,7 +10,7 @@ if (( $# > 1 )); then
   exit 2
 fi
 
-icon_composer="Kromora.icon"
+icon_composer="Kromora/Kromora.icon"
 if (( $# == 1 )); then
   app_bundle="$1"
   [[ "$app_bundle" == /* ]] || app_bundle="$caller_directory/$app_bundle"

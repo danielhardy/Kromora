@@ -12,7 +12,7 @@ final class XcodeProjectInvariantTests: XCTestCase {
     }
 
     func testSandboxEntitlementsAllowPhotoKit() throws {
-        guard let text = readText(at: packageRoot.appendingPathComponent("App/Kromora.entitlements")) else { return }
+        guard let text = readText(at: packageRoot.appendingPathComponent("Kromora/Kromora.entitlements")) else { return }
         XCTAssertTrue(text.contains("com.apple.security.personal-information.photos-library"),
                       "PhotoKit is denied in the sandbox without the Photos library entitlement.")
     }
@@ -29,7 +29,7 @@ final class XcodeProjectInvariantTests: XCTestCase {
     ]
 
     func testEntitlementCheckerAcceptsSourceEntitlementsAndIntendedSet() throws {
-        let source = packageRoot.appendingPathComponent("App/Kromora.entitlements")
+        let source = packageRoot.appendingPathComponent("Kromora/Kromora.entitlements")
         guard FileManager.default.fileExists(atPath: source.path) else { return }
         XCTAssertEqual(try runEntitlementChecker(on: source).status, 0)
         XCTAssertEqual(try runEntitlementChecker(on: writeEntitlements(Self.intendedEntitlements)).status, 0)
@@ -73,7 +73,7 @@ final class XcodeProjectInvariantTests: XCTestCase {
         return (process.terminationStatus, String(decoding: data, as: UTF8.self))
     }
 
-    func testXcodeSourcesBuildPhaseContainsOnlyTheAppLauncher() throws {
+    func testSynchronizedKromoraFolderIsTheTargetsOnlySourceOfFiles() throws {
         guard let project = readText(at: xcodeProjectURL) else { return }
         guard
             let nativeTargets = section("PBXNativeTarget", in: project),
@@ -82,65 +82,53 @@ final class XcodeProjectInvariantTests: XCTestCase {
                 in: nativeTargets
             ).first,
             let target = try objectBody(targetID, in: nativeTargets, isa: "PBXNativeTarget"),
-            let buildPhases = try firstCapture(#"(?s)buildPhases\s*=\s*\((.*?)\);"#, in: target),
-            let sourcePhaseID = try captures(
-                #"([A-F0-9]+)\s+/\*\s*Sources\s*\*/"#,
-                in: buildPhases
-            ).first,
-            let sourceBuildPhases = section("PBXSourcesBuildPhase", in: project),
-            let sourcePhase = try objectBody(sourcePhaseID, in: sourceBuildPhases, isa: "PBXSourcesBuildPhase"),
-            let files = try firstCapture(#"(?s)files\s*=\s*\((.*?)\);"#, in: sourcePhase),
-            let buildFiles = section("PBXBuildFile", in: project),
-            let fileReferences = section("PBXFileReference", in: project),
-            let groups = section("PBXGroup", in: project)
+            let synchronizedGroups = try firstCapture(
+                #"(?s)fileSystemSynchronizedGroups\s*=\s*\((.*?)\);"#,
+                in: target
+            ),
+            let rootGroups = section("PBXFileSystemSynchronizedRootGroup", in: project)
         else {
-            XCTFail("\(Self.invariant): could not find the Kromora target's Sources build phase.")
+            XCTFail("\(Self.invariant): the Kromora target must use a file-system synchronized group.")
             return
         }
 
-        let buildFileIDs = try captures(#"\b[A-F0-9]{24}\b"#, in: files, captureGroup: 0)
-        var swiftSourcePaths: [String] = []
-
-        for buildFileID in buildFileIDs {
-            guard
-                let buildFile = try objectBody(buildFileID, in: buildFiles, isa: "PBXBuildFile"),
-                let fileReferenceID = try firstCapture(#"\bfileRef\s*=\s*([A-F0-9]+)\b"#, in: buildFile),
-                let fileReference = try objectBody(fileReferenceID, in: fileReferences, isa: "PBXFileReference")
-            else {
-                XCTFail("\(Self.invariant): every Sources build entry must resolve to a file reference.")
+        let groupIDs = try captures(#"\b[A-F0-9]{24}\b"#, in: synchronizedGroups, captureGroup: 0)
+        XCTAssertEqual(groupIDs.count, 1, "\(Self.invariant): the target may own exactly one synchronized group.")
+        for groupID in groupIDs {
+            guard let group = try objectBody(groupID, in: rootGroups, isa: "PBXFileSystemSynchronizedRootGroup") else {
+                XCTFail("\(Self.invariant): the synchronized group must resolve.")
                 continue
             }
-
-            guard let path = try firstCapture(#"\bpath\s*=\s*"?([^";\n]+)"?;"#, in: fileReference) else {
-                XCTFail("\(Self.invariant): every Sources build entry must declare its file path.")
-                continue
-            }
-            guard (path as NSString).pathExtension == "swift" else { continue }
-
-            let parentGroupIDs = try captures(
-                #"(?m)^\s*([A-F0-9]+)(?:\s+/\*[^\n]*?\*/)?\s*=\s*\{"#,
-                in: groups
+            XCTAssertEqual(
+                try firstCapture(#"\bpath\s*=\s*"?([^";\n]+)"?;"#, in: group),
+                "Kromora",
+                "\(Self.invariant): the synchronized group must be the Kromora/ folder."
             )
-            let parentPaths = try parentGroupIDs.compactMap { groupID -> String? in
-                guard
-                    let group = try objectBody(groupID, in: groups, isa: "PBXGroup"),
-                    let children = try firstCapture(#"(?s)children\s*=\s*\((.*?)\);"#, in: group),
-                    try captures(#"\b[A-F0-9]+\b"#, in: children, captureGroup: 0).contains(fileReferenceID)
-                else { return nil }
-                return try firstCapture(#"\bpath\s*=\s*"?([^";\n]+)"?;"#, in: group)
-            }
-
-            guard parentPaths.count == 1 else {
-                XCTFail("\(Self.invariant): the Xcode launcher must belong to the App group at ../App.")
-                continue
-            }
-            swiftSourcePaths.append("\(parentPaths[0])/\(path)")
         }
 
+        // Hand-added file entries would bypass the folder-content invariant, so only the
+        // KromoraKit framework link may appear as a build file, and no phase may list sources.
+        let buildFileLines = (section("PBXBuildFile", in: project) ?? "")
+            .split(whereSeparator: \.isNewline)
+            .filter { $0.contains("isa = PBXBuildFile") }
         XCTAssertEqual(
-            swiftSourcePaths,
-            ["../App/KromoraApp.swift"],
-            "\(Self.invariant): the Kromora target's Sources build phase may compile only App/KromoraApp.swift."
+            buildFileLines.count,
+            1,
+            "\(Self.invariant): project.pbxproj may list only the KromoraKit package product as a build file."
+        )
+        XCTAssertTrue(buildFileLines.allSatisfy { $0.contains("productRef") })
+        for phase in ["PBXSourcesBuildPhase", "PBXResourcesBuildPhase"] {
+            guard let phaseSection = section(phase, in: project) else { continue }
+            let files = try firstCapture(#"(?s)files\s*=\s*\((.*?)\);"#, in: phaseSection) ?? ""
+            XCTAssertTrue(
+                files.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                "\(Self.invariant): \(phase) must stay empty; the synchronized folder supplies files."
+            )
+        }
+        let fileReferences = section("PBXFileReference", in: project) ?? ""
+        XCTAssertFalse(
+            fileReferences.contains(".swift"),
+            "\(Self.invariant): project.pbxproj may not reference Swift files directly."
         )
     }
 
@@ -185,7 +173,7 @@ final class XcodeProjectInvariantTests: XCTestCase {
     }
 
     func testBothAppLaunchersRemainThin() throws {
-        for relativePath in ["Sources/Kromora/KromoraApp.swift", "App/KromoraApp.swift"] {
+        for relativePath in ["Sources/Kromora/KromoraApp.swift", "Kromora/KromoraApp.swift"] {
             guard let source = readText(at: packageRoot.appendingPathComponent(relativePath)) else { continue }
             let lineCount = source.split(whereSeparator: \.isNewline).count
             XCTAssertLessThanOrEqual(
@@ -196,36 +184,23 @@ final class XcodeProjectInvariantTests: XCTestCase {
         }
     }
 
-    func testAppAndXcodeContainNoOtherSwiftFiles() throws {
-        let appURL = packageRoot.appendingPathComponent("App", isDirectory: true)
-        let xcodeURL = packageRoot.appendingPathComponent("Xcode", isDirectory: true)
-        // Xcode/build is ignored generated output and may contain DerivedSources/*.swift.
-        let generatedBuildURL = xcodeURL.appendingPathComponent("build", isDirectory: true)
-        guard
-            let appSwiftFiles = swiftFiles(under: appURL),
-            let xcodeSwiftFiles = swiftFiles(under: xcodeURL, excluding: generatedBuildURL)
-        else {
-            return
-        }
+    func testAppFolderContainsNoOtherSwiftFiles() throws {
+        let appURL = packageRoot.appendingPathComponent("Kromora", isDirectory: true)
+        guard let appSwiftFiles = swiftFiles(under: appURL) else { return }
 
         XCTAssertEqual(
             appSwiftFiles,
             ["KromoraApp.swift"],
-            "\(Self.invariant): App/ may contain no Swift source except KromoraApp.swift."
-        )
-        XCTAssertEqual(
-            xcodeSwiftFiles,
-            [],
-            "\(Self.invariant): Xcode/ must contain no Swift source files."
+            "\(Self.invariant): Kromora/ may contain no Swift source except KromoraApp.swift."
         )
     }
 
     func testXcodeConfigurationExistsAndTargetsMacOS26Arm64() throws {
-        let configDirectory = packageRoot.appendingPathComponent("Xcode/Config", isDirectory: true)
+        let configDirectory = packageRoot.appendingPathComponent("Config", isDirectory: true)
         for name in ["Base.xcconfig", "Debug.xcconfig", "Release.xcconfig"] {
             XCTAssertTrue(
                 FileManager.default.fileExists(atPath: configDirectory.appendingPathComponent(name).path),
-                "\(Self.invariant): Xcode/Config/\(name) must exist."
+                "\(Self.invariant): Config/\(name) must exist."
             )
         }
 
@@ -253,7 +228,7 @@ final class XcodeProjectInvariantTests: XCTestCase {
     }
 
     private var xcodeProjectURL: URL {
-        packageRoot.appendingPathComponent("Xcode/Kromora.xcodeproj/project.pbxproj")
+        packageRoot.appendingPathComponent("Kromora.xcodeproj/project.pbxproj")
     }
 
     private func readText(at url: URL) -> String? {
@@ -265,7 +240,7 @@ final class XcodeProjectInvariantTests: XCTestCase {
         }
     }
 
-    private func swiftFiles(under directoryURL: URL, excluding excludedURL: URL? = nil) -> [String]? {
+    private func swiftFiles(under directoryURL: URL) -> [String]? {
         guard let enumerator = FileManager.default.enumerator(
             at: directoryURL,
             includingPropertiesForKeys: nil
@@ -276,10 +251,6 @@ final class XcodeProjectInvariantTests: XCTestCase {
 
         var swiftFiles: [String] = []
         while let item = enumerator.nextObject() as? URL {
-            if let excludedURL, item.standardizedFileURL == excludedURL.standardizedFileURL {
-                enumerator.skipDescendants()
-                continue
-            }
             guard item.pathExtension == "swift" else { continue }
             swiftFiles.append(String(item.path.dropFirst(directoryURL.path.count + 1)))
         }
@@ -301,7 +272,7 @@ final class XcodeProjectInvariantTests: XCTestCase {
 
     private func objectBody(_ id: String, in section: String, isa: String) throws -> String? {
         let escapedID = NSRegularExpression.escapedPattern(for: id)
-        // Xcode may emit nested dictionaries inline (such as explicitFileTypes = {}).
+        // Xcode may emit nested dictionaries inline (for example, `explicitFileTypes = {};`).
         let pattern = "(?s)(?:^|\\n)\\s*\(escapedID)(?:\\s+/\\*[^\\n]*?\\*/)?\\s*=\\s*\\{((?:[^{}]|\\{[^{}]*\\})*)\\};"
         guard
             let body = try firstCapture(pattern, in: section),

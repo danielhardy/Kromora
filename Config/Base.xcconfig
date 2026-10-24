@@ -10,11 +10,12 @@ ARCHS = arm64
 MARKETING_VERSION = 0.1
 CURRENT_PROJECT_VERSION = 1
 
-// Use the shared source plist for package UTI declarations and the app's usage strings.
-INFOPLIST_FILE = $(SRCROOT)/../App/Info.plist
+// The checked-in plist carries only the keys with no build-setting form: the exported package
+// UTIs and the KromoraGitCommit substitution. Everything else is generated from build settings.
+INFOPLIST_FILE = $(SRCROOT)/Kromora/Info.plist
 
 // Apply the app's declared sandbox capabilities and hardened runtime when signing.
-CODE_SIGN_ENTITLEMENTS = $(SRCROOT)/../App/Kromora.entitlements
+CODE_SIGN_ENTITLEMENTS = $(SRCROOT)/Kromora/Kromora.entitlements
 ENABLE_APP_SANDBOX = YES
 ENABLE_HARDENED_RUNTIME = YES
 
@@ -24,6 +25,8 @@ ASSETCATALOG_COMPILER_APPICON_NAME = Kromora
 INFOPLIST_KEY_LSApplicationCategoryType = public.app-category.photography
 INFOPLIST_KEY_NSHumanReadableCopyright = Copyright © 2026 Tim; Copyright © 2026 Daniel Hardy
 INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO
+INFOPLIST_KEY_NSPrincipalClass = NSApplication
+INFOPLIST_KEY_NSPhotoLibraryUsageDescription = Kromora accesses your Photos library so you can choose photos to import into a Kromora library and save exported images back to Photos.
 KROMORA_GIT_COMMIT =
 
 // The standalone Xcode launcher uses Swift 6; package compiler settings remain in Package.swift.

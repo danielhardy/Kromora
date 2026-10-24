@@ -82,15 +82,15 @@ final class KromoraAboutTests: XCTestCase {
             encoding: .utf8
         )
         let xcodeProject = try String(
-            contentsOf: packageRoot.appendingPathComponent("Xcode/Kromora.xcodeproj/project.pbxproj"),
+            contentsOf: packageRoot.appendingPathComponent("Kromora.xcodeproj/project.pbxproj"),
             encoding: .utf8
         )
         let xcodeConfig = try String(
-            contentsOf: packageRoot.appendingPathComponent("Xcode/Config/Base.xcconfig"),
+            contentsOf: packageRoot.appendingPathComponent("Config/Base.xcconfig"),
             encoding: .utf8
         )
         let appInfoPlist = try String(
-            contentsOf: packageRoot.appendingPathComponent("App/Info.plist"),
+            contentsOf: packageRoot.appendingPathComponent("Kromora/Info.plist"),
             encoding: .utf8
         )
         let buildLauncher = try String(
@@ -104,7 +104,10 @@ final class KromoraAboutTests: XCTestCase {
         XCTAssertFalse(aboutView.contains("Bundled Starter Looks"))
         XCTAssertFalse(aboutView.contains("look.attribution"))
         XCTAssertFalse(aboutView.contains("textSelection(.enabled)"))
-        XCTAssertTrue(xcodeProject.contains("Kromora.icon in Resources"))
+        XCTAssertTrue(xcodeProject.contains("path = Kromora;"))
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: packageRoot.appendingPathComponent("Kromora/Kromora.icon/icon.json").path
+        ))
         XCTAssertTrue(xcodeConfig.contains("ASSETCATALOG_COMPILER_APPICON_NAME = Kromora"))
         XCTAssertTrue(xcodeConfig.contains("KROMORA_GIT_COMMIT ="))
         XCTAssertTrue(appInfoPlist.contains("<string>$(KROMORA_GIT_COMMIT)</string>"))

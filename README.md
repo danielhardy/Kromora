@@ -109,7 +109,7 @@ swift test
 Requirements: macOS 26 (Tahoe) or newer on Apple Silicon to run, Xcode 27 or newer with the macOS 27
 SDK to build, and Swift 6 language mode. `swift run` is useful for iteration but does not include
 the production app's asset catalog or App Sandbox entitlements. Open
-[`Xcode/Kromora.xcodeproj`](Xcode/Kromora.xcodeproj) in Xcode and run the **Kromora** scheme to
+[`Kromora.xcodeproj`](Kromora.xcodeproj) in Xcode and run the **Kromora** scheme to
 exercise the packaged app.
 
 CI's required verification lanes are `scripts/ci-tests.sh fast` and

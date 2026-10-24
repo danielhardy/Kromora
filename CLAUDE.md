@@ -9,8 +9,9 @@ Kromora is a native RAW photo editor (**Swift 6 language mode**, SwiftUI + Core 
 SwiftPM is the primary development build system. All application functionality belongs in
 `KromoraKit`. The SwiftPM `Kromora` executable is the development launcher, and the Xcode
 `Kromora` target is the production launcher. The Xcode project exists only to package `KromoraKit`
-as the signed, sandboxed Mac App Store app. Do not add implementation files to the Xcode target;
-`XcodeProjectInvariantTests` enforces this boundary. Verify the production app with
+as the signed, sandboxed Mac App Store app. Do not add implementation files to the Xcode target. The target's only file source is the synchronized
+`Kromora/` folder, and `XcodeProjectInvariantTests` enforces that boundary by requiring
+`KromoraApp.swift` to be its only Swift file and the project to list no files by hand. Verify the production app with
 `scripts/app-store-build.sh`.
 
 Binary distribution is through the Mac App Store, with TestFlight for prereleases; developers can
@@ -20,7 +21,7 @@ build from source using SwiftPM. We do not distribute DMGs or maintain an update
 
 - Build: `swift build`
 - Run (fast iteration; no sandbox/icon): `swift run`
-- Production app (icon + App Sandbox): run `open Xcode/Kromora.xcodeproj`, then run the
+- Production app (icon + App Sandbox): run `open Kromora.xcodeproj`, then run the
   `Kromora` scheme in Xcode.
 - Tests: `swift test`. CI runs `scripts/ci-tests.sh fast` for deterministic/model/fake-engine tests
   in parallel and `scripts/ci-tests.sh serial` for Core Image/render and AppKit/UI tests serially.
@@ -101,8 +102,10 @@ The package is split so the app's code is testable (`@testable` can't import an 
   `PhotoAnalysisCoordinator` own focused workflows. `ContentView`, `KromoraCommands`,
   `KromoraAppDelegate`, and `KromoraScene` are `public`; keep the rest internal.
 - `Sources/Kromora/` — SwiftPM launcher only (`KromoraApp.swift`).
-- `App/` — production packaging inputs only (`Info.plist`, entitlements, asset catalog, and
-  branding); no Swift implementation.
+- `Kromora/` — production packaging inputs only (`KromoraApp.swift`, `Info.plist`, entitlements,
+  asset catalog, and `Kromora.icon`). It is the Xcode target's file-system synchronized group, so
+  everything in it is built or bundled; keep xcconfigs (`Config/`) and fixtures elsewhere.
+  `Kromora.xcodeproj` is at the repo root; always pass `-project Kromora.xcodeproj` to `xcodebuild`.
 - `Tests/KromoraKitTests/` — XCTest. **Most fixtures are generated, never committed** (`Fixtures.swift`
   builds `.cube` files and orientation-tagged JPEGs into a temp dir). A small
   set of AI-generated photo-intelligence JPEGs (≤ 5 MB total, each ≤ 500 KB) may be committed under

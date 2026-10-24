@@ -41,7 +41,7 @@ sandbox file-grant case; it is exercised by KRMA-1048 for memory, not here.
 
    ```sh
    xcodebuild \
-     -project Xcode/Kromora.xcodeproj \
+     -project Kromora.xcodeproj \
      -scheme Kromora \
      -configuration Release \
      -destination 'platform=macOS,arch=arm64' \

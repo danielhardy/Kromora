@@ -11,12 +11,12 @@ privacy guidance](https://developer.apple.com/help/app-store-connect/manage-app-
 
 | Field | Prepared value |
 | --- | --- |
-| Name | **Kromora** ([generated display name](../Xcode/Config/Base.xcconfig#L21-L25); [bundle name](../App/Info.plist#L5-L13)). |
+| Name | **Kromora** ([generated display name](../Config/Base.xcconfig#L23); [bundle name](../Config/Base.xcconfig#L2)). |
 | Subtitle options | **A focused Mac photo workflow** (28 characters); **RAW editing, made local** (23 characters). Both are within Apple's 30-character limit ([App information](https://developer.apple.com/help/app-store-connect/reference/app-information/app-information)). The wording describes the local photo workflow in the [README](../README.md#L21-L25). |
-| Primary category | **Photography** — recommended and already represented by the Xcode category setting `public.app-category.photography` ([Base.xcconfig](../Xcode/Config/Base.xcconfig#L21-L25)). **Confirm** the matching App Store Connect category before submission; Apple says the App Store Connect primary category should match Xcode ([App information reference](https://developer.apple.com/help/app-store-connect/reference/app-information/app-information)). |
+| Primary category | **Photography** — recommended and already represented by the Xcode category setting `public.app-category.photography` ([Base.xcconfig](../Config/Base.xcconfig#L25)). **Confirm** the matching App Store Connect category before submission; Apple says the App Store Connect primary category should match Xcode ([App information reference](https://developer.apple.com/help/app-store-connect/reference/app-information/app-information)). |
 | Secondary category | Optional; leave unset unless the submitter chooses a relevant second category (**confirm**). Apple permits primary and secondary categories ([Choosing a category](https://developer.apple.com/app-store/categories/)). |
-| Bundle ID | `com.last8.kromora.photo` ([Info.plist](../App/Info.plist#L5-L13)). |
-| Copyright | `Copyright © 2026 Tim; Copyright © 2026 Daniel Hardy` ([Xcode-generated copyright](../Xcode/Config/Base.xcconfig#L21-L26), consistent with the [license notices](../LICENSE#L1-L5)). **Confirm** the names and year for the release. |
+| Bundle ID | `com.last8.kromora.photo` ([Base.xcconfig](../Config/Base.xcconfig#L3)). |
+| Copyright | `Copyright © 2026 Tim; Copyright © 2026 Daniel Hardy` ([Xcode-generated copyright](../Config/Base.xcconfig#L26), consistent with the [license notices](../LICENSE#L1-L5)). **Confirm** the names and year for the release. |
 | Support URL | **Human to provide** — public support page URL. |
 | Privacy Policy URL | **Human to provide** — public policy URL. Apple requires a privacy-policy URL for App Store apps ([App Privacy reference](https://developer.apple.com/help/app-store-connect/reference/app-privacy/)). |
 
@@ -39,7 +39,7 @@ The repository evidence supports this answer for the current macOS app:
   Photos imports are user-selected through PhotosPicker, and Kromora then uses PhotoKit read/write
   authorization to retrieve the selected originals (including iCloud downloads), show Photos
   thumbnails, and optionally deliver exports and place albums ([sandbox audit, protected resources](APP_STORE_SANDBOX_AUDIT.md#L361-L363),
-  [Info.plist usage description](../App/Info.plist#L25-L26)).
+  [Photos usage description build setting](../Config/Base.xcconfig#L29)).
 - Apple's answers cover collection by the app and its third-party partners across platforms. Apple
   says to select “No, we do not collect data from this app” when neither the app nor its partners
   collect data ([App Store Connect privacy guidance](https://developer.apple.com/help/app-store-connect/manage-app-information/manage-app-privacy/)).
@@ -48,16 +48,23 @@ The privacy answer is separate from `PrivacyInfo.xcprivacy`: Apple's manifest do
 describes collected-data types and required-reason APIs as distinct declarations, and its required-
 reason list names iOS, iPadOS, tvOS, visionOS, and watchOS ([privacy-manifest guidance](https://developer.apple.com/documentation/bundleresources/privacy-manifest-files)).
 The current package and Xcode target are macOS-only ([Package.swift](../Package.swift#L119-L147),
-[project target](../Xcode/Kromora.xcodeproj/project.pbxproj#L155-L174)); the sandbox audit likewise
+[project target](../Kromora.xcodeproj/project.pbxproj#L83-L105)); the sandbox audit likewise
 states that App Store Connect data-collection answers reflect actual practices independently of a
 manifest ([sandbox audit](APP_STORE_SANDBOX_AUDIT.md#L375-L385)).
+
+**Decision (KRMA-1095, 2026-10-24): Kromora does not ship a `PrivacyInfo.xcprivacy`.** Apple's
+required-reason declarations still exclude macOS, the app collects no data, and it has no
+third-party SDKs, so a manifest would declare nothing enforceable. Revisit if Apple adds macOS to
+the required-reason list, if an iOS, iPadOS, tvOS, visionOS, or watchOS target is added, or if a
+third-party SDK subject to a manifest requirement is integrated. The audit's reason-code table
+([sandbox audit](APP_STORE_SANDBOX_AUDIT.md#required-reason-api-inventory)) is the starting point.
 
 ## Export compliance
 
 **Proposed answer: No — the app does not use non-exempt encryption. Confirm against the archived
 app and any release-only linked code.** Xcode generates
-`ITSAppUsesNonExemptEncryption = NO` from [`Base.xcconfig`](../Xcode/Config/Base.xcconfig#L21-L26);
-the source [`App/Info.plist`](../App/Info.plist) does not contain that generated key. A source scan
+`ITSAppUsesNonExemptEncryption = NO` from [`Base.xcconfig`](../Config/Base.xcconfig#L27);
+the source [`Info.plist`](../Kromora/Info.plist) does not contain that generated key. A source scan
 for CryptoKit, SHA-256, common encryption APIs, and encryption calls finds SHA-256 digest operations
 used for identity, cache keys, and package integrity ([`PhotoAsset.swift`](../Sources/KromoraKit/Models/PhotoAsset.swift#L76-L85),
 [`RenderCacheKey.swift`](../Sources/KromoraKit/Models/RenderCacheKey.swift#L152-L158),
@@ -116,12 +123,12 @@ has no app-initiated network requests; confirm the release build still has no si
 
 | Entitlement | Purpose |
 | --- | --- |
-| `com.apple.security.app-sandbox` | Runs the distributed app in the macOS App Sandbox ([entitlements](../App/Kromora.entitlements#L1-L6), [audit rationale](APP_STORE_SANDBOX_AUDIT.md#L401-L414)). |
-| `com.apple.security.files.user-selected.read-write` | Reads and writes files or folders the user selects, including imports, exports, and Look files ([entitlements](../App/Kromora.entitlements#L5-L9), [audit rationale](APP_STORE_SANDBOX_AUDIT.md#L401-L414)). |
-| `com.apple.security.files.removable-media.read-only` | Reads imported images from mounted camera cards without writing to the card ([entitlements](../App/Kromora.entitlements#L7-L11), [audit rationale](APP_STORE_SANDBOX_AUDIT.md#L401-L414)). |
-| `com.apple.security.files.bookmarks.app-scope` | Retains access to user-selected external files and folders across launches ([entitlements](../App/Kromora.entitlements#L9-L13), [audit rationale](APP_STORE_SANDBOX_AUDIT.md#L401-L414)). |
-| `com.apple.security.assets.pictures.read-write` | Stores the default library package, default exports, and app-owned Looks under Pictures ([entitlements](../App/Kromora.entitlements#L11-L16), [audit rationale](APP_STORE_SANDBOX_AUDIT.md#L401-L414)). |
-| `com.apple.security.personal-information.photos-library` | Lets PhotoKit authorize, fetch originals for Photos import, and save exports to Photos in the sandbox ([entitlements](../App/Kromora.entitlements#L16-L18)). |
+| `com.apple.security.app-sandbox` | Runs the distributed app in the macOS App Sandbox ([entitlements](../Kromora/Kromora.entitlements#L1-L6), [audit rationale](APP_STORE_SANDBOX_AUDIT.md#L401-L414)). |
+| `com.apple.security.files.user-selected.read-write` | Reads and writes files or folders the user selects, including imports, exports, and Look files ([entitlements](../Kromora/Kromora.entitlements#L5-L9), [audit rationale](APP_STORE_SANDBOX_AUDIT.md#L401-L414)). |
+| `com.apple.security.files.removable-media.read-only` | Reads imported images from mounted camera cards without writing to the card ([entitlements](../Kromora/Kromora.entitlements#L7-L11), [audit rationale](APP_STORE_SANDBOX_AUDIT.md#L401-L414)). |
+| `com.apple.security.files.bookmarks.app-scope` | Retains access to user-selected external files and folders across launches ([entitlements](../Kromora/Kromora.entitlements#L9-L13), [audit rationale](APP_STORE_SANDBOX_AUDIT.md#L401-L414)). |
+| `com.apple.security.assets.pictures.read-write` | Stores the default library package, default exports, and app-owned Looks under Pictures ([entitlements](../Kromora/Kromora.entitlements#L11-L16), [audit rationale](APP_STORE_SANDBOX_AUDIT.md#L401-L414)). |
+| `com.apple.security.personal-information.photos-library` | Lets PhotoKit authorize, fetch originals for Photos import, and save exports to Photos in the sandbox ([entitlements](../Kromora/Kromora.entitlements#L16-L18)). |
 
 ### RAW formats
 
@@ -176,7 +183,7 @@ keeps those files out of commits ([realworldtest rules](../realworldtest/README.
 
 - Enroll or confirm the organization's Apple Developer Program membership and account access.
 - Create/confirm the App ID and App Store Connect app record using bundle ID `com.last8.kromora.photo`
-  ([Info.plist](../App/Info.plist#L5-L13)); complete the support and privacy URL fields above.
+  ([Base.xcconfig](../Config/Base.xcconfig#L2-L3)); complete the support and privacy URL fields above.
 - Configure the distribution signing certificate and provisioning profile for the account. The
   release build uses the Xcode signing and entitlement process ([Packaging](PACKAGING.md#L17-L31)).
 - Archive the Release scheme, validate and upload in Xcode Organizer, then wait for App Store Connect

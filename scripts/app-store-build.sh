@@ -15,7 +15,7 @@ if [[ "$mode" != "verify" && "$mode" != "archive" ]]; then
   exit 2
 fi
 
-project="Xcode/Kromora.xcodeproj"
+project="Kromora.xcodeproj"
 configuration="Release"
 destination="platform=macOS,arch=arm64"
 derived_data_path=".build/xcode"

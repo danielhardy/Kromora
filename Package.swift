@@ -112,7 +112,7 @@ do {
 // Kromora is split into a library plus a thin `@main` executable so the app's own
 // code can be unit-tested: `@testable` cannot import an executable target.
 // Everything of substance lives in KromoraKit; the Kromora target is just the entry
-// point and app delegate. Production packaging inputs live in App/.
+// point and app delegate. Production packaging inputs live in Kromora/.
 let package = Package(
     name: "Kromora",
     platforms: [.macOS(.v26)],
