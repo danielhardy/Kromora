@@ -764,14 +764,14 @@ actor RenderEngine: RenderEngining {
     /// adjustment values applied through the resolved mask. A layer dropping out of the visible
     /// graph still changes the identity, while an exposure/contrast tick on an active layer does
     /// not restart an unchanged semantic detector.
-    struct MaskRecipeIdentity: Encodable {
-        struct Layer: Encodable {
+    struct MaskRecipeIdentity: Encodable, Sendable, Equatable {
+        struct Layer: Encodable, Sendable, Equatable {
             let id: UUID
             let isInverted: Bool
             let components: [Component]
         }
 
-        struct Component: Encodable {
+        struct Component: Encodable, Sendable, Equatable {
             let id: UUID
             let mode: MaskCombineMode
             let isInverted: Bool
@@ -780,11 +780,18 @@ actor RenderEngine: RenderEngining {
 
         let layers: [Layer]
 
+    private var documentIdentityMemo = RenderDocumentIdentityMemo()
         init(_ layers: [LocalAdjustmentLayer]) {
             self.layers = layers.filter(\.hasVisibleLook).map { layer in
                 Layer(
                     id: layer.id,
                     isInverted: layer.isInverted,
+    /// Session identity for `document`, reusing component digests the memo already holds. Not yet
+    /// consumed by the render path (KRMA-1101).
+    func documentIdentity(for document: EditDocument, source: RenderSourceFingerprint) -> RenderDocumentIdentity {
+        documentIdentityMemo.identity(for: document, source: source)
+    }
+
                     components: layer.components.filter(\.isUsable).map { component in
                         Component(
                             id: component.id, mode: component.mode,
