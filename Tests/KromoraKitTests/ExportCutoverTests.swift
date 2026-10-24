@@ -221,7 +221,8 @@ final class ExportCutoverTests: TempDirectoryTestCase {
         let outcome = await coordinator.performBatchExport(
             items, document: document, lut: lut, format: .png, to: try destinationFolder()
         )
-        XCTAssertEqual(outcome, .init(exported: 3, failed: 0, total: 3))
+        // `editedExportCount` counts written items whose document is non-identity; this one is edited.
+        XCTAssertEqual(outcome, .init(exported: 3, failed: 0, total: 3, editedExportCount: 3))
 
         for _ in 0..<3 {
             _ = try await awaitEncodeCompletion(reader, fake, "a batch encode completion") { _ in true }
