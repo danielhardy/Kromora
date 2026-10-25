@@ -28,6 +28,20 @@ public protocol FileDialogProviding {
 }
 
 public extension FileDialogProviding {
+    /// Keeps existing dialog providers source-compatible; AppKit uses its package-aware override.
+    func chooseLibraryPackage(
+        title: String,
+        prompt: String,
+        startingAt directoryURL: URL?
+    ) async -> URL? {
+        await chooseFolder(
+            title: title,
+            prompt: prompt,
+            startingAt: directoryURL,
+            canCreateDirectories: false
+        )
+    }
+
     func chooseImages(startingAt directoryURL: URL?) async -> [URL]? {
         await chooseFiles(
             title: "Open Image",

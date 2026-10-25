@@ -379,6 +379,30 @@ final class ActiveLibrarySelectionTests: XCTestCase {
 
 @MainActor
 final class LibraryPackagePanelConfigurationTests: XCTestCase {
+    private final class ExistingFileDialog: FileDialogProviding {
+        let folder: URL
+        private(set) var canCreateDirectories: Bool?
+
+        init(folder: URL) { self.folder = folder }
+
+        func chooseFiles(
+            title: String,
+            allowedContentTypes: [UTType],
+            allowsMultipleSelection: Bool,
+            startingAt directoryURL: URL?
+        ) async -> [URL]? { nil }
+
+        func chooseFolder(
+            title: String,
+            prompt: String,
+            startingAt directoryURL: URL?,
+            canCreateDirectories: Bool
+        ) async -> URL? {
+            self.canCreateDirectories = canCreateDirectories
+            return folder
+        }
+    }
+
     func testLibraryPackagePanelAcceptsPackagesWithoutChangingFolderPanel() {
         let panel = NSOpenPanel()
         let start = URL(filePath: "/tmp", directoryHint: .isDirectory)
@@ -397,5 +421,19 @@ final class LibraryPackagePanelConfigurationTests: XCTestCase {
         _ = await dialog.chooseFolder(title: "Folder", prompt: "Choose", startingAt: nil, canCreateDirectories: true)
         XCTAssertEqual(sheets.lastOpenPanel?.canChooseFiles, false)
         XCTAssertEqual(sheets.lastOpenPanel?.canChooseDirectories, true)
+    }
+
+    func testExistingFileDialogConformerUsesFolderPickerDefault() async {
+        let folder = URL(filePath: "/tmp/Legacy Library")
+        let dialog = ExistingFileDialog(folder: folder)
+
+        let chosen = await dialog.chooseLibraryPackage(
+            title: "Choose Library",
+            prompt: "Use Library",
+            startingAt: URL(filePath: "/tmp", directoryHint: .isDirectory)
+        )
+
+        XCTAssertEqual(chosen, folder)
+        XCTAssertEqual(dialog.canCreateDirectories, false)
     }
 }
