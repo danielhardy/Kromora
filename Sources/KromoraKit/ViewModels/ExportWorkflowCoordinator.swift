@@ -203,15 +203,23 @@ final class ExportWorkflowCoordinator {
         // Registered with the export coordinator so quit and shutdown see and cancel it.
         let source = request.source
         let document = request.document
+        let lut = request.lut
+        let assetID = destination.exportActiveAssetID
+        let options = OriginalBundleCompanionPolicy.options()
+        let companionName = "\(name)_rendered.\(options.format.fileExtension)"
         do {
-            try await export.runJob(.originalBundle) {
+            try await export.runJob(.originalBundle) { [export] in
                 defer { access.release() }
+                let rendered = try await export.renderEncodedData(
+                    source: source, assetID: assetID, document: document, lut: lut, options: options
+                )
                 try await OriginalSettingsBundle.create(
                     source: source,
                     sourceName: sourceName,
                     document: document,
                     destination: bundleURL,
-                    locationMetadataIncluded: true
+                    locationMetadataIncluded: true,
+                    rendered: .init(filename: companionName, data: rendered)
                 )
             }
             self.destination?.setExportStatus(
@@ -627,6 +635,14 @@ enum ExternalEditorExportPolicy {
             metadata: .preserve,
             location: .exclude
         )
+    }
+}
+
+/// Original + Settings bundle: the rendered companion is a full-size 16-bit TIFF in the canvas
+/// target with its ICC profile embedded. The bundled original and its profile are untouched.
+enum OriginalBundleCompanionPolicy {
+    static func options(space: WorkingSpace = .current) -> ExportOptions {
+        ExportOptions(format: .tiff, colorSpace: space, metadata: .preserve, location: .exclude)
     }
 }
 

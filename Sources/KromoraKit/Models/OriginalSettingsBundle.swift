@@ -14,6 +14,15 @@ enum OriginalSettingsBundle {
         let settingsSHA256: String
         let originalsAreReadOnly: Bool
         let locationMetadataIncluded: Bool
+        /// Present when the bundle carries a rendered companion encoded in the canvas target.
+        let renderedFilename: String?
+        let renderedSHA256: String?
+    }
+
+    /// An encoded rendering of the edit, tagged with its ICC profile by the encoder.
+    struct RenderedCompanion: Sendable {
+        let filename: String
+        let data: Data
     }
 
     enum BundleError: Error, LocalizedError {
@@ -33,14 +42,16 @@ enum OriginalSettingsBundle {
         sourceName: String,
         document: EditDocument,
         destination: URL,
-        locationMetadataIncluded: Bool
+        locationMetadataIncluded: Bool,
+        rendered: RenderedCompanion? = nil
     ) async throws {
         try await createOffActor(
             source: source,
             sourceName: sourceName,
             document: document,
             destination: destination,
-            locationMetadataIncluded: locationMetadataIncluded
+            locationMetadataIncluded: locationMetadataIncluded,
+            rendered: rendered
         )
     }
 
@@ -51,14 +62,16 @@ enum OriginalSettingsBundle {
         sourceName: String,
         document: EditDocument,
         destination: URL,
-        locationMetadataIncluded: Bool
+        locationMetadataIncluded: Bool,
+        rendered: RenderedCompanion?
     ) async throws {
         try createSynchronously(
             source: source,
             sourceName: sourceName,
             document: document,
             destination: destination,
-            locationMetadataIncluded: locationMetadataIncluded
+            locationMetadataIncluded: locationMetadataIncluded,
+            rendered: rendered
         )
     }
 
@@ -67,7 +80,8 @@ enum OriginalSettingsBundle {
         sourceName: String,
         document: EditDocument,
         destination: URL,
-        locationMetadataIncluded: Bool
+        locationMetadataIncluded: Bool,
+        rendered: RenderedCompanion?
     ) throws {
         try Task.checkCancellation()
         let original: Data
@@ -78,13 +92,20 @@ enum OriginalSettingsBundle {
         try Task.checkCancellation()
         let settings = try JSONEncoder.prettySorted.encode(document)
         let originalFilename = safeFilename(sourceName, fallbackExtension: extensionFor(source))
+        let renderedFilename = rendered.map { safeFilename($0.filename, fallbackExtension: "image") }
+        if let renderedFilename, renderedFilename == originalFilename
+            || renderedFilename == settingsFilename || renderedFilename == manifestFilename {
+            throw BundleError.checksumMismatch(renderedFilename)
+        }
         let manifest = Manifest(
             schemaVersion: 1,
             originalFilename: originalFilename,
             originalSHA256: checksum(original),
             settingsSHA256: checksum(settings),
             originalsAreReadOnly: true,
-            locationMetadataIncluded: locationMetadataIncluded
+            locationMetadataIncluded: locationMetadataIncluded,
+            renderedFilename: renderedFilename,
+            renderedSHA256: rendered.map { checksum($0.data) }
         )
         let manifestData = try JSONEncoder.prettySorted.encode(manifest)
 
@@ -95,6 +116,10 @@ enum OriginalSettingsBundle {
         try Task.checkCancellation()
         try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: false)
         try original.write(to: temporary.appendingPathComponent(originalFilename), options: .atomic)
+        if let rendered, let renderedFilename {
+            try Task.checkCancellation()
+            try rendered.data.write(to: temporary.appendingPathComponent(renderedFilename), options: .atomic)
+        }
         try Task.checkCancellation()
         try settings.write(to: temporary.appendingPathComponent(settingsFilename), options: .atomic)
         try Task.checkCancellation()
@@ -127,6 +152,17 @@ enum OriginalSettingsBundle {
         }
         guard checksum(settings) == manifest.settingsSHA256 else {
             throw BundleError.checksumMismatch(settingsFilename)
+        }
+        if let renderedFilename = manifest.renderedFilename {
+            guard let expected = manifest.renderedSHA256,
+                  URL(fileURLWithPath: renderedFilename).lastPathComponent == renderedFilename,
+                  renderedFilename != ".", renderedFilename != ".." else {
+                throw BundleError.checksumMismatch(manifestFilename)
+            }
+            let rendered = try Data(contentsOf: directory.appendingPathComponent(renderedFilename))
+            guard checksum(rendered) == expected else {
+                throw BundleError.checksumMismatch(renderedFilename)
+            }
         }
         return manifest
     }

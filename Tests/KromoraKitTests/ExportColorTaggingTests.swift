@@ -157,4 +157,43 @@ final class ExportColorTaggingTests: XCTestCase {
             XCTAssertGreaterThan(pixel[1], 1.0, "\(name) retains P3 green")
         }
     }
+
+    func testOriginalBundleCompanionIsTaggedAndLeavesOriginalByteIdentical() async throws {
+        let source = try makeP3Source()
+        guard case .url(let sourceURL) = source.backing else { return XCTFail("expected file source") }
+        let originalBytes = try Data(contentsOf: sourceURL)
+        let originalProfile = try profileName(of: sourceURL)
+        for space in WorkingSpace.allCases {
+            let options = OriginalBundleCompanionPolicy.options(space: space)
+            let data = try await RenderEngine().render(RenderRequest(
+                source: source, document: EditDocument(), quality: .export,
+                output: .encoded(format: options.format, quality: CGFloat(options.quality)),
+                space: options.colorSpace, exportOptions: options
+            )).data
+            let bundle = directory.appendingPathComponent("B-\(space.rawValue).\(OriginalSettingsBundle.fileExtension)")
+            try await OriginalSettingsBundle.create(
+                source: source, sourceName: "p3-green.png", document: EditDocument(),
+                destination: bundle, locationMetadataIncluded: true,
+                rendered: .init(filename: "p3-green_rendered.tiff", data: data)
+            )
+            let manifest = try OriginalSettingsBundle.verify(at: bundle)
+            XCTAssertEqual(manifest.renderedFilename, "p3-green_rendered.tiff")
+            let bundledOriginal = bundle.appendingPathComponent("p3-green.png")
+            XCTAssertEqual(try Data(contentsOf: bundledOriginal), originalBytes)
+            XCTAssertEqual(try profileName(of: bundledOriginal), originalProfile)
+
+            let companion = bundle.appendingPathComponent("p3-green_rendered.tiff")
+            XCTAssertEqual(try profileName(of: companion), space.cgColorSpace.name, "companion in \(space)")
+            let pixel = try extendedSRGBPixel(of: companion)
+            if space == .displayP3 {
+                XCTAssertLessThan(pixel[0], -0.05)
+                XCTAssertGreaterThan(pixel[1], 1.0)
+            } else {
+                XCTAssertGreaterThanOrEqual(pixel[0], -0.005)
+                XCTAssertLessThanOrEqual(pixel[1], 1.005)
+            }
+            try Data("x".utf8).write(to: companion)
+            XCTAssertThrowsError(try OriginalSettingsBundle.verify(at: bundle))
+        }
+    }
 }
