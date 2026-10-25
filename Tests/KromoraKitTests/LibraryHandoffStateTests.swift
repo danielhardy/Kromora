@@ -45,8 +45,9 @@ final class LibraryHandoffStateTests: XCTestCase {
         let state = LibraryHandoffState()
         state.runEntrance(
             image: NSImage(size: CGSize(width: 40, height: 30)),
-            from: CGRect(x: 0, y: 0, width: 20, height: 20))
+            from: CGRect(x: 0, y: 0, width: 20, height: 20), inspectorWidth: 280)
         XCTAssertTrue(state.isEntering)
+        XCTAssertTrue(state.isChromeHeld, "the filmstrip waits, with its space reserved, until the photo lands")
         XCTAssertTrue(state.isCanvasHeld, "the flight must be the only copy of the photo on screen")
         state.finish()
         XCTAssertFalse(state.isEntering)
@@ -85,8 +86,33 @@ final class LibraryHandoffStateTests: XCTestCase {
         let state = LibraryHandoffState()
         state.isLeaving = true
         state.isRetractingChrome = true
+        state.inspectorHeldOpen = true
+        state.libraryScrim = 1
+        state.isChromeHeld = true
         state.finish()
         XCTAssertFalse(state.isLeaving)
         XCTAssertFalse(state.isRetractingChrome)
+        XCTAssertFalse(state.inspectorHeldOpen)
+        XCTAssertFalse(state.isChromeHeld)
+        XCTAssertEqual(state.libraryScrim, 0, "no handoff may leave the Library dimmed")
+    }
+
+    func testCanvasFittedRectAccountsForTheCanvasPadding() {
+        // The canvas draws its image 8 pt inside the preview view; the handoff photo must match.
+        let canvas = CGRect(x: 0, y: 0, width: 116, height: 116)
+        XCTAssertEqual(
+            LibraryHandoffState.canvasFittedRect(imageSize: CGSize(width: 50, height: 50), in: canvas),
+            CGRect(x: 8, y: 8, width: 100, height: 100))
+    }
+
+    func testFinalCanvasFrameTakesTheInspectorsWidthFromTheTrailingEdge() {
+        let held = CGRect(x: 0, y: 40, width: 1000, height: 600)
+        XCTAssertEqual(
+            LibraryHandoffState.finalCanvasFrame(held: held, inspectorWidth: 280),
+            CGRect(x: 0, y: 40, width: 720, height: 600))
+        XCTAssertEqual(LibraryHandoffState.finalCanvasFrame(held: held, inspectorWidth: 0), held)
+        XCTAssertEqual(
+            LibraryHandoffState.finalCanvasFrame(held: held, inspectorWidth: 5_000).width, 1,
+            "a wider-than-window inspector must not produce a negative frame")
     }
 }

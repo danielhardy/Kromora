@@ -79,6 +79,34 @@ final class EditorCanvasViewportTests: TempDirectoryTestCase {
         XCTAssertEqual(view.effectiveViewportSize.height, 554, accuracy: 0.001)
     }
 
+    /// KRMA-1073: a handoff photo flies to the canvas while the chrome is hidden. If the hidden
+    /// chrome gave its space back, the canvas would grow and then shrink again when the chrome
+    /// arrived, so the photo would reverse direction.
+    func testReservedChromeSpaceKeepsTheCanvasAtItsFinalSizeWhileHidden() throws {
+        let model = makeAppViewModel(engine: FakeRenderEngine())
+        model.previewSurface.present(
+            CIImage(color: .white).cropped(to: CGRect(x: 0, y: 0, width: 800, height: 600)))
+        func scene(hidden: Bool, reserves: Bool) -> some View {
+            EditorCanvasLayout(isChromeHidden: hidden, reservesChromeSpace: reserves, reduceMotion: true) { size in
+                PreviewView(viewModel: model, surfaceHeight: size.height)
+            } chrome: {
+                Color.gray.frame(height: 130)
+            }
+        }
+        let hosting = NSHostingView(rootView: scene(hidden: false, reserves: false))
+        hosting.frame = CGRect(x: 0, y: 0, width: 900, height: 700)
+        hosting.layoutSubtreeIfNeeded()
+        hosting.layoutSubtreeIfNeeded()
+        let view = try XCTUnwrap(findPreview(in: hosting))
+        let final = view.effectiveViewportSize.height
+        hosting.rootView = scene(hidden: true, reserves: true)
+        hosting.layoutSubtreeIfNeeded()
+        XCTAssertEqual(view.effectiveViewportSize.height, final, accuracy: 0.001)
+        hosting.rootView = scene(hidden: true, reserves: false)
+        hosting.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(view.effectiveViewportSize.height, final, "crop mode still gives the space back")
+    }
+
     private func findPreview(in view: NSView) -> PreviewMTKView? {
         if let preview = view as? PreviewMTKView { return preview }
         return view.subviews.compactMap { findPreview(in: $0) }.first

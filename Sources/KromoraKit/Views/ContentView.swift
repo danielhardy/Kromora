@@ -231,6 +231,7 @@ public struct ContentView: View {
                 get: {
                     canvasState.isCropToolActive
                         || (inspectorState.isPresented && !viewModel.libraryHandoff.isEntering)
+                        || viewModel.libraryHandoff.inspectorHeldOpen
                 },
                 set: { isPresented in
                     // Crop owns the inspector for the duration of the mode.
@@ -241,6 +242,9 @@ public struct ContentView: View {
             )
         ) {
             InfoInspectorView(viewModel: viewModel, inspectorState: inspectorState)
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: {
+                    if $0 > 0 { viewModel.libraryHandoff.inspectorWidth = $0 }
+                }
                 .inspectorColumnWidth(min: 240, ideal: 280, max: 360)
         }
     }
@@ -257,12 +261,16 @@ public struct ContentView: View {
         // Set before the open so the workspace swap is instant and the editor mounts with its
         // chrome already held back, rather than flashing it for a frame.
         handoff.isEntering = flies
+        handoff.isChromeHeld = flies
         viewModel.openLibraryImageForEditing(assetID: assetID)
         guard flies, viewModel.navigation.isEdit, let cell, let image else {
             handoff.isEntering = false
+            handoff.isChromeHeld = false
             return
         }
-        handoff.runEntrance(image: image, from: cell)
+        handoff.runEntrance(
+            image: image, from: cell,
+            inspectorWidth: inspectorState.isPresented ? handoff.inspectorWidth : 0)
     }
 
     private func startReturnHandoff() {
@@ -289,10 +297,16 @@ public struct ContentView: View {
             libraryLayer
                 .allowsHitTesting(!coversLibrary)
                 .accessibilityHidden(coversLibrary)
+            KromoraTheme.canvasBackground
+                .opacity(handoff.libraryScrim)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
             if coversLibrary {
                 editorLayer
-                    .background(KromoraTheme.windowBackground)
-                    .opacity(handoff.isCanvasHeld ? 0 : 1)
+                    .background(
+                        handoff.isCanvasHeld ? KromoraTheme.canvasBackground : KromoraTheme.windowBackground
+                    )
+                    .opacity(handoff.isEditorHeld ? 0 : 1)
                     .transition(.opacity)
             }
         }
@@ -375,8 +389,11 @@ public struct ContentView: View {
             VStack(spacing: 0) {
                 EditorCanvasLayout(
                     isChromeHidden: canvasState.isCropToolActive
-                        || viewModel.libraryHandoff.isEntering
+                        || viewModel.libraryHandoff.isChromeHeld
                                 || viewModel.libraryHandoff.isRetractingChrome,
+                    reservesChromeSpace: !canvasState.isCropToolActive
+                        && (viewModel.libraryHandoff.isChromeHeld
+                            || viewModel.libraryHandoff.isRetractingChrome),
                     reduceMotion: accessibilityReduceMotion
                 ) { surfaceSize in
                     PreviewView(viewModel: viewModel, surfaceHeight: surfaceSize.height)

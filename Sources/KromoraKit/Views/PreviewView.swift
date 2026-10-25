@@ -260,7 +260,7 @@ struct PreviewView: View {
             ZStack {
                     if showsCanvas {
                         canvasSurface(previewSurface, showsMaskOverlay: true)
-                            .padding(8)
+                            .padding(LibraryHandoffState.canvasContentInset)
                     }
 
                     if canvasState.isCropToolActive, viewModel.sourceSize != .zero {

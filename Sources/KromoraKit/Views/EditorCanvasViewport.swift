@@ -33,6 +33,9 @@ struct EditorCanvasViewport<Content: View>: View, @MainActor Animatable {
 /// presentation and the canvas viewport change; neither insertion nor removal drives layout.
 struct EditorCanvasLayout<Canvas: View, Chrome: View>: View {
     var isChromeHidden: Bool
+    /// Keeps the canvas at its with-chrome size while the chrome is hidden, so a handoff photo can
+    /// fly to its final frame and the chrome arrives around it without resizing the canvas.
+    var reservesChromeSpace = false
     var reduceMotion: Bool
     @ViewBuilder var canvas: (CGSize) -> Canvas
     @ViewBuilder var chrome: () -> Chrome
@@ -43,7 +46,7 @@ struct EditorCanvasLayout<Canvas: View, Chrome: View>: View {
             ZStack(alignment: .bottom) {
                 EditorCanvasViewport(
                     surfaceSize: geometry.size,
-                    bottomInset: isChromeHidden ? 0 : chromeHeight
+                    bottomInset: isChromeHidden && !reservesChromeSpace ? 0 : chromeHeight
                 ) { _ in
                     canvas(geometry.size)
                 }

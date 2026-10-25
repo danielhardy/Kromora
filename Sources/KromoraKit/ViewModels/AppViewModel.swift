@@ -3027,6 +3027,10 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
             // Release the editor inspector before composing the Library viewport. If it closes
             // after the workspace changes, SwiftUI first lays the grid out beside the inspector
             // and then animates its width, rebuilding the grid rows during the return.
+            // A flying return holds the inspector open until its swap (`inspectorHeldOpen`), so the
+            // photo contracts from the canvas the user was looking at; the view clears the hold
+            // immediately when there is no flight.
+            if navigation.isEdit { libraryHandoff.inspectorHeldOpen = inspectorState.isPresented }
             inspectorState.isPresented = false
             // Keep the editor mounted over the Library until the return handoff decides how to
             // leave; the view clears this immediately when there is no flight.
