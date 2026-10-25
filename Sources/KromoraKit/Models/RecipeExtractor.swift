@@ -18,7 +18,7 @@ import simd
 ///   3. Lanczos-scale the RAW render down to JPG dimensions
 ///   4. Box-blur the JPG to compute an edge mask (sharpening contaminates
 ///      chroma at high frequencies)
-///   5. Render all three to RGBA8 byte buffers in sRGB
+///   5. Render all three to RGBA8 byte buffers in the authoring space
 ///   6. Find integer-pixel alignment via brute-force luma cross-correlation on
 ///      a center patch
 ///   7. Sample N random pixels; keep ones in smooth (low-edge) regions
@@ -53,6 +53,9 @@ struct RecipeExtractor {
         /// Largest relative aspect-ratio difference tolerated between the RAW
         /// and the JPG before the pair is rejected as mismatched.
         var aspectTolerance: CGFloat = 0.01
+        /// The space the pair is compared in and the cube is stamped with. Preparation keeps sRGB
+        /// (`WorkingSpace.current`); P3 fits against a P3 render of both images.
+        var authoringSpace: WorkingSpace = .current
     }
 
     enum ExtractorError: LocalizedError {
@@ -83,6 +86,8 @@ struct RecipeExtractor {
         let cube: [SIMD3<Float>]   // size³ entries, R fastest
         let size: Int
         let report: RecipeReport
+        /// The space `cube` was fit in; the Look must be stamped and interpolated in it.
+        var authoringSpace: WorkingSpace = .sRGB
     }
 
     /// Run the full extraction pipeline. Safe to call from a background task.
@@ -99,18 +104,11 @@ struct RecipeExtractor {
 
         let context = RenderEngineResources.makeOneShotContext(preferMetal: true)
 
-        // PINNED to .sRGB, deliberately NOT WorkingSpace.current.
-        //
-        // A derived .cube encodes a transform FROM the baseline-render space TO the JPEG's, and is
-        // later applied by CubeLUT.makeFilter in WorkingSpace.current. For the derived LUT to be
-        // self-consistent, the space it is FIT in must equal the space it is APPLIED in. Both are
-        // sRGB today, so this holds trivially.
-        //
-        // If WorkingSpace.current ever moves to P3, do NOT simply thread it through here: the
-        // neutral RAW baseline this fits against is itself an sRGB-default render. Either re-fit
-        // derive in P3, or stamp the build space onto the CubeLUT so apply can match.
-        // See WorkingSpace and `docs/ENGINEERING_GUIDE.md`.
-        let sRGB = WorkingSpace.sRGB.cgColorSpace
+        // The fit space IS the authoring space the result is stamped with, so the cube is applied
+        // in the space it was fit in. Both images are color-matched into it when rendered to the
+        // measurement buffers below; the neutral RAW baseline is a color-managed `CIImage`, not an
+        // sRGB-encoded one, so no stage is pinned to sRGB.
+        let fitSpace = options.authoringSpace.cgColorSpace
 
         func checkCancelled() throws {
             if isCancelled?() == true { throw CancellationError() }
@@ -176,13 +174,13 @@ struct RecipeExtractor {
             .cropped(to: outputRect)
 
         // 5. Render all three to RGBA8 byte buffers
-        guard let rawBuf = render(rawTranslated, to: outputRect, context: context, colorSpace: sRGB) else {
+        guard let rawBuf = render(rawTranslated, to: outputRect, context: context, colorSpace: fitSpace) else {
             throw ExtractorError.renderFailed("neutral RAW")
         }
-        guard let jpgBuf = render(jpgTranslated, to: outputRect, context: context, colorSpace: sRGB) else {
+        guard let jpgBuf = render(jpgTranslated, to: outputRect, context: context, colorSpace: fitSpace) else {
             throw ExtractorError.renderFailed("JPG")
         }
-        guard let blurBuf = render(jpgBlurred, to: outputRect, context: context, colorSpace: sRGB) else {
+        guard let blurBuf = render(jpgBlurred, to: outputRect, context: context, colorSpace: fitSpace) else {
             throw ExtractorError.renderFailed("blurred JPG")
         }
 
@@ -290,7 +288,9 @@ struct RecipeExtractor {
         try checkCancelled()
         progress?(1.0, "Done")
 
-        return Result(cube: cube, size: cubeN, report: report)
+        return Result(
+            cube: cube, size: cubeN, report: report, authoringSpace: options.authoringSpace
+        )
     }
 
     // MARK: - Sampling

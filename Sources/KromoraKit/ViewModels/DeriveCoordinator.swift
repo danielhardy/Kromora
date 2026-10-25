@@ -61,16 +61,22 @@ final class DeriveCoordinator {
     /// Parent of the per-operation `KromoraDerive-*` directories; tests inject a private one.
     @ObservationIgnored private let scratchRoot: URL
 
+    /// - Parameter authoringSpace: the space the production extractor fits in and stamps. Defaults to
+    ///   `WorkingSpace.current`; a scripted `extractor` reports its own space in its `Result`.
     init(
-        extractor: @escaping Extractor = { raw, jpg, progress, isCancelled in
-            try RecipeExtractor.derive(
-                rawURL: raw, jpgURL: jpg, progress: progress, isCancelled: isCancelled
-            )
-        },
+        extractor: Extractor? = nil,
+        authoringSpace: WorkingSpace = .current,
         sheets: any SheetPresenting = AppKitSheetPresenter(),
         scratchRoot: URL = FileManager.default.temporaryDirectory
     ) {
-        self.extractor = extractor
+        self.extractor = extractor ?? { raw, jpg, progress, isCancelled in
+            var options = RecipeExtractor.Options()
+            options.authoringSpace = authoringSpace
+            return try RecipeExtractor.derive(
+                rawURL: raw, jpgURL: jpg, options: options,
+                progress: progress, isCancelled: isCancelled
+            )
+        }
         self.scratchRoot = scratchRoot
         self.sheets = sheets
     }
@@ -145,9 +151,9 @@ final class DeriveCoordinator {
     /// anything that persists a document, after the OS temp sweep that path can be reused by an
     /// unrelated file, so a stale reference resolves to the *wrong* LUT rather than to none.
     nonisolated static func makeDerivedLUT(
-        cube: [SIMD3<Float>], size: Int, name: String
+        cube: [SIMD3<Float>], size: Int, name: String, authoringSpace: WorkingSpace = .sRGB
     ) -> CubeLUT {
-        CubeLUT(cube: cube, size: size, name: name, category: "Derived")
+        CubeLUT(cube: cube, size: size, name: name, category: "Derived", authoringSpace: authoringSpace)
     }
 
     /// Derive a LUT from a (RAW, JPG) pair. The result lives in `derivedLUT`
@@ -191,10 +197,16 @@ final class DeriveCoordinator {
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
                 scratchDirectory = directory
                 let scratch = directory.appendingPathComponent("\(name).cube")
-                try CubeLUT.write(cube: result.cube, size: result.size, title: name, to: scratch)
+                try CubeLUT.write(
+                    cube: result.cube, size: result.size, title: name,
+                    authoringSpace: result.authoringSpace, to: scratch
+                )
                 try Task.checkCancellation()
 
-                let lut = Self.makeDerivedLUT(cube: result.cube, size: result.size, name: name)
+                let lut = Self.makeDerivedLUT(
+                    cube: result.cube, size: result.size, name: name,
+                    authoringSpace: result.authoringSpace
+                )
                 outcome = .finished(lut: lut, report: result.report, scratch: scratch)
             } catch is CancellationError {
                 if let scratchDirectory { try? FileManager.default.removeItem(at: scratchDirectory) }

@@ -34,27 +34,69 @@ GPU-backed `CIColorCubeWithColorSpace`.
 was accepted on 2026-10-25. This is the implementation target for KRMA-1117/KRMA-1121; current
 shipping output stays sRGB until the final flip.
 
-Every parsed Look has an authoring space. Apply its table in that space, independently of the
-Display P3 canvas/export target. Honor recognized authoring-space comment headers; assume sRGB for
-unstamped imports and reject unknown or malformed declarations. The implementation ticket must
-document the exact header spelling when introduced. Include authoring space in filter/cache identity.
+Every parsed Look has an authoring space. Its table is interpolated in that space
+(`CIColorCubeWithColorSpace.inputColorSpace`), independently of the canvas/export target, and the
+space is part of the Look's content hash and of `LUTFilterCache` keys.
 
-Regenerate Kromora's bundled Looks from defined source procedures for P3, review their appearance,
-and update provenance/manifest notes. After the flip, Save as Look and Derive must actually sample
-or fit in P3 and stamp P3; Derive's neutral baseline and sampled buffers must agree with the fit.
-Changing only a header on sRGB table values does not satisfy this requirement. Preparation keeps
-sRGB sampling/stamps and existing bundled output active until the P3 assets are switched in together.
+### Authoring-space header
 
-Do not rewrite or re-fit imported Looks automatically. Preserve their bytes when embedding them.
-An sRGB Look may constrain colors outside its bounded domain even in a P3 editor; honoring its
-space preserves its interpretation, not every wide-gamut input color. No authoring-space setting is
-required in the UI. Existing prerelease libraries/edits may be reset instead of migrated, but source
-originals and imported files are not deleted by this policy change.
+A `.cube` file declares its authoring space with one comment line before the table:
+
+```
+# KROMORA_AUTHORING_SPACE: displayP3
+```
+
+- The key is exactly `KROMORA_AUTHORING_SPACE` (case-sensitive), followed by `:` and a value of
+  `sRGB` or `displayP3` (case-sensitive). Surrounding whitespace is ignored.
+- It is an ordinary `#` comment, so other tools ignore it. A comment that merely resembles it
+  (different case or key) is just a comment.
+- A file with no header is interpreted as **sRGB**. That is a documented import assumption, not
+  knowledge of the author's intent.
+- An unknown value, a missing value or colon, a key with a suffix (`KROMORA_AUTHORING_SPACE_X`), a
+  duplicate declaration, or a declaration after table data fails parsing with an error.
+- Kromora writes the header on every cube it saves (Save as Look/LUT and derived scratch/saved files).
+
+Imported Looks are never rewritten or re-fit; embedded package copies keep their exact bytes and
+header.
+
+### Bounded gamut of sRGB Looks
+
+An sRGB-authored cube has a bounded `[0, 1]` sRGB domain. Applied in a Display P3 editor it keeps
+its sRGB meaning, but colors outside the sRGB gamut are clamped into that domain by the table, so an
+sRGB Look is not a gamut-preserving P3 Look. Correct interpretation preserves the Look's intended
+effect, not every wide-gamut input color.
+
+### P3 starter assets
+
+`Sources/KromoraKit/Resources/StarterLooksP3` holds a prepared, **inactive** Display P3 set of the
+13 starter Looks (same ids, names and categories; `BundledLookLibrary.preparedP3ResourceSubdirectory`).
+KRMA-1121 activates it. The active set in `StarterLooks` is unchanged by preparation.
+
+They are regenerated, not retagged, by `scripts/generate-p3-starter-looks.swift generate`: each
+Look's sRGB control lattice is the defined source parameter, resampled onto a 17³ Display P3 lattice
+through an explicit sRGB↔P3 conversion (with bounded linear extrapolation outside the sRGB domain),
+and stamped `displayP3`. `scripts/generate-p3-starter-looks.swift review <out.png>` renders an A/B
+contact sheet (neutral ramp, primaries/secondaries, skin, sky, foliage) of the sRGB Look versus its
+P3 counterpart and prints the maximum 8-bit difference. Visual review (2026-10-25): neutrals agree
+within 4/255 for every Look (asserted by `BundledP3LookTests`); in-gamut colors match closely, while
+fully saturated primaries differ most (up to about 18/255, in Warm Slide, Evening Cinema, Muted Film
+and Honey Negative) because the P3 lattice samples a nonlinear conversion. The film-Look generator
+(KRMA-1103) should emit and stamp the same authoring space.
+
+### Save as Look and Derive
+
+Save as Look and Derive sample or fit in one explicit authoring space and stamp it:
+`LookLUTConverter.convert(space:)`, `LookSaveCoordinator(authoringSpace:)`, and
+`RecipeExtractor.Options.authoringSpace` / `DeriveCoordinator(authoringSpace:)`. The default is
+`WorkingSpace.current`, still sRGB during preparation; the neutral RAW baseline, JPG, edge mask and
+measurement buffers of Derive are all color-matched into the chosen space, and the result is stamped
+with it. The flip changes only the default. Existing prerelease libraries and edits may be reset
+instead of migrated; source originals and imported files are not deleted by this policy.
 
 ## Save and derive
 
 Save as Look/LUT exports the supported global portion of the current value document as a 33³ cube
-in the current working color space. The confirmation sheet names omitted source-dependent or
+in the chosen authoring space (sRGB until the P3 flip). The confirmation sheet names omitted source-dependent or
 spatial stages, including RAW develop, crop/rotation, masking, Texture, Clarity, Dehaze, vignette,
 and grain; the output does not claim pixel-identical reproduction of those stages.
 

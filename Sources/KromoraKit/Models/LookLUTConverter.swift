@@ -151,7 +151,7 @@ struct LookLUTConversion: Sendable {
             "Kromora Look export",
             "Support matrix version: \(supportMatrix.version)",
             "LUT size: \(size)^3",
-            "Working color space: \(workingSpace.rawValue)",
+            "Authoring color space: \(workingSpace.rawValue) (sampled and interpolated in this space)",
             "DOMAIN_MIN: 0.0 0.0 0.0",
             "DOMAIN_MAX: 1.0 1.0 1.0",
             "Quality policy: maximum absolute channel error across a 5^3 off-lattice probe grid; accepted when error is at or below the tolerance.",
@@ -165,7 +165,9 @@ struct LookLUTConversion: Sendable {
         if let message = supportMatrix.omissionMessage {
             comments.append("Notice: \(message)")
         }
-        return CubeLUT.cubeFileContents(cube: cube, size: size, title: title, comments: comments)
+        return CubeLUT.cubeFileContents(
+            cube: cube, size: size, title: title, authoringSpace: workingSpace, comments: comments
+        )
     }
 }
 
@@ -199,6 +201,8 @@ enum LookLUTConverter {
         document: EditDocument,
         lut: CubeLUT?,
         size: Int = defaultSize,
+        // The authoring space the cube is sampled in and stamped with. Preparation keeps sRGB
+        // (`WorkingSpace.current`); a caller passes `.displayP3` to sample and stamp P3.
         space: WorkingSpace = .current,
         tolerance: Double = LUTConversionVerification.defaultTolerance
     ) throws -> LookLUTConversion {
@@ -258,7 +262,7 @@ enum LookLUTConverter {
         )
         let cube = try renderRGB(output, count: size * size * size, context: context, space: space)
 
-        let generated = CubeLUT(cube: cube, size: size, name: "verification")
+        let generated = CubeLUT(cube: cube, size: size, name: "verification", authoringSpace: space)
         let verification = try verify(
             document: sampledDocument,
             originalLUT: lut,

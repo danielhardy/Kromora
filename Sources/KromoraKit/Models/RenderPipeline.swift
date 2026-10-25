@@ -232,7 +232,7 @@ enum RenderPipeline {
         spatialReferenceExtent: CGRect? = nil
     ) -> CIImage {
         // The Look is the base look: every slider below adjusts its output.
-        let looked = applyLUT(document.lut, lut: lut, to: developed, space: space, cache: lutCache)
+        let looked = applyLUT(document.lut, lut: lut, to: developed, cache: lutCache)
         let lightAdjusted = applyLight(document.light, to: looked, cache: toneCurveCache)
         let colorAdjusted = applyColor(document.color, to: lightAdjusted)
         // Vignette is deliberately held until after crop because it is a final composition effect
@@ -1638,12 +1638,11 @@ enum RenderPipeline {
         _ settings: LUTSettings,
         lut: CubeLUT?,
         to image: CIImage,
-        space: WorkingSpace,
         cache: LUTFilterCache?
     ) -> CIImage {
         guard !settings.isIdentity, let lut else { return image }
 
-        let cubeFilter = cache?.filter(for: lut, space: space) ?? lut.makeFilter(space: space)
+        let cubeFilter = cache?.filter(for: lut) ?? lut.makeFilter()
         return lut.apply(to: image, intensity: settings.intensity, using: cubeFilter) ?? image
     }
 }

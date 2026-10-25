@@ -1,16 +1,16 @@
 import Foundation
 import CoreImage
 
-/// Reusable `CIColorCubeWithColorSpace` filters, keyed by LUT, its content, **and** colour space.
+/// Reusable `CIColorCubeWithColorSpace` filters, keyed by LUT, its content, **and** authoring space.
 ///
 /// Building one of these is not free: `CubeLUT.makeFilter` hands Core Image the whole flattened cube,
 /// which for a 65³ LUT is 65³ × 4 floats ≈ **4.4 MB**. Rebuilding it per render — and a slider drag is
 /// many renders — is the kind of cost that does not show up in a screenshot but does show up in a
 /// scrub.
 ///
-/// **The key includes the colour space**, because the cube is interpolated in it: the same LUT in sRGB
-/// and in Display P3 are two different filters, and returning one for the other would silently break
-/// the lockstep the `WorkingSpace` seam exists to guarantee.
+/// **The key includes the cube's authoring space**, because the cube is interpolated in it: the same
+/// table stamped sRGB and stamped Display P3 are two different filters, and returning one for the
+/// other would silently apply the wrong colour meaning. The canvas/export target is not part of it.
 ///
 /// **Deliberately not `Sendable`.** `CIFilter` is a mutable reference type and using a cached one means
 /// writing `inputImage` to it, so a shared instance across concurrent renders would be a data race.
@@ -48,16 +48,16 @@ final class LUTFilterCache {
         self.capacity = max(1, capacity)
     }
 
-    /// The cube filter for `lut` in `space`, built on first use and reused after.
+    /// The cube filter for `lut` in its authoring space, built on first use and reused after.
     ///
     /// Returns `nil` only if Core Image cannot create the filter at all, which `CubeLUT.makeFilter`
     /// already treats as a failure. A `nil` is not cached — a transient failure should not poison the
     /// entry for the rest of the session.
-    func filter(for lut: CubeLUT, space: WorkingSpace = .current) -> CIFilter? {
+    func filter(for lut: CubeLUT) -> CIFilter? {
         var interval = KromoraObservability.begin(.cache, quality: .preview)
         defer { interval.end() }
 
-        let key = Key(lut: lut.lutID, contentHash: lut.contentHash, space: space)
+        let key = Key(lut: lut.lutID, contentHash: lut.contentHash, space: lut.authoringSpace)
 
         if let cached = filters[key] {
             hitCount += 1
@@ -67,7 +67,7 @@ final class LUTFilterCache {
         }
         missCount += 1
         KromoraObservability.event(.cacheMiss, quality: .preview, detail: "layer=lutFilter")
-        guard let made = lut.makeFilter(space: space) else { return nil }
+        guard let made = lut.makeFilter() else { return nil }
 
         filters[key] = made
         usage.append(key)

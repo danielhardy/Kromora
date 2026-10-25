@@ -12,8 +12,7 @@ import simd
 /// asserted where it lives. See the redirection block below.
 ///
 /// What remains is the seam as a *value* — that `.current` resolves, that every case names a real
-/// system space, that the cube interpolates in the space it is handed, and that derive stays pinned
-/// to sRGB regardless.
+/// system space, that the cube interpolates in its authoring space, and that derive defaults to the current space.
 final class WorkingSpaceTests: TempDirectoryTestCase {
 
     // MARK: - The seam itself
@@ -55,32 +54,22 @@ final class WorkingSpaceTests: TempDirectoryTestCase {
         // A cube that isn't the identity will interpolate differently in a wider space, so the two
         // renders must differ. If makeFilter ignored its argument they would be identical.
         let source = try gradientImage(width: 32, height: 32)
-        let lut = try warmLUT()
-
-        let inSRGB = try XCTUnwrap(lut.apply(to: source, space: .sRGB))
-        let inP3 = try XCTUnwrap(lut.apply(to: source, space: .displayP3))
+        let inSRGB = try XCTUnwrap(TestImages.warmLUT(authoringSpace: .sRGB).apply(to: source))
+        let inP3 = try XCTUnwrap(TestImages.warmLUT(authoringSpace: .displayP3).apply(to: source))
 
         // Rasterize both through the SAME space so only the interpolation differs.
         let a = try Pixels.bytes(of: inSRGB, space: .sRGB)
         let b = try Pixels.bytes(of: inP3, space: .sRGB)
 
-        assertPixelsDiffer(a, b, "the cube's interpolation space should affect the result")
+        assertPixelsDiffer(a, b, "the cube's authoring space should affect the result")
     }
 
-    // MARK: - Derive stays pinned
+    // MARK: - Derive fits in the space it stamps
 
-    /// `RecipeExtractor` must fit in sRGB regardless of `WorkingSpace.current`, because the space a
-    /// cube is fit in has to equal the space it is applied in. This asserts the contract that makes
-    /// that reasoning valid today; if `.current` ever moves, this test is the tripwire.
-    func testDeriveFitSpaceEqualsApplySpace() {
-        XCTAssertEqual(
-            WorkingSpace.current, .sRGB,
-            """
-            RecipeExtractor is pinned to .sRGB. If WorkingSpace.current has moved, derived LUTs are \
-            now fit in a different space than they are applied in and will mis-map. Re-fit derive, \
-            or stamp the build space onto CubeLUT — see WorkingSpace and PHASE2_SPEC §4.4.
-            """
-        )
+    /// Preparation keeps sRGB sampling and stamps; the derive/Save defaults follow `current`.
+    func testPreparationDefaultsStaySRGB() {
+        XCTAssertEqual(WorkingSpace.current, .sRGB)
+        XCTAssertEqual(RecipeExtractor.Options().authoringSpace, .sRGB)
     }
 
     // The histogram used to be a third `ImageProcessor` colour site and was pinned here. Step 6 moved
@@ -95,7 +84,5 @@ final class WorkingSpaceTests: TempDirectoryTestCase {
     private func gradientImage(width: Int, height: Int) throws -> CIImage {
         try TestImages.gradient(width: width, height: height)
     }
-
-    private func warmLUT() throws -> CubeLUT { TestImages.warmLUT() }
 
 }

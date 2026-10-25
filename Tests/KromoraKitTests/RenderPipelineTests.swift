@@ -875,8 +875,7 @@ final class RenderPipelineTests: TempDirectoryTestCase {
         combined.lut = settings
 
         let developed = try decodedSource()
-        let space = WorkingSpace.current
-        let cubeFilter = lut.makeFilter(space: space)
+        let cubeFilter = lut.makeFilter()
         let looked = try XCTUnwrap(lut.apply(to: developed, intensity: 1, using: cubeFilter))
         let expected = RenderPipeline.buildGradedImage(developed: looked, document: sliders, lut: nil)
         let oldOrder = try XCTUnwrap(lut.apply(
@@ -897,7 +896,7 @@ final class RenderPipelineTests: TempDirectoryTestCase {
         let document = EditDocument(lut: LUTSettings(lutID: lut.lutID, intensity: 0.6))
         let developed = try decodedSource()
         let direct = try XCTUnwrap(lut.apply(
-            to: developed, intensity: 0.6, using: lut.makeFilter(space: .current)))
+            to: developed, intensity: 0.6, using: lut.makeFilter()))
 
         assertPixelsEqual(try Pixels.bytes(of: try build(document, lut: lut)),
                           try Pixels.bytes(of: direct),
@@ -1292,18 +1291,18 @@ final class RenderPipelineTests: TempDirectoryTestCase {
 
     // MARK: - Colour space
 
-    /// The interpolation space has to reach the cube. If `buildImage` dropped its `space` argument,
-    /// these two would be identical.
-    func testWorkingSpaceReachesTheCube() throws {
-        let lut = TestImages.warmLUT()
-        let document = EditDocument(lut: LUTSettings(lutID: lut.lutID, intensity: 1))
+    /// The cube is interpolated in its authoring space: two tables with the same numbers and different
+    /// stamps must render differently, while the render target's space leaves the cube alone.
+    func testAuthoringSpaceReachesTheCube() throws {
+        let srgbLUT = TestImages.warmLUT(authoringSpace: .sRGB)
+        let p3LUT = TestImages.warmLUT(authoringSpace: .displayP3)
+        let document = EditDocument(lut: LUTSettings(lutID: srgbLUT.lutID, intensity: 1))
 
         // Rasterize both through the SAME space, so only the interpolation differs.
-        let inSRGB = try Pixels.bytes(of: try build(document, lut: lut, space: .sRGB), space: .sRGB)
-        let inP3 = try Pixels.bytes(
-            of: try build(document, lut: lut, space: .displayP3), space: .sRGB)
+        let inSRGB = try Pixels.bytes(of: try build(document, lut: srgbLUT, space: .sRGB), space: .sRGB)
+        let inP3 = try Pixels.bytes(of: try build(document, lut: p3LUT, space: .sRGB), space: .sRGB)
 
-        assertPixelsDiffer(inSRGB, inP3, "the cube's interpolation space should change the result")
+        assertPixelsDiffer(inSRGB, inP3, "the cube's authoring space should change the result")
     }
 
     // MARK: - Source backing

@@ -21,12 +21,12 @@ import CoreGraphics
 /// its embedded profile into the `CIContext` working space, exactly as before. This seam governs how
 /// the cube is interpolated and how pixels are written out — not how they are read in.
 ///
-/// **`RecipeExtractor` is deliberately pinned to `.sRGB`, not `.current`.** A derived `.cube` encodes
-/// a transform *from* the baseline-render space *to* the JPEG's, and is later applied by
-/// `CubeLUT.makeFilter` in `WorkingSpace.current`. For the derived LUT to be self-consistent, the
-/// space it is fit in must equal the space it is applied in. Both are sRGB today. Enabling P3 means
-/// re-fitting derive in P3 *or* stamping the build space onto the `CubeLUT` — never blindly threading
-/// `.current` into the sampler, whose neutral RAW baseline is itself an sRGB-default render.
+/// **A Look's interpolation space is its authoring space, not this type's `current`.** A cube is
+/// stamped (`CubeLUT.authoringSpaceHeaderKey`) and applied in the space it was written in, so an sRGB
+/// Look keeps its meaning in a P3 pipeline. Save as Look (`LookLUTConverter`) and Derive
+/// (`RecipeExtractor.Options.authoringSpace`) sample, fit, and stamp one explicit space, which is
+/// `current` until the P3 flip and is threaded through the neutral baseline, measurement buffers and
+/// fit rather than pinned.
 ///
 /// See `docs/ENGINEERING_GUIDE.md`
 enum WorkingSpace: String, Codable, Sendable, Equatable, CaseIterable {
@@ -44,7 +44,7 @@ enum WorkingSpace: String, Codable, Sendable, Equatable, CaseIterable {
         }
     }
 
-    /// The space the app renders and exports in. Flipping this is the whole P3 switch — but read the
-    /// derive caveat above first; it is a prerequisite, not a footnote.
+    /// The space the app renders and exports in. Flipping this moves the canvas/export target and the
+    /// default authoring space of newly saved and derived Looks.
     static let current: WorkingSpace = .sRGB
 }

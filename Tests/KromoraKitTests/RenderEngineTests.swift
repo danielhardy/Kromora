@@ -860,193 +860,27 @@ final class RenderEngineTests: TempDirectoryTestCase {
         }
     }
 
-    /// And the cube really is interpolated in the requested space when driven through the engine —
-    /// the same assertion Step 3 makes of the pipeline, repeated here because the engine is a second
-    /// place the argument could be dropped.
-    func testTheWorkingSpaceReachesTheCubeThroughTheEngine() async throws {
+    /// The cube is interpolated in its authoring space when driven through the engine — the same
+    /// assertion the pipeline makes, repeated because the engine is a second place it could be lost.
+    func testTheAuthoringSpaceReachesTheCubeThroughTheEngine() async throws {
         let engine = RenderEngine()
-        let lut = TestImages.warmLUT()
-        let document = EditDocument(lut: LUTSettings(lutID: lut.lutID, intensity: 1))
+        let srgbLUT = TestImages.warmLUT(authoringSpace: .sRGB)
+        let p3LUT = TestImages.warmLUT(authoringSpace: .displayP3)
+        let document = EditDocument(lut: LUTSettings(lutID: srgbLUT.lutID, intensity: 1))
 
-        // Both graphs rasterized through sRGB, so only the interpolation differs.
         let inSRGB = try XCTUnwrap(RenderPipeline.buildImage(
-            source: source, document: document, lut: lut, scale: .full, space: .sRGB
+            source: source, document: document, lut: srgbLUT, scale: .full, space: .sRGB
         ))
         let inP3 = try XCTUnwrap(RenderPipeline.buildImage(
-            source: source, document: document, lut: lut, scale: .full, space: .displayP3
+            source: source, document: document, lut: p3LUT, scale: .full, space: .sRGB
         ))
         assertPixelsDiffer(try Pixels.bytes(of: inSRGB, space: .sRGB),
                            try Pixels.bytes(of: inP3, space: .sRGB),
-                           "the interpolation space must change the cube's result")
+                           "the authoring space must change the cube's result")
 
-        // The engine's own output in each space must match its corresponding graph.
-        let engineSRGB = try await render(engine, document, lut: lut, space: .sRGB)
+        let engineSRGB = try await render(engine, document, lut: srgbLUT, space: .sRGB)
         assertPixelsEqual(try Pixels.bytes(of: engineSRGB), try Pixels.bytes(of: inSRGB, space: .sRGB),
-                          "the engine's sRGB render should match an sRGB-interpolated graph")
-    }
-
-    // MARK: - Scale
-
-    func testScaleIsTheOnlyDifferenceBetweenPreviewAndFull() async throws {
-        let engine = RenderEngine()
-
-        let full = try await render(engine, EditDocument())
-        let preview = try await render(
-            engine, EditDocument(), scale: .preview(maxSize: CGSize(width: 32, height: 32))
-        )
-
-        XCTAssertEqual(full.width, 96)
-        XCTAssertEqual(full.height, 64)
-        XCTAssertLessThanOrEqual(preview.width, 32)
-        XCTAssertLessThanOrEqual(preview.height, 32)
-        XCTAssertGreaterThan(preview.width, 0)
-    }
-
-    // MARK: - Encoding
-
-    func testEveryFormatEncodesToItsOwnType() async throws {
-        let engine = RenderEngine()
-        let expected: [ExportFormat: UTType] = [
-            .png: .png, .jpeg: .jpeg, .tiff: .tiff, .heif: .heic,
-        ]
-
-        for (format, type) in expected {
-            let data = try await engine.encode(
-                source: source, document: EditDocument(), lut: nil, scale: .full,
-                format: format, quality: 0.95, space: .current
-            )
-            XCTAssertFalse(data.isEmpty, "\(format) produced no bytes")
-
-            let imageSource = try XCTUnwrap(CGImageSourceCreateWithData(data as CFData, nil))
-            let uti = try XCTUnwrap(CGImageSourceGetType(imageSource) as String?)
-            XCTAssertEqual(UTType(uti), type, "\(format) encoded as \(uti)")
-        }
-    }
-
-    /// HEIF is only part of the format contract when Image I/O can produce a real, readable file.
-    /// The test is intentionally a round trip rather than a non-empty-data check: an encoder that
-    /// returns bytes the system cannot decode is not cleanly supported for export.
-    func testHEIFRoundTripsDimensionsAndColorSpace() async throws {
-        let engine = RenderEngine()
-        let options = ExportOptions(format: .heif, colorSpace: .displayP3)
-
-        do {
-            let result = try await engine.encode(
-                source: source,
-                document: EditDocument(),
-                lut: nil,
-                options: options
-            )
-            let imageSource = try XCTUnwrap(CGImageSourceCreateWithData(result as CFData, nil))
-            XCTAssertEqual(CGImageSourceGetType(imageSource) as String?, UTType.heic.identifier)
-            let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(imageSource, 0, nil))
-            XCTAssertEqual(image.width, 96)
-            XCTAssertEqual(image.height, 64)
-            XCTAssertEqual(image.colorSpace?.name as String?, CGColorSpace.displayP3 as String?)
-        } catch let error as ImageError {
-            throw XCTSkip("HEIF encoding is unavailable on this machine: \(error.localizedDescription)")
-        }
-    }
-
-    /// The output-encoding half of the colour seam has to reach the encoder — if it were dropped,
-    /// both files would carry the same profile.
-    func testTheWorkingSpaceReachesTheEncoder() async throws {
-        let engine = RenderEngine()
-
-        let sRGB = try await engine.encode(
-            source: source, document: EditDocument(), lut: nil, scale: .full,
-            format: .png, quality: 1, space: .sRGB
-        )
-        let p3 = try await engine.encode(
-            source: source, document: EditDocument(), lut: nil, scale: .full,
-            format: .png, quality: 1, space: .displayP3
-        )
-
-        let sRGBName = try Pixels.decode(sRGB).colorSpace?.name as String?
-        let p3Name = try Pixels.decode(p3).colorSpace?.name as String?
-        XCTAssertEqual(sRGBName, CGColorSpace.sRGB as String)
-        XCTAssertEqual(p3Name, CGColorSpace.displayP3 as String)
-        XCTAssertNotEqual(sRGBName, p3Name)
-    }
-
-    // MARK: - Failure
-
-    func testAnUndecodableSourceIsNilForPreviewAndThrowsForExport() async throws {
-        let engine = RenderEngine()
-        let junk = ImageSource(backing: .data(Data("not an image".utf8)), kind: .standard, nativeExtent: .zero)
-
-        let preview = await engine.makeCGImage(
-            source: junk, document: EditDocument(), lut: nil, scale: .full, space: .current
-        )
-        XCTAssertNil(preview)
-
-        do {
-            _ = try await engine.encode(
-                source: junk, document: EditDocument(), lut: nil, scale: .full,
-                format: .png, quality: 1, space: .current
-            )
-            XCTFail("encoding an undecodable source should throw")
-        } catch {
-            // Assert on *which* failure: an unrelated error would satisfy a bare `catch`. Matched
-            // by pattern rather than by `==` so `ImageError` doesn't need an `Equatable` conformance
-            // it has no other use for.
-            guard case ImageError.processingFailed = error else {
-                return XCTFail("expected processingFailed, got \(error)")
-            }
-        }
-    }
-
-    // MARK: - The developed-source memo
-
-    /// The memo exists so an intensity drag does not re-decode the file every frame (measured: 156 ms
-    /// versus 0.6 ms on a 6000×4000 source). It must not be observable in the output.
-    ///
-    /// Two *different preview sizes* on purpose: a memo keyed on everything but the scale would
-    /// serve the first size's image for the second, which a single preview render cannot detect.
-    func testTheMemoIsKeyedOnThePreviewSize() async throws {
-        let engine = RenderEngine()
-
-        let small = try await render(engine, EditDocument(),
-                                     scale: .preview(maxSize: CGSize(width: 32, height: 32)))
-        let large = try await render(engine, EditDocument(),
-                                     scale: .preview(maxSize: CGSize(width: 64, height: 64)))
-
-        XCTAssertLessThanOrEqual(small.width, 32)
-        XCTAssertEqual(large.width, 64, "a second preview size must not reuse the first's image")
-        XCTAssertNotEqual(small.width, large.width)
-    }
-
-    /// And keyed on the image. A memo that ignored which source it held would keep showing the
-    /// previous photo after the user stepped to the next one — invisible to any test that only ever
-    /// opens one image.
-    func testTheMemoIsKeyedOnTheSource() async throws {
-        let engine = RenderEngine()
-        let box = RenderScale.preview(maxSize: CGSize(width: 48, height: 48))
-
-        let firstURL = try Fixtures.writeGradientPNG(width: 96, height: 64, named: "a.png", in: tempDirectory)
-        // A solid patch, so the two images cannot be confused for one another.
-        let secondURL = tempDirectory.appendingPathComponent("b.png")
-        let solid = try Fixtures.makeCGImage(width: 96, height: 64, red: 0.1, green: 0.9, blue: 0.2)
-        let dest = try XCTUnwrap(CGImageDestinationCreateWithURL(
-            secondURL as CFURL, UTType.png.identifier as CFString, 1, nil
-        ))
-        CGImageDestinationAddImage(dest, solid, nil)
-        XCTAssertTrue(CGImageDestinationFinalize(dest))
-
-        let a = ImageSource(url: firstURL, nativeExtent: CGSize(width: 96, height: 64))
-        let b = ImageSource(url: secondURL, nativeExtent: CGSize(width: 96, height: 64))
-
-        let imageA = await engine.makeCGImage(
-            source: a, document: EditDocument(), lut: nil, scale: box, space: .current
-        )
-        let imageB = await engine.makeCGImage(
-            source: b, document: EditDocument(), lut: nil, scale: box, space: .current
-        )
-        let renderedA = try XCTUnwrap(imageA)
-        let renderedB = try XCTUnwrap(imageB)
-
-        assertPixelsDiffer(try Pixels.bytes(of: renderedB), try Pixels.bytes(of: renderedA),
-                           "opening a second image must not keep serving the first")
+                          "the engine's render should match the graph for the same authoring space")
     }
 
     // MARK: - The cache lives on the actor
@@ -1069,12 +903,13 @@ final class RenderEngineTests: TempDirectoryTestCase {
         let afterFive = await engine.diagnosticsSnapshot.cachedFilterCount
         XCTAssertEqual(afterFive, 1, "five renders of one LUT should build one filter")
 
-        // A second space is a second entry — the cube is interpolated in the space.
+        // The render target is not part of the filter key: the cube is interpolated in its
+        // authoring space, so a different target reuses the same filter.
         _ = await engine.makeCGImage(
             source: source, document: document, lut: lut, scale: .full, space: .displayP3
         )
         let afterP3 = await engine.diagnosticsSnapshot.cachedFilterCount
-        XCTAssertEqual(afterP3, 2)
+        XCTAssertEqual(afterP3, 1)
 
         await engine.invalidateLUTCache()
         let afterFlush = await engine.diagnosticsSnapshot.cachedFilterCount

@@ -28,7 +28,15 @@ final class LookSaveCoordinator {
     @ObservationIgnored private var conversionTask: Task<Void, Never>?
     @ObservationIgnored private let sheets: any SheetPresenting
 
-    init(sheets: any SheetPresenting = AppKitSheetPresenter()) {
+    /// The space Save as Look samples in and stamps. Preparation keeps `WorkingSpace.current` (sRGB);
+    /// tests and the P3 flip choose `.displayP3`.
+    @ObservationIgnored let authoringSpace: WorkingSpace
+
+    init(
+        authoringSpace: WorkingSpace = .current,
+        sheets: any SheetPresenting = AppKitSheetPresenter()
+    ) {
+        self.authoringSpace = authoringSpace
         self.sheets = sheets
     }
 
@@ -43,9 +51,9 @@ final class LookSaveCoordinator {
         self.isSheetPresented = true
         self.isConverting = true
 
-        conversionTask = Task { [document, lut] in
+        conversionTask = Task { [document, lut, authoringSpace] in
             do {
-                let result = try await Self.convert(document: document, lut: lut)
+                let result = try await Self.convert(document: document, lut: lut, space: authoringSpace)
                 guard !Task.isCancelled else { return }
                 self.conversion = result
                 self.isConverting = false
@@ -60,8 +68,10 @@ final class LookSaveCoordinator {
         }
     }
 
-    @concurrent private static func convert(document: EditDocument, lut: CubeLUT?) async throws -> LookLUTConversion {
-        try LookLUTConverter.convert(document: document, lut: lut)
+    @concurrent private static func convert(
+        document: EditDocument, lut: CubeLUT?, space: WorkingSpace
+    ) async throws -> LookLUTConversion {
+        try LookLUTConverter.convert(document: document, lut: lut, space: space)
     }
 
     func dismiss() {

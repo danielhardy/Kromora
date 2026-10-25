@@ -90,7 +90,7 @@ final class DeriveInvarianceTests: XCTestCase {
 
         // How RecipeExtractor fits it: the neutral RAW render, cube applied, sampled in sRGB.
         let neutral = try XCTUnwrap(ImageDecoder.developRAWNeutral(at: derived.raw))
-        let viaDeriveBaseline = try XCTUnwrap(derived.lut.apply(to: neutral, space: .sRGB))
+        let viaDeriveBaseline = try XCTUnwrap(derived.lut.apply(to: neutral))
 
         // How the app applies it: the whole document, through the pipeline, at full resolution.
         let document = EditDocument(lut: LUTSettings(lutID: derived.lut.lutID, intensity: 1))

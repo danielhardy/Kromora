@@ -133,7 +133,9 @@ enum TestImages {
 
     /// A cube that is emphatically not the identity: pushes red up and blue down, so both "the LUT
     /// ran" and "it interpolated in the right space" are visible.
-    static func warmLUT(size: Int = 4, name: String = "warm") -> CubeLUT {
+    static func warmLUT(
+        size: Int = 4, name: String = "warm", authoringSpace: WorkingSpace = .sRGB
+    ) -> CubeLUT {
         var cube = [SIMD3<Float>]()
         let denom = Float(size - 1)
         for b in 0..<size {
@@ -147,7 +149,7 @@ enum TestImages {
                 }
             }
         }
-        return CubeLUT(cube: cube, size: size, name: name)
+        return CubeLUT(cube: cube, size: size, name: name, authoringSpace: authoringSpace)
     }
 
     /// An identity cube — applying it must change nothing, which is what makes it useful for

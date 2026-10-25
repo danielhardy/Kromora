@@ -509,7 +509,7 @@ extension RenderEngining {
 /// Added in Step 4 **alongside** the old `ImageProcessor` path, which Steps 5–7 then cut over leaf by
 /// leaf — preview, export, histogram — until nothing was left of it to delete. `RecipeExtractor`
 /// keeps its own context by design (§3): it sits outside this stack, never imports `EditDocument`,
-/// and samples in a space pinned to sRGB regardless of `WorkingSpace.current`. The render stack now
+/// and samples in the authoring space it is asked to stamp (`RecipeExtractor.Options.authoringSpace`). The render stack now
 /// has one actor-owned processing context and one explicitly main-actor-owned presentation context;
 /// `RenderStackTests` continues to protect against accidental context proliferation.
 actor RenderEngine: RenderEngining {

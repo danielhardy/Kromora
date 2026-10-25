@@ -51,6 +51,11 @@ struct CubeLUT: Identifiable, Hashable, Sendable {
     let url: URL
     let size: Int
     let source: LUTSource
+    /// The space this table's values are written in and interpolated in
+    /// (`CIColorCubeWithColorSpace.inputColorSpace`). It is Look metadata: it comes from the file's
+    /// authoring-space header (sRGB when unstamped) or from the sampler that built the table, and is
+    /// independent of the canvas/export target. See `authoringSpaceHeaderKey`.
+    let authoringSpace: WorkingSpace
     private let tableData: Data  // flattened RGBARGBA... float32 for Core Image
 
     /// SHA-256 of the `.cube` file bytes this table was parsed from (of the table itself for an
@@ -59,10 +64,47 @@ struct CubeLUT: Identifiable, Hashable, Sendable {
     /// once while parsing, off the main actor; reading it is free.
     let contentHash: String
 
-    /// Includes table contents as well as the stable LUT ID, so replacing a file in place cannot
-    /// reuse a final preview merely because the path stayed the same.
+    /// Includes table contents and authoring space as well as the stable LUT ID, so replacing a file
+    /// in place cannot reuse a final preview merely because the path stayed the same.
     var cacheFingerprint: String {
-        contentHash + ":" + id
+        contentHash + ":" + authoringSpace.rawValue + ":" + id
+    }
+
+    // MARK: - Authoring-space header
+
+    /// The comment key that stamps a `.cube` file with its authoring space:
+    ///
+    ///     # KROMORA_AUTHORING_SPACE: displayP3
+    ///
+    /// It is an ordinary `#` comment, so other tools ignore it. The key is case-sensitive; the value
+    /// is a `WorkingSpace` raw value, `sRGB` or `displayP3`. The line must precede the table, appear
+    /// at most once, and carries a recognized value, otherwise parsing fails. A file without it is
+    /// interpreted as sRGB.
+    static let authoringSpaceHeaderKey = "KROMORA_AUTHORING_SPACE"
+
+    /// The header line that stamps `space`, without a trailing newline.
+    static func authoringSpaceHeader(_ space: WorkingSpace) -> String {
+        "# \(authoringSpaceHeaderKey): \(space.rawValue)"
+    }
+
+    /// The declaration in one trimmed comment line, `nil` when the line is not a declaration.
+    /// Throws when the line names the key but its value is missing or unrecognized.
+    private static func authoringSpaceDeclaration(inComment trimmed: String) throws -> WorkingSpace? {
+        let body = trimmed.drop(while: { $0 == "#" || $0 == " " || $0 == "\t" })
+        guard body.hasPrefix(authoringSpaceHeaderKey) else { return nil }
+        let rest = body.dropFirst(authoringSpaceHeaderKey.count)
+            .drop(while: { $0 == " " || $0 == "\t" })
+        guard rest.first == ":" else {
+            throw LUTError.invalidFormat("malformed \(authoringSpaceHeaderKey) declaration; expected `\(authoringSpaceHeaderKey): <space>`")
+        }
+        let value = rest.dropFirst().trimmingCharacters(in: .whitespaces)
+        guard let space = WorkingSpace(rawValue: value) else {
+            let known = WorkingSpace.allCases.map(\.rawValue).joined(separator: ", ")
+            throw LUTError.invalidFormat(
+                "unknown authoring space “\(value)” in \(authoringSpaceHeaderKey); use one of \(known)"
+            )
+        }
+        return space
     }
 
     // MARK: - Hashable
@@ -81,7 +123,8 @@ struct CubeLUT: Identifiable, Hashable, Sendable {
         name: String,
         category: String = "Derived",
         sourceURL: URL? = nil,
-        source: LUTSource = .derived
+        source: LUTSource = .derived,
+        authoringSpace: WorkingSpace = .sRGB
     ) {
         precondition(cube.count == size * size * size, "cube count must equal size^3")
         self.size = size
@@ -89,6 +132,7 @@ struct CubeLUT: Identifiable, Hashable, Sendable {
         self.category = category
         self.url = sourceURL ?? URL(fileURLWithPath: "/dev/null")
         self.source = source
+        self.authoringSpace = authoringSpace
 
         var floats = [Float]()
         floats.reserveCapacity(cube.count * 4)
@@ -100,9 +144,13 @@ struct CubeLUT: Identifiable, Hashable, Sendable {
         }
         let table = floats.withUnsafeBufferPointer { Data(buffer: $0) }
         self.tableData = table
-        self.contentHash = RenderCacheHash.digest(table)
+        // The same numbers in another space are another Look. sRGB hashes the bare table so existing
+        // identities do not move.
+        let identity = authoringSpace == .sRGB
+            ? table : table + Data("space:\(authoringSpace.rawValue)".utf8)
+        self.contentHash = RenderCacheHash.digest(identity)
         // The table has to be built before the ID, because the ID is made from it.
-        self.id = sourceURL.map(Self.canonicalPath) ?? Self.derivedID(name: name, table: table)
+        self.id = sourceURL.map(Self.canonicalPath) ?? Self.derivedID(name: name, table: identity)
     }
 
     /// The identity of a LUT that exists only in memory: `derived://<name>/<hash of the table>`.
@@ -179,6 +227,7 @@ struct CubeLUT: Identifiable, Hashable, Sendable {
         var normalizationScale: SIMD3<Float> = .one
         var sawSize = false
         var sawTableData = false
+        var declaredSpace: WorkingSpace?
         var metadataBytes = 0
         var metadataLines = 0
         var lineNumber = 0
@@ -215,6 +264,17 @@ struct CubeLUT: Identifiable, Hashable, Sendable {
                 : rawLine
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty || trimmed.hasPrefix("#") {
+                if trimmed.hasPrefix("#"), let space = try Self.authoringSpaceDeclaration(inComment: trimmed) {
+                    guard !sawTableData else {
+                        throw LUTError.invalidFormat(
+                            "\(Self.authoringSpaceHeaderKey) must appear before table data (line \(lineNumber))"
+                        )
+                    }
+                    guard declaredSpace == nil else {
+                        throw LUTError.invalidFormat("\(Self.authoringSpaceHeaderKey) appears more than once")
+                    }
+                    declaredSpace = space
+                }
                 try accountForMetadata(line)
                 continue
             }
@@ -363,6 +423,7 @@ struct CubeLUT: Identifiable, Hashable, Sendable {
         }
 
         self.size = lutSize
+        self.authoringSpace = declaredSpace ?? .sRGB
 
         self.tableData = floats.withUnsafeBufferPointer { buffer in
             Data(buffer: buffer)
@@ -411,20 +472,19 @@ struct CubeLUT: Identifiable, Hashable, Sendable {
 
     /// Creates a CIColorCube filter configured with this LUT.
     ///
-    /// `space` is the **LUT interpolation space** — one half of the colour seam. It must stay in
-    /// lockstep with the output encoding space; both default to `WorkingSpace.current` so they cannot
-    /// drift apart. See `WorkingSpace`.
-    func makeFilter(space: WorkingSpace = .current) -> CIFilter? {
+    /// The cube is interpolated in its **authoring space**, never in the canvas/export target: an
+    /// sRGB Look keeps its sRGB meaning in a Display P3 pipeline. See `WorkingSpace`.
+    func makeFilter() -> CIFilter? {
         guard let filter = CIFilter(name: "CIColorCubeWithColorSpace") else { return nil }
         filter.setValue(size, forKey: "inputCubeDimension")
         filter.setValue(tableData as NSData, forKey: "inputCubeData")
-        filter.setValue(space.cgColorSpace, forKey: "inputColorSpace")
+        filter.setValue(authoringSpace.cgColorSpace, forKey: "inputColorSpace")
         return filter
     }
 
     /// Apply this LUT to a CIImage and return the result.
-    func apply(to image: CIImage, space: WorkingSpace = .current) -> CIImage? {
-        guard let filter = makeFilter(space: space) else { return nil }
+    func apply(to image: CIImage) -> CIImage? {
+        guard let filter = makeFilter() else { return nil }
         filter.setValue(image, forKey: kCIInputImageKey)
         return filter.outputImage
     }
@@ -438,14 +498,14 @@ struct CubeLUT: Identifiable, Hashable, Sendable {
     /// remap), so the dissolve is a clean opacity blend.
     ///
     /// Note the crossfade happens in the `CIContext`'s working space (≈ linear light), **not** in
-    /// `space` — that argument governs cube interpolation only. Measured: a to-black LUT over white
+    /// the authoring space, which governs cube interpolation only. Measured: a to-black LUT over white
     /// reads 188 at intensity 0.5, where a perceptual mix would read ~128. See `docs/ENGINEERING_GUIDE.md`
     /// §8.1; changing it later is a visible look change for every sub-100% render.
-    func apply(to image: CIImage, intensity: Double, space: WorkingSpace = .current) -> CIImage? {
+    func apply(to image: CIImage, intensity: Double) -> CIImage? {
         let t = max(0, min(1, intensity))
         // Build nothing when the LUT contributes nothing — a 65³ cube is ~4.4 MB to hand over.
         if t <= 0 { return image }
-        return apply(to: image, intensity: t, using: makeFilter(space: space))
+        return apply(to: image, intensity: t, using: makeFilter())
     }
 
     /// The shared body of the two `apply` overloads, taking a cube filter rather than making one.
@@ -478,12 +538,14 @@ struct CubeLUT: Identifiable, Hashable, Sendable {
         cube: [SIMD3<Float>],
         size: Int,
         title: String,
+        authoringSpace: WorkingSpace = .sRGB,
         comments: [String] = []
     ) -> String {
         precondition(cube.count == size * size * size, "cube count must equal size^3")
         var lines: [String] = []
         lines.reserveCapacity(cube.count + comments.count + 6)
         lines.append("# Generated by Kromora")
+        lines.append(authoringSpaceHeader(authoringSpace))
         for comment in comments {
             lines.append(contentsOf: comment.components(separatedBy: .newlines).map {
                 "# \($0.replacingOccurrences(of: "#", with: ""))"
@@ -510,9 +572,10 @@ struct CubeLUT: Identifiable, Hashable, Sendable {
         cube: [SIMD3<Float>],
         size: Int,
         title: String,
+        authoringSpace: WorkingSpace = .sRGB,
         to url: URL
     ) throws {
-        let text = cubeFileContents(cube: cube, size: size, title: title)
+        let text = cubeFileContents(cube: cube, size: size, title: title, authoringSpace: authoringSpace)
         try text.write(to: url, atomically: true, encoding: .utf8)
     }
 

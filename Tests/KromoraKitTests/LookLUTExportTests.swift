@@ -50,7 +50,8 @@ final class LookLUTExportTests: TempDirectoryTestCase {
         XCTAssertTrue(conversion.verification.passed)
         let text = conversion.cubeText(title: "Identity Look")
         XCTAssertTrue(text.contains("LUT_3D_SIZE 2"))
-        XCTAssertTrue(text.contains("Working color space: sRGB"))
+        XCTAssertTrue(text.contains(CubeLUT.authoringSpaceHeader(.sRGB)))
+        XCTAssertTrue(text.contains("Authoring color space: sRGB"))
         XCTAssertTrue(text.contains("DOMAIN_MIN: 0.0 0.0 0.0"))
         XCTAssertNotNil(try? CubeLUT(url: Fixtures.writeCube(text, named: "identity-look.cube", in: tempDirectory)))
     }

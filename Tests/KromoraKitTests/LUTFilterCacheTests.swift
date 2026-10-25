@@ -5,7 +5,7 @@ import CoreImage
 /// The cache exists because handing Core Image a 65³ cube — ~4.4 MB — on every frame of a slider drag
 /// is waste. What has to be true for it to be safe:
 ///
-/// - the key includes the colour space, or the `WorkingSpace` seam is silently broken;
+/// - the key includes the cube's authoring space, or a P3 Look is applied as sRGB;
 /// - a reused `CIFilter` does not retroactively change images already built from it;
 /// - it does not grow without bound, because each entry is megabytes.
 final class LUTFilterCacheTests: XCTestCase {
@@ -16,8 +16,8 @@ final class LUTFilterCacheTests: XCTestCase {
         let cache = LUTFilterCache()
         let lut = TestImages.warmLUT()
 
-        let first = cache.filter(for: lut, space: .sRGB)
-        let second = cache.filter(for: lut, space: .sRGB)
+        let first = cache.filter(for: lut)
+        let second = cache.filter(for: lut)
 
         XCTAssertNotNil(first)
         XCTAssertTrue(first === second, "a cache hit should hand back the same instance")
@@ -26,15 +26,12 @@ final class LUTFilterCacheTests: XCTestCase {
         XCTAssertEqual(cache.statistics.misses, 1)
     }
 
-    /// The cube is interpolated *in* the colour space, so the same LUT in two spaces is two different
-    /// filters. Keying on the LUT alone would hand back an sRGB cube for a P3 render and quietly
-    /// break the lockstep that `WorkingSpace` exists to guarantee.
+    /// The cube is interpolated *in* its authoring space, so the same table stamped in two spaces is two
+    /// different filters. Keying on the LUT alone would hand back an sRGB cube for a P3 Look.
     func testTheColourSpaceIsPartOfTheKey() throws {
         let cache = LUTFilterCache()
-        let lut = TestImages.warmLUT()
-
-        let sRGB = try XCTUnwrap(cache.filter(for: lut, space: .sRGB))
-        let p3 = try XCTUnwrap(cache.filter(for: lut, space: .displayP3))
+        let sRGB = try XCTUnwrap(cache.filter(for: TestImages.warmLUT(authoringSpace: .sRGB)))
+        let p3 = try XCTUnwrap(cache.filter(for: TestImages.warmLUT(authoringSpace: .displayP3)))
 
         XCTAssertFalse(sRGB === p3, "two spaces must not share one filter")
         XCTAssertEqual(cache.count, 2)
