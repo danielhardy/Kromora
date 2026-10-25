@@ -28,6 +28,26 @@ build from source using SwiftPM. We do not distribute DMGs or maintain an update
   RAW-fixture and benchmark methods are opt-in through `scripts/ci-tests.sh optional`, then CI
   builds and verifies the packaged app.
 
+### Test policy for agents (inner loop vs. gates)
+
+The suite is ~2,900 tests and the lane audit alone needs a full test-target build, so **never run bare
+`swift test` or a whole `ci-tests.sh` lane to check an edit**. Run tests in proportion to the change:
+
+1. **While iterating:** `scripts/test-affected.sh`. It maps changed files (vs. `HEAD`, or `--base main`) to
+   the covering suites and runs `swift test --filter` on just those. Use `--list` to preview, `--wide` to
+   also include suites that only mention a changed type, or name suites/methods directly
+   (`scripts/test-affected.sh CropTests/testFoo`). When a test fails, rerun only that
+   `Suite/testMethod` until it passes; do not rerun the affected set each time.
+2. **Before reporting done:** the affected set once, plus `scripts/ci-tests.sh fast` only when you changed
+   shared models, coordinators, or persistence, and `scripts/ci-tests.sh serial` only when you touched
+   render, Core Image, Metal, or AppKit/UI code. Docs, scripts, and `.dg/` changes need no Swift tests.
+3. **Leave to CI:** the full suite, `identity`, `optional`, and `warning-gate`, unless the ticket asks for them
+   or you changed the thing they guard (relocation/identity code for `identity`).
+
+Run a lane or the affected set once per change set, not after every small edit. If
+`test-affected.sh` finds no covering suite for a new source file, that is a signal to add a focused test
+for it, not to fall back to the full suite.
+
 CI runs on GitHub Actions' arm64 `xcode-27` image with Xcode 27 and the macOS 27 SDK. That hosted
 image is currently in preview. The package, app bundle, and distributable still target **macOS 26
 (Tahoe) on Apple Silicon**; keep product API usage compatible with that deployment floor. Do not add
