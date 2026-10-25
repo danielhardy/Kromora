@@ -44,12 +44,23 @@ done
 
 # XCTestCase subclasses declared in a test file.
 suites_in_file() {
-    grep -hoE '^[[:space:]]*(@MainActor[[:space:]]+)?(final[[:space:]]+)?class[[:space:]]+[A-Za-z0-9_]+[[:space:]]*:[[:space:]]*XCTestCase' "$1" \
+    grep -hoE '^[[:space:]]*(@MainActor[[:space:]]+)?(final[[:space:]]+)?class[[:space:]]+[A-Za-z0-9_]+[[:space:]]*:[[:space:]]*(XCTestCase|TempDirectoryTestCase)' "$1" \
         | sed -E 's/.*class[[:space:]]+([A-Za-z0-9_]+).*/\1/' || true
 }
 
 is_selectable_test_file() {
     [[ "$1" == $tests_dir/*.swift && "$1" != *Benchmark* && "$1" != *Performance* ]]
+}
+
+is_selectable_suite() {
+    [[ "$1" != TempDirectoryTestCase && "$1" != *Benchmark* && "$1" != *Performance* ]]
+}
+
+add_suites_in_file() {
+    local suite
+    for suite in "${(@f)$(suites_in_file "$1")}"; do
+        is_selectable_suite "$suite" && selected+=("$suite")
+    done
 }
 
 typeset -aU selected
@@ -70,7 +81,7 @@ else
     for file in "${changed[@]}"; do
         [[ -f "$file" ]] || continue
         if [[ "$file" == $tests_dir/*.swift ]]; then
-            is_selectable_test_file "$file" && selected+=("${(@f)$(suites_in_file "$file")}")
+            is_selectable_test_file "$file" && add_suites_in_file "$file"
             continue
         fi
         [[ "$file" == Sources/KromoraKit/*.swift ]] || continue
@@ -80,7 +91,7 @@ else
         name_matches=($tests_dir/${stem}*Tests.swift(N))
         name_matches=(${name_matches:#})
         for match in "${name_matches[@]}"; do
-            is_selectable_test_file "$match" && selected+=("${(@f)$(suites_in_file "$match")}")
+            is_selectable_test_file "$match" && add_suites_in_file "$match"
         done
 
         if (( wide || ${#name_matches} == 0 )); then
@@ -99,7 +110,7 @@ else
                 is_selectable_test_file "$match" && [[ -n "$(suites_in_file "$match")" ]] && usable+=("$match")
             done
             if (( wide || ${#usable} <= mention_cap )); then
-                for match in "${usable[@]}"; do selected+=("${(@f)$(suites_in_file "$match")}"); done
+                for match in "${usable[@]}"; do add_suites_in_file "$match"; done
                 (( ${#name_matches} == 0 )) && notes+=("$file: no ${stem}*Tests.swift; used ${#usable} suite file(s) that mention it")
             else
                 notes+=("$file: no ${stem}*Tests.swift and ${#usable} files mention it (cap $mention_cap); name suites explicitly or use --wide")
@@ -110,17 +121,28 @@ fi
 
 selected=(${selected:#})
 
-# Drop whole-suite entries that ci-tests.sh lists as optional (RAW fixtures, benchmarks).
+# Keep optional test cases out of automatic selections. Whole optional suites are removed from the
+# filter; method-level opt-ins use SwiftPM's --skip so their containing deterministic suite remains
+# useful. Explicit suite or method arguments are an intentional opt-in and bypass these exclusions.
 optional_line="$(grep -E '^optional_filter=' scripts/ci-tests.sh || true)"
+optional_filter=""
+if [[ -n "$optional_line" ]]; then
+    optional_filter="${optional_line#*=}"
+    optional_filter="${optional_filter[2,-2]}"
+fi
 typeset -a kept
-for suite in "${selected[@]}"; do
-    if [[ "$suite" != */* ]] && print -r -- "$optional_line" | grep -qE "[(|]${suite}[|)]"; then
-        notes+=("$suite is an optional-lane suite; skipped")
-    else
-        kept+=("$suite")
-    fi
-done
-selected=("${kept[@]}")
+skip_filter=""
+if (( ! ${#explicit_suites} )); then
+    for suite in "${selected[@]}"; do
+        if [[ "$suite" != */* ]] && print -r -- "$optional_filter" | grep -qE "(^|[(|])${suite}([|)]|$)"; then
+            notes+=("$suite is an optional-lane suite; skipped")
+        else
+            kept+=("$suite")
+        fi
+    done
+    selected=("${kept[@]}")
+    skip_filter="$optional_filter"
+fi
 
 for note in "${notes[@]}"; do print -u2 "note: $note"; done
 
@@ -130,8 +152,14 @@ if (( ${#selected} == 0 )); then
 fi
 
 filter="(${(j:|:)selected})"
+run_command="swift test --filter '$filter'"
+[[ -n "$skip_filter" ]] && run_command+=" --skip '$skip_filter'"
 print "Suites (${#selected}): ${(j:, :)selected}"
-print "Rerun: swift test --filter '$filter'"
+print "Rerun: $run_command"
 (( list_only )) && exit 0
 
-exec swift test --filter "$filter"
+if [[ -n "$skip_filter" ]]; then
+    exec swift test --filter "$filter" --skip "$skip_filter"
+else
+    exec swift test --filter "$filter"
+fi
