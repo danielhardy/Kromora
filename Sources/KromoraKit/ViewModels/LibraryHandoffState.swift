@@ -82,6 +82,12 @@ final class LibraryHandoffState {
         returnTargetID = id
     }
 
+    func prepareForReturn(isEditing: Bool, inspectorIsPresented: Bool) {
+        guard isEditing else { return }
+        inspectorHeldOpen = inspectorIsPresented
+        isLeaving = true
+    }
+
     /// Grows `image` from its Library cell to where it will sit in the finished editor while the
     /// Library fades to the canvas tone, then brings the inspector and filmstrip in around it. The
     /// photo never moves again after it lands: the canvas takes over at the same frame. The

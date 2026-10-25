@@ -30,6 +30,23 @@ final class LibraryHandoffStateTests: XCTestCase {
         XCTAssertEqual(state.returnCellFrame, CGRect(x: 1, y: 2, width: 3, height: 4))
     }
 
+    func testPreparingForReturnHoldsOnlyThePresentedInspector() {
+        let state = LibraryHandoffState()
+        state.prepareForReturn(isEditing: true, inspectorIsPresented: true)
+        XCTAssertTrue(state.inspectorHeldOpen)
+        XCTAssertTrue(state.isLeaving)
+
+        state.finish()
+        state.prepareForReturn(isEditing: true, inspectorIsPresented: false)
+        XCTAssertFalse(state.inspectorHeldOpen)
+        XCTAssertTrue(state.isLeaving)
+
+        state.finish()
+        state.prepareForReturn(isEditing: false, inspectorIsPresented: true)
+        XCTAssertFalse(state.inspectorHeldOpen)
+        XCTAssertFalse(state.isLeaving)
+    }
+
     func testFinishClearsFlightAndEntranceGate() {
         let state = LibraryHandoffState()
         state.flight = .init(image: NSImage(), frame: .zero, cornerRadius: 0, opacity: 1)
