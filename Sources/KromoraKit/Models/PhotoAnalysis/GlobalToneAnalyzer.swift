@@ -68,9 +68,10 @@ struct GlobalToneAnalyzer: Sendable {
     }
 
     /// Pure histogram mapping shared by the async renderer-backed path and deterministic tests.
-    /// Histogram RGB/luma bins must be sampled in `PhotoAnalysis.referenceSpace` (encoded sRGB). Luma is
-    /// Rec.709 `Y = 0.2126R + 0.7152G + 0.0722B`; the linear view applies the sRGB transfer decode
-    /// to that already-computed luma sample, while the perceptual view retains the encoded value.
+    /// Histogram RGB/luma bins must be sampled in `PhotoAnalysis.referenceSpace` (encoded sRGB).
+    /// Luma is Rec.709 `Y = 0.2126R + 0.7152G + 0.0722B`; the linear view applies the sRGB
+    /// transfer decode to that already-computed luma sample, while the perceptual view retains the
+    /// encoded value.
     static func statistics(from histogram: HistogramData) throws -> (
         tone: LuminanceDistribution, color: ColorStatistics
     ) {

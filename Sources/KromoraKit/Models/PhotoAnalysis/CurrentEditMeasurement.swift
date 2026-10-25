@@ -51,7 +51,7 @@ struct RenderedPixelSamples: Sendable, Equatable {
     var pixelCount: Int { width * height }
 }
 
-/// One native-resolution patch raster in `PhotoAnalysis.referenceSpace` for noise/detail estimation.
+/// One native-resolution patch raster in `PhotoAnalysis.referenceSpace` for noise and detail.
 struct NativePatchPixels: Sendable, Equatable {
     let width: Int
     let height: Int
