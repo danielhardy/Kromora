@@ -1098,6 +1098,9 @@ actor RenderEngine: RenderEngining {
                     "inputBiasVector": CIVector(x: 0, y: 0, z: 0, w: 1),
                 ]).cropped(to: extent)
             }
+            // Deliberately sRGB, not `WorkingSpace.current`: this is a presentation-only
+            // coverage/inspection image that is never exported or delivered, so it is not a
+            // missed Display P3 migration (see ADR-KRMA-1115, KRMA-1130).
             return context.createCGImage(
                 output, from: extent, format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)
             )
