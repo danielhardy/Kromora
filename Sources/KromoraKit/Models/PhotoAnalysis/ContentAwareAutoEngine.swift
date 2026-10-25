@@ -91,6 +91,8 @@ struct ContentAwareAutoEngine: Sendable {
             } ?? []
 
         await onProgress?(.renderingCandidates)
+        // Every measurement, Apple fit, and candidate score uses PhotoAnalysis.referenceSpace;
+        // the editor working space only identifies the render revision in measurement cache keys.
         let measurer = CurrentEditMeasurer(engine: engine, store: maskStore)
         let measurement: CurrentEditMeasurement
         let measurementStart = clock.now
@@ -158,7 +160,7 @@ struct ContentAwareAutoEngine: Sendable {
         // render work belongs to the candidate-render stage, so it is clocked here.
         let appleReferenceStart = clock.now
         let apple = await AppleEnhancementReferenceAdapter(
-            engine: engine, space: .sRGB
+            engine: engine
         ).referenceProposal(
             source: source, document: autoBaseline, lut: lut, sourceKind: sourceKind,
             scene: scene, signalConfidence: signalConfidence,

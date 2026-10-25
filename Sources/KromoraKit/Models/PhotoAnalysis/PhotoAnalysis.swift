@@ -75,6 +75,10 @@ struct AnalyzedRegion: Sendable, Codable, Equatable, Identifiable {
 /// invents a background region: it is present when the coordinator returned its derived
 /// `.background` mask (including the full-background result when no foreground exists).
 struct PhotoAnalysis: Sendable, Codable, Equatable {
+    /// Fixed encoding for calibrated tone/color facts, Auto scoring, and white-balance sampling.
+    /// Independent of the canvas/export working space; changing it requires recalibrating policy.
+    static let referenceSpace: WorkingSpace = .sRGB
+
     let version: AnalysisVersion
     let globalTone: ToneStatistics
     let colorStatistics: ColorStatistics

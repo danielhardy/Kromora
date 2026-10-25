@@ -776,9 +776,9 @@ struct AutoCoordinatorConfiguration: Sendable, Equatable {
     var convergenceWindow: Int
     /// Minimum evaluations before convergence can stop the run.
     var minimumEvaluationsBeforeConvergence: Int
-    /// Long edge for candidate renders. Small by design — candidates are evidence, not previews.
+    /// Long edge for candidate renders in `PhotoAnalysis.referenceSpace`. Small by design —
+    /// candidates are evidence, not previews.
     var candidateLongEdge: Int
-    var space: WorkingSpace
 
     static let `default` = AutoCoordinatorConfiguration()
 
@@ -790,8 +790,7 @@ struct AutoCoordinatorConfiguration: Sendable, Equatable {
         tieEpsilon: Double = 0.004,
         convergenceWindow: Int = 3,
         minimumEvaluationsBeforeConvergence: Int = 3,
-        candidateLongEdge: Int = 256,
-        space: WorkingSpace = .sRGB
+        candidateLongEdge: Int = 256
     ) {
         self.maxSmallRenders = max(0, maxSmallRenders)
         self.maxRAWRedevelopments = max(0, maxRAWRedevelopments)
@@ -801,7 +800,6 @@ struct AutoCoordinatorConfiguration: Sendable, Equatable {
         self.convergenceWindow = max(1, convergenceWindow)
         self.minimumEvaluationsBeforeConvergence = max(1, minimumEvaluationsBeforeConvergence)
         self.candidateLongEdge = max(1, candidateLongEdge)
-        self.space = space
     }
 }
 
@@ -1009,12 +1007,15 @@ struct AutoEnhancementCoordinator: Sendable {
             let renderStart = stageClock.now
             let timedSamples = await engine.renderedSamples(
                 source: source, document: candidate.document, lut: lut,
-                targetLongEdge: configuration.candidateLongEdge, space: configuration.space
+                targetLongEdge: configuration.candidateLongEdge, space: PhotoAnalysis.referenceSpace
             )
             let renderElapsed = stageClock.now - renderStart
             renderSeconds += AutoTimingClock.seconds(renderElapsed)
             if sourceKindIsRAW {
                 rawRenderSeconds += AutoTimingClock.seconds(renderElapsed)
+            }
+            guard let timedSamples, timedSamples.space == PhotoAnalysis.referenceSpace else {
+                return nil
             }
             return timedSamples
         }
@@ -1027,14 +1028,15 @@ struct AutoEnhancementCoordinator: Sendable {
         let baselineRenderStart = stageClock.now
         let baselineRender = await engine.renderedSamples(
             source: source, document: candidates[0].document, lut: lut,
-            targetLongEdge: configuration.candidateLongEdge, space: configuration.space
+            targetLongEdge: configuration.candidateLongEdge, space: PhotoAnalysis.referenceSpace
         )
         let baselineRenderElapsed = stageClock.now - baselineRenderStart
         renderSeconds += AutoTimingClock.seconds(baselineRenderElapsed)
         if sourceKindIsRAW {
             rawRenderSeconds += AutoTimingClock.seconds(baselineRenderElapsed)
         }
-        guard let baselineSamples = baselineRender else {
+        guard let baselineSamples = baselineRender,
+              baselineSamples.space == PhotoAnalysis.referenceSpace else {
             if Task.isCancelled {
                 return finish(
                     .cancelled, document: current, provenance: nil,

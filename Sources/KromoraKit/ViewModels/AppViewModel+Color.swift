@@ -297,7 +297,8 @@ extension AppViewModel {
         let height = sampleImage.height
         guard width > 0, height > 0 else { return nil }
         var bytes = [UInt8](repeating: 0, count: width * height * 4)
-        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+        // The estimator is calibrated on encoded sRGB, regardless of the canvas working space.
+        let colorSpace = PhotoAnalysis.referenceSpace.cgColorSpace
         let rendered = bytes.withUnsafeMutableBytes { storage -> Bool in
             guard let bitmap = CGContext(
                 data: storage.baseAddress, width: width, height: height,

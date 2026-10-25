@@ -32,6 +32,8 @@ final class MaskedToneAnalyzerTests: TempDirectoryTestCase {
         XCTAssertLessThan(darkStats.tone.mean, brightStats.tone.mean)
         XCTAssertEqual(darkStats.tone.mean, 0, accuracy: 0.01)
         XCTAssertEqual(brightStats.tone.mean, 1, accuracy: 0.01)
+        let requests = await engine.previewRequests
+        XCTAssertEqual(requests.map(\.space), [.sRGB, .sRGB])
     }
 
     func testSoftMaskRetainsFractionalEdgeWeights() async throws {

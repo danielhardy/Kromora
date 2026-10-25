@@ -423,7 +423,7 @@ extension RenderEngining {
         var bytes = [UInt8](repeating: 0, count: height * bytesPerRow)
         guard let context = CGContext(
             data: &bytes, width: width, height: height, bitsPerComponent: 8,
-            bytesPerRow: bytesPerRow, space: CGColorSpaceCreateDeviceRGB(),
+            bytesPerRow: bytesPerRow, space: space.cgColorSpace,
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ) else { return nil }
         context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))

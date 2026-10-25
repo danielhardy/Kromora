@@ -32,17 +32,16 @@ struct GlobalToneAnalyzer: Sendable {
     }
 
     func analyze(image: AnalysisImage) async throws -> GlobalToneAnalysis {
-        try await analyze(image: image, document: EditDocument(), lut: nil, space: .sRGB)
+        try await analyze(image: image, document: EditDocument(), lut: nil)
     }
 
     /// Document-aware Tier-0 analysis (KRMA-343). Measures the current rendered edit instead
     /// of the source: `document`/`lut` select what the renderer tallies. The parameterless
-    /// overload above preserves the source-measurement behavior for existing callers.
+    /// overload above preserves source measurement. Both paths use the fixed sRGB reference.
     func analyze(
         image: AnalysisImage,
         document: EditDocument,
-        lut: CubeLUT?,
-        space: WorkingSpace
+        lut: CubeLUT?
     ) async throws -> GlobalToneAnalysis {
         try Task.checkCancellation()
         var interval = KromoraObservability.begin(
@@ -55,7 +54,7 @@ struct GlobalToneAnalyzer: Sendable {
             document: document,
             lut: lut,
             scale: .preview(maxSize: CGSize(width: dimensions.width, height: dimensions.height)),
-            space: space,
+            space: PhotoAnalysis.referenceSpace,
             maxDimension: max(dimensions.width, dimensions.height)
         )
         try Task.checkCancellation()
@@ -69,7 +68,7 @@ struct GlobalToneAnalyzer: Sendable {
     }
 
     /// Pure histogram mapping shared by the async renderer-backed path and deterministic tests.
-    /// Histogram RGB/luma bins are sampled from the renderer's sRGB working space. Its luma bin is
+    /// Histogram RGB/luma bins must be sampled in `PhotoAnalysis.referenceSpace` (encoded sRGB). Luma is
     /// Rec.709 `Y = 0.2126R + 0.7152G + 0.0722B`; the linear view applies the sRGB transfer decode
     /// to that already-computed luma sample, while the perceptual view retains the encoded value.
     static func statistics(from histogram: HistogramData) throws -> (

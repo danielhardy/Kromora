@@ -20,10 +20,34 @@ alternate renderers that lack the sampling seam or requests without a photo iden
 is explicitly degraded: its completion message names the histogram fallback and its reason. It
 keeps the conservative global Light/Color behavior for renderer integrations and test doubles.
 
+## Measurement space
+
+Photo analysis and Auto measure in the fixed, encoded sRGB reference space
+(`PhotoAnalysis.referenceSpace`), independently of `WorkingSpace.current`. Global and masked
+histograms, correlated color/neutral evidence, native detail patches, Apple enhancement fitting,
+unchanged/candidate scoring, and the degraded histogram Auto path all request sRGB pixels
+explicitly. Source profiles are honored by the renderer; Display P3 sources are converted to this
+reference before measurement. Vision masks and scene classifications decode the profiled source
+directly and do not depend on the canvas encoding. The existing Rec.709 luma coefficients, sRGB
+transfer decode, thresholds, and reference targets therefore retain their calibration, including
+sRGB gamut clipping
+as an analysis guardrail. This does not constrain canvas or export encoding.
+
+The white-balance eyedropper also converts to this reference before estimating a correction. The
+Color inspector wheel is an authored, tagged sRGB UI palette rather than a photo measurement.
+Measurement cache keys retain the requested working-space identity and configuration; the sRGB
+preparation change leaves existing sRGB keys and policy versions unchanged.
+
+`AutoMeasurementSpaceTests` measures one edited, P3-tagged color fixture with both sRGB and
+Display P3 request identities. It requires identical global/regional facts and native/Apple
+proposals, with a `1e-6` tolerance for final exposure and candidate scores (and identical selected
+documents). It also compares sRGB sampling and masked histograms against the former Device RGB
+readback byte-for-byte.
+
 ## Neutral target
 
-The default neutral target is a perceptual luminance median of `0.48` in the renderer's sRGB
-working space. The target is not an exposure offset: the proposed EV is
+The default neutral target is a perceptual luminance median of `0.48` in the fixed sRGB
+measurement space. The target is not an exposure offset: the proposed EV is
 `log2(targetMedian / max(sourceP50, 0.03))`, then bounded by the photographic correction caps.
 
 The target uses robust tone-distribution evidence from the current developed/rendered image:

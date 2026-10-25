@@ -512,6 +512,14 @@ final class AppleEnhancementReferenceTests: XCTestCase {
         }
     }
 
+    func testProductionDescriptorRejectsNonReferenceEncoding() {
+        let samples = solidRGB((180, 90, 45))
+        let p3 = RenderedPixelSamples(
+            width: samples.width, height: samples.height, bytes: samples.bytes, space: .displayP3
+        )
+        XCTAssertNil(CIAutoAdjustmentDescriptor().reference(for: p3))
+    }
+
     func testProductionDescriptorRejectsEmptySamples() {
         let descriptor = CIAutoAdjustmentDescriptor()
         let empty = RenderedPixelSamples(width: 0, height: 0, bytes: [], space: .sRGB)

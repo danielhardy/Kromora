@@ -506,15 +506,16 @@ final class CurrentEditMeasurementTests: TempDirectoryTestCase {
 
     func testColorSpaceAndRawPathsMeasure() async throws {
         let document = EditDocument()
-        let (p3Measurer, _) = await configured(samples: solidSamples(
-            128, space: .displayP3
-        ))
+        let (p3Measurer, engine) = await configured(samples: solidSamples(128))
         let p3 = try await p3Measurer.measure(
             source: standardSource(), document: document,
             expectedDocumentHash: document.editHash,
             configuration: CurrentEditMeasurementConfiguration(space: .displayP3)
         )
         XCTAssertGreaterThan(p3.globalTone.perceptual.mean, 0)
+        XCTAssertEqual(p3.space, .sRGB)
+        let requests = await engine.sampleRequests
+        XCTAssertEqual(requests.first?.space, .sRGB, "P3 edits must be measured in sRGB")
 
         let (rawMeasurer, _) = await configured(samples: solidSamples(100))
         let raw = try await rawMeasurer.measure(
@@ -523,6 +524,21 @@ final class CurrentEditMeasurementTests: TempDirectoryTestCase {
         )
         XCTAssertGreaterThan(raw.globalTone.perceptual.mean, 0)
         XCTAssertTrue(raw.highlightHeadroom.available)
+    }
+
+    func testUnexpectedSamplerEncodingIsUnavailable() async throws {
+        let (measurer, _) = await configured(samples: solidSamples(128, space: .displayP3))
+        let document = EditDocument()
+        do {
+            _ = try await measurer.measure(
+                source: standardSource(), document: document,
+                expectedDocumentHash: document.editHash,
+                configuration: CurrentEditMeasurementConfiguration(space: .displayP3)
+            )
+            XCTFail("P3 bytes cannot be interpreted with the sRGB calibration")
+        } catch let error as CurrentEditMeasurementError {
+            XCTAssertEqual(error, .renderUnavailable)
+        }
     }
 
     // MARK: - Cache identity

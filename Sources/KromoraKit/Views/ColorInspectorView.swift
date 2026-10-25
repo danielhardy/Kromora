@@ -574,9 +574,11 @@ struct ColorGradingWheelDisc: View {
             }
         }
 
+        // This is an authored UI palette, not a measurement of rendered photo pixels. Keep its
+        // numeric sRGB colors and tag together when the photo working space changes.
+        let colorSpace = WorkingSpace.sRGB.cgColorSpace
         let data = Data(pixels)
         guard let provider = CGDataProvider(data: data as CFData),
-            let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
             let image = CGImage(
                 width: side,
                 height: side,

@@ -51,7 +51,7 @@ struct RenderedPixelSamples: Sendable, Equatable {
     var pixelCount: Int { width * height }
 }
 
-/// One native-resolution patch raster for noise/detail estimation.
+/// One native-resolution patch raster in `PhotoAnalysis.referenceSpace` for noise/detail estimation.
 struct NativePatchPixels: Sendable, Equatable {
     let width: Int
     let height: Int
@@ -128,7 +128,7 @@ extension RenderEngine: CurrentEditSampling {
             guard let base = ptr.baseAddress else { return false }
             guard let context = CGContext(
                 data: base, width: width, height: height, bitsPerComponent: 8,
-                bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bytesPerRow: width * 4, space: space.cgColorSpace,
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
             ) else { return false }
             context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
@@ -159,6 +159,8 @@ extension RenderEngine: CurrentEditSampling {
 /// final candidate evaluation.
 struct CurrentEditMeasurementConfiguration: Codable, Sendable, Equatable, Hashable {
     var maximumDimension: Int
+    /// Editor working-space identity, retained in the cache key. Pixel measurements always use
+    /// `PhotoAnalysis.referenceSpace`, including when the editor works in Display P3.
     var space: WorkingSpace
     var analysisView: Bool
     /// Bounded native patch sampling. A reduced preview must not decide sharpening or NR.
@@ -169,7 +171,7 @@ struct CurrentEditMeasurementConfiguration: Codable, Sendable, Equatable, Hashab
 
     init(
         maximumDimension: Int = 768,
-        space: WorkingSpace = .sRGB,
+        space: WorkingSpace = .current,
         analysisView: Bool = true,
         nativePatchCount: Int = 5,
         nativePatchSize: Int = 128
@@ -515,6 +517,7 @@ struct CurrentEditMeasurement: Codable, Sendable, Equatable {
     /// Hash of the document actually rendered (analysis view when configured).
     let effectiveDocumentHash: String
     let configurationFingerprint: String
+    /// Encoding of the measured pixels, independent of the requested working-space cache identity.
     let space: WorkingSpace
     let isAnalysisView: Bool
     /// True for `EditDocument()` measured explicitly — the identity baseline, not a silent empty.
@@ -816,8 +819,8 @@ struct CurrentEditMeasurementKey: Sendable, Codable, Hashable, Equatable {
 // MARK: - Pure pixel analysis
 
 /// Pure per-pixel analysis over one RGBA8 buffer. No renderer, no `CGImage`, no framework: the
-/// sampler owns rasterization and these functions own the arithmetic, so every fact below is
-/// unit-testable against hand-built bytes.
+/// sampler supplies `PhotoAnalysis.referenceSpace` pixels and these functions own the arithmetic,
+/// so every fact below is unit-testable against hand-built bytes.
 enum RenderedPixelAnalyzer {
     /// Tone via the shared histogram-to-facts mapping, so global tone stays consistent with the
     /// Tier-0 path while operating on the current edit's pixels.
@@ -1187,8 +1190,8 @@ struct CurrentEditMeasurer: Sendable {
 
         guard let samples = await engine.renderedSamples(
             source: source, document: effectiveDocument, lut: lut,
-            targetLongEdge: configuration.maximumDimension, space: configuration.space
-        ), !samples.isEmpty else {
+            targetLongEdge: configuration.maximumDimension, space: PhotoAnalysis.referenceSpace
+        ), !samples.isEmpty, samples.space == PhotoAnalysis.referenceSpace else {
             throw CurrentEditMeasurementError.renderUnavailable
         }
         try Task.checkCancellation()
@@ -1231,7 +1234,7 @@ struct CurrentEditMeasurer: Sendable {
                     try Task.checkCancellation()
                     let statistics = try await regional.statistics(
                         image: image, through: mask,
-                        document: effectiveDocument, lut: lut, space: configuration.space
+                        document: effectiveDocument, lut: lut
                     )
                     regions.append(AnalyzedRegion(
                         id: mask.id, kind: mask.kind, mask: mask.reference,
@@ -1263,7 +1266,7 @@ struct CurrentEditMeasurer: Sendable {
             )
         } else if let patches = await engine.nativeDetailPatches(
             source: source, document: effectiveDocument, lut: lut,
-            specs: specs, space: configuration.space
+            specs: specs, space: PhotoAnalysis.referenceSpace
         ) {
             detail = RenderedPixelAnalyzer.detail(
                 from: patches, specs: specs, requested: specs.count
@@ -1288,7 +1291,7 @@ struct CurrentEditMeasurer: Sendable {
             documentHash: document.editHash,
             effectiveDocumentHash: effectiveDocument.editHash,
             configurationFingerprint: configuration.fingerprint,
-            space: configuration.space,
+            space: PhotoAnalysis.referenceSpace,
             isAnalysisView: configuration.analysisView,
             isBaseline: document.isIdentity,
             globalTone: tone,

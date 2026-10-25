@@ -4,6 +4,21 @@ import XCTest
 @testable import KromoraKit
 
 final class GlobalToneAnalyzerTests: XCTestCase {
+    func testSourceAndCurrentEditRequestTheFixedSRGBReference() async throws {
+        let engine = FakeRenderEngine()
+        let image = try AnalysisImageFactory.make(from: ImageSource(
+            data: Data("reference-space".utf8), nativeExtent: CGSize(width: 64, height: 48)
+        ))
+        let analyzer = GlobalToneAnalyzer(engine: engine)
+        _ = try await analyzer.analyze(image: image)
+        var document = EditDocument()
+        document.light.exposure = 0.5
+        _ = try await analyzer.analyze(image: image, document: document, lut: nil)
+        let requests = await engine.histogramRequests
+        XCTAssertEqual(requests.map(\.space), [.sRGB, .sRGB])
+        XCTAssertEqual(requests.last?.document, document)
+    }
+
     func testStatisticsUsePercentilesAndClippingFromOneHistogram() throws {
         var bins = [Int](repeating: 0, count: 256)
         bins[0] = 2

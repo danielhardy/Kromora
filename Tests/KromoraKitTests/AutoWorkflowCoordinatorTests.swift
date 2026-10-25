@@ -147,6 +147,10 @@ final class AutoWorkflowCoordinatorTests: XCTestCase {
             AutoWorkflowRequest(source: source, assetID: nil, document: EditDocument(), lut: nil),
             onProgress: { _ in }
         )
+        await analysis.shutdown()
+        try? FileManager.default.removeItem(at: directory)
+        let requests = await engine.histogramRequests
+        XCTAssertEqual(requests.map(\.space), [.sRGB])
         guard case .degraded(let reason) = outcome.path else {
             return XCTFail("a renderer without content-aware sampling should use degraded mode")
         }

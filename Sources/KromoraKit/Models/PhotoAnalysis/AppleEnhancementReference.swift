@@ -128,7 +128,8 @@ struct CIAutoAdjustmentDescriptor: AppleAutoAdjustmentDescribing {
     init() {}
 
     func reference(for samples: RenderedPixelSamples) -> AppleReferenceRender? {
-        guard let base = Self.ciImage(from: samples) else { return nil }
+        guard samples.space == PhotoAnalysis.referenceSpace,
+              let base = Self.ciImage(from: samples) else { return nil }
         let filters = base.autoAdjustmentFilters()
         let intent = AppleReferenceIntent(effects: filters.map {
             Self.effect(forFilterName: $0.name, values: Self.numericInputs(of: $0))
@@ -213,7 +214,9 @@ struct CIAutoAdjustmentDescriptor: AppleAutoAdjustmentDescribing {
         let context = RenderEngineResources.makeOneShotContext(
             workingColorSpace: space.cgColorSpace
         )
-        guard let rendered = context.createCGImage(image, from: image.extent) else { return nil }
+        guard let rendered = context.createCGImage(
+            image, from: image.extent, format: .RGBA8, colorSpace: space.cgColorSpace
+        ) else { return nil }
         let width = rendered.width
         let height = rendered.height
         guard width > 0, height > 0 else { return nil }
@@ -223,7 +226,7 @@ struct CIAutoAdjustmentDescriptor: AppleAutoAdjustmentDescribing {
                   let outputContext = CGContext(
                       data: baseAddress, width: width, height: height,
                       bitsPerComponent: 8, bytesPerRow: width * 4,
-                      space: CGColorSpaceCreateDeviceRGB(),
+                      space: space.cgColorSpace,
                       bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
                   )
             else { return false }
@@ -932,15 +935,12 @@ struct AppleEnhancementReferenceAdapter: Sendable {
 
     let engine: any RenderEngining & CurrentEditSampling
     let descriptor: any AppleAutoAdjustmentDescribing
-    let space: WorkingSpace
     init(
         engine: any RenderEngining & CurrentEditSampling,
-        descriptor: any AppleAutoAdjustmentDescribing = CIAutoAdjustmentDescriptor(),
-        space: WorkingSpace = .sRGB
+        descriptor: any AppleAutoAdjustmentDescribing = CIAutoAdjustmentDescriptor()
     ) {
         self.engine = engine
         self.descriptor = descriptor
-        self.space = space
     }
 
     /// Produce one Apple-informed proposal for `document` over `source`.
@@ -971,8 +971,8 @@ struct AppleEnhancementReferenceAdapter: Sendable {
         let analysisDocument = AutoCandidateEvaluation.analysisDocument(from: document)
         guard let baseline = await engine.renderedSamples(
             source: source, document: analysisDocument, lut: lut,
-            targetLongEdge: Self.analysisLongEdge, space: space
-        ), !baseline.isEmpty else {
+            targetLongEdge: Self.analysisLongEdge, space: PhotoAnalysis.referenceSpace
+        ), !baseline.isEmpty, baseline.space == PhotoAnalysis.referenceSpace else {
             return .unavailable(
                 code: .renderUnavailable,
                 message: "The analysis-view edit could not be rendered for fitting."
@@ -1013,7 +1013,7 @@ struct AppleEnhancementReferenceAdapter: Sendable {
         var proposed = document
         apply(fit.changes, to: &proposed, sourceKind: sourceKind)
         let provenance = AppleReferenceProvenance(
-            sourceKind: sourceKind, space: space,
+            sourceKind: sourceKind, space: PhotoAnalysis.referenceSpace,
             filterNames: reference.intent.filterNames,
             omittedEffects: fit.omitted, fitMethod: fit.method,
             referenceStrength: fit.strength,

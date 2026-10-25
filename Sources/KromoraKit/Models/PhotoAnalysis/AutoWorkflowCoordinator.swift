@@ -182,7 +182,7 @@ final class ProductionAutoWorkflow: AutoWorkflowRunning {
         baseline.lut = .none
         let histogram = await engine.histogram(
             source: source, document: baseline, lut: nil,
-            scale: .preview(maxSize: CGSize(width: 1600, height: 1200)), space: .current,
+            scale: .preview(maxSize: CGSize(width: 1600, height: 1200)), space: PhotoAnalysis.referenceSpace,
             maxDimension: AutoAdjustmentSettings.default.histogramMaxDimension
         )
         guard !Task.isCancelled else {
