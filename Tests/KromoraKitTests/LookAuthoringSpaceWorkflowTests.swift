@@ -4,16 +4,16 @@ import simd
 @testable import KromoraKit
 
 /// Save as Look and Derive sample, fit, and stamp one explicit authoring space (KRMA-1117).
-/// Preparation keeps sRGB by default; the P3 flip changes only the default.
+/// The default is `WorkingSpace.current` (Display P3 since KRMA-1121).
 @MainActor
 final class LookAuthoringSpaceWorkflowTests: TempDirectoryTestCase {
 
     // MARK: - Save as Look
 
-    func testSaveAsLookDefaultsToSRGBAndStampsIt() throws {
+    func testSaveAsLookDefaultsToTheWorkingSpaceAndStampsIt() throws {
         let conversion = try LookLUTConverter.convert(document: EditDocument(), lut: nil, size: 3)
-        XCTAssertEqual(conversion.workingSpace, .sRGB)
-        XCTAssertTrue(conversion.cubeText(title: "t").contains(CubeLUT.authoringSpaceHeader(.sRGB)))
+        XCTAssertEqual(conversion.workingSpace, .displayP3)
+        XCTAssertTrue(conversion.cubeText(title: "t").contains(CubeLUT.authoringSpaceHeader(.displayP3)))
     }
 
     func testSaveAsLookCanSampleAndStampP3() throws {
@@ -54,8 +54,8 @@ final class LookAuthoringSpaceWorkflowTests: TempDirectoryTestCase {
 
     // MARK: - Derive
 
-    func testDeriveDefaultsToSRGBAndCarriesTheFitSpaceToTheStamp() async throws {
-        XCTAssertEqual(RecipeExtractor.Options().authoringSpace, .sRGB)
+    func testDeriveDefaultsToTheWorkingSpaceAndCarriesTheFitSpaceToTheStamp() async throws {
+        XCTAssertEqual(RecipeExtractor.Options().authoringSpace, .displayP3)
         for space in WorkingSpace.allCases {
             let cube = [SIMD3<Float>](repeating: SIMD3(0.25, 0.5, 0.75), count: 8)
             let coordinator = DeriveCoordinator(

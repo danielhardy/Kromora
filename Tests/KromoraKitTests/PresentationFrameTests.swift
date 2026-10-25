@@ -84,7 +84,7 @@ enum FrameFixtures {
         identity: PortablePhotoIdentity,
         edit: String = "edit",
         look: LookSignature = .none,
-        space: WorkingSpace = .sRGB,
+        space: WorkingSpace = .current,
         epoch: Int = RenderPipeline.pixelEpoch,
         raster: RasterColorSpace = .sRGB,
         kind: PresentationFrameKind = .preview2048,
@@ -119,7 +119,7 @@ enum FrameFixtures {
 
     static func frame(
         identity: PortablePhotoIdentity = FrameFixtures.identity(),
-        edit: String = "edit", look: LookSignature = .none, space: WorkingSpace = .sRGB,
+        edit: String = "edit", look: LookSignature = .none, space: WorkingSpace = .current,
         epoch: Int = RenderPipeline.pixelEpoch, width: Int = 64, height: Int = 48,
         red: CGFloat = 0.5
     ) throws -> PresentationFrame {
@@ -139,7 +139,7 @@ final class PresentationFrameClassifierTests: XCTestCase {
 
     private func current(
         edit: String? = "edit", look: LookSignature? = LookSignature.none,
-        space: WorkingSpace = .sRGB, epoch: Int = RenderPipeline.pixelEpoch,
+        space: WorkingSpace = .current, epoch: Int = RenderPipeline.pixelEpoch,
         source: PortablePhotoIdentity? = nil
     ) -> FrameCurrentInputs {
         FrameCurrentInputs(
@@ -186,7 +186,7 @@ final class PresentationFrameClassifierTests: XCTestCase {
             (.sourceFingerprintMismatch, FrameFixtures.metadata(identity: otherFingerprint), current()),
             (.placeholderSourceIdentity, FrameFixtures.metadata(identity: identity), current(source: placeholder)),
             (.dimensionsInvalid, FrameFixtures.metadata(identity: identity, width: 0), current()),
-            (.colorSpaceUnpresentable, FrameFixtures.metadata(identity: identity, raster: .displayP3), current())
+            (.colorSpaceUnpresentable, FrameFixtures.metadata(identity: identity, space: .sRGB, raster: .displayP3), current(space: .sRGB))
         ]
 
         for (reason, metadata, inputs) in rows {

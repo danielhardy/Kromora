@@ -96,7 +96,7 @@ final class RenderEngineProcessingPrefixAcceptanceTests: TempDirectoryTestCase {
         let request = request(source: source, document: document, lut: lut)
 
         let textureEngine = RenderEngine()
-        let cpuEngine = RenderEngine(context: CIContext())
+        let cpuEngine = RenderEngine(context: CIContext(options: [.workingColorSpace: WorkingSpace.current.linearWorkingColorSpace]))
         let textureImageResult = await textureEngine.makeCGImage(request)
         let cpuImageResult = await cpuEngine.makeCGImage(request)
         let textureImage = try XCTUnwrap(textureImageResult)
@@ -122,7 +122,7 @@ final class RenderEngineProcessingPrefixAcceptanceTests: TempDirectoryTestCase {
             effects: EffectsAdjustments(texture: 16, clarity: 8)
         )
         let request = request(source: source, document: document)
-        let fallbackEngine = RenderEngine(context: CIContext())
+        let fallbackEngine = RenderEngine(context: CIContext(options: [.workingColorSpace: WorkingSpace.current.linearWorkingColorSpace]))
         let referenceEngine = RenderEngine()
 
         let fallbackImageResult = await fallbackEngine.makeCGImage(request)
@@ -158,10 +158,10 @@ final class RenderEngineProcessingPrefixAcceptanceTests: TempDirectoryTestCase {
         ]
 
         for document in documents {
-            let firstResult = await RenderEngine(context: CIContext()).makeCGImage(
+            let firstResult = await RenderEngine(context: CIContext(options: [.workingColorSpace: WorkingSpace.current.linearWorkingColorSpace])).makeCGImage(
                 request(source: source, document: document)
             )
-            let secondResult = await RenderEngine(context: CIContext()).makeCGImage(
+            let secondResult = await RenderEngine(context: CIContext(options: [.workingColorSpace: WorkingSpace.current.linearWorkingColorSpace])).makeCGImage(
                 request(source: source, document: document)
             )
             let first = try XCTUnwrap(firstResult)

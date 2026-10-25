@@ -17,8 +17,8 @@ final class WorkingSpaceTests: TempDirectoryTestCase {
 
     // MARK: - The seam itself
 
-    func testCurrentIsSRGB() {
-        XCTAssertEqual(WorkingSpace.current, .sRGB)
+    func testCurrentIsDisplayP3() {
+        XCTAssertEqual(WorkingSpace.current, .displayP3)
         XCTAssertEqual(WorkingSpace.sRGB.cgColorSpace.name, CGColorSpace.sRGB)
         XCTAssertEqual(WorkingSpace.displayP3.cgColorSpace.name, CGColorSpace.displayP3)
     }
@@ -66,10 +66,10 @@ final class WorkingSpaceTests: TempDirectoryTestCase {
 
     // MARK: - Derive fits in the space it stamps
 
-    /// Preparation keeps sRGB sampling and stamps; the derive/Save defaults follow `current`.
-    func testPreparationDefaultsStaySRGB() {
-        XCTAssertEqual(WorkingSpace.current, .sRGB)
-        XCTAssertEqual(RecipeExtractor.Options().authoringSpace, .sRGB)
+    /// The derive/Save defaults follow `current`, which is Display P3 since KRMA-1121.
+    @MainActor func testAuthoringDefaultsFollowTheWorkingSpace() {
+        XCTAssertEqual(RecipeExtractor.Options().authoringSpace, WorkingSpace.current)
+        XCTAssertEqual(LookSaveCoordinator().authoringSpace, WorkingSpace.current)
     }
 
     // The histogram used to be a third `ImageProcessor` colour site and was pinned here. Step 6 moved

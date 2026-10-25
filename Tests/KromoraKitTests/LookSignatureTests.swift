@@ -193,12 +193,12 @@ final class LookSignatureTests: TempDirectoryTestCase {
         XCTAssertNotEqual(
             FrameClassifier.classify(
                 ungraded, against: FrameCurrentInputs(
-                    source: identity, editHash: "edit", look: unresolved, workingSpace: .sRGB)),
+                    source: identity, editHash: "edit", look: unresolved, workingSpace: .current)),
             .exact)
         XCTAssertEqual(
             FrameClassifier.classify(
                 ungraded, against: FrameCurrentInputs(
-                    source: identity, editHash: "edit", look: resolved, workingSpace: .sRGB)),
+                    source: identity, editHash: "edit", look: resolved, workingSpace: .current)),
             .staleCompatible)
 
         // A graded frame is not exact while the current Look is merely unresolved.
@@ -206,7 +206,7 @@ final class LookSignatureTests: TempDirectoryTestCase {
         XCTAssertEqual(
             FrameClassifier.classify(
                 graded, against: FrameCurrentInputs(
-                    source: identity, editHash: "edit", look: unresolved, workingSpace: .sRGB)),
+                    source: identity, editHash: "edit", look: unresolved, workingSpace: .current)),
             .provisionalOnly)
     }
 
@@ -214,7 +214,7 @@ final class LookSignatureTests: TempDirectoryTestCase {
         let identity = FrameFixtures.identity()
         let none = FrameFixtures.metadata(identity: identity, look: LookSignature.none)
         let inputs = FrameCurrentInputs(
-            source: identity, editHash: "edit", look: .unresolved(id: id), workingSpace: .sRGB)
+            source: identity, editHash: "edit", look: .unresolved(id: id), workingSpace: .current)
         XCTAssertNotEqual(FrameClassifier.classify(none, against: inputs), .exact)
     }
 
@@ -226,7 +226,7 @@ final class LookSignatureTests: TempDirectoryTestCase {
             FrameClassifier.classify(
                 frame, against: FrameCurrentInputs(
                     source: identity, editHash: "edit",
-                    look: .resolved(id: id, contentHash: hash), workingSpace: .sRGB))
+                    look: .resolved(id: id, contentHash: hash), workingSpace: .current))
         }
         XCTAssertEqual(classify("h1"), .exact)
         XCTAssertEqual(classify("h2"), .staleCompatible)

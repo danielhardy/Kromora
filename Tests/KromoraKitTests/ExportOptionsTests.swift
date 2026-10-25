@@ -71,7 +71,7 @@ final class ExportOptionsTests: TempDirectoryTestCase {
         XCTAssertEqual(options.format, .jpeg)
         XCTAssertEqual(options.sizing, .fullSize)
         XCTAssertEqual(options.quality, 0.95)
-        XCTAssertEqual(options.colorSpace, .sRGB)
+        XCTAssertEqual(options.colorSpace, .displayP3)
         XCTAssertEqual(options.bitDepth, .eight)
         XCTAssertEqual(options.alpha, .opaque)
         XCTAssertEqual(options.filenamePolicy, .sourceNameWithLook)

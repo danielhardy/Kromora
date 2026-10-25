@@ -10,8 +10,9 @@ import CoreGraphics
 ///
 /// Provenance: the references in `Resources/MetalKernelGoldens/` were rendered on 2026-09-22 from
 /// the pre-migration CIKL kernels (via the throwaway `GoldenGeneratorTests`, since deleted) on a
-/// Metal CIContext in the current working space — the same `Pixels.bytes` pipeline these tests
-/// use. Regeneration procedure: temporarily restore the CIKL sources, re-run the generator
+/// Metal CIContext in the then-current working space, sRGB — the same `Pixels.bytes` pipeline these
+/// tests use. Every golden comparison therefore pins `space: .sRGB` rather than following
+/// `WorkingSpace.current`; kernel parity does not depend on the delivery space. Regeneration procedure: temporarily restore the CIKL sources, re-run the generator
 /// inputs below (each test documents its exact input), and replace the `.rgba` files.
 /// Total reference payload is ~100 KB.
 ///
@@ -252,7 +253,7 @@ final class MetalKernelParityTests: XCTestCase {
         _ image: CIImage, named name: String, tolerance: Int = 1,
         file: StaticString = #filePath, line: UInt = #line
     ) throws {
-        let fresh = try Pixels.bytes(of: image)
+        let fresh = try Pixels.bytes(of: image, space: .sRGB)
         if ProcessInfo.processInfo.environment["UPDATE_METAL_GOLDENS"] == "1" {
             let root = URL(fileURLWithPath: #filePath)
                 .deletingLastPathComponent()
@@ -278,7 +279,7 @@ final class MetalKernelParityTests: XCTestCase {
             guard let base = raw.baseAddress else { return }
             context.render(
                 image, toBitmap: base, rowBytes: width * 4, bounds: rect,
-                format: .RGBA8, colorSpace: WorkingSpace.current.cgColorSpace)
+                format: .RGBA8, colorSpace: WorkingSpace.sRGB.cgColorSpace)
         }
         return buffer
     }
@@ -457,15 +458,15 @@ final class MetalKernelParityTests: XCTestCase {
     func testGrainKeepsGoldenStatistics() throws {
         // Golden stats (CIKL render): mean 142.07, std 65.67. Same character, new pattern.
         let golden = try golden(named: "grain-seed")
-        let fresh = try Pixels.bytes(of: grainImage(seed: 123456789))
+        let fresh = try Pixels.bytes(of: grainImage(seed: 123456789), space: .sRGB)
         assertGrainStatistics(fresh, matching: golden.bytes)
     }
 
     func testGrainIsDeterministicAndSeedSensitive() throws {
-        let first = try Pixels.bytes(of: grainImage(seed: 123456789))
-        let second = try Pixels.bytes(of: grainImage(seed: 123456789))
+        let first = try Pixels.bytes(of: grainImage(seed: 123456789), space: .sRGB)
+        let second = try Pixels.bytes(of: grainImage(seed: 123456789), space: .sRGB)
         assertPixelsEqual(first, second, tolerance: 0, "same seed must render identical grain")
-        let other = try Pixels.bytes(of: grainImage(seed: 987654321))
+        let other = try Pixels.bytes(of: grainImage(seed: 987654321), space: .sRGB)
         assertPixelsDiffer(first, other, "different seeds must produce different grain")
     }
 

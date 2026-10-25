@@ -54,6 +54,16 @@ Every length is validated against the file size before any buffer is allocated.
   frame *stale-compatible* (shown, then refined once). `PresentationFrameEnvelope.storageFormatVersion`
   changes only when the container cannot be decoded; a mismatch is a per-entry miss. Neither value
   ever wipes the directory.
+- **Working space.** `FrameSignature.workingSpace` is part of the frame's identity, and the Display
+  P3 release (KRMA-1121) raised `pixelEpoch` to 37. A frame or packed thumbnail written by an
+  sRGB-era build therefore classifies as stale rather than exact: an sRGB raster is still
+  presentable inside P3 and is shown once while the P3 frame is rendered, and a P3 raster is never
+  shown under an sRGB working space. No file is rewritten or wiped by the flip.
+- **Prerelease reset procedure.** Saved edit revisions are value documents and are not re-rendered or
+  converted; prerelease libraries are not guaranteed to look the same under Display P3 (slider math
+  now runs in extended linear P3, and every raster is P3). When that matters, quit Kromora and
+  create a new library package, or delete just the package's `Derived/` caches (previews and
+  thumbnails rebuild from originals). Kromora never deletes a library or originals automatically.
 - **Damage is per entry.** A corrupt or truncated file is removed and reported as a miss; an
   unsupported container version is ignored until the next write replaces it. No error reaches
   presentation.

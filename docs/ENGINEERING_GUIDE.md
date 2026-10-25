@@ -230,7 +230,7 @@ preview texture's output encoding. The tag persists across SwiftUI view updates 
 can color-match the canvas to the display, keeping it consistent with color-managed thumbnails and
 exports on Display P3 screens.
 
-**Camera sources and the sRGB canvas.** The local samples are five iPhone
+**Camera sources and the Display P3 canvas.** The local samples are five iPhone
 17 Pro DNGs, one 8-bit iPhone 17 Pro HEIC, and two Sony ILCE-7CR ARWs. ImageIO identifies the DNGs
 as Adobe RAW, the HEIC as HEIC, and the Sony files as Sony ARW; all report Display P3. For RAW,
 Display P3 is the developed `CIImage` color space, not an embedded ICC profile. The HEIC carries a
@@ -246,28 +246,44 @@ per pixel. Across these fixtures, 0-3.32% of pixels differed by more than 2/255,
 than 8/255, and the maximum delta was 37/255. Converting the direct P3 pixels to linear sRGB found
 0% out-of-sRGB pixels in both Sony ARWs, 0-4.39% in the iPhone DNGs, and 1.81% in the HEIC. These
 are bounded, 8-bit pixel comparisons, not a calibrated display measurement. Hardware (colorimeter)
-validation was not performed. The current implementation remains sRGB until KRMA-1121; the accepted
-policy below replaces the earlier Instagram-first decision for the P3 release.
+validation was not performed. The accepted policy below replaces the earlier Instagram-first decision
+and has been active since KRMA-1121.
 
-**P3 migration policy** ([ADR-KRMA-1115](../.dg/decisions/ADR-KRMA-1115-display-p3-export-look-and-saved-edit-policy.md),
-accepted 2026-10-25). The P3 release uses Display P3 for the canvas and every rendered delivery:
-JPEG, HEIC, TIFF, PNG, Share, Copy, Photos, external-editor TIFF, and rendered bundle companions.
-Encode pixels in that space and embed its ICC profile; there is no independent export-space picker
-or silent sRGB delivery path. Decode inputs according to their profiles; original bundle bytes stay
-untouched. A future sRGB delivery mode must include a matching preview.
+**Display P3 policy (active since KRMA-1121)**
+([ADR-KRMA-1115](../.dg/decisions/ADR-KRMA-1115-display-p3-export-look-and-saved-edit-policy.md),
+accepted 2026-10-25). `WorkingSpace.current` is `.displayP3`. The canvas and every rendered delivery
+use it: JPEG, HEIC, TIFF, PNG, Share, Copy, Photos, external-editor TIFF, and rendered bundle
+companions encode pixels in Display P3 and embed its ICC profile. There is no independent
+export-space picker or silent sRGB delivery path; `ExportOptions.colorSpace` defaults to `.current`
+and the delivery policies (`ShareExportPolicy`, `ShareCopyPolicy`, `ExternalEditorExportPolicy`,
+`OriginalBundleCompanionPolicy`) all follow it. Inputs decode according to their profiles; original
+bundle bytes stay untouched. A future sRGB delivery mode must include a matching preview, HDR/EDR is
+a separate follow-up (KRMA-1114 epic), and soft proofing is out of scope.
+
+**The graph evaluates in extended linear Display P3.** The engine's retained `CIContext` is created
+with `WorkingSpace.linearWorkingColorSpace` (`extendedLinearDisplayP3`). Core Image's default is
+extended linear sRGB, and built-in filters such as `CIToneCurve` clamp to the working gamut: with the
+default context the first Light edit clipped a P3 photo to sRGB (out-of-sRGB green came back as
+sRGB green). Never pass the non-linear `cgColorSpace` as a working space; that makes every filter
+blend gamma-encoded values and breaks the linear-light assumptions in `RenderPipeline`. Test
+contexts that need to match the engine use `Pixels` (which picks the matching linear working space).
+Golden fixtures authored in sRGB (`MetalKernelParityTests`, the retouch quality floors) pin
+`space: .sRGB` so kernel parity does not depend on the delivery space.
 
 Each cube has an authoring space and is interpolated in it; missing headers assume sRGB, while
-unknown or malformed declarations fail clearly. Regenerate and visually review bundled Looks for
-P3. New saved and derived Looks sample/fit and stamp P3 after the flip. Honor imported stamps and
-preserve imported/embedded bytes. An sRGB Look can still constrain wide-gamut colors through its
-bounded table; the stamp makes interpretation correct, not gamut-preserving.
+unknown or malformed declarations fail clearly. The bundled Looks are the regenerated P3 set; new
+saved and derived Looks sample/fit and stamp P3. Imported stamps are honored and imported/embedded
+bytes are preserved. An sRGB Look can still constrain wide-gamut colors through its bounded table;
+the stamp makes interpretation correct, not gamut-preserving (see [`LOOKS.md`](LOOKS.md)).
 
-Prerelease libraries may be reset; no old-edit appearance guarantee, legacy renderer, or
-last-rendered-space document field is required. Space remains part of cache/frame identity and
-stale rendered data must be invalidated at the flip. Migrate `WorkingSpace.current`, derived-LUT
-fitting, bundled assets, LUT interpretation, frame signatures/caches, thumbnails, and export tagging
-together, with preview/export parity tests. Preparation tickets keep today's sRGB behavior until
-KRMA-1121 activates the change. HDR/EDR and soft proofing remain separate.
+**Stale rendered data and resets.** Space is part of cache and frame identity
+(`FrameSignature.workingSpace` and the render-cache keys), and `RenderPipeline.pixelEpoch` was bumped to 37
+at the flip, so previews, thumbnails, stored frames and render caches written by an sRGB-era build
+are rejected rather than shown. There is no legacy renderer and no last-rendered-space document
+field. Saved edits from prerelease libraries are not guaranteed to look the same: Looks stamped
+`sRGB` still render as sRGB Looks, but slider math now runs in P3. When a prerelease library needs
+a clean slate, quit the app and create a new library package (or delete only the derived
+thumbnail/preview caches inside it); the app never deletes a library or originals automatically.
 
 `LatestPreviewFrameStore` keeps the latest presented 2048 px preview of each asset. Three value types
 define what a stored frame means:

@@ -123,7 +123,7 @@ final class ColorMixerTests: XCTestCase {
         let rendered = try Pixels.bytes(of: RenderPipeline.applyColorMixer(mixer, to: source))
 
         XCTAssertEqual(rendered[3], 102, accuracy: 1)
-        XCTAssertGreaterThan(abs(Int(rendered[0]) - Int(rendered[1])), 10,
+        XCTAssertGreaterThan(abs(Int(rendered[0]) - Int(rendered[1])), 8,
                              "the visible colour should be adjusted before premultiplication")
     }
 

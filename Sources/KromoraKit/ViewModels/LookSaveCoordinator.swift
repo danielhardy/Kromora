@@ -28,8 +28,8 @@ final class LookSaveCoordinator {
     @ObservationIgnored private var conversionTask: Task<Void, Never>?
     @ObservationIgnored private let sheets: any SheetPresenting
 
-    /// The space Save as Look samples in and stamps. Preparation keeps `WorkingSpace.current` (sRGB);
-    /// tests and the P3 flip choose `.displayP3`.
+    /// The space Save as Look samples in and stamps: `WorkingSpace.current` (Display P3);
+    /// tests may choose another space.
     @ObservationIgnored let authoringSpace: WorkingSpace
 
     init(

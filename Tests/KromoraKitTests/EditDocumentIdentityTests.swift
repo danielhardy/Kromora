@@ -153,13 +153,13 @@ final class EditDocumentIdentityTests: XCTestCase {
             PresentationFrameMetadata.self, from: JSONEncoder().encode(stored))
         let inputs = FrameCurrentInputs(
             source: identity, editHash: fixture().editHash, look: LookSignature.none,
-            workingSpace: .sRGB)
+            workingSpace: .current)
         XCTAssertEqual(FrameClassifier.classify(decoded, against: inputs), .exact)
         var edited = fixture()
         edited.light.exposure += 0.01
         let staleInputs = FrameCurrentInputs(
             source: identity, editHash: edited.editHash, look: LookSignature.none,
-            workingSpace: .sRGB)
+            workingSpace: .current)
         XCTAssertNotEqual(FrameClassifier.classify(decoded, against: staleInputs), .exact)
     }
 }

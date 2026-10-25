@@ -6,6 +6,8 @@ import XCTest
 
 /// Deterministic, image-quality oracle for the small-defect retouch lane. This is deliberately
 /// separate from renderer timing tests; it compares rendered pixels with known clean references.
+/// Fixtures are authored in sRGB and the floors were calibrated on sRGB-encoded bytes, so the
+/// comparison pins `space: .sRGB` rather than following `WorkingSpace.current`.
 final class RetouchQualityEvaluationTests: TempDirectoryTestCase {
     /// Defect families the v1 product supports. Wires and broad removal (the 60 px dust case) are
     /// stress-corpus rows only; they are reported but never gate shipping.
@@ -67,7 +69,7 @@ final class RetouchQualityEvaluationTests: TempDirectoryTestCase {
                             sourceSize: CGSize(width: fixture.width, height: fixture.height),
                             maskRenderer: LocalMaskRenderer()
                         )
-                        output = try Pixels.bytes(of: rendered)
+                        output = try Pixels.bytes(of: rendered, space: .sRGB)
                     } else { continue }
                     let values = RetouchQualityMetrics.measure(clean: clean, output: output, mask: fixture.mask, width: fixture.width, height: fixture.height)
                     let failed = values.failures(against: RetouchQualityMetrics.limits[background]!)
@@ -203,7 +205,7 @@ final class RetouchQualityEvaluationTests: TempDirectoryTestCase {
             RetouchSettings(spots: [spot]), to: CIImage(cgImage: cgImage),
             sourceSize: CGSize(width: width, height: height), maskRenderer: LocalMaskRenderer()
         )
-        let output = try Pixels.bytes(of: rendered)
+        let output = try Pixels.bytes(of: rendered, space: .sRGB)
         var darkest = 255
         for y in 96...140 { for x in 98...106 {
             darkest = min(darkest, Int(output[(y * width + x) * 4]))

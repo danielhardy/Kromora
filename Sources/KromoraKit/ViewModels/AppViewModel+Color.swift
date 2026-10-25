@@ -290,7 +290,10 @@ extension AppViewModel {
         let crop = rect.intersection(image.extent)
         guard !crop.isNull, crop.width >= 1, crop.height >= 1 else { return nil }
         let context = RenderEngine.presentationContext
-        guard let sampleImage = context.createCGImage(image.cropped(to: crop), from: crop) else {
+        guard let sampleImage = context.createCGImage(
+            image.cropped(to: crop), from: crop,
+            format: .RGBA8, colorSpace: WorkingSpace.current.cgColorSpace
+        ) else {
             return nil
         }
         let width = sampleImage.width

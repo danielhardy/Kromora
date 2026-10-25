@@ -13,19 +13,36 @@ enum Pixels {
 
     /// One context for the whole suite, so a comparison never accidentally measures two different
     /// render backends against each other.
-    static let context: CIContext = {
+    static let context: CIContext = makeContext(evaluatingIn: .current)
+
+    private static let sRGBContext = makeContext(evaluatingIn: .sRGB)
+
+    /// A context whose working space is `space`, mirroring production where the engine evaluates the
+    /// graph in the app working space. Rendering "in sRGB" therefore means evaluating in sRGB too:
+    /// working-space-dependent filters (contrast, saturation, tone-curve gamut) behave per space.
+    private static func makeContext(evaluatingIn space: WorkingSpace) -> CIContext {
+        let options: [CIContextOption: Any] = [.workingColorSpace: space.linearWorkingColorSpace]
         if let device = MTLCreateSystemDefaultDevice() {
-            return CIContext(mtlDevice: device)
+            return CIContext(mtlDevice: device, options: options)
         }
-        return CIContext()
-    }()
+        return CIContext(options: options)
+    }
+
+    private static func evaluationContext(for space: WorkingSpace) -> CIContext {
+        space == .current ? context : sRGBContext
+    }
 
     /// Rasterize to raw RGBA8 in `space`.
     ///
     /// Note Core Image is **not** bit-reproducible across time-separated runs — around 0.0003% of
     /// bytes can move by 1 — while back-to-back runs match. Compare renders taken next to each other,
     /// and keep the tolerance at 1.
-    static func bytes(of image: CIImage, space: WorkingSpace = .current) throws -> [UInt8] {
+    ///
+    /// - Parameter workingSpace: the space the graph is evaluated in; defaults to `space`. Pass
+    ///   `.current` to compare against the engine's own evaluation while encoding in another space.
+    static func bytes(
+        of image: CIImage, space: WorkingSpace = .current, workingSpace: WorkingSpace? = nil
+    ) throws -> [UInt8] {
         let rect = image.extent.integral
         guard rect.isRasterizable else {
             throw XCTSkip("image has no rasterizable extent: \(image.extent)")
@@ -35,7 +52,7 @@ enum Pixels {
         var buffer = [UInt8](repeating: 0, count: width * height * 4)
         buffer.withUnsafeMutableBytes { raw in
             guard let base = raw.baseAddress else { return }
-            context.render(
+            evaluationContext(for: workingSpace ?? space).render(
                 image, toBitmap: base, rowBytes: width * 4, bounds: rect,
                 format: .RGBA8, colorSpace: space.cgColorSpace
             )

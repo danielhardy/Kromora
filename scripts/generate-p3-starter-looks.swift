@@ -1,6 +1,6 @@
 #!/usr/bin/env swift
-// Regenerates the Display P3 starter Looks (Sources/KromoraKit/Resources/StarterLooksP3) from the
-// sRGB starter Looks (Sources/KromoraKit/Resources/StarterLooks), which are the defined source
+// Regenerates the active Display P3 starter Looks (Sources/KromoraKit/Resources/StarterLooks) from the
+// sRGB source Looks (scripts/starter-looks-srgb, not bundled), which are the defined source
 // parameters: a 3x3x3 sRGB control lattice per Look.
 //
 // Usage:
@@ -21,8 +21,8 @@ import ImageIO
 import UniformTypeIdentifiers
 
 let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-let sourceDir = root.appendingPathComponent("Sources/KromoraKit/Resources/StarterLooks")
-let outputDir = root.appendingPathComponent("Sources/KromoraKit/Resources/StarterLooksP3")
+let sourceDir = root.appendingPathComponent("scripts/starter-looks-srgb")
+let outputDir = root.appendingPathComponent("Sources/KromoraKit/Resources/StarterLooks")
 let latticeSize = 17
 let extrapolationBound: Double = 0.5   // extended-sRGB coordinates are bounded to [-0.5, 1.5]
 
@@ -144,16 +144,16 @@ func generate() throws {
             + "scripts/generate-p3-starter-looks.swift resamples the sRGB control lattice of the same Look onto a "
             + "\(latticeSize)^3 Display P3 lattice (colour-managed conversion, not a relabelled sRGB table)."
         var approval = looks[index]["approval"] as! [String: Any]
-        approval["recordID"] = "KRMA-1117-P3-STARTER-2026-10-25"
-        approval["reviewer"] = "KRMA-1117 implementation visual review; maintainers confirm at KRMA-1121 activation"
+        approval["recordID"] = "KRMA-1121-P3-STARTER-2026-10-25"
+        approval["reviewer"] = "KRMA-1117 visual review (A/B contact sheet via `review`); activated by KRMA-1121"
         approval["approvedAt"] = "2026-10-25"
         approval["notes"] = "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3). Appearance on "
-            + "in-gamut colours reviewed against the active sRGB Look via `review`; no camera profile or commercial emulation used."
+            + "in-gamut colours reviewed against the sRGB source Look via `review`; no camera profile or commercial emulation used."
         looks[index]["approval"] = approval
     }
     manifest["looks"] = looks
     manifest["acknowledgement"] = (manifest["acknowledgement"] as! String)
-        + " The Display P3 set is prepared and inactive until the P3 release flip."
+        + " The bundled set is authored in Display P3."
     let data = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
     try (data + Data("\n".utf8)).write(to: outputDir.appendingPathComponent("manifest.json"))
 }

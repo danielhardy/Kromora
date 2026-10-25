@@ -575,7 +575,7 @@ final class CurrentEditMeasurementTests: TempDirectoryTestCase {
             base,
             measurer.key(
                 source: source, assetID: assetID, document: document,
-                configuration: CurrentEditMeasurementConfiguration(space: .displayP3)
+                configuration: CurrentEditMeasurementConfiguration(space: .sRGB)
             ),
             "render revision (space) must participate in the key"
         )

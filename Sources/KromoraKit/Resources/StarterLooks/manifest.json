@@ -1,240 +1,240 @@
 {
-  "schemaVersion": 1,
-  "acknowledgement": "Starter Looks are original Kromora assets. They are read-only and require no third-party attribution. Film and manufacturer references are descriptive inspiration only; no official profiles or commercial emulation data are bundled.",
-  "looks": [
+  "acknowledgement" : "Starter Looks are original Kromora assets. They are read-only and require no third-party attribution. Film and manufacturer references are descriptive inspiration only; no official profiles or commercial emulation data are bundled. The bundled set is authored in Display P3.",
+  "looks" : [
     {
-      "id": "kromora.starter.soft-mono",
-      "name": "Soft Mono",
-      "category": "Monochrome",
-      "resource": "soft-mono.cube",
-      "sourceAuthor": "Kromora project contributors",
-      "source": "Original in-house procedural asset; authored for Kromora.",
-      "license": "MIT License (Kromora project license)",
-      "attribution": "No third-party attribution required; retain the Kromora MIT notice.",
-      "redistribution": "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement.",
-      "approval": {
-        "status": "approved",
-        "recordID": "LUMO-150-STARTER-2026-09-03",
-        "reviewer": "Kromora maintainers",
-        "approvedAt": "2026-09-03",
-        "notes": "Original monochrome transform; no camera profile or commercial emulation used."
-      }
+      "approval" : {
+        "approvedAt" : "2026-10-25",
+        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3). Appearance on in-gamut colours reviewed against the sRGB source Look via `review`; no camera profile or commercial emulation used.",
+        "recordID" : "KRMA-1121-P3-STARTER-2026-10-25",
+        "reviewer" : "KRMA-1117 visual review (A/B contact sheet via `review`); activated by KRMA-1121",
+        "status" : "approved"
+      },
+      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
+      "category" : "Monochrome",
+      "id" : "kromora.starter.soft-mono",
+      "license" : "MIT License (Kromora project license)",
+      "name" : "Soft Mono",
+      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement.",
+      "resource" : "soft-mono.cube",
+      "source" : "Original in-house procedural asset; authored for Kromora. Display P3 regeneration: scripts/generate-p3-starter-looks.swift resamples the sRGB control lattice of the same Look onto a 17^3 Display P3 lattice (colour-managed conversion, not a relabelled sRGB table).",
+      "sourceAuthor" : "Kromora project contributors"
     },
     {
-      "id": "kromora.starter.evening-cinema",
-      "name": "Evening Cinema",
-      "category": "Cinematic",
-      "resource": "evening-cinema.cube",
-      "sourceAuthor": "Kromora project contributors",
-      "source": "Original in-house procedural asset; authored for Kromora.",
-      "license": "MIT License (Kromora project license)",
-      "attribution": "No third-party attribution required; retain the Kromora MIT notice.",
-      "redistribution": "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement.",
-      "approval": {
-        "status": "approved",
-        "recordID": "LUMO-150-STARTER-2026-09-03",
-        "reviewer": "Kromora maintainers",
-        "approvedAt": "2026-09-03",
-        "notes": "Original cool-shadow/warm-highlight transform; no commercial film emulation used."
-      }
+      "approval" : {
+        "approvedAt" : "2026-10-25",
+        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3). Appearance on in-gamut colours reviewed against the sRGB source Look via `review`; no camera profile or commercial emulation used.",
+        "recordID" : "KRMA-1121-P3-STARTER-2026-10-25",
+        "reviewer" : "KRMA-1117 visual review (A/B contact sheet via `review`); activated by KRMA-1121",
+        "status" : "approved"
+      },
+      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
+      "category" : "Cinematic",
+      "id" : "kromora.starter.evening-cinema",
+      "license" : "MIT License (Kromora project license)",
+      "name" : "Evening Cinema",
+      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement.",
+      "resource" : "evening-cinema.cube",
+      "source" : "Original in-house procedural asset; authored for Kromora. Display P3 regeneration: scripts/generate-p3-starter-looks.swift resamples the sRGB control lattice of the same Look onto a 17^3 Display P3 lattice (colour-managed conversion, not a relabelled sRGB table).",
+      "sourceAuthor" : "Kromora project contributors"
     },
     {
-      "id": "kromora.starter.muted-film",
-      "name": "Muted Film",
-      "category": "Film-inspired",
-      "resource": "muted-film.cube",
-      "sourceAuthor": "Kromora project contributors",
-      "source": "Original in-house procedural asset; authored for Kromora.",
-      "license": "MIT License (Kromora project license)",
-      "attribution": "No third-party attribution required; retain the Kromora MIT notice.",
-      "redistribution": "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement.",
-      "approval": {
-        "status": "approved",
-        "recordID": "LUMO-150-STARTER-2026-09-03",
-        "reviewer": "Kromora maintainers",
-        "approvedAt": "2026-09-03",
-        "notes": "Original restrained-contrast transform; not derived from a film stock or camera profile."
-      }
+      "approval" : {
+        "approvedAt" : "2026-10-25",
+        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3). Appearance on in-gamut colours reviewed against the sRGB source Look via `review`; no camera profile or commercial emulation used.",
+        "recordID" : "KRMA-1121-P3-STARTER-2026-10-25",
+        "reviewer" : "KRMA-1117 visual review (A/B contact sheet via `review`); activated by KRMA-1121",
+        "status" : "approved"
+      },
+      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
+      "category" : "Film-inspired",
+      "id" : "kromora.starter.muted-film",
+      "license" : "MIT License (Kromora project license)",
+      "name" : "Muted Film",
+      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement.",
+      "resource" : "muted-film.cube",
+      "source" : "Original in-house procedural asset; authored for Kromora. Display P3 regeneration: scripts/generate-p3-starter-looks.swift resamples the sRGB control lattice of the same Look onto a 17^3 Display P3 lattice (colour-managed conversion, not a relabelled sRGB table).",
+      "sourceAuthor" : "Kromora project contributors"
     },
     {
-      "id": "kromora.starter.warm-slide",
-      "name": "Warm Slide",
-      "category": "Warm slide-inspired",
-      "resource": "warm-slide.cube",
-      "sourceAuthor": "Kromora project contributors",
-      "source": "Original in-house procedural asset; authored for Kromora.",
-      "license": "MIT License (Kromora project license)",
-      "attribution": "No third-party attribution required; retain the Kromora MIT notice.",
-      "redistribution": "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement.",
-      "approval": {
-        "status": "approved",
-        "recordID": "LUMO-150-STARTER-2026-09-03",
-        "reviewer": "Kromora maintainers",
-        "approvedAt": "2026-09-03",
-        "notes": "Original warm/high-saturation transform; name is descriptive and not a stock reference."
-      }
+      "approval" : {
+        "approvedAt" : "2026-10-25",
+        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3). Appearance on in-gamut colours reviewed against the sRGB source Look via `review`; no camera profile or commercial emulation used.",
+        "recordID" : "KRMA-1121-P3-STARTER-2026-10-25",
+        "reviewer" : "KRMA-1117 visual review (A/B contact sheet via `review`); activated by KRMA-1121",
+        "status" : "approved"
+      },
+      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
+      "category" : "Warm slide-inspired",
+      "id" : "kromora.starter.warm-slide",
+      "license" : "MIT License (Kromora project license)",
+      "name" : "Warm Slide",
+      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement.",
+      "resource" : "warm-slide.cube",
+      "source" : "Original in-house procedural asset; authored for Kromora. Display P3 regeneration: scripts/generate-p3-starter-looks.swift resamples the sRGB control lattice of the same Look onto a 17^3 Display P3 lattice (colour-managed conversion, not a relabelled sRGB table).",
+      "sourceAuthor" : "Kromora project contributors"
     },
     {
-      "id": "kromora.starter.silver-noir",
-      "name": "Silver Noir",
-      "category": "Monochrome",
-      "resource": "silver-noir.cube",
-      "sourceAuthor": "Kromora project contributors",
-      "source": "Original in-house procedural asset; authored for Kromora. High-contrast neutral monochrome with deep blacks and bright silver highlights.",
-      "license": "MIT License (Kromora project license)",
-      "attribution": "No third-party attribution required; retain the Kromora MIT notice.",
-      "redistribution": "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
-      "approval": {
-        "status": "approved",
-        "recordID": "LUMO-372-STARTER-2026-09-12",
-        "reviewer": "Kromora maintainers",
-        "approvedAt": "2026-09-12",
-        "notes": "Original procedural 3D LUT; no ripped commercial emulation data, camera profile, or official manufacturer asset used."
-      }
+      "approval" : {
+        "approvedAt" : "2026-10-25",
+        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3). Appearance on in-gamut colours reviewed against the sRGB source Look via `review`; no camera profile or commercial emulation used.",
+        "recordID" : "KRMA-1121-P3-STARTER-2026-10-25",
+        "reviewer" : "KRMA-1117 visual review (A/B contact sheet via `review`); activated by KRMA-1121",
+        "status" : "approved"
+      },
+      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
+      "category" : "Monochrome",
+      "id" : "kromora.starter.silver-noir",
+      "license" : "MIT License (Kromora project license)",
+      "name" : "Silver Noir",
+      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
+      "resource" : "silver-noir.cube",
+      "source" : "Original in-house procedural asset; authored for Kromora. Display P3 regeneration: scripts/generate-p3-starter-looks.swift resamples the sRGB control lattice of the same Look onto a 17^3 Display P3 lattice (colour-managed conversion, not a relabelled sRGB table).",
+      "sourceAuthor" : "Kromora project contributors"
     },
     {
-      "id": "kromora.starter.paper-grain",
-      "name": "Paper Grain",
-      "category": "Monochrome",
-      "resource": "paper-grain.cube",
-      "sourceAuthor": "Kromora project contributors",
-      "source": "Original in-house procedural asset; authored for Kromora. Lifted, low-contrast neutral monochrome with a soft paper-like tonal curve.",
-      "license": "MIT License (Kromora project license)",
-      "attribution": "No third-party attribution required; retain the Kromora MIT notice.",
-      "redistribution": "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
-      "approval": {
-        "status": "approved",
-        "recordID": "LUMO-372-STARTER-2026-09-12",
-        "reviewer": "Kromora maintainers",
-        "approvedAt": "2026-09-12",
-        "notes": "Original procedural 3D LUT; no ripped commercial emulation data, camera profile, or official manufacturer asset used."
-      }
+      "approval" : {
+        "approvedAt" : "2026-10-25",
+        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3). Appearance on in-gamut colours reviewed against the sRGB source Look via `review`; no camera profile or commercial emulation used.",
+        "recordID" : "KRMA-1121-P3-STARTER-2026-10-25",
+        "reviewer" : "KRMA-1117 visual review (A/B contact sheet via `review`); activated by KRMA-1121",
+        "status" : "approved"
+      },
+      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
+      "category" : "Monochrome",
+      "id" : "kromora.starter.paper-grain",
+      "license" : "MIT License (Kromora project license)",
+      "name" : "Paper Grain",
+      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
+      "resource" : "paper-grain.cube",
+      "source" : "Original in-house procedural asset; authored for Kromora. Display P3 regeneration: scripts/generate-p3-starter-looks.swift resamples the sRGB control lattice of the same Look onto a 17^3 Display P3 lattice (colour-managed conversion, not a relabelled sRGB table).",
+      "sourceAuthor" : "Kromora project contributors"
     },
     {
-      "id": "kromora.starter.blueprint-mono",
-      "name": "Blueprint Mono",
-      "category": "Monochrome",
-      "resource": "blueprint-mono.cube",
-      "sourceAuthor": "Kromora project contributors",
-      "source": "Original in-house procedural asset; authored for Kromora. Open-shadow neutral monochrome with a gently compressed blue-hour-style tonal response.",
-      "license": "MIT License (Kromora project license)",
-      "attribution": "No third-party attribution required; retain the Kromora MIT notice.",
-      "redistribution": "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
-      "approval": {
-        "status": "approved",
-        "recordID": "LUMO-372-STARTER-2026-09-12",
-        "reviewer": "Kromora maintainers",
-        "approvedAt": "2026-09-12",
-        "notes": "Original procedural 3D LUT; no ripped commercial emulation data, camera profile, or official manufacturer asset used."
-      }
+      "approval" : {
+        "approvedAt" : "2026-10-25",
+        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3). Appearance on in-gamut colours reviewed against the sRGB source Look via `review`; no camera profile or commercial emulation used.",
+        "recordID" : "KRMA-1121-P3-STARTER-2026-10-25",
+        "reviewer" : "KRMA-1117 visual review (A/B contact sheet via `review`); activated by KRMA-1121",
+        "status" : "approved"
+      },
+      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
+      "category" : "Monochrome",
+      "id" : "kromora.starter.blueprint-mono",
+      "license" : "MIT License (Kromora project license)",
+      "name" : "Blueprint Mono",
+      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
+      "resource" : "blueprint-mono.cube",
+      "source" : "Original in-house procedural asset; authored for Kromora. Display P3 regeneration: scripts/generate-p3-starter-looks.swift resamples the sRGB control lattice of the same Look onto a 17^3 Display P3 lattice (colour-managed conversion, not a relabelled sRGB table).",
+      "sourceAuthor" : "Kromora project contributors"
     },
     {
-      "id": "kromora.starter.infrared-mono",
-      "name": "Infrared Mono",
-      "category": "Monochrome",
-      "resource": "infrared-mono.cube",
-      "sourceAuthor": "Kromora project contributors",
-      "source": "Original in-house procedural asset; authored for Kromora. Green-sensitive neutral monochrome with emphatic luminance separation; descriptive only.",
-      "license": "MIT License (Kromora project license)",
-      "attribution": "No third-party attribution required; retain the Kromora MIT notice.",
-      "redistribution": "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
-      "approval": {
-        "status": "approved",
-        "recordID": "LUMO-372-STARTER-2026-09-12",
-        "reviewer": "Kromora maintainers",
-        "approvedAt": "2026-09-12",
-        "notes": "Original procedural 3D LUT; no ripped commercial emulation data, camera profile, or official manufacturer asset used."
-      }
+      "approval" : {
+        "approvedAt" : "2026-10-25",
+        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3). Appearance on in-gamut colours reviewed against the sRGB source Look via `review`; no camera profile or commercial emulation used.",
+        "recordID" : "KRMA-1121-P3-STARTER-2026-10-25",
+        "reviewer" : "KRMA-1117 visual review (A/B contact sheet via `review`); activated by KRMA-1121",
+        "status" : "approved"
+      },
+      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
+      "category" : "Monochrome",
+      "id" : "kromora.starter.infrared-mono",
+      "license" : "MIT License (Kromora project license)",
+      "name" : "Infrared Mono",
+      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
+      "resource" : "infrared-mono.cube",
+      "source" : "Original in-house procedural asset; authored for Kromora. Display P3 regeneration: scripts/generate-p3-starter-looks.swift resamples the sRGB control lattice of the same Look onto a 17^3 Display P3 lattice (colour-managed conversion, not a relabelled sRGB table).",
+      "sourceAuthor" : "Kromora project contributors"
     },
     {
-      "id": "kromora.starter.ember-cyan",
-      "name": "Ember & Cyan",
-      "category": "Cinematic",
-      "resource": "ember-cyan.cube",
-      "sourceAuthor": "Kromora project contributors",
-      "source": "Original in-house procedural asset; authored for Kromora. Orange-and-teal cinematic separation with warm highlights and cyan shadows.",
-      "license": "MIT License (Kromora project license)",
-      "attribution": "No third-party attribution required; retain the Kromora MIT notice.",
-      "redistribution": "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
-      "approval": {
-        "status": "approved",
-        "recordID": "LUMO-372-STARTER-2026-09-12",
-        "reviewer": "Kromora maintainers",
-        "approvedAt": "2026-09-12",
-        "notes": "Original procedural 3D LUT; no ripped commercial emulation data, camera profile, or official manufacturer asset used."
-      }
+      "approval" : {
+        "approvedAt" : "2026-10-25",
+        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3). Appearance on in-gamut colours reviewed against the sRGB source Look via `review`; no camera profile or commercial emulation used.",
+        "recordID" : "KRMA-1121-P3-STARTER-2026-10-25",
+        "reviewer" : "KRMA-1117 visual review (A/B contact sheet via `review`); activated by KRMA-1121",
+        "status" : "approved"
+      },
+      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
+      "category" : "Cinematic",
+      "id" : "kromora.starter.ember-cyan",
+      "license" : "MIT License (Kromora project license)",
+      "name" : "Ember & Cyan",
+      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
+      "resource" : "ember-cyan.cube",
+      "source" : "Original in-house procedural asset; authored for Kromora. Display P3 regeneration: scripts/generate-p3-starter-looks.swift resamples the sRGB control lattice of the same Look onto a 17^3 Display P3 lattice (colour-managed conversion, not a relabelled sRGB table).",
+      "sourceAuthor" : "Kromora project contributors"
     },
     {
-      "id": "kromora.starter.honey-negative",
-      "name": "Honey Negative",
-      "category": "Film-inspired",
-      "resource": "honey-negative.cube",
-      "sourceAuthor": "Kromora project contributors",
-      "source": "Original in-house procedural asset; authored for Kromora. Warm, natural, gently lifted negative-film-inspired color rendering; not a commercial stock profile.",
-      "license": "MIT License (Kromora project license)",
-      "attribution": "No third-party attribution required; retain the Kromora MIT notice.",
-      "redistribution": "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
-      "approval": {
-        "status": "approved",
-        "recordID": "LUMO-372-STARTER-2026-09-12",
-        "reviewer": "Kromora maintainers",
-        "approvedAt": "2026-09-12",
-        "notes": "Original procedural 3D LUT; no ripped commercial emulation data, camera profile, or official manufacturer asset used."
-      }
+      "approval" : {
+        "approvedAt" : "2026-10-25",
+        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3). Appearance on in-gamut colours reviewed against the sRGB source Look via `review`; no camera profile or commercial emulation used.",
+        "recordID" : "KRMA-1121-P3-STARTER-2026-10-25",
+        "reviewer" : "KRMA-1117 visual review (A/B contact sheet via `review`); activated by KRMA-1121",
+        "status" : "approved"
+      },
+      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
+      "category" : "Film-inspired",
+      "id" : "kromora.starter.honey-negative",
+      "license" : "MIT License (Kromora project license)",
+      "name" : "Honey Negative",
+      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
+      "resource" : "honey-negative.cube",
+      "source" : "Original in-house procedural asset; authored for Kromora. Display P3 regeneration: scripts/generate-p3-starter-looks.swift resamples the sRGB control lattice of the same Look onto a 17^3 Display P3 lattice (colour-managed conversion, not a relabelled sRGB table).",
+      "sourceAuthor" : "Kromora project contributors"
     },
     {
-      "id": "kromora.starter.pastel-wash",
-      "name": "Pastel Wash",
-      "category": "Pastel",
-      "resource": "pastel-wash.cube",
-      "sourceAuthor": "Kromora project contributors",
-      "source": "Original in-house procedural asset; authored for Kromora. Soft, low-saturation pastel color with lifted shadows and compressed highlights.",
-      "license": "MIT License (Kromora project license)",
-      "attribution": "No third-party attribution required; retain the Kromora MIT notice.",
-      "redistribution": "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
-      "approval": {
-        "status": "approved",
-        "recordID": "LUMO-372-STARTER-2026-09-12",
-        "reviewer": "Kromora maintainers",
-        "approvedAt": "2026-09-12",
-        "notes": "Original procedural 3D LUT; no ripped commercial emulation data, camera profile, or official manufacturer asset used."
-      }
+      "approval" : {
+        "approvedAt" : "2026-10-25",
+        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3). Appearance on in-gamut colours reviewed against the sRGB source Look via `review`; no camera profile or commercial emulation used.",
+        "recordID" : "KRMA-1121-P3-STARTER-2026-10-25",
+        "reviewer" : "KRMA-1117 visual review (A/B contact sheet via `review`); activated by KRMA-1121",
+        "status" : "approved"
+      },
+      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
+      "category" : "Pastel",
+      "id" : "kromora.starter.pastel-wash",
+      "license" : "MIT License (Kromora project license)",
+      "name" : "Pastel Wash",
+      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
+      "resource" : "pastel-wash.cube",
+      "source" : "Original in-house procedural asset; authored for Kromora. Display P3 regeneration: scripts/generate-p3-starter-looks.swift resamples the sRGB control lattice of the same Look onto a 17^3 Display P3 lattice (colour-managed conversion, not a relabelled sRGB table).",
+      "sourceAuthor" : "Kromora project contributors"
     },
     {
-      "id": "kromora.starter.bleached-daylight",
-      "name": "Bleached Daylight",
-      "category": "Faded",
-      "resource": "bleached-daylight.cube",
-      "sourceAuthor": "Kromora project contributors",
-      "source": "Original in-house procedural asset; authored for Kromora. Faded daylight palette with reduced saturation and a restrained matte curve.",
-      "license": "MIT License (Kromora project license)",
-      "attribution": "No third-party attribution required; retain the Kromora MIT notice.",
-      "redistribution": "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
-      "approval": {
-        "status": "approved",
-        "recordID": "LUMO-372-STARTER-2026-09-12",
-        "reviewer": "Kromora maintainers",
-        "approvedAt": "2026-09-12",
-        "notes": "Original procedural 3D LUT; no ripped commercial emulation data, camera profile, or official manufacturer asset used."
-      }
+      "approval" : {
+        "approvedAt" : "2026-10-25",
+        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3). Appearance on in-gamut colours reviewed against the sRGB source Look via `review`; no camera profile or commercial emulation used.",
+        "recordID" : "KRMA-1121-P3-STARTER-2026-10-25",
+        "reviewer" : "KRMA-1117 visual review (A/B contact sheet via `review`); activated by KRMA-1121",
+        "status" : "approved"
+      },
+      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
+      "category" : "Faded",
+      "id" : "kromora.starter.bleached-daylight",
+      "license" : "MIT License (Kromora project license)",
+      "name" : "Bleached Daylight",
+      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
+      "resource" : "bleached-daylight.cube",
+      "source" : "Original in-house procedural asset; authored for Kromora. Display P3 regeneration: scripts/generate-p3-starter-looks.swift resamples the sRGB control lattice of the same Look onto a 17^3 Display P3 lattice (colour-managed conversion, not a relabelled sRGB table).",
+      "sourceAuthor" : "Kromora project contributors"
     },
     {
-      "id": "kromora.starter.hard-light",
-      "name": "Hard Light",
-      "category": "High-contrast",
-      "resource": "hard-light.cube",
-      "sourceAuthor": "Kromora project contributors",
-      "source": "Original in-house procedural asset; authored for Kromora. Hard, graphic contrast that deepens shadows and brightens highlights.",
-      "license": "MIT License (Kromora project license)",
-      "attribution": "No third-party attribution required; retain the Kromora MIT notice.",
-      "redistribution": "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
-      "approval": {
-        "status": "approved",
-        "recordID": "LUMO-372-STARTER-2026-09-12",
-        "reviewer": "Kromora maintainers",
-        "approvedAt": "2026-09-12",
-        "notes": "Original procedural 3D LUT; no ripped commercial emulation data, camera profile, or official manufacturer asset used."
-      }
+      "approval" : {
+        "approvedAt" : "2026-10-25",
+        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3). Appearance on in-gamut colours reviewed against the sRGB source Look via `review`; no camera profile or commercial emulation used.",
+        "recordID" : "KRMA-1121-P3-STARTER-2026-10-25",
+        "reviewer" : "KRMA-1117 visual review (A/B contact sheet via `review`); activated by KRMA-1121",
+        "status" : "approved"
+      },
+      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
+      "category" : "High-contrast",
+      "id" : "kromora.starter.hard-light",
+      "license" : "MIT License (Kromora project license)",
+      "name" : "Hard Light",
+      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
+      "resource" : "hard-light.cube",
+      "source" : "Original in-house procedural asset; authored for Kromora. Display P3 regeneration: scripts/generate-p3-starter-looks.swift resamples the sRGB control lattice of the same Look onto a 17^3 Display P3 lattice (colour-managed conversion, not a relabelled sRGB table).",
+      "sourceAuthor" : "Kromora project contributors"
     }
-  ]
+  ],
+  "schemaVersion" : 1
 }

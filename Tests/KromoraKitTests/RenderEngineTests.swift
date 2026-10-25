@@ -56,11 +56,14 @@ final class RenderEngineTests: TempDirectoryTestCase {
         let maybeImage = await engine.makeCIImage(request)
         let image = try XCTUnwrap(maybeImage)
 
-        XCTAssertEqual(image.colorSpace?.name as String?, CGColorSpace.sRGB as String?)
+        XCTAssertEqual(image.colorSpace?.name as String?, WorkingSpace.current.cgColorSpace.name as String?)
         XCTAssertEqual(image.extent.integral.size, CGSize(width: 48, height: 32))
         let displayed = try await MainActor.run {
             try XCTUnwrap(
-                RenderEngine.presentationContext.createCGImage(image, from: image.extent.integral),
+                RenderEngine.presentationContext.createCGImage(
+                    image, from: image.extent.integral,
+                    format: .RGBA8, colorSpace: WorkingSpace.current.cgColorSpace
+                ),
                 "the completed texture must remain consumable by a Core Image presenter"
             )
         }
@@ -855,7 +858,7 @@ final class RenderEngineTests: TempDirectoryTestCase {
             ))
 
             assertPixelsEqual(try Pixels.bytes(of: viaEngine),
-                              try Pixels.bytes(of: graph, space: space),
+                              try Pixels.bytes(of: graph, space: space, workingSpace: .current),
                               "the engine should evaluate the graph unchanged in \(space.rawValue)")
         }
     }

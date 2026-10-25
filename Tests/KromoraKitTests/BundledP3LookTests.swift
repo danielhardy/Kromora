@@ -2,45 +2,51 @@ import XCTest
 import CoreImage
 @testable import KromoraKit
 
-/// The prepared Display P3 starter set (KRMA-1117): valid, stamped, genuinely regenerated rather than
-/// retagged, free of unintended neutral clipping, and inactive until KRMA-1121.
+/// The active Display P3 starter set (KRMA-1117, activated by KRMA-1121): valid, stamped, genuinely
+/// regenerated from the sRGB source lattices rather than retagged, and free of unintended neutral
+/// clipping. The sRGB sources live in `scripts/starter-looks-srgb` and are not bundled.
 final class BundledP3LookTests: XCTestCase {
-    private let p3Directory = BundledLookLibrary.preparedP3ResourceSubdirectory
-
-    func testTheActiveStarterSetIsStillSRGBAndUnchanged() throws {
-        let library = BundledLookLibrary.load()
-        XCTAssertEqual(library.looks.count, 13)
-        XCTAssertTrue(library.warnings.isEmpty)
-        XCTAssertTrue(library.looks.allSatisfy { $0.authoringSpace == .sRGB })
-        XCTAssertEqual(BundledLookLibrary.resourceSubdirectory, "Resources/StarterLooks")
+    private var sourceDirectory: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("scripts/starter-looks-srgb", isDirectory: true)
     }
 
-    func testPreparedP3SetValidatesAndIsStamped() throws {
-        let manifest = try BundledLookLibrary.validate(subdirectory: p3Directory)
-        XCTAssertEqual(manifest.looks.count, 13)
+    private func sourceLooks() throws -> [String: CubeLUT] {
+        let manifest = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: sourceDirectory.appendingPathComponent("manifest.json"))) as! [String: Any]
+        var result = [String: CubeLUT]()
+        for entry in manifest["looks"] as! [[String: Any]] {
+            let resource = entry["resource"] as! String
+            result[entry["id"] as! String] = try CubeLUT(
+                url: sourceDirectory.appendingPathComponent(resource), source: .bundled)
+        }
+        return result
+    }
+
+    func testTheActiveStarterSetIsDisplayP3() throws {
+        let library = BundledLookLibrary.load()
+        XCTAssertEqual(library.looks.count, 13)
+        XCTAssertTrue(library.warnings.isEmpty, "\(library.warnings)")
+        XCTAssertTrue(library.looks.allSatisfy { $0.authoringSpace == .displayP3 })
+        XCTAssertEqual(BundledLookLibrary.resourceSubdirectory, "Resources/StarterLooks")
+        let manifest = try BundledLookLibrary.validate(subdirectory: BundledLookLibrary.resourceSubdirectory)
         XCTAssertTrue(manifest.looks.allSatisfy { $0.approval.notes.contains("Display P3") })
         XCTAssertTrue(manifest.looks.allSatisfy { $0.source.contains("generate-p3-starter-looks") })
-
-        let library = BundledLookLibrary.load(subdirectory: p3Directory)
-        XCTAssertTrue(library.warnings.isEmpty, "\(library.warnings)")
-        XCTAssertEqual(library.looks.count, 13)
-        XCTAssertTrue(library.looks.allSatisfy { $0.authoringSpace == .displayP3 })
-        XCTAssertEqual(
-            Set(library.looks.map(\.id)), Set(BundledLookLibrary.load().looks.map(\.id)),
-            "the flip keeps stable Look identities"
-        )
     }
 
     func testP3TablesAreRegeneratedNotRetagged() throws {
-        let active = Dictionary(uniqueKeysWithValues: BundledLookLibrary.load().looks.map { ($0.id, $0) })
-        for p3 in BundledLookLibrary.load(subdirectory: p3Directory).looks {
-            let srgb = try XCTUnwrap(active[p3.id])
+        let sources = try sourceLooks()
+        XCTAssertEqual(Set(sources.keys), Set(BundledLookLibrary.load().looks.map(\.id)))
+        for p3 in BundledLookLibrary.load().looks {
+            let srgb = try XCTUnwrap(sources[p3.id])
+            XCTAssertEqual(srgb.authoringSpace, .sRGB)
             XCTAssertGreaterThan(p3.size, srgb.size, "\(p3.name) is resampled on a finer P3 lattice")
             XCTAssertNotEqual(p3.contentHash, srgb.contentHash)
         }
     }
 
-    /// Neutral input must come out the same neutral tone as the active sRGB Look, within a small
+    /// Neutral input must come out the same neutral tone as the sRGB source Look, within a small
     /// tolerance, so the regeneration neither clips nor shifts the tonal ramp.
     func testNeutralRampMatchesTheSRGBLookWithoutClipping() throws {
         let steps = 17
@@ -58,9 +64,9 @@ final class BundledP3LookTests: XCTestCase {
                            format: .RGBA8, colorSpace: WorkingSpace.sRGB.cgColorSpace)
             return bytes
         }
-        let active = Dictionary(uniqueKeysWithValues: BundledLookLibrary.load().looks.map { ($0.id, $0) })
-        for p3 in BundledLookLibrary.load(subdirectory: p3Directory).looks {
-            let a = try render(try XCTUnwrap(active[p3.id]))
+        let sources = try sourceLooks()
+        for p3 in BundledLookLibrary.load().looks {
+            let a = try render(try XCTUnwrap(sources[p3.id]))
             let b = try render(p3)
             for i in 0..<steps {
                 for c in 0..<3 {

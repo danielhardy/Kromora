@@ -1122,7 +1122,10 @@ final class PreviewSurfaceTests: XCTestCase {
             ))
         let fallbackPixels = try Pixels.bytes(
             of: XCTUnwrap(
-                RenderEngine.presentationContext.createCGImage(fallback, from: destination)
+                RenderEngine.presentationContext.createCGImage(
+                    fallback, from: destination,
+                    format: .RGBA8, colorSpace: WorkingSpace.current.cgColorSpace
+                )
             ))
         let metal = try XCTUnwrap(
             PreviewSurfaceView.Coordinator().renderRetainedTexture(
@@ -1616,8 +1619,10 @@ final class PreviewSurfaceTests: XCTestCase {
     }
 
     /// CGImage row 0 is the visual top. Those rows are red; the visual bottom is cyan.
+    /// Authored in the working space, like every frame the engine publishes: a source in another
+    /// space would be blended in its own encoding by Core Image but in the working encoding by Metal.
     private func makeOrientationAsymmetricCGImage(width: Int, height: Int) throws -> CGImage {
-        let space = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        let space = WorkingSpace.current.cgColorSpace
         var pixels = [UInt8](repeating: 0, count: width * height * 4)
         for y in 0..<height {
             for x in 0..<width {

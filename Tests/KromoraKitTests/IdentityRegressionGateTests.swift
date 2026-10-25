@@ -76,7 +76,7 @@ final class IdentityRegressionGateTests: TempDirectoryTestCase {
                 signature: FrameSignature(
                     source: representative.identity,
                     editHash: representative.document.editHash, look: .none,
-                    workingSpace: .sRGB, pixelEpoch: RenderPipeline.pixelEpoch
+                    workingSpace: .current, pixelEpoch: RenderPipeline.pixelEpoch
                 ),
                 geometry: PresentedGeometry(
                     crop: CropAdjustments(), rotation: ImageRotation(rawValue: 0)!,
@@ -156,7 +156,7 @@ final class IdentityRegressionGateTests: TempDirectoryTestCase {
                     against: FrameCurrentInputs(
                         source: movedRepresentative.identity,
                         editHash: movedRepresentative.document.editHash,
-                        look: LookSignature.none, workingSpace: .sRGB
+                        look: LookSignature.none, workingSpace: .current
                     )
                 ),
                 .exact

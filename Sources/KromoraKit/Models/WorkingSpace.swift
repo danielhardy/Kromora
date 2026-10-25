@@ -44,7 +44,18 @@ enum WorkingSpace: String, Codable, Sendable, Equatable, CaseIterable {
         }
     }
 
-    /// The space the app renders and exports in. Flipping this moves the canvas/export target and the
-    /// default authoring space of newly saved and derived Looks.
-    static let current: WorkingSpace = .sRGB
+    /// The extended-range *linear* variant Core Image evaluates the graph in. A non-linear working
+    /// space would make every filter blend in gamma-encoded values; the extended range keeps
+    /// out-of-gamut values alive between stages. For `.sRGB` this is Core Image's own default.
+    var linearWorkingColorSpace: CGColorSpace {
+        switch self {
+        case .sRGB: return CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!
+        case .displayP3: return CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3)!
+        }
+    }
+
+    /// The space the app renders and exports in: Display P3 since KRMA-1121. It is the canvas and
+    /// delivery target, the Core Image working gamut, and the default authoring space of newly saved
+    /// and derived Looks.
+    static let current: WorkingSpace = .displayP3
 }

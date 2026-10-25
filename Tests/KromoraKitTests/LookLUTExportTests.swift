@@ -50,8 +50,8 @@ final class LookLUTExportTests: TempDirectoryTestCase {
         XCTAssertTrue(conversion.verification.passed)
         let text = conversion.cubeText(title: "Identity Look")
         XCTAssertTrue(text.contains("LUT_3D_SIZE 2"))
-        XCTAssertTrue(text.contains(CubeLUT.authoringSpaceHeader(.sRGB)))
-        XCTAssertTrue(text.contains("Authoring color space: sRGB"))
+        XCTAssertTrue(text.contains(CubeLUT.authoringSpaceHeader(.displayP3)))
+        XCTAssertTrue(text.contains("Authoring color space: displayP3"))
         XCTAssertTrue(text.contains("DOMAIN_MIN: 0.0 0.0 0.0"))
         XCTAssertNotNil(try? CubeLUT(url: Fixtures.writeCube(text, named: "identity-look.cube", in: tempDirectory)))
     }
@@ -90,7 +90,9 @@ final class LookLUTExportTests: TempDirectoryTestCase {
     }
 
     func testStrongSaturationRetriesAtHighestQualityResolution() throws {
-        let document = EditDocument(color: ColorAdjustments(saturation: 30))
+        // Display P3 holds more of a strong saturation boost without clipping, so this needs a
+        // stronger edit than the sRGB-era `saturation: 30` to miss at the default resolution.
+        let document = EditDocument(color: ColorAdjustments(vibrance: 100, saturation: 100))
 
         let conversion = try LookLUTConverter.convert(document: document, lut: nil)
 
@@ -100,7 +102,10 @@ final class LookLUTExportTests: TempDirectoryTestCase {
     }
 
     func testPersistentApproximationIsReturnedWithMeasuredQuality() throws {
-        let document = EditDocument(color: ColorAdjustments(saturation: 100))
+        let document = EditDocument(
+            light: LightAdjustments(exposure: 0.5, contrast: 60),
+            color: ColorAdjustments(vibrance: 100, saturation: 100)
+        )
 
         let conversion = try LookLUTConverter.convert(document: document, lut: nil)
 
@@ -186,7 +191,10 @@ final class LookLUTExportTests: TempDirectoryTestCase {
     @MainActor
     func testApproximateConversionRequiresExplicitConfirmationBeforeWriting() throws {
         let conversion = try LookLUTConverter.convert(
-            document: EditDocument(color: ColorAdjustments(saturation: 100)), lut: nil
+            document: EditDocument(
+                light: LightAdjustments(exposure: 0.5, contrast: 60),
+                color: ColorAdjustments(vibrance: 100, saturation: 100)
+            ), lut: nil
         )
         let coordinator = LookSaveCoordinator()
         coordinator.setConversion(conversion, name: "Approximate Look")

@@ -63,7 +63,10 @@ enum RenderPipeline {
     /// v36 moves the Look (LUT) to the head of the adjustment chain: it is now a base look that
     /// Light, Color, Effects, Detail, and ordered adjustments adjust, rather than a final grade
     /// applied over their output.
-    static let pixelEpoch = 36
+    /// v37 is the Display P3 release (KRMA-1121): the engine evaluates the graph in extended linear
+    /// Display P3 and every raster and export is encoded in Display P3, so frames and caches written
+    /// by an sRGB-era build are stale.
+    static let pixelEpoch = 37
 
     /// Build the graph for `document` over `source`.
     ///

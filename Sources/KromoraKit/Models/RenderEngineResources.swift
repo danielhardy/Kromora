@@ -212,14 +212,20 @@ final class RenderEngineResources {
 
     init(configuration: RenderCacheConfiguration) {
         self.configuration = configuration
+        // The graph evaluates in the app's working gamut, linear. Built-in filters such as
+        // `CIToneCurve` clamp to the working gamut, so the default extended-linear-sRGB context would
+        // clip a Display P3 photo to sRGB on the first Light edit.
+        let options: [CIContextOption: Any] = [
+            .workingColorSpace: WorkingSpace.current.linearWorkingColorSpace
+        ]
         if let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue() {
             self.device = device
             self.commandQueue = queue
-            self.context = CIContext(mtlCommandQueue: queue)
+            self.context = CIContext(mtlCommandQueue: queue, options: options)
         } else {
             self.device = nil
             self.commandQueue = nil
-            self.context = CIContext()
+            self.context = CIContext(options: options)
         }
         self.previewCache = BoundedLRUCache(
             maxEntries: configuration.previewMaxEntries,

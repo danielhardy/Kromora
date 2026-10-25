@@ -28,11 +28,12 @@ The parser rejects 1D or mixed tables, reversed domains, non-finite values, malf
 rows, truncated files, and dimensions outside 2–65. LUT application uses Core Image's
 GPU-backed `CIColorCubeWithColorSpace`.
 
-## P3 release authoring policy
+## P3 authoring policy
 
 [ADR-KRMA-1115](../.dg/decisions/ADR-KRMA-1115-display-p3-export-look-and-saved-edit-policy.md)
-was accepted on 2026-10-25. This is the implementation target for KRMA-1117/KRMA-1121; current
-shipping output stays sRGB until the final flip.
+was accepted on 2026-10-25 and activated by KRMA-1121: the canvas and every rendered delivery are
+Display P3 (`WorkingSpace.current`), the bundled Looks are P3-authored, and new saved and derived
+Looks are sampled and stamped P3.
 
 Every parsed Look has an authoring space. Its table is interpolated in that space
 (`CIColorCubeWithColorSpace.inputColorSpace`), independently of the canvas/export target, and the
@@ -68,19 +69,23 @@ effect, not every wide-gamut input color.
 
 ### P3 starter assets
 
-`Sources/KromoraKit/Resources/StarterLooksP3` holds a prepared, **inactive** Display P3 set of the
-13 starter Looks (same ids, names and categories; `BundledLookLibrary.preparedP3ResourceSubdirectory`).
-KRMA-1121 activates it. The active set in `StarterLooks` is unchanged by preparation.
+`Sources/KromoraKit/Resources/StarterLooks` holds the active Display P3 set of the 13 starter Looks
+(stable ids, names and categories, all stamped `displayP3`). The sRGB originals, the defined source
+parameters, are kept outside the bundle in `scripts/starter-looks-srgb`.
 
-They are regenerated, not retagged, by `scripts/generate-p3-starter-looks.swift generate`: each
-Look's sRGB control lattice is the defined source parameter, resampled onto a 17³ Display P3 lattice
-through an explicit sRGB↔P3 conversion (with bounded linear extrapolation outside the sRGB domain),
-and stamped `displayP3`. `scripts/generate-p3-starter-looks.swift review <out.png>` renders an A/B
-contact sheet (neutral ramp, primaries/secondaries, skin, sky, foliage) of the sRGB Look versus its
-P3 counterpart and prints the maximum 8-bit difference. Visual review (2026-10-25): neutrals agree
-within 4/255 for every Look (asserted by `BundledP3LookTests`); in-gamut colors match closely, while
-fully saturated primaries differ most (up to about 18/255, in Warm Slide, Evening Cinema, Muted Film
-and Honey Negative) because the P3 lattice samples a nonlinear conversion. The film-Look generator
+They are regenerated, not retagged, by `swift scripts/generate-p3-starter-looks.swift generate`
+(run from the repository root; the output is deterministic): each Look's sRGB control lattice is
+resampled onto a 17³ Display P3 lattice through an explicit sRGB↔P3 conversion (with bounded linear
+extrapolation outside the sRGB domain) and stamped `displayP3`.
+`swift scripts/generate-p3-starter-looks.swift review <out.png>` renders an A/B contact sheet
+(neutral ramp, primaries/secondaries, skin, sky, foliage) of each sRGB source versus its P3
+counterpart and prints the maximum 8-bit difference.
+
+Visual review (2026-10-25, recorded in each manifest entry's `approval`, record
+`KRMA-1121-P3-STARTER-2026-10-25`): neutrals agree within 4/255 for every Look (asserted by
+`BundledP3LookTests` against the sRGB sources); in-gamut colors match closely, while fully
+saturated primaries differ most (up to about 18/255, in Warm Slide, Evening Cinema, Muted Film and
+Honey Negative) because the P3 lattice samples a nonlinear conversion. The film-Look generator
 (KRMA-1103) should emit and stamp the same authoring space.
 
 ### Save as Look and Derive
@@ -88,15 +93,17 @@ and Honey Negative) because the P3 lattice samples a nonlinear conversion. The f
 Save as Look and Derive sample or fit in one explicit authoring space and stamp it:
 `LookLUTConverter.convert(space:)`, `LookSaveCoordinator(authoringSpace:)`, and
 `RecipeExtractor.Options.authoringSpace` / `DeriveCoordinator(authoringSpace:)`. The default is
-`WorkingSpace.current`, still sRGB during preparation; the neutral RAW baseline, JPG, edge mask and
+`WorkingSpace.current`, which is Display P3; the neutral RAW baseline, JPG, edge mask and
 measurement buffers of Derive are all color-matched into the chosen space, and the result is stamped
-with it. The flip changes only the default. Existing prerelease libraries and edits may be reset
-instead of migrated; source originals and imported files are not deleted by this policy.
+with it. Looks saved by a prerelease sRGB build keep their `sRGB` stamp (or none, which means sRGB)
+and are still interpreted as sRGB Looks; they are not rewritten. Prerelease libraries and edits may
+be reset instead of migrated (see the engineering guide); source originals and imported files are
+not deleted by this policy.
 
 ## Save and derive
 
 Save as Look/LUT exports the supported global portion of the current value document as a 33³ cube
-in the chosen authoring space (sRGB until the P3 flip). The confirmation sheet names omitted source-dependent or
+in the chosen authoring space (Display P3 by default). The confirmation sheet names omitted source-dependent or
 spatial stages, including RAW develop, crop/rotation, masking, Texture, Clarity, Dehaze, vignette,
 and grain; the output does not claim pixel-identical reproduction of those stages.
 

@@ -180,7 +180,7 @@ final class RetouchCameraScaleDiagnosticsTests: XCTestCase {
         let window = fixture.window
         let ciWindow = CGRect(x: window.minX, y: CGFloat(fixture.height) - window.maxY,
                               width: window.width, height: window.height)
-        let output = try Pixels.bytes(of: rendered.cropped(to: ciWindow))
+        let output = try Pixels.bytes(of: rendered.cropped(to: ciWindow), space: .sRGB)
         let metrics = RetouchQualityMetrics.measure(
             clean: Self.slice(fixture.clean, fixture: fixture, window: window), output: output,
             mask: Self.sliceMask(fixture.mask, fixture: fixture, window: window),
@@ -308,8 +308,8 @@ extension RetouchCameraScaleDiagnosticsTests {
         print("BACKGROUND | SOURCE | OFFSET px | TOUCHES HAIR | ΔE2000 | GRADIENT | VAR | LUMA | RESULT")
         for background in RetouchQualityFixtures.backgrounds {
             let fixture = RetouchQualityFixtures.make(background: background, defect: "hair/fibre")
-            let clean = try Pixels.bytes(of: CIImage(cgImage: fixture.clean))
-            let damaged = try Pixels.bytes(of: CIImage(cgImage: fixture.damaged))
+            let clean = try Pixels.bytes(of: CIImage(cgImage: fixture.clean), space: .sRGB)
+            let damaged = try Pixels.bytes(of: CIImage(cgImage: fixture.damaged), space: .sRGB)
             let input = CIImage(cgImage: fixture.damaged)
             let samples = fixture.stroke.map { BrushSample(point: $0) }
             let w = fixture.width, h = fixture.height
@@ -335,7 +335,7 @@ extension RetouchCameraScaleDiagnosticsTests {
                     RetouchSettings(spots: [spot]), to: input, sourceSize: CGSize(width: w, height: h),
                     maskRenderer: LocalMaskRenderer())
                 let metrics = RetouchQualityMetrics.measure(
-                    clean: clean, output: try Pixels.bytes(of: rendered), mask: fixture.mask, width: w, height: h)
+                    clean: clean, output: try Pixels.bytes(of: rendered, space: .sRGB), mask: fixture.mask, width: w, height: h)
                 return (metrics, metrics.failures(against: RetouchQualityMetrics.limits[background]!))
             }
             func report(_ label: String, _ offset: CGVector) throws -> Bool {

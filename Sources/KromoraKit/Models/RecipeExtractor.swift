@@ -53,8 +53,8 @@ struct RecipeExtractor {
         /// Largest relative aspect-ratio difference tolerated between the RAW
         /// and the JPG before the pair is rejected as mismatched.
         var aspectTolerance: CGFloat = 0.01
-        /// The space the pair is compared in and the cube is stamped with. Preparation keeps sRGB
-        /// (`WorkingSpace.current`); P3 fits against a P3 render of both images.
+        /// The space the pair is compared in and the cube is stamped with. Defaults to Display P3
+        /// (`WorkingSpace.current`); an sRGB fit renders both images in sRGB.
         var authoringSpace: WorkingSpace = .current
     }
 
@@ -87,7 +87,7 @@ struct RecipeExtractor {
         let size: Int
         let report: RecipeReport
         /// The space `cube` was fit in; the Look must be stamped and interpolated in it.
-        var authoringSpace: WorkingSpace = .sRGB
+        var authoringSpace: WorkingSpace = .current
     }
 
     /// Run the full extraction pipeline. Safe to call from a background task.
