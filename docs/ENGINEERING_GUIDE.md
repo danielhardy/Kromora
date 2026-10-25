@@ -245,13 +245,29 @@ that round trip was compared with the direct P3 render, using the largest encode
 per pixel. Across these fixtures, 0-3.32% of pixels differed by more than 2/255, 0-1.22% by more
 than 8/255, and the maximum delta was 37/255. Converting the direct P3 pixels to linear sRGB found
 0% out-of-sRGB pixels in both Sony ARWs, 0-4.39% in the iPhone DNGs, and 1.81% in the HEIC. These
-are bounded, 8-bit pixel comparisons, not a calibrated display measurement. Decision: keep the
-color-managed sRGB canvas for the Instagram-first MVP so the preview matches the default sRGB
-delivery; a P3 canvas alone would show colors that the default export cannot retain. If the product
-adds a P3-preserving edit/output mode, migrate `WorkingSpace.current`, derived-LUT fitting
-(`RecipeExtractor`, pinned to sRGB), LUT interpolation, frame signatures/caches, thumbnails, and
-export tagging together, with preview/export parity tests. HDR/EDR and soft proofing remain
-separate. Hardware (colorimeter) validation was not performed.
+are bounded, 8-bit pixel comparisons, not a calibrated display measurement. Hardware (colorimeter)
+validation was not performed. The current implementation remains sRGB until KRMA-1121; the accepted
+policy below replaces the earlier Instagram-first decision for the P3 release.
+
+**P3 migration policy** ([ADR-KRMA-1115](../.dg/decisions/ADR-KRMA-1115-display-p3-export-look-and-saved-edit-policy.md),
+accepted 2026-10-25). The P3 release uses Display P3 for the canvas and every rendered delivery:
+JPEG, HEIC, TIFF, PNG, Share, Copy, Photos, external-editor TIFF, and rendered bundle companions.
+Encode pixels in that space and embed its ICC profile; there is no independent export-space picker
+or silent sRGB delivery path. Decode inputs according to their profiles; original bundle bytes stay
+untouched. A future sRGB delivery mode must include a matching preview.
+
+Each cube has an authoring space and is interpolated in it; missing headers assume sRGB, while
+unknown or malformed declarations fail clearly. Regenerate and visually review bundled Looks for
+P3. New saved and derived Looks sample/fit and stamp P3 after the flip. Honor imported stamps and
+preserve imported/embedded bytes. An sRGB Look can still constrain wide-gamut colors through its
+bounded table; the stamp makes interpretation correct, not gamut-preserving.
+
+Prerelease libraries may be reset; no old-edit appearance guarantee, legacy renderer, or
+last-rendered-space document field is required. Space remains part of cache/frame identity and
+stale rendered data must be invalidated at the flip. Migrate `WorkingSpace.current`, derived-LUT
+fitting, bundled assets, LUT interpretation, frame signatures/caches, thumbnails, and export tagging
+together, with preview/export parity tests. Preparation tickets keep today's sRGB behavior until
+KRMA-1121 activates the change. HDR/EDR and soft proofing remain separate.
 
 `LatestPreviewFrameStore` keeps the latest presented 2048 px preview of each asset. Three value types
 define what a stored frame means:

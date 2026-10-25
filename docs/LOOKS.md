@@ -28,6 +28,29 @@ The parser rejects 1D or mixed tables, reversed domains, non-finite values, malf
 rows, truncated files, and dimensions outside 2–65. LUT application uses Core Image's
 GPU-backed `CIColorCubeWithColorSpace`.
 
+## P3 release authoring policy
+
+[ADR-KRMA-1115](../.dg/decisions/ADR-KRMA-1115-display-p3-export-look-and-saved-edit-policy.md)
+was accepted on 2026-10-25. This is the implementation target for KRMA-1117/KRMA-1121; current
+shipping output stays sRGB until the final flip.
+
+Every parsed Look has an authoring space. Apply its table in that space, independently of the
+Display P3 canvas/export target. Honor recognized authoring-space comment headers; assume sRGB for
+unstamped imports and reject unknown or malformed declarations. The implementation ticket must
+document the exact header spelling when introduced. Include authoring space in filter/cache identity.
+
+Regenerate Kromora's bundled Looks from defined source procedures for P3, review their appearance,
+and update provenance/manifest notes. After the flip, Save as Look and Derive must actually sample
+or fit in P3 and stamp P3; Derive's neutral baseline and sampled buffers must agree with the fit.
+Changing only a header on sRGB table values does not satisfy this requirement. Preparation keeps
+sRGB sampling/stamps and existing bundled output active until the P3 assets are switched in together.
+
+Do not rewrite or re-fit imported Looks automatically. Preserve their bytes when embedding them.
+An sRGB Look may constrain colors outside its bounded domain even in a P3 editor; honoring its
+space preserves its interpretation, not every wide-gamut input color. No authoring-space setting is
+required in the UI. Existing prerelease libraries/edits may be reset instead of migrated, but source
+originals and imported files are not deleted by this policy change.
+
 ## Save and derive
 
 Save as Look/LUT exports the supported global portion of the current value document as a 33³ cube
