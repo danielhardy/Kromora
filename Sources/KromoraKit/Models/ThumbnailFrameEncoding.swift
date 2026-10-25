@@ -72,12 +72,11 @@ enum ThumbnailFrameEncoder {
     /// so anything else is converted to sRGB — the display thumbnail loses nothing it could show.
     /// The raster an original thumbnail is stored and shown as.
     ///
-    /// ImageIO hands back library thumbnails in Display P3 even though the app's working space is
-    /// sRGB. A P3 frame can never be presented losslessly in an sRGB working space, so
-    /// `FrameClassifier` refused every stored original and each launch re-decoded every unedited
-    /// photo from its source file. Normalizing to the working space makes a stored original
-    /// acceptable, and the loader shows these same pixels so a cold decode and a warm read agree.
-    /// An sRGB raster stays as is: it is presentable in any working space.
+    /// A raster whose profile is not the target working space is converted into it, so a stored
+    /// original is always a frame `FrameClassifier` can accept for that space. Before the Display P3
+    /// flip, ImageIO's Display P3 library thumbnails were converted into an sRGB working space; the
+    /// loader shows these same pixels so a cold decode and a warm read agree. An sRGB raster stays as
+    /// is: it is presentable in any working space.
     static func normalizedRaster(
         _ image: CGImage, space target: WorkingSpace = .current
     ) -> (image: CGImage, space: RasterColorSpace)? {

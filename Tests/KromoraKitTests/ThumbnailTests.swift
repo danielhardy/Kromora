@@ -108,10 +108,10 @@ final class ThumbnailTests: TempDirectoryTestCase {
         }
     }
 
-    /// ImageIO returns library thumbnails in Display P3, but the working space is sRGB and a P3
-    /// raster is never lossless there, so every stored original used to be classified unusable.
-    /// Each launch then re-decoded every unedited photo from its source file. A stored original
-    /// must be acceptable to the classifier that will read it back.
+    /// ImageIO returns library thumbnails in Display P3. A P3 raster is only lossless in a Display P3
+    /// working space, so a stored original must be normalized into `WorkingSpace.current`. A stored
+    /// original must be acceptable to the classifier that will read it back, or every launch
+    /// re-decodes every unedited photo from its source file.
     func testOriginalFramesFromDisplayP3RastersAreStoredInTheWorkingSpaceAndClassifyExact() throws {
         let p3 = try XCTUnwrap(CGColorSpace(name: CGColorSpace.displayP3))
         let context = try XCTUnwrap(CGContext(

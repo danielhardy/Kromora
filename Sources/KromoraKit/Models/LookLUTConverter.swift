@@ -201,8 +201,8 @@ enum LookLUTConverter {
         document: EditDocument,
         lut: CubeLUT?,
         size: Int = defaultSize,
-        // The authoring space the cube is sampled in and stamped with. Preparation keeps sRGB
-        // (`WorkingSpace.current`); a caller passes `.displayP3` to sample and stamp P3.
+        // The authoring space the cube is sampled in and stamped with. Defaults to
+        // `WorkingSpace.current` (Display P3); a caller passes `.sRGB` to sample and stamp sRGB.
         space: WorkingSpace = .current,
         tolerance: Double = LUTConversionVerification.defaultTolerance
     ) throws -> LookLUTConversion {
