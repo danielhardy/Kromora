@@ -408,6 +408,9 @@ final class PresentationBudgetTests: TempDirectoryTestCase {
             sourceAssets: { try $0.materializedAssets() }
         )
         try await open("peer.png", in: viewModel)
+        // Queued edited-thumbnail jobs for the not-yet-open photo would otherwise publish an edited
+        // raster after the item is cleared below, and the canvas would adopt it as an early candidate.
+        try await waitUntil("queued thumbnail work drained") { viewModel.workScheduler.isIdle }
         await fake.gatePreviews()
         addTeardownBlock {
             await gate.release()
