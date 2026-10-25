@@ -172,6 +172,20 @@ final class PreviewSurfaceTests: XCTestCase {
         XCTAssertEqual(updatedColorSpace.name, WorkingSpace.current.cgColorSpace.name)
     }
 
+    func testPreviewCanvasColorSpaceUsesThePresentedP3FrameSpace() throws {
+        let surface = PreviewSurface()
+        let hostingView = NSHostingView(rootView: PreviewSurfaceView(surface: surface))
+        let view = try hostedPreviewView(in: hostingView, size: CGSize(width: 320, height: 240))
+        let p3 = WorkingSpace.displayP3.cgColorSpace
+        let p3Primary = try XCTUnwrap(CIColor(red: 1, green: 0, blue: 0, colorSpace: p3))
+        let p3Patch = CIImage(color: p3Primary)
+            .cropped(to: CGRect(x: 0, y: 0, width: 16, height: 16))
+
+        XCTAssertTrue(surface.present(p3Patch, space: .displayP3))
+        try XCTUnwrap(view.delegate).draw(in: view)
+        XCTAssertEqual(try XCTUnwrap(view.colorspace).name, CGColorSpace.displayP3)
+    }
+
     private func hostedPreviewView(
         in hostingView: NSHostingView<some View>, size: CGSize
     ) throws -> MTKView {

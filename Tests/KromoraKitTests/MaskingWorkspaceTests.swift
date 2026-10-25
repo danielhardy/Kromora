@@ -1,5 +1,8 @@
+import AppKit
 import CoreGraphics
+import CoreImage
 import Foundation
+import SwiftUI
 import XCTest
 
 @testable import KromoraKit
@@ -547,6 +550,32 @@ final class MaskingWorkspaceTests: TempDirectoryTestCase {
         state.toggleOverlay()
         XCTAssertFalse(state.showOverlay)
         XCTAssertEqual(viewModel.document, documentBefore, "the overlay never changes the edit")
+    }
+
+    func testMaskOverlaySwatchKeepsItsSRGBMeaningInDisplayP3() throws {
+        let red = MaskOverlayColor(red: 0.9, green: 0.2, blue: 0.4, alpha: 1)
+        let resolved = try XCTUnwrap(
+            NSColor(red.color).usingColorSpace(.sRGB),
+            "the mask swatch is authored and stored as sRGB"
+        )
+        let swatchColor = CIColor(cgColor: resolved.cgColor)
+        XCTAssertEqual(swatchColor.colorSpace.name, CGColorSpace.sRGB)
+
+        let extent = CGRect(x: 0, y: 0, width: 8, height: 8)
+        let displayedSwatch = CIImage(color: swatchColor).cropped(to: extent)
+        let knownColor = try XCTUnwrap(CIColor(
+            red: 0.9, green: 0.2, blue: 0.4,
+            colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!
+        ))
+        let knownSRGBPatch = CIImage(
+            color: knownColor
+        ).cropped(to: extent)
+
+        assertPixelsEqual(
+            try Pixels.bytes(of: displayedSwatch, space: .displayP3),
+            try Pixels.bytes(of: knownSRGBPatch, space: .displayP3),
+            "an sRGB mask swatch should be color-managed into the P3 canvas space"
+        )
     }
 
     func testMaskPreviewTargetsOverrideOverlaySelectionWithoutEditingOrHistory() {

@@ -1,6 +1,7 @@
 import XCTest
 import AppKit
 import CoreGraphics
+import CoreImage
 import ImageIO
 import UniformTypeIdentifiers
 @testable import KromoraKit
@@ -136,6 +137,35 @@ final class ThumbnailTests: TempDirectoryTestCase {
         XCTAssertEqual(shown.colorSpace?.name, WorkingSpace.current.cgColorSpace.name)
         XCTAssertEqual(shown.width, 120)
         XCTAssertEqual(shown.height, 80)
+    }
+
+    func testEditedThumbnailEncodesTheExplicitP3RenderSpace() throws {
+        let space = WorkingSpace.displayP3
+        let colorSpace = space.cgColorSpace
+        let extent = CGRect(x: 0, y: 0, width: 16, height: 16)
+        let primary = try XCTUnwrap(CIColor(red: 1, green: 0, blue: 0, colorSpace: colorSpace))
+        let patch = CIImage(color: primary)
+            .cropped(to: extent)
+        let directRender = try XCTUnwrap(CIContext(options: [.workingColorSpace: colorSpace])
+            .createCGImage(patch, from: extent, format: .RGBA8, colorSpace: colorSpace))
+        let identity = FrameFixtures.identity()
+        let signature = FrameSignature(
+            source: identity, editHash: "p3-thumbnail", look: .none,
+            workingSpace: space, pixelEpoch: RenderPipeline.pixelEpoch
+        )
+
+        let frame = try XCTUnwrap(ThumbnailFrameEncoder.editedFrame(
+            image: directRender, identity: identity, signature: signature,
+            crop: .neutral, rotation: .zero
+        ))
+        let decoded = try Pixels.decode(frame.rasterData)
+
+        XCTAssertEqual(frame.metadata.rasterColorSpace, RasterColorSpace(space))
+        XCTAssertEqual(decoded.colorSpace?.name, CGColorSpace.displayP3)
+        assertPixelsEqual(
+            try Pixels.bytes(of: decoded), try Pixels.bytes(of: directRender),
+            tolerance: 4, "the P3 thumbnail should preserve its direct P3 primary"
+        )
     }
 
     func testPackedThumbnailKeysRetireInsufficient900PixelFrames() throws {
