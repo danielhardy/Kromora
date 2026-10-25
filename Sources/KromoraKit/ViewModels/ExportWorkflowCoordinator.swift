@@ -151,12 +151,7 @@ final class ExportWorkflowCoordinator {
                 assetID: destination.exportActiveAssetID,
                 document: request.document,
                 lut: request.lut,
-                options: ExportOptions(
-                    format: .tiff,
-                    destination: .file(url),
-                    metadata: .preserve,
-                    location: .exclude
-                ),
+                options: ExternalEditorExportPolicy.options(destination: .file(url)),
                 to: url,
                 access: .systemGranted(for: url)
             )
@@ -601,15 +596,33 @@ enum ShareExportPolicy {
     static let longEdge = 4096
     static let quality = 0.85
 
-    /// Encodes in `WorkingSpace.current` (sRGB or Display P3), with location metadata excluded.
+    /// Encodes in the canvas target (`WorkingSpace.current`), with location metadata excluded.
+    /// `space` is an internal seam for preparation tests; no caller outside tests passes it, so
+    /// delivery cannot diverge from the preview.
     static func options(
-        format: ExportFormat = preferredFormat, destination: ExportDestination? = nil
+        format: ExportFormat = preferredFormat, destination: ExportDestination? = nil,
+        space: WorkingSpace = .current
     ) -> ExportOptions {
         ExportOptions(
             format: format,
             quality: quality,
             sizing: .longEdge(longEdge),
-            colorSpace: .current,
+            colorSpace: space,
+            destination: destination,
+            metadata: .preserve,
+            location: .exclude
+        )
+    }
+}
+
+/// Edit in External Editor: the 16-bit TIFF handoff, encoded in the canvas target with its profile.
+enum ExternalEditorExportPolicy {
+    static func options(
+        destination: ExportDestination? = nil, space: WorkingSpace = .current
+    ) -> ExportOptions {
+        ExportOptions(
+            format: .tiff,
+            colorSpace: space,
             destination: destination,
             metadata: .preserve,
             location: .exclude
