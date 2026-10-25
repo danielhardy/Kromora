@@ -1757,6 +1757,7 @@ actor RenderEngine: RenderEngining {
             scale: RenderScaleKey(
                 scale, nativeExtent: rotation.orientedExtent(source.nativeExtent)
             ),
+            space: space,
             pipelineVersion: RenderPipeline.pixelEpoch
         )
         if let key {
@@ -2559,6 +2560,7 @@ actor RenderEngine: RenderEngining {
             scale: RenderScaleKey(
                 scale, nativeExtent: rotation.orientedExtent(source.nativeExtent)
             ),
+            space: space,
             pipelineVersion: RenderPipeline.pixelEpoch
         )
         let cache = thumbnail ? thumbnailDevelopedSourceCache : developedSourceCache

@@ -65,11 +65,13 @@ struct RenderScaleKey: Hashable, Sendable {
 }
 
 /// Cache identity for the source stage. It excludes adjustments and LUTs because those are applied
-/// after the developed source has been built.
+/// after the developed source has been built. The working space is part of the key because the
+/// engine's `CIContext` materializes (and a RAW develop may be tagged for) the space it renders in.
 struct DevelopedSourceCacheKey: Hashable, Sendable {
     let source: RenderSourceFingerprint
     let developHash: String
     let scale: RenderScaleKey
+    let space: WorkingSpace
     let pipelineVersion: Int
 }
 

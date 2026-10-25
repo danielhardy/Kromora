@@ -78,8 +78,9 @@ enum ThumbnailFrameEncoder {
     /// photo from its source file. Normalizing to the working space makes a stored original
     /// acceptable, and the loader shows these same pixels so a cold decode and a warm read agree.
     /// An sRGB raster stays as is: it is presentable in any working space.
-    static func normalizedRaster(_ image: CGImage) -> (image: CGImage, space: RasterColorSpace)? {
-        let target = WorkingSpace.current
+    static func normalizedRaster(
+        _ image: CGImage, space target: WorkingSpace = .current
+    ) -> (image: CGImage, space: RasterColorSpace)? {
         let name = image.colorSpace?.name
         if name == CGColorSpace.sRGB { return (image, .sRGB) }
         if name == target.cgColorSpace.name { return (image, RasterColorSpace(target)) }
