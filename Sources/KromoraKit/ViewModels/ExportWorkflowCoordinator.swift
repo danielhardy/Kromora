@@ -647,6 +647,10 @@ enum ShareCopyPolicy {
     static let format: ExportFormat = .jpeg
     static let pasteboardType = NSPasteboard.PasteboardType(UTType.jpeg.identifier)
     static var options: ExportOptions { ShareExportPolicy.options(format: format) }
+    /// Internal target seam for preparation tests; production Copy follows the canvas target.
+    static func options(for space: WorkingSpace) -> ExportOptions {
+        ShareExportPolicy.options(format: format, space: space)
+    }
     /// Cap on encoded bytes held at once for a multi-photo Copy. Measured (docs/TESTING.md, KRMA-1048):
     /// peak footprint is about 4.6 GB regardless of selection size, set by one RAW render, and 32
     /// mixed photos copy while larger selections are rejected. The cap bounds only the part that

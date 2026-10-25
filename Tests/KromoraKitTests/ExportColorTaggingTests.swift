@@ -34,14 +34,19 @@ final class ExportColorTaggingTests: XCTestCase {
     }
 
     private func export(_ source: ImageSource, format: ExportFormat, space: WorkingSpace) async throws -> URL {
-        let url = directory.appendingPathComponent("out-\(space.rawValue).\(format.fileExtension)")
-        let options = ExportOptions(format: format, colorSpace: space)
+        try await export(source, options: ExportOptions(format: format, colorSpace: space))
+    }
+
+    private func export(_ source: ImageSource, options: ExportOptions) async throws -> URL {
+        let url = directory.appendingPathComponent(
+            "out-\(options.colorSpace.rawValue)-\(UUID().uuidString).\(options.format.fileExtension)"
+        )
         try await RenderEngine().encode(RenderRequest(
             source: source,
             document: EditDocument(),
             quality: .export,
-            output: .encoded(format: format, quality: CGFloat(options.quality)),
-            space: space,
+            output: .encoded(format: options.format, quality: CGFloat(options.quality)),
+            space: options.colorSpace,
             exportOptions: options
         ), to: url)
         return url
@@ -54,30 +59,12 @@ final class ExportColorTaggingTests: XCTestCase {
         return image.colorSpace?.name
     }
 
-    func testEveryFormatReopensTaggedWithTheExplicitTarget() async throws {
-        let source = try makeP3Source()
-        for format in ExportFormat.allCases {
-            for space in WorkingSpace.allCases {
-                let url: URL
-                do { url = try await export(source, format: format, space: space) } catch {
-                    if format == .heif { continue }  // hardware encoder may be absent
-                    throw error
-                }
-                XCTAssertEqual(
-                    try profileName(of: url), space.cgColorSpace.name, "\(format) in \(space)"
-                )
-            }
-        }
-    }
-
-    func testP3ExportRetainsOutOfSRGBGreenWhileSRGBClipsIt() async throws {
-        let source = try makeP3Source()
-        let p3URL = try await export(source, format: .png, space: .displayP3)
+    /// Reads one encoded pixel after color conversion into extended linear sRGB. A saturated P3
+    /// green remains outside sRGB there; sRGB output clips it into the ordinary [0, 1] range.
+    private func extendedSRGBPixel(of url: URL) throws -> [Float16] {
         let image = try XCTUnwrap(
-            CGImageSourceCreateWithURL(p3URL as CFURL, nil).flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) }
+            CGImageSourceCreateWithURL(url as CFURL, nil).flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) }
         )
-        // Draw the exported pixel into extended-sRGB float: a retained P3 primary lands outside
-        // [0, 1] there (red about -0.51), a clipped one cannot.
         let extended = try XCTUnwrap(CGColorSpace(name: CGColorSpace.extendedLinearSRGB))
         var pixel = [Float16](repeating: 0, count: 4)
         let drawn = pixel.withUnsafeMutableBytes { buffer -> Bool in
@@ -91,15 +78,53 @@ final class ExportColorTaggingTests: XCTestCase {
             return true
         }
         XCTAssertTrue(drawn)
-        XCTAssertLessThan(pixel[0], -0.05)
-        XCTAssertGreaterThan(pixel[1], 1.0)
-
-        let sRGBURL = try await export(source, format: .png, space: .sRGB)
-        XCTAssertEqual(try profileName(of: sRGBURL), CGColorSpace.sRGB as CFString)
-        XCTAssertEqual(try profileName(of: p3URL), CGColorSpace.displayP3 as CFString)
+        return pixel
     }
 
-    func testShareCopyAndExternalEditorFollowTheSameTarget() {
+    private func supportsEncoding(_ format: ExportFormat) -> Bool {
+        let identifiers = CGImageDestinationCopyTypeIdentifiers() as? [String] ?? []
+        return identifiers.contains(format.utType.identifier)
+    }
+
+    func testEveryFormatReopensTaggedWithTheExplicitTarget() async throws {
+        let source = try makeP3Source()
+        for format in ExportFormat.allCases {
+            // Some supported Apple Silicon configurations do not register a HEIF destination.
+            // Skip only that unavailable encoder; once registered, export failures must surface.
+            guard supportsEncoding(format) else {
+                if format == .heif { continue }
+                XCTFail("Image I/O does not register an encoder for \(format)")
+                continue
+            }
+            for space in WorkingSpace.allCases {
+                let url = try await export(source, format: format, space: space)
+                XCTAssertEqual(
+                    try profileName(of: url), space.cgColorSpace.name, "\(format) in \(space)"
+                )
+            }
+        }
+    }
+
+    func testP3ExportRetainsOutOfSRGBGreenWhileSRGBClipsIt() async throws {
+        let source = try makeP3Source()
+        for format in ExportFormat.allCases where supportsEncoding(format) {
+            let p3URL = try await export(source, format: format, space: .displayP3)
+            XCTAssertEqual(try profileName(of: p3URL), CGColorSpace.displayP3 as CFString, "\(format) P3 tag")
+            let p3Pixel = try extendedSRGBPixel(of: p3URL)
+            // Compression and integer quantization can soften the P3 primary. The generous
+            // threshold leaves room for 8-bit/lossy formats while rejecting sRGB clipping.
+            XCTAssertLessThan(p3Pixel[0], -0.05, "\(format) retains P3 green")
+            XCTAssertGreaterThan(p3Pixel[1], 1.0, "\(format) retains P3 green")
+
+            let sRGBURL = try await export(source, format: format, space: .sRGB)
+            XCTAssertEqual(try profileName(of: sRGBURL), CGColorSpace.sRGB as CFString, "\(format) sRGB tag")
+            let sRGBPixel = try extendedSRGBPixel(of: sRGBURL)
+            XCTAssertGreaterThanOrEqual(sRGBPixel[0], -0.005, "\(format) clips to sRGB")
+            XCTAssertLessThanOrEqual(sRGBPixel[1], 1.005, "\(format) clips to sRGB")
+        }
+    }
+
+    func testShareCopyPhotosAndExternalEditorFollowTheSameTarget() async throws {
         XCTAssertEqual(ShareExportPolicy.options().colorSpace, .current)
         XCTAssertEqual(ShareCopyPolicy.options.colorSpace, .current)
         XCTAssertEqual(ExternalEditorExportPolicy.options().colorSpace, .current)
@@ -107,7 +132,29 @@ final class ExportColorTaggingTests: XCTestCase {
         XCTAssertEqual(ExternalEditorExportPolicy.options().bitDepth, .sixteen)
         for space in WorkingSpace.allCases {
             XCTAssertEqual(ShareExportPolicy.options(space: space).colorSpace, space)
+            XCTAssertEqual(ShareCopyPolicy.options(for: space).colorSpace, space)
             XCTAssertEqual(ExternalEditorExportPolicy.options(space: space).colorSpace, space)
+        }
+
+        let source = try makeP3Source()
+        let photosOptions = ExportOptions(
+            format: .png, colorSpace: .displayP3, photos: PhotosExportOptions()
+        )
+        XCTAssertNotNil(photosOptions.photos)
+        let deliveries: [(String, ExportOptions)] = [
+            ("Share", ShareExportPolicy.options(format: .png, space: .displayP3)),
+            ("Copy", ShareCopyPolicy.options(for: .displayP3)),
+            ("Photos", photosOptions),
+            ("External Editor", ExternalEditorExportPolicy.options(space: .displayP3))
+        ]
+        for (name, options) in deliveries {
+            let url = try await export(source, options: options)
+            XCTAssertEqual(
+                try profileName(of: url), CGColorSpace.displayP3 as CFString, "\(name) ICC profile"
+            )
+            let pixel = try extendedSRGBPixel(of: url)
+            XCTAssertLessThan(pixel[0], -0.05, "\(name) retains P3 green")
+            XCTAssertGreaterThan(pixel[1], 1.0, "\(name) retains P3 green")
         }
     }
 }
