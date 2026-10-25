@@ -113,6 +113,35 @@ final class ExportWorkflowCoordinatorTests: XCTestCase {
         XCTAssertTrue(destination.statuses.isEmpty)
     }
 
+    func testBundleRenderKeepsAssetIdentitySnapshottedBeforeConfirmation() async throws {
+        let sheets = FakeSheets()
+        let engine = FakeRenderEngine()
+        let export = ExportCoordinator(engine: engine, photosDelivery: nil)
+        let destination = Destination()
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("KromoraBundleTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        sheets.openURLs = [root]
+        let requestedAssetID = PhotoAssetID(rawValue: "requested-asset")
+        destination.exportActiveAssetID = requestedAssetID
+        destination.exportSourceName = "Photo.png"
+        openPhoto(on: destination)
+        sheets.confirmHandler = {
+            destination.exportActiveAssetID = PhotoAssetID(rawValue: "different-active-asset")
+        }
+        let workflow = ExportWorkflowCoordinator(
+            export: export, sheets: sheets, destination: destination
+        )
+
+        await workflow.exportOriginalWithSettings().value
+
+        let requests = await engine.encodeRequests
+        XCTAssertEqual(requests.last?.assetID, requestedAssetID)
+        XCTAssertTrue(destination.errors.isEmpty)
+        XCTAssertTrue(destination.statuses.last?.contains("bundle exported") == true)
+    }
+
     func testSelectedExportAndShareRequireSelectionAndUseSelectedRequest() {
         let (workflow, destination) = makeWorkflow()
         workflow.exportDialog()

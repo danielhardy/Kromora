@@ -13,6 +13,7 @@ final class FakeSheets: SheetPresenting {
     var setupResults: [Bool] = []
     /// Runs inside the folder step with its panel, standing in for the user's clicks.
     var openHandler: ((NSOpenPanel) -> [URL]?)?
+    var confirmHandler: (() -> Void)?
     private(set) var setupCalls = 0
     private(set) var lastSetupAccessory: ExportSetupAccessoryView?
     private(set) var lastSetupTitle: String?
@@ -52,6 +53,7 @@ final class FakeSheets: SheetPresenting {
     ) async -> Bool {
         confirmCalls += 1
         lastConfirmButtons = buttons
+        confirmHandler?()
         return confirmResult
     }
 }

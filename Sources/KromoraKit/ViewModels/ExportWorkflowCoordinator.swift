@@ -172,6 +172,7 @@ final class ExportWorkflowCoordinator {
             self.destination?.setExportStatus("Open an image first")
             return
         }
+        let assetID = destination.exportActiveAssetID
         let sourceName = destination.exportSourceName
         guard await sheets.confirm(
             message: "Keep the original's embedded metadata?",
@@ -204,7 +205,6 @@ final class ExportWorkflowCoordinator {
         let source = request.source
         let document = request.document
         let lut = request.lut
-        let assetID = destination.exportActiveAssetID
         let options = OriginalBundleCompanionPolicy.options()
         let companionName = "\(name)_rendered.\(options.format.fileExtension)"
         do {
