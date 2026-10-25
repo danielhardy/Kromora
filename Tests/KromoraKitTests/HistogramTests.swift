@@ -315,6 +315,21 @@ final class HistogramTests: TempDirectoryTestCase {
         XCTAssertNotEqual(inSRGB.red, inP3.red, "the histogram should follow the render space")
     }
 
+    /// A saturated Display P3 primary is outside sRGB. Tallied in P3 it lands exactly in the top red
+    /// bin with empty green/blue; tallied in sRGB it would clip and smear the other channels.
+    func testAKnownP3PatchBinsExactlyInP3() async throws {
+        let p3 = try XCTUnwrap(CGColorSpace(name: CGColorSpace.displayP3))
+        let color = try XCTUnwrap(CIColor(red: 1, green: 0, blue: 0, colorSpace: p3))
+        let patch = CIImage(color: color).cropped(to: CGRect(x: 0, y: 0, width: 16, height: 16))
+
+        let tallied = await RenderEngine().histogram(
+            presentedImage: patch, space: .displayP3, maxDimension: 16)
+        let histogram = try XCTUnwrap(tallied)
+        XCTAssertEqual(histogram.red[255], 256)
+        XCTAssertEqual(histogram.green[0], 256)
+        XCTAssertEqual(histogram.blue[0], 256)
+    }
+
     func testAnUndecodableSourceHasNoHistogram() async {
         let engine = RenderEngine()
         let junk = ImageSource(backing: .data(Data("not an image".utf8)), kind: .standard, nativeExtent: .zero)

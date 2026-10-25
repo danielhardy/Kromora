@@ -1437,6 +1437,10 @@ struct PreviewSurfaceView: NSViewRepresentable {
                 return
             }
             guard let surface else { return }
+            // The drawable is written in the published frame's space (texture blit and the Core
+            // Image fallback alike), so the layer tag must follow it rather than a global default.
+            let frameColorSpace = surface.space.cgColorSpace
+            if view.colorspace?.name != frameColorSpace.name { view.colorspace = frameColorSpace }
             let drawableAcquisitionStart = LiveEditTelemetryClock.now
             guard let drawable = view.currentDrawable,
                 let commandBuffer = commandQueue.makeCommandBuffer()
