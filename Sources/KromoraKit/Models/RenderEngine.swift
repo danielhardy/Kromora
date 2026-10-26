@@ -111,6 +111,11 @@ protocol RenderEngining: EditedThumbnailRendering, Sendable {
         maxDimension: Int
     ) async -> HistogramData?
 
+    /// Rasterize the already-presented frame into a bounded extended-range linear Display P3 float
+    /// sample for the Info gamut view (KRMA-1132). Unlike the RGBA8 histogram sample it keeps values
+    /// outside 0...1, so colors beyond P3 survive. Lightweight conformers leave this at `nil`.
+    func gamutSample(presentedImage: sending CIImage, maxDimension: Int) async -> GamutSample?
+
     /// Tally the rendered canonical image through a soft mask. The default implementation uses
     /// the same raster request seam as `histogram`; production engines may override it with an
     /// actor-local GPU tally without changing the analysis API.
@@ -159,6 +164,8 @@ protocol RenderEngining: EditedThumbnailRendering, Sendable {
 
 extension RenderEngining {
     var materializesPresentationTextures: Bool { true }
+
+    func gamutSample(presentedImage: sending CIImage, maxDimension: Int) async -> GamutSample? { nil }
 
     /// Compatibility default for lightweight render test doubles and integrations.
     func invalidateRenderCaches() async {}

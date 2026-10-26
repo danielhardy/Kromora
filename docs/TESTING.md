@@ -1154,3 +1154,26 @@ hit two assertions in the unrelated
 `ThumbnailSwitchLifecycleTests.testFilmstripSelectionSchedulesOriginalBeforeAdjustedDrawableConfirmation`;
 its focused rerun and both subsequent full fast runs passed without changing that test or product
 path. This is a synchronization caveat, not evidence of an import regression.
+
+### Info color-gamut view (KRMA-1132)
+
+The Info tab's collapsed-by-default "Color Gamut" disclosure measures the edited result. While
+collapsed or hidden it does nothing. Expanded, `AppViewModel.measureGamut()` asks `RenderEngine`
+(`gamutSample(presentedImage:maxDimension:)`) to rasterize the last presented frame, already
+completed on the GPU so no graph is rebuilt, into a float sample of at most 512 px on the long
+side. The sample is RGBAf in extended-linear Display P3, so out-of-range (beyond-P3) values
+survive. The pure `GamutTally(linearDisplayP3:)` then runs on a detached utility task. The
+disclosure's `task(id:)` is keyed on the histogram's `sampleIdentity`, so it re-measures once per
+edit or image switch and a cancelled task discards its result. Cost is one 512-px render plus a
+tally of at most ~262k pixels, only while the disclosure is open. The plot is a 64x64 CIE 1976
+u'v' density with sRGB and Display P3 triangles.
+
+Tests: `GamutTallyTests` (pure tally) and `GamutSampleTests`, which push a generated
+extended-linear image with sRGB-safe, P3-only and beyond-P3 quadrants through the production
+`gamutSample` then `GamutTally` path (outside sRGB 50%, outside P3 25%).
+`GamutSampleLocalFixtureTests` is the opt-in local-fixture lane. On the default edit it measured
+(outside sRGB / outside P3): Sony ARW 0% / 0% (both files); iPhone DNG 0% to 4.46% / 0%. The
+Sony figures match KRMA-1114's 0%; the iPhone maximum differs from KRMA-1114's 4.39% by 0.07
+percentage points, within a stated 0.1-point tolerance. This measures the edited, tone-mapped,
+512 px preview sample, while KRMA-1114 used a one-off decode, so small differences are expected.
+The HEIC fixture is not a RAW extension, so this lane does not cover it.

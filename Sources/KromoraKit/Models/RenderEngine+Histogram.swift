@@ -95,3 +95,45 @@ extension RenderEngine {
         return HistogramData(rgba8: bytes, width: width, height: height, bytesPerRow: bytesPerRow)
     }
 }
+
+extension RenderEngine {
+    /// Rasterize the presented frame to a bounded RGBAf buffer in extended-linear Display P3 (the
+    /// working space Core Image evaluates in), so beyond-P3 values are not clamped (KRMA-1132).
+    /// Core Image graph work stays here; only the `Sendable` `GamutSample` leaves the actor.
+    func gamutSample(
+        presentedImage: sending CIImage,
+        maxDimension: Int = 512
+    ) async -> GamutSample? {
+        guard !Task.isCancelled, maxDimension > 0 else { return nil }
+        let extent = presentedImage.extent
+        guard extent.isRasterizable else { return nil }
+        let factor = min(
+            CGFloat(maxDimension) / extent.width,
+            CGFloat(maxDimension) / extent.height,
+            1.0
+        )
+        let scaled = presentedImage.transformed(by: CGAffineTransform(scaleX: factor, y: factor))
+        let rect = scaled.extent.integral
+        guard rect.isRasterizable else { return nil }
+        let width = Int(rect.width)
+        let height = Int(rect.height)
+        guard width > 0, height > 0 else { return nil }
+
+        let bytesPerRow = width * 4 * MemoryLayout<Float>.stride
+        var floats = [Float](repeating: 0, count: width * height * 4)
+        floats.withUnsafeMutableBytes { ptr in
+            guard let base = ptr.baseAddress, !Task.isCancelled else { return }
+            context.render(
+                scaled, toBitmap: base, rowBytes: bytesPerRow, bounds: rect,
+                format: .RGBAf, colorSpace: WorkingSpace.current.linearWorkingColorSpace
+            )
+        }
+        guard !Task.isCancelled else { return nil }
+        var pixels: [SIMD3<Float>] = []
+        pixels.reserveCapacity(width * height)
+        for i in 0..<(width * height) {
+            pixels.append(SIMD3(floats[i * 4], floats[i * 4 + 1], floats[i * 4 + 2]))
+        }
+        return GamutSample(linearDisplayP3: pixels)
+    }
+}

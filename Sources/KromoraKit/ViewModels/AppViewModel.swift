@@ -4676,6 +4676,18 @@ extension AppViewModel: PreviewPublicationDestination {
         )
     }
     func publicationScheduleIdlePreviewBuild() { scheduleIdlePreviewBuild() }
+
+    /// Tally the last presented (edited) frame's gamut share from a bounded extended-linear float
+    /// sample (KRMA-1132). On demand only: the Info gamut disclosure calls this while expanded.
+    func measureGamut(maxDimension: Int = 512) async -> GamutTally? {
+        guard let image = previewPublicationCoordinator.lastPresentedVisibleImage else { return nil }
+        guard let sample = await engine.gamutSample(
+            presentedImage: image, maxDimension: maxDimension
+        ) else { return nil }
+        return await Task.detached(priority: .utility) {
+            GamutTally(linearDisplayP3: sample.linearDisplayP3)
+        }.value
+    }
     func writeCanonicalPreview(_ image: CIImage, request: RenderRequest) {
         previewPresentation.writeCanonical(image, for: request)
     }

@@ -211,6 +211,7 @@ struct InfoInspectorView: View {
             VStack(alignment: .leading, spacing: InspectorStyle.sectionSpacing) {
                 InspectorPanelHeading(title: "Info")
                 identitySection
+                InfoGamutSection(viewModel: viewModel, isExpanded: $gamutExpanded)
                 if let assetID = viewModel.maskingAssetID,
                    let source = viewModel.maskingSource {
                     InfoAnalysisSection(
@@ -230,6 +231,7 @@ struct InfoInspectorView: View {
 
     /// Do not persist this state: a newly opened photo must never trigger analysis unexpectedly.
     @State private var analysisExpanded = false
+    @State private var gamutExpanded = false
     @State private var editHistoryExpanded = false
     @State private var snapshotName = ""
     @State private var expandedMetadataSections: Set<String> = ["Camera & Lens", "Exposure"]
@@ -850,5 +852,115 @@ struct InfoLocationCard: View {
             .font(InspectorStyle.fieldValue.monospaced())
             .textSelection(.enabled)
         }
+    }
+}
+
+// MARK: - Color gamut (KRMA-1132)
+
+/// Owns the `info.histogram` read for the gamut disclosure. Collapsed by default; while collapsed it
+/// does no work at all, and expanded it asks the engine for a bounded extended-linear Display P3
+/// float sample of the presented frame, keyed on the histogram's sample identity so an unchanged
+/// image never re-tallies.
+private struct InfoGamutSection: View {
+    let viewModel: AppViewModel
+    @Binding var isExpanded: Bool
+    @State private var tally: GamutTally?
+
+    private struct TaskKey: Equatable {
+        let expanded: Bool
+        let sampleIdentity: Int?
+    }
+
+    var body: some View {
+        let histogram = viewModel.info.histogram
+        InspectorDisclosure("Color Gamut", isExpanded: $isExpanded) {
+            VStack(alignment: .leading, spacing: 8) {
+                if let tally {
+                    GamutPlot(tally: tally)
+                        .frame(height: 160)
+                        .frame(maxWidth: .infinity)
+                    Text(Self.summary(for: tally))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                } else {
+                    Text(isExpanded && histogram != nil ? "Measuring…" : "Gamut unavailable")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .task(id: TaskKey(expanded: isExpanded, sampleIdentity: histogram?.sampleIdentity)) {
+            guard isExpanded, histogram != nil else {
+                if histogram == nil { tally = nil }
+                return
+            }
+            let result = await viewModel.measureGamut()
+            guard !Task.isCancelled else { return }
+            tally = result
+        }
+    }
+
+    static func summary(for tally: GamutTally) -> String {
+        let srgb = tally.outsideSRGBFraction.formatted(.percent.precision(.fractionLength(0...1)))
+        let base = "Edited image: \(srgb) of pixels outside sRGB."
+        guard tally.measuresBeyondP3 else {
+            return base + " Outside Display P3 is not measured; the preview sample is clamped to P3."
+        }
+        let p3 = tally.outsideP3Fraction.formatted(.percent.precision(.fractionLength(0...1)))
+        return base + " \(p3) outside Display P3."
+    }
+}
+
+/// u'v' density with the sRGB and Display P3 triangles over it. Draws at most
+/// `GamutTally.gridSize`² cells, never pixels.
+private struct GamutPlot: View {
+    let tally: GamutTally
+
+    var body: some View {
+        Canvas { context, size in
+            let n = GamutTally.gridSize
+            let peak = Double(max(1, tally.densityPeak))
+            let cellW = size.width / Double(n)
+            let cellH = size.height / Double(n)
+            for y in 0..<n {
+                for x in 0..<n {
+                    let count = tally.density[y * n + x]
+                    guard count > 0 else { continue }
+                    // Log scale: a few saturated pixels stay visible next to a neutral peak.
+                    let level = log1p(Double(count)) / log1p(peak)
+                    let rect = CGRect(x: Double(x) * cellW,
+                                      y: size.height - Double(y + 1) * cellH,
+                                      width: cellW + 0.5, height: cellH + 0.5)
+                    context.fill(Path(rect), with: .color(.accentColor.opacity(0.15 + 0.85 * level)))
+                }
+            }
+            func triangle(_ points: [CGPoint]) -> Path {
+                var path = Path()
+                for (i, p) in points.enumerated() {
+                    let u = (p.x - GamutTally.uRange.lowerBound)
+                        / (GamutTally.uRange.upperBound - GamutTally.uRange.lowerBound)
+                    let v = (p.y - GamutTally.vRange.lowerBound)
+                        / (GamutTally.vRange.upperBound - GamutTally.vRange.lowerBound)
+                    let point = CGPoint(x: u * size.width, y: size.height - v * size.height)
+                    if i == 0 { path.move(to: point) } else { path.addLine(to: point) }
+                }
+                path.closeSubpath()
+                return path
+            }
+            context.stroke(triangle(GamutTally.displayP3Primaries), with: .color(.primary.opacity(0.8)),
+                           style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+            context.stroke(triangle(GamutTally.sRGBPrimaries), with: .color(.primary),
+                           lineWidth: 1)
+        }
+        .aspectRatio(
+            (GamutTally.uRange.upperBound - GamutTally.uRange.lowerBound)
+                / (GamutTally.vRange.upperBound - GamutTally.vRange.lowerBound),
+            contentMode: .fit
+        )
+        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+        .accessibilityElement()
+        .accessibilityLabel("Color gamut plot")
+        .accessibilityValue(InfoGamutSection.summary(for: tally))
     }
 }
