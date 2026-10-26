@@ -137,7 +137,7 @@ final class LookInspectorViewTests: TempDirectoryTestCase {
             cube: Array(repeating: SIMD3<Float>(0.2, 0.3, 0.4), count: 8),
             size: 2,
             name: "Starter Look",
-            category: "Cinematic",
+            category: "Cine",
             source: .bundled
         )
         let user = CubeLUT(
@@ -149,7 +149,7 @@ final class LookInspectorViewTests: TempDirectoryTestCase {
         )
         viewModel.library.categories = [
             LUTLibrary.Category(
-                id: "bundled:Cinematic", name: "Cinematic", luts: [starter], source: .bundled
+                id: "bundled:Cine", name: "Cine", luts: [starter], source: .bundled
             ),
             LUTLibrary.Category(
                 id: "user:Imported", name: "Imported", luts: [user], source: .user

@@ -10,16 +10,38 @@ final class BundledLookTests: TempDirectoryTestCase {
         return LUTLibrary(preferences: defaults, includeBundled: true)
     }
 
+    func testRetiredStarterLooksResolveToTheirReplacements() throws {
+        let library = BundledLookLibrary.load()
+        XCTAssertTrue(library.warnings.isEmpty)
+        let ids = Set(library.looks.map(\.id))
+        let retired = ["silver-noir": "fine-mono", "muted-film": "field-report", "paper-grain": "soft-mono"]
+        for (stem, replacement) in retired {
+            XCTAssertFalse(ids.contains("kromora.starter.\(stem)"))
+            let forms = [
+                "kromora.starter.\(stem)",
+                "/Applications/Kromora.app/Contents/Resources/Kromora_KromoraKit.bundle/Resources/StarterLooks/\(stem).cube",
+                "/Users/x/Kromora/.build/debug/Kromora_KromoraKit.bundle/Resources/StarterLooks/\(stem).cube",
+            ]
+            for form in forms {
+                let resolved = try XCTUnwrap(library.looks.first(matching: LUTID(raw: form)), form)
+                XCTAssertEqual(resolved.id, "kromora.starter.\(replacement)")
+            }
+        }
+        // Surviving Looks and unrelated references are untouched.
+        XCTAssertEqual(library.looks.first(matching: LUTID(raw: "kromora.starter.soft-mono"))?.id, "kromora.starter.soft-mono")
+        XCTAssertNil(library.looks.first(matching: LUTID(raw: "/Users/x/Looks/silver-noir.cube")))
+        XCTAssertNil(library.looks.first(matching: LUTID(raw: "kromora.starter.unknown")))
+    }
+
     func testManifestContainsApprovedProvenanceForEveryBundledLook() throws {
         let manifest = try BundledLookLibrary.validate()
 
         XCTAssertEqual(manifest.schemaVersion, 1)
         XCTAssertFalse(manifest.acknowledgement.isEmpty)
-        XCTAssertEqual(manifest.looks.count, 14)
+        XCTAssertEqual(manifest.looks.count, 27)
         XCTAssertEqual(
             Set(manifest.looks.map(\.category)),
-            ["Monochrome", "Cinematic", "Film-inspired", "Warm slide-inspired",
-             "Pastel", "Faded", "High-contrast", "Slide"]
+            ["Slide", "Negative", "Cine", "Monochrome"]
         )
         XCTAssertEqual(Set(manifest.looks.map(\.id)).count, manifest.looks.count)
         XCTAssertEqual(Set(manifest.looks.map(\.resource)).count, manifest.looks.count)
@@ -28,9 +50,9 @@ final class BundledLookTests: TempDirectoryTestCase {
         XCTAssertTrue(manifest.looks.allSatisfy { $0.approval.status == "approved" })
         XCTAssertTrue(manifest.looks.allSatisfy { $0.license.contains("MIT") })
         XCTAssertTrue(manifest.looks.allSatisfy { $0.attribution.contains("No third-party") })
-        XCTAssertTrue(manifest.looks.contains { $0.name == "Honey Negative" && $0.category == "Film-inspired" })
-        XCTAssertTrue(manifest.looks.contains { $0.name == "Ember & Cyan" && $0.category == "Cinematic" })
-        XCTAssertTrue(manifest.looks.contains { $0.name == "Pastel Wash" && $0.category == "Pastel" })
+        XCTAssertTrue(manifest.looks.contains { $0.name == "Honey Negative" && $0.category == "Negative" })
+        XCTAssertTrue(manifest.looks.contains { $0.name == "Ember & Cyan" && $0.category == "Cine" })
+        XCTAssertTrue(manifest.looks.contains { $0.name == "Pastel Wash" && $0.category == "Cine" })
         XCTAssertFalse(manifest.looks.contains { $0.name == "Neon Dusk" })
         XCTAssertFalse(manifest.looks.contains { $0.name == "Midnight Slate" })
         XCTAssertFalse(manifest.looks.contains { $0.name == "Forest Shadow" })
@@ -38,26 +60,34 @@ final class BundledLookTests: TempDirectoryTestCase {
         XCTAssertFalse(manifest.acknowledgement.localizedCaseInsensitiveContains("mit"))
     }
 
+    func testStarterCategoryOrderIsExplicitWithMonochromeLast() {
+        let names = ["Monochrome", "Zebra", "Cine", "Aardvark", "Negative", "Slide"]
+        XCTAssertEqual(
+            names.sorted(by: LUTLibrary.starterCategoryPrecedes),
+            ["Slide", "Negative", "Cine", "Aardvark", "Zebra", "Monochrome"]
+        )
+        XCTAssertFalse(LUTLibrary.starterCategoryPrecedes("Monochrome", "Zebra"))
+    }
+
     func testApplicationLibrarySeparatesStarterLooksFromUserLooks() async throws {
         let library = makeLibrary()
-        XCTAssertEqual(library.allLUTs.count, 14)
+        XCTAssertEqual(library.allLUTs.count, 27)
         XCTAssertTrue(library.allLUTs.allSatisfy { $0.source == .bundled })
         XCTAssertEqual(library.lookCollections.map(\.title), ["Starter Looks", "My Looks"])
-        XCTAssertEqual(library.starterLooks.count, 14)
+        XCTAssertEqual(library.starterLooks.count, 27)
         XCTAssertEqual(
             library.starterCategories.map(\.name),
-            ["Monochrome", "Cinematic", "Faded", "Film-inspired", "High-contrast",
-             "Pastel", "Slide", "Warm slide-inspired"]
+            ["Slide", "Negative", "Cine", "Monochrome"]
         )
-        XCTAssertEqual(Set(library.starterLooks.prefix(5).map(\.category)), ["Monochrome"])
+        XCTAssertEqual(Set(library.starterLooks.prefix(5).map(\.category)), ["Slide"])
+        XCTAssertEqual(library.starterLooks.last?.category, "Monochrome")
         XCTAssertTrue(library.starterLooks.allSatisfy { $0.source == .bundled })
         XCTAssertTrue(library.myLooks.isEmpty, "the empty My Looks collection must remain visible")
         XCTAssertTrue(library.lookCollections[0].isReadOnly)
         XCTAssertFalse(library.lookCollections[1].isReadOnly)
         XCTAssertEqual(
             library.categories.map(\.name),
-            ["Monochrome", "Cinematic", "Faded", "Film-inspired", "High-contrast",
-             "Pastel", "Slide", "Warm slide-inspired"]
+            ["Slide", "Negative", "Cine", "Monochrome"]
         )
         XCTAssertTrue(library.categories.allSatisfy { $0.source == .bundled })
         XCTAssertTrue(library.bundledLoadWarnings.isEmpty)
@@ -68,13 +98,13 @@ final class BundledLookTests: TempDirectoryTestCase {
         library.importLUT(from: userURL)
         while library.isImporting { try await Task.sleep(for: .milliseconds(10)) }
 
-        XCTAssertEqual(library.allLUTs.filter { $0.source == .bundled }.count, 14)
+        XCTAssertEqual(library.allLUTs.filter { $0.source == .bundled }.count, 27)
         XCTAssertEqual(library.allLUTs.filter { $0.source == .user }.map(\.name), ["my-look"])
         XCTAssertEqual(library.categories.filter { $0.source == .user }.map(\.name), ["Imported"])
-        XCTAssertEqual(library.starterLooks.count, 14)
+        XCTAssertEqual(library.starterLooks.count, 27)
         XCTAssertEqual(library.myLooks.map(\.name), ["my-look"])
         XCTAssertTrue(library.myLooks.allSatisfy { $0.source != .bundled })
-        XCTAssertEqual(library.lookCollections.map { $0.looks.count }, [14, 1])
+        XCTAssertEqual(library.lookCollections.map { $0.looks.count }, [27, 1])
     }
 
     func testLookCollectionsHaveDeterministicFlatOrderingAcrossCategories() async throws {
@@ -118,8 +148,34 @@ final class BundledLookTests: TempDirectoryTestCase {
             .filter { $0.source == .bundled }
             .map(\.cacheFingerprint)
 
-        XCTAssertEqual(fingerprints.count, 14)
+        XCTAssertEqual(fingerprints.count, 27)
         XCTAssertEqual(Set(fingerprints).count, fingerprints.count)
+    }
+
+    func testParallelLoadKeepsManifestOrderAndStableIDsForFullSizeCubes() throws {
+        let directory = try Fixtures.makeTempDirectory("StarterLookParallel")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let text = Fixtures.identityCubeText(size: 33)
+        var entries: [BundledLookManifest.Entry] = []
+        for index in 0..<8 {
+            let url = try Fixtures.writeCube(text, named: "look-\(index).cube", in: directory)
+            entries.append(BundledLookManifest.Entry(
+                id: "stable-\(index)", name: "Look \(index)", category: "Test", resource: url.lastPathComponent,
+                sourceAuthor: "Tests", source: "Original", license: "MIT License (Kromora project license)", attribution: "None",
+                redistribution: "Allowed", approval: .init(status: "approved", recordID: "test-\(index)", reviewer: "Tests", approvedAt: "2026-01-01", notes: "Test")
+            ))
+        }
+        entries.insert(BundledLookManifest.Entry(
+            id: "stable-missing", name: "Missing", category: "Test", resource: "missing.cube",
+            sourceAuthor: "Tests", source: "Original", license: "MIT License (Kromora project license)", attribution: "None",
+            redistribution: "Allowed", approval: .init(status: "approved", recordID: "test-m", reviewer: "Tests", approvedAt: "2026-01-01", notes: "Test")
+        ), at: 3)
+        let manifest = BundledLookManifest(schemaVersion: 1, acknowledgement: "Test", looks: entries)
+
+        let loaded = BundledLookLibrary.load(manifest: manifest, resourceDirectory: directory)
+        XCTAssertEqual(loaded.looks.map(\.id), (0..<8).map { "stable-\($0)" })
+        XCTAssertEqual(loaded.looks.map(\.name), (0..<8).map { "Look \($0)" })
+        XCTAssertEqual(loaded.warnings.count, 1)
     }
 
     func testMalformedBundledEntryIsSkippedWithoutHidingHealthyEntries() throws {

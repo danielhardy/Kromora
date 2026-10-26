@@ -28,7 +28,7 @@
         "status" : "approved"
       },
       "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
-      "category" : "Cinematic",
+      "category" : "Cine",
       "id" : "kromora.starter.evening-cinema",
       "license" : "MIT License (Kromora project license)",
       "name" : "Evening Cinema",
@@ -46,66 +46,12 @@
         "status" : "approved"
       },
       "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
-      "category" : "Film-inspired",
-      "id" : "kromora.starter.muted-film",
-      "license" : "MIT License (Kromora project license)",
-      "name" : "Muted Film",
-      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement.",
-      "resource" : "muted-film.cube",
-      "source" : "Original in-house procedural asset; authored for Kromora. Display P3 regeneration: scripts/generate-p3-starter-looks.swift resamples the sRGB control lattice of the same Look onto a 17^3 Display P3 lattice (colour-managed conversion, not a relabelled sRGB table).",
-      "sourceAuthor" : "Kromora project contributors"
-    },
-    {
-      "approval" : {
-        "approvedAt" : "2026-10-25",
-        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3). Appearance on in-gamut colours reviewed against the sRGB source Look via `review`; no camera profile or commercial emulation used.",
-        "recordID" : "KRMA-1121-P3-STARTER-2026-10-25",
-        "reviewer" : "KRMA-1117 visual review (A/B contact sheet via `review`); activated by KRMA-1121",
-        "status" : "approved"
-      },
-      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
-      "category" : "Warm slide-inspired",
+      "category" : "Slide",
       "id" : "kromora.starter.warm-slide",
       "license" : "MIT License (Kromora project license)",
       "name" : "Warm Slide",
       "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement.",
       "resource" : "warm-slide.cube",
-      "source" : "Original in-house procedural asset; authored for Kromora. Display P3 regeneration: scripts/generate-p3-starter-looks.swift resamples the sRGB control lattice of the same Look onto a 17^3 Display P3 lattice (colour-managed conversion, not a relabelled sRGB table).",
-      "sourceAuthor" : "Kromora project contributors"
-    },
-    {
-      "approval" : {
-        "approvedAt" : "2026-10-25",
-        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3). Appearance on in-gamut colours reviewed against the sRGB source Look via `review`; no camera profile or commercial emulation used.",
-        "recordID" : "KRMA-1121-P3-STARTER-2026-10-25",
-        "reviewer" : "KRMA-1117 visual review (A/B contact sheet via `review`); activated by KRMA-1121",
-        "status" : "approved"
-      },
-      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
-      "category" : "Monochrome",
-      "id" : "kromora.starter.silver-noir",
-      "license" : "MIT License (Kromora project license)",
-      "name" : "Silver Noir",
-      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
-      "resource" : "silver-noir.cube",
-      "source" : "Original in-house procedural asset; authored for Kromora. Display P3 regeneration: scripts/generate-p3-starter-looks.swift resamples the sRGB control lattice of the same Look onto a 17^3 Display P3 lattice (colour-managed conversion, not a relabelled sRGB table).",
-      "sourceAuthor" : "Kromora project contributors"
-    },
-    {
-      "approval" : {
-        "approvedAt" : "2026-10-25",
-        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3). Appearance on in-gamut colours reviewed against the sRGB source Look via `review`; no camera profile or commercial emulation used.",
-        "recordID" : "KRMA-1121-P3-STARTER-2026-10-25",
-        "reviewer" : "KRMA-1117 visual review (A/B contact sheet via `review`); activated by KRMA-1121",
-        "status" : "approved"
-      },
-      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
-      "category" : "Monochrome",
-      "id" : "kromora.starter.paper-grain",
-      "license" : "MIT License (Kromora project license)",
-      "name" : "Paper Grain",
-      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
-      "resource" : "paper-grain.cube",
       "source" : "Original in-house procedural asset; authored for Kromora. Display P3 regeneration: scripts/generate-p3-starter-looks.swift resamples the sRGB control lattice of the same Look onto a 17^3 Display P3 lattice (colour-managed conversion, not a relabelled sRGB table).",
       "sourceAuthor" : "Kromora project contributors"
     },
@@ -154,7 +100,7 @@
         "status" : "approved"
       },
       "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
-      "category" : "Cinematic",
+      "category" : "Cine",
       "id" : "kromora.starter.ember-cyan",
       "license" : "MIT License (Kromora project license)",
       "name" : "Ember & Cyan",
@@ -172,7 +118,7 @@
         "status" : "approved"
       },
       "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
-      "category" : "Film-inspired",
+      "category" : "Negative",
       "id" : "kromora.starter.honey-negative",
       "license" : "MIT License (Kromora project license)",
       "name" : "Honey Negative",
@@ -190,7 +136,7 @@
         "status" : "approved"
       },
       "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
-      "category" : "Pastel",
+      "category" : "Cine",
       "id" : "kromora.starter.pastel-wash",
       "license" : "MIT License (Kromora project license)",
       "name" : "Pastel Wash",
@@ -208,7 +154,7 @@
         "status" : "approved"
       },
       "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
-      "category" : "Faded",
+      "category" : "Cine",
       "id" : "kromora.starter.bleached-daylight",
       "license" : "MIT License (Kromora project license)",
       "name" : "Bleached Daylight",
@@ -226,7 +172,7 @@
         "status" : "approved"
       },
       "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
-      "category" : "High-contrast",
+      "category" : "Slide",
       "id" : "kromora.starter.hard-light",
       "license" : "MIT License (Kromora project license)",
       "name" : "Hard Light",
@@ -251,6 +197,294 @@
       "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement.",
       "resource" : "clean-slide.cube",
       "source" : "Original in-house procedural asset; authored for Kromora. Generated deterministically from SlideLookParameters.cleanSlide by Tests/KromoraKitTests/SlideLookGenerator.swift (regenerate with KROMORA_WRITE_SLIDE_LOOKS=1 swift test --filter SlideLookGeneratorTests/testBundledCleanSlideMatchesTheGenerator); 33^3 lattice authored directly in Display P3.",
+      "sourceAuthor" : "Kromora project contributors"
+    },
+    {
+      "approval" : {
+        "approvedAt" : "2026-10-26",
+        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3), sRGB transfer encoding (KROMORA_ENCODING: sRGBTransfer), 33^3 lattice, inputs bounded to 0...1. Parameters are expressed in P3, not converted from sRGB tables; colours outside the P3 gamut are not represented. WorkingSpace.current is Display P3 and Look interpolation uses the cube's stamp (checked against RenderPipeline/CubeLUT). Best-guess approximation of a high-saturation slide character; reviewed by eye on neutral RAW develops only, no fidelity to any camera claimed; no camera profile, reference pair or commercial emulation data used.",
+        "recordID" : "KRMA-1104-VIVID-SLIDE-2026-10-26",
+        "reviewer" : "KRMA-1104 structural verification (SlideLookGeneratorTests); no reference to match",
+        "status" : "approved"
+      },
+      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
+      "category" : "Slide",
+      "id" : "kromora.starter.vivid-slide",
+      "license" : "MIT License (Kromora project license)",
+      "name" : "Vivid Slide",
+      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement.",
+      "resource" : "vivid-slide.cube",
+      "source" : "Original in-house procedural asset; authored for Kromora. Generated deterministically from SlideLookParameters.vividSlide by Tests/KromoraKitTests/SlideLookGenerator.swift (regenerate with KROMORA_WRITE_SLIDE_LOOKS=1 swift test --filter SlideLookGeneratorTests/testBundledVividSlideMatchesTheGenerator); 33^3 lattice authored directly in Display P3.",
+      "sourceAuthor" : "Kromora project contributors"
+    },
+    {
+      "approval" : {
+        "approvedAt" : "2026-10-26",
+        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3), sRGB transfer encoding (KROMORA_ENCODING: sRGBTransfer), 33^3 lattice, inputs bounded to 0...1. Parameters are expressed in P3, not converted from sRGB tables; colours outside the P3 gamut are not represented. WorkingSpace.current is Display P3 and Look interpolation uses the cube's stamp (checked against RenderPipeline/CubeLUT). Best-guess approximation of a soft slide character; reviewed by eye on neutral RAW develops only, no fidelity to any camera claimed; no camera profile, reference pair or commercial emulation data used.",
+        "recordID" : "KRMA-1104-SOFT-SLIDE-2026-10-26",
+        "reviewer" : "KRMA-1104 structural verification (SlideLookGeneratorTests); no reference to match",
+        "status" : "approved"
+      },
+      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
+      "category" : "Slide",
+      "id" : "kromora.starter.soft-slide",
+      "license" : "MIT License (Kromora project license)",
+      "name" : "Soft Slide",
+      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement.",
+      "resource" : "soft-slide.cube",
+      "source" : "Original in-house procedural asset; authored for Kromora. Generated deterministically from SlideLookParameters.softSlide by Tests/KromoraKitTests/SlideLookGenerator.swift (regenerate with KROMORA_WRITE_SLIDE_LOOKS=1 swift test --filter SlideLookGeneratorTests/testBundledSoftSlideMatchesTheGenerator); 33^3 lattice authored directly in Display P3.",
+      "sourceAuthor" : "Kromora project contributors"
+    },
+    {
+      "approval" : {
+        "approvedAt" : "2026-10-26",
+        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3), sRGB transfer encoding (KROMORA_ENCODING: sRGBTransfer), 33^3 lattice, inputs bounded to 0...1. Parameters are expressed in P3, not converted from sRGB tables; colours outside the P3 gamut are not represented. WorkingSpace.current is Display P3 and Look interpolation uses the cube's stamp (checked against RenderPipeline/CubeLUT). Best-guess approximation of a documentary character with firm shadows, soft highlights and restrained color; reviewed by eye on neutral RAW develops only, no fidelity to any camera claimed; no camera profile, reference pair or commercial emulation data used.",
+        "recordID" : "KRMA-1105-FIELD-REPORT-2026-10-26",
+        "reviewer" : "KRMA-1105 structural verification (SlideLookGeneratorTests); no reference to match",
+        "status" : "approved"
+      },
+      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
+      "category" : "Negative",
+      "id" : "kromora.starter.field-report",
+      "license" : "MIT License (Kromora project license)",
+      "name" : "Field Report",
+      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement.",
+      "resource" : "field-report.cube",
+      "source" : "Original in-house procedural asset; authored for Kromora. Generated deterministically from SlideLookParameters.fieldReport by Tests/KromoraKitTests/SlideLookGenerator.swift (regenerate with KROMORA_WRITE_SLIDE_LOOKS=1 swift test --filter SlideLookGeneratorTests/testBundledFieldReportMatchesTheGenerator); 33^3 lattice authored directly in Display P3.",
+      "sourceAuthor" : "Kromora project contributors"
+    },
+    {
+      "approval" : {
+        "approvedAt" : "2026-10-26",
+        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3), sRGB transfer encoding (KROMORA_ENCODING: sRGBTransfer), 33^3 lattice, inputs bounded to 0...1. Parameters are expressed in P3, not converted from sRGB tables; colours outside the P3 gamut are not represented. WorkingSpace.current is Display P3 and Look interpolation uses the cube's stamp (checked against RenderPipeline/CubeLUT). Best-guess approximation of a low-contrast negative-style portrait character; reviewed by eye on neutral RAW develops only, no fidelity to any camera claimed; no camera profile, reference pair or commercial emulation data used.",
+        "recordID" : "KRMA-1105-PORTRAIT-SOFT-2026-10-26",
+        "reviewer" : "KRMA-1105 structural verification (SlideLookGeneratorTests); no reference to match",
+        "status" : "approved"
+      },
+      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
+      "category" : "Negative",
+      "id" : "kromora.starter.portrait-soft",
+      "license" : "MIT License (Kromora project license)",
+      "name" : "Portrait Soft",
+      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement.",
+      "resource" : "portrait-soft.cube",
+      "source" : "Original in-house procedural asset; authored for Kromora. Generated deterministically from SlideLookParameters.portraitSoft by Tests/KromoraKitTests/SlideLookGenerator.swift (regenerate with KROMORA_WRITE_SLIDE_LOOKS=1 swift test --filter SlideLookGeneratorTests/testBundledPortraitSoftMatchesTheGenerator); 33^3 lattice authored directly in Display P3.",
+      "sourceAuthor" : "Kromora project contributors"
+    },
+    {
+      "approval" : {
+        "approvedAt" : "2026-10-26",
+        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3), sRGB transfer encoding (KROMORA_ENCODING: sRGBTransfer), 33^3 lattice, inputs bounded to 0...1. Parameters are expressed in P3, not converted from sRGB tables; colours outside the P3 gamut are not represented. WorkingSpace.current is Display P3 and Look interpolation uses the cube's stamp (checked against RenderPipeline/CubeLUT). Best-guess approximation of a moderate-contrast negative-style portrait character; reviewed by eye on neutral RAW develops only, no fidelity to any camera claimed; no camera profile, reference pair or commercial emulation data used.",
+        "recordID" : "KRMA-1105-PORTRAIT-CRISP-2026-10-26",
+        "reviewer" : "KRMA-1105 structural verification (SlideLookGeneratorTests); no reference to match",
+        "status" : "approved"
+      },
+      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
+      "category" : "Negative",
+      "id" : "kromora.starter.portrait-crisp",
+      "license" : "MIT License (Kromora project license)",
+      "name" : "Portrait Crisp",
+      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement.",
+      "resource" : "portrait-crisp.cube",
+      "source" : "Original in-house procedural asset; authored for Kromora. Generated deterministically from SlideLookParameters.portraitCrisp by Tests/KromoraKitTests/SlideLookGenerator.swift (regenerate with KROMORA_WRITE_SLIDE_LOOKS=1 swift test --filter SlideLookGeneratorTests/testBundledPortraitCrispMatchesTheGenerator); 33^3 lattice authored directly in Display P3.",
+      "sourceAuthor" : "Kromora project contributors"
+    },
+    {
+      "approval" : {
+        "approvedAt" : "2026-10-26",
+        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3), sRGB transfer encoding (KROMORA_ENCODING: sRGBTransfer), 33^3 lattice, inputs bounded to 0...1. Parameters are expressed in P3, not converted from sRGB tables; colours outside the P3 gamut are not represented. WorkingSpace.current is Display P3 and Look interpolation uses the cube's stamp (checked against RenderPipeline/CubeLUT). Best-guess approximation of a high-contrast negative character with uneven hue response, cool shadows and warm highlights; reviewed by eye on neutral RAW develops only, no fidelity to any camera claimed; no camera profile, reference pair or commercial emulation data used.",
+        "recordID" : "KRMA-1106-STREET-NEGATIVE-2026-10-26",
+        "reviewer" : "KRMA-1106 structural verification (SlideLookGeneratorTests); no reference to match",
+        "status" : "approved"
+      },
+      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
+      "category" : "Negative",
+      "id" : "kromora.starter.street-negative",
+      "license" : "MIT License (Kromora project license)",
+      "name" : "Street Negative",
+      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement.",
+      "resource" : "street-negative.cube",
+      "source" : "Original in-house procedural asset; authored for Kromora. Generated deterministically from SlideLookParameters.streetNegative by Tests/KromoraKitTests/SlideLookGenerator.swift (regenerate with KROMORA_WRITE_SLIDE_LOOKS=1 swift test --filter SlideLookGeneratorTests/testBundledStreetNegativeMatchesTheGenerator); 33^3 lattice authored directly in Display P3.",
+      "sourceAuthor" : "Kromora project contributors"
+    },
+    {
+      "approval" : {
+        "approvedAt" : "2026-10-26",
+        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3), sRGB transfer encoding (KROMORA_ENCODING: sRGBTransfer), 33^3 lattice, inputs bounded to 0...1. Parameters are expressed in P3, not converted from sRGB tables; colours outside the P3 gamut are not represented. WorkingSpace.current is Display P3 and Look interpolation uses the cube's stamp (checked against RenderPipeline/CubeLUT). Best-guess approximation of a warm print character with lifted toe, amber highlights and cool shadows; reviewed by eye on neutral RAW develops only, no fidelity to any camera claimed; no camera profile, reference pair or commercial emulation data used.",
+        "recordID" : "KRMA-1106-AMBER-PRINT-2026-10-26",
+        "reviewer" : "KRMA-1106 structural verification (SlideLookGeneratorTests); no reference to match",
+        "status" : "approved"
+      },
+      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
+      "category" : "Negative",
+      "id" : "kromora.starter.amber-print",
+      "license" : "MIT License (Kromora project license)",
+      "name" : "Amber Print",
+      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement.",
+      "resource" : "amber-print.cube",
+      "source" : "Original in-house procedural asset; authored for Kromora. Generated deterministically from SlideLookParameters.amberPrint by Tests/KromoraKitTests/SlideLookGenerator.swift (regenerate with KROMORA_WRITE_SLIDE_LOOKS=1 swift test --filter SlideLookGeneratorTests/testBundledAmberPrintMatchesTheGenerator); 33^3 lattice authored directly in Display P3.",
+      "sourceAuthor" : "Kromora project contributors"
+    },
+    {
+      "approval" : {
+        "approvedAt" : "2026-10-26",
+        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3), sRGB transfer encoding (KROMORA_ENCODING: sRGBTransfer), 33^3 lattice, inputs bounded to 0...1. Parameters are expressed in P3, not converted from sRGB tables; colours outside the P3 gamut are not represented. WorkingSpace.current is Display P3 and Look interpolation uses the cube's stamp (checked against RenderPipeline/CubeLUT). Best-guess approximation of a near-neutral character with depth from luminance shifts; reviewed by eye on neutral RAW develops only, no fidelity to any camera claimed; no camera profile, reference pair or commercial emulation data used.",
+        "recordID" : "KRMA-1106-TRUE-COLOR-2026-10-26",
+        "reviewer" : "KRMA-1106 structural verification (SlideLookGeneratorTests); no reference to match",
+        "status" : "approved"
+      },
+      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
+      "category" : "Negative",
+      "id" : "kromora.starter.true-color",
+      "license" : "MIT License (Kromora project license)",
+      "name" : "True Color",
+      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement.",
+      "resource" : "true-color.cube",
+      "source" : "Original in-house procedural asset; authored for Kromora. Generated deterministically from SlideLookParameters.trueColor by Tests/KromoraKitTests/SlideLookGenerator.swift (regenerate with KROMORA_WRITE_SLIDE_LOOKS=1 swift test --filter SlideLookGeneratorTests/testBundledTrueColorMatchesTheGenerator); 33^3 lattice authored directly in Display P3.",
+      "sourceAuthor" : "Kromora project contributors"
+    },
+    {
+      "approval" : {
+        "approvedAt" : "2026-10-26",
+        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3), sRGB transfer encoding (KROMORA_ENCODING: sRGBTransfer), 33^3 lattice, inputs bounded to 0...1. Parameters are expressed in P3, not converted from sRGB tables; colours outside the P3 gamut are not represented. WorkingSpace.current is Display P3 and Look interpolation uses the cube's stamp (checked against RenderPipeline/CubeLUT). Best-guess approximation of a hard-from-the-lower-mid-tones, soft-into-shadows black-and-white character. Neutral channel weights; differs from Soft Mono (flat), Silver Noir (dark and crushed), Paper Grain, Blueprint Mono and Infrared Mono, which are not channel-mix Looks; no grain baked in; reviewed by eye on neutral RAW develops only, no fidelity to any camera claimed; no camera profile, reference pair or commercial emulation data used.",
+        "recordID" : "KRMA-1108-FINE-MONO-2026-10-26",
+        "reviewer" : "KRMA-1108 structural verification (SlideLookGeneratorTests, FilmLookStructureTests); no reference to match",
+        "status" : "approved"
+      },
+      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
+      "category" : "Monochrome",
+      "id" : "kromora.starter.fine-mono",
+      "license" : "MIT License (Kromora project license)",
+      "name" : "Fine Mono",
+      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement.",
+      "resource" : "fine-mono.cube",
+      "source" : "Original in-house procedural asset; authored for Kromora. Generated deterministically from SlideLookParameters.fineMono by Tests/KromoraKitTests/SlideLookGenerator.swift (regenerate with KROMORA_WRITE_SLIDE_LOOKS=1 swift test --filter SlideLookGeneratorTests/testBundledFineMonoMatchesTheGenerator); 33^3 lattice authored directly in Display P3.",
+      "sourceAuthor" : "Kromora project contributors"
+    },
+    {
+      "approval" : {
+        "approvedAt" : "2026-10-26",
+        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3), sRGB transfer encoding (KROMORA_ENCODING: sRGBTransfer), 33^3 lattice, inputs bounded to 0...1. Parameters are expressed in P3, not converted from sRGB tables; colours outside the P3 gamut are not represented. WorkingSpace.current is Display P3 and Look interpolation uses the cube's stamp (checked against RenderPipeline/CubeLUT). Best-guess approximation of Fine Mono with a yellow colour-filter channel mix: blue sky darkens; no grain baked in; reviewed by eye on neutral RAW develops only, no fidelity to any camera claimed; no camera profile, reference pair or commercial emulation data used.",
+        "recordID" : "KRMA-1108-FINE-MONO-YELLOW-2026-10-26",
+        "reviewer" : "KRMA-1108 structural verification (SlideLookGeneratorTests, FilmLookStructureTests); no reference to match",
+        "status" : "approved"
+      },
+      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
+      "category" : "Monochrome",
+      "id" : "kromora.starter.fine-mono-yellow",
+      "license" : "MIT License (Kromora project license)",
+      "name" : "Fine Mono Yellow",
+      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement.",
+      "resource" : "fine-mono-yellow.cube",
+      "source" : "Original in-house procedural asset; authored for Kromora. Generated deterministically from SlideLookParameters.fineMonoYellow by Tests/KromoraKitTests/SlideLookGenerator.swift (regenerate with KROMORA_WRITE_SLIDE_LOOKS=1 swift test --filter SlideLookGeneratorTests/testBundledFineMonoYellowMatchesTheGenerator); 33^3 lattice authored directly in Display P3.",
+      "sourceAuthor" : "Kromora project contributors"
+    },
+    {
+      "approval" : {
+        "approvedAt" : "2026-10-26",
+        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3), sRGB transfer encoding (KROMORA_ENCODING: sRGBTransfer), 33^3 lattice, inputs bounded to 0...1. Parameters are expressed in P3, not converted from sRGB tables; colours outside the P3 gamut are not represented. WorkingSpace.current is Display P3 and Look interpolation uses the cube's stamp (checked against RenderPipeline/CubeLUT). Best-guess approximation of Fine Mono with a red colour-filter channel mix: blue sky darkens strongly and red-bearing colours, including sunlit foliage, lighten; no grain baked in; reviewed by eye on neutral RAW develops only, no fidelity to any camera claimed; no camera profile, reference pair or commercial emulation data used.",
+        "recordID" : "KRMA-1108-FINE-MONO-RED-2026-10-26",
+        "reviewer" : "KRMA-1108 structural verification (SlideLookGeneratorTests, FilmLookStructureTests); no reference to match",
+        "status" : "approved"
+      },
+      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
+      "category" : "Monochrome",
+      "id" : "kromora.starter.fine-mono-red",
+      "license" : "MIT License (Kromora project license)",
+      "name" : "Fine Mono Red",
+      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement.",
+      "resource" : "fine-mono-red.cube",
+      "source" : "Original in-house procedural asset; authored for Kromora. Generated deterministically from SlideLookParameters.fineMonoRed by Tests/KromoraKitTests/SlideLookGenerator.swift (regenerate with KROMORA_WRITE_SLIDE_LOOKS=1 swift test --filter SlideLookGeneratorTests/testBundledFineMonoRedMatchesTheGenerator); 33^3 lattice authored directly in Display P3.",
+      "sourceAuthor" : "Kromora project contributors"
+    },
+    {
+      "approval" : {
+        "approvedAt" : "2026-10-26",
+        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3), sRGB transfer encoding (KROMORA_ENCODING: sRGBTransfer), 33^3 lattice, inputs bounded to 0...1. Parameters are expressed in P3, not converted from sRGB tables; colours outside the P3 gamut are not represented. WorkingSpace.current is Display P3 and Look interpolation uses the cube's stamp (checked against RenderPipeline/CubeLUT). Best-guess approximation of Fine Mono with a green colour-filter channel mix: foliage tones compress together while reds and blues darken; no grain baked in; reviewed by eye on neutral RAW develops only, no fidelity to any camera claimed; no camera profile, reference pair or commercial emulation data used.",
+        "recordID" : "KRMA-1108-FINE-MONO-GREEN-2026-10-26",
+        "reviewer" : "KRMA-1108 structural verification (SlideLookGeneratorTests, FilmLookStructureTests); no reference to match",
+        "status" : "approved"
+      },
+      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
+      "category" : "Monochrome",
+      "id" : "kromora.starter.fine-mono-green",
+      "license" : "MIT License (Kromora project license)",
+      "name" : "Fine Mono Green",
+      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement.",
+      "resource" : "fine-mono-green.cube",
+      "source" : "Original in-house procedural asset; authored for Kromora. Generated deterministically from SlideLookParameters.fineMonoGreen by Tests/KromoraKitTests/SlideLookGenerator.swift (regenerate with KROMORA_WRITE_SLIDE_LOOKS=1 swift test --filter SlideLookGeneratorTests/testBundledFineMonoGreenMatchesTheGenerator); 33^3 lattice authored directly in Display P3.",
+      "sourceAuthor" : "Kromora project contributors"
+    },
+    {
+      "approval" : {
+        "approvedAt" : "2026-10-26",
+        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3), sRGB transfer encoding (KROMORA_ENCODING: sRGBTransfer), 33^3 lattice, inputs bounded to 0...1. Parameters are expressed in P3, not converted from sRGB tables; colours outside the P3 gamut are not represented. WorkingSpace.current is Display P3 and Look interpolation uses the cube's stamp (checked against RenderPipeline/CubeLUT). Best-guess approximation of a flatter black-and-white character that holds highlights, with the same channel weights as Fine Mono; no grain baked in; reviewed by eye on neutral RAW develops only, no fidelity to any camera claimed; no camera profile, reference pair or commercial emulation data used.",
+        "recordID" : "KRMA-1108-PLAIN-MONO-2026-10-26",
+        "reviewer" : "KRMA-1108 structural verification (SlideLookGeneratorTests, FilmLookStructureTests); no reference to match",
+        "status" : "approved"
+      },
+      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
+      "category" : "Monochrome",
+      "id" : "kromora.starter.plain-mono",
+      "license" : "MIT License (Kromora project license)",
+      "name" : "Plain Mono",
+      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement.",
+      "resource" : "plain-mono.cube",
+      "source" : "Original in-house procedural asset; authored for Kromora. Generated deterministically from SlideLookParameters.plainMono by Tests/KromoraKitTests/SlideLookGenerator.swift (regenerate with KROMORA_WRITE_SLIDE_LOOKS=1 swift test --filter SlideLookGeneratorTests/testBundledPlainMonoMatchesTheGenerator); 33^3 lattice authored directly in Display P3.",
+      "sourceAuthor" : "Kromora project contributors"
+    },
+    {
+      "approval" : {
+        "approvedAt" : "2026-10-26",
+        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3), sRGB transfer encoding (KROMORA_ENCODING: sRGBTransfer), 33^3 lattice, inputs bounded to 0...1. Parameters are expressed in P3, not converted from sRGB tables; colours outside the P3 gamut are not represented. WorkingSpace.current is Display P3 and Look interpolation uses the cube's stamp (checked against RenderPipeline/CubeLUT). Best-guess approximation of a sepia-style warm toned monochrome: amber shadows and cream highlights over Plain Mono's curve; no grain baked in; reviewed by eye on neutral RAW develops only, no fidelity to any camera claimed; no camera profile, reference pair or commercial emulation data used.",
+        "recordID" : "KRMA-1108-WARM-TONE-2026-10-26",
+        "reviewer" : "KRMA-1108 structural verification (SlideLookGeneratorTests, FilmLookStructureTests); no reference to match",
+        "status" : "approved"
+      },
+      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
+      "category" : "Monochrome",
+      "id" : "kromora.starter.warm-tone",
+      "license" : "MIT License (Kromora project license)",
+      "name" : "Warm Tone",
+      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement.",
+      "resource" : "warm-tone.cube",
+      "source" : "Original in-house procedural asset; authored for Kromora. Generated deterministically from SlideLookParameters.warmTone by Tests/KromoraKitTests/SlideLookGenerator.swift (regenerate with KROMORA_WRITE_SLIDE_LOOKS=1 swift test --filter SlideLookGeneratorTests/testBundledWarmToneMatchesTheGenerator); 33^3 lattice authored directly in Display P3.",
+      "sourceAuthor" : "Kromora project contributors"
+    },
+    {
+      "approval" : {
+        "approvedAt" : "2026-10-26",
+        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3), sRGB transfer encoding (KROMORA_ENCODING: sRGBTransfer), 33^3 lattice, inputs bounded to 0...1. Parameters are expressed in P3, not converted from sRGB tables; colours outside the P3 gamut are not represented. WorkingSpace.current is Display P3 and Look interpolation uses the cube's stamp (checked against RenderPipeline/CubeLUT). Best-guess approximation of a very low-contrast, low-saturation grading base with a soft toe and shoulder and greens, purples and magentas lowest; reviewed by eye on neutral RAW develops only, no fidelity to any camera claimed; no camera profile, reference pair or commercial emulation data used.",
+        "recordID" : "KRMA-1107-CINE-FLAT-2026-10-26",
+        "reviewer" : "KRMA-1107 structural verification (SlideLookGeneratorTests, FilmLookStructureTests); no reference to match",
+        "status" : "approved"
+      },
+      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
+      "category" : "Cine",
+      "id" : "kromora.starter.cine-flat",
+      "license" : "MIT License (Kromora project license)",
+      "name" : "Cine Flat",
+      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement.",
+      "resource" : "cine-flat.cube",
+      "source" : "Original in-house procedural asset; authored for Kromora. Generated deterministically from SlideLookParameters.cineFlat by Tests/KromoraKitTests/SlideLookGenerator.swift (regenerate with KROMORA_WRITE_SLIDE_LOOKS=1 swift test --filter SlideLookGeneratorTests/testBundledCineFlatMatchesTheGenerator); 33^3 lattice authored directly in Display P3.",
+      "sourceAuthor" : "Kromora project contributors"
+    },
+    {
+      "approval" : {
+        "approvedAt" : "2026-10-26",
+        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3), sRGB transfer encoding (KROMORA_ENCODING: sRGBTransfer), 33^3 lattice, inputs bounded to 0...1. Parameters are expressed in P3, not converted from sRGB tables; colours outside the P3 gamut are not represented. WorkingSpace.current is Display P3 and Look interpolation uses the cube's stamp (checked against RenderPipeline/CubeLUT). Best-guess approximation of a very high-contrast, crushed-shadow, bright-highlight look with low uniform saturation and almost no hue shift; reviewed by eye on neutral RAW develops only, no fidelity to any camera claimed; no camera profile, reference pair or commercial emulation data used.",
+        "recordID" : "KRMA-1107-SILVER-BYPASS-2026-10-26",
+        "reviewer" : "KRMA-1107 structural verification (SlideLookGeneratorTests, FilmLookStructureTests); no reference to match",
+        "status" : "approved"
+      },
+      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
+      "category" : "Cine",
+      "id" : "kromora.starter.silver-bypass",
+      "license" : "MIT License (Kromora project license)",
+      "name" : "Silver Bypass",
+      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement.",
+      "resource" : "silver-bypass.cube",
+      "source" : "Original in-house procedural asset; authored for Kromora. Generated deterministically from SlideLookParameters.silverBypass by Tests/KromoraKitTests/SlideLookGenerator.swift (regenerate with KROMORA_WRITE_SLIDE_LOOKS=1 swift test --filter SlideLookGeneratorTests/testBundledSilverBypassMatchesTheGenerator); 33^3 lattice authored directly in Display P3.",
       "sourceAuthor" : "Kromora project contributors"
     }
   ],

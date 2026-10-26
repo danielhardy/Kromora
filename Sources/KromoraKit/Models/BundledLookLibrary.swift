@@ -61,6 +61,29 @@ struct BundledLookLibrary: Sendable {
     static let resourceSubdirectory = "Resources/StarterLooks"
     static let manifestName = "manifest"
 
+    /// Starter Looks retired in KRMA-1131, keyed by file stem, mapped to the manifest id of the
+    /// nearest surviving Look. An edit or undo revision that still names a retired Look resolves
+    /// to its replacement instead of dangling.
+    static let retiredLookReplacements: [String: String] = [
+        "silver-noir": "kromora.starter.fine-mono",
+        "muted-film": "kromora.starter.field-report",
+        "paper-grain": "kromora.starter.soft-mono",
+    ]
+
+    /// The surviving Look's id for a retired reference, or `nil` when `raw` does not name a
+    /// retired Look. Accepts the manifest id (`kromora.starter.silver-noir`) and the older path
+    /// form whose last component is the cube file inside a `StarterLooks` directory.
+    static func replacementID(forRetired raw: String) -> String? {
+        let idPrefix = "kromora.starter."
+        if raw.hasPrefix(idPrefix) {
+            return retiredLookReplacements[String(raw.dropFirst(idPrefix.count))]
+        }
+        let url = URL(fileURLWithPath: raw)
+        guard url.pathExtension.lowercased() == "cube",
+              url.deletingLastPathComponent().lastPathComponent == "StarterLooks" else { return nil }
+        return retiredLookReplacements[url.deletingPathExtension().lastPathComponent]
+    }
+
     /// Reads just the manifest (acknowledgement text plus per-Look provenance fields) without
     /// parsing any `.cube` resource. Use this for text-only display, such as the About window's
     /// credits section — `load()` additionally parses every bundled LUT and is unnecessary there.

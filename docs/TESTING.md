@@ -964,23 +964,6 @@ Release, M4 Pro, macOS 27.2, 30 iterations, medians:
 reuses the developed-source and mask-payload entries, and that a brush edit, a RAW-develop edit, and a
 crop edit miss the mask, developed-source, and preview caches respectively.
 
-### Persisted package identity hash reuse (KRMA-753, 2026-10-01)
-
-Release last-known-frame capture after reusing the asset record's content hash for an unchanged
-embedded original: `scripts/run-kromora-capture.sh --benchmark last-known-frame --source
-realworldtest/DSC01019.ARW --iterations 30 --capture-id KRMA753 --output-dir
-/tmp/kromora-capture-krma753`. One run on Apple M1 Pro / macOS 27.0 (26A428), Xcode 27.0,
-9504×6336 DSC01019.ARW, 1440×897-point viewport, 30 warm navigation samples. The warm Edit
-first-pixel p50/p95 was 264.3 / 283.0 ms, versus the three-run KRMA-746/747 baseline median p95
-of 293 ms (about 10 ms lower in this run). The 50 ms p95 target remains unmet. Main-actor time
-before first suspension was 1.96 ms p95. Exact and stale warm Edit structural checks passed; the
-warm 30-cell grid p95 was 221.9 ms and remains over its 100 ms target. Capture records and trace:
-`/tmp/kromora-capture-krma753/KRMA753-DSC01019-20261001-201014-report.jsonl` and
-`/tmp/kromora-capture-krma753/KRMA753-DSC01019-20261001-201014.trace`.
-
-Also fixed in this pass: a package-library photo selected from the filmstrip left the previous
-photo's pixels on the canvas while its record resolved. `AppViewModel.openImage` now clears the
-surface and resets the presentation session before that suspension, covered by
 **KRMA-1102 per-stroke brush identity (2026-10-26).** `BrushStrokeDigest` memoizes
 `RenderCacheHash.digest(stroke)` per stroke ID and reuses it by `==` (O(1) for strokes that share
 sample storage). A brush definition digest is SHA-256 over the ordered per-stroke digests.
@@ -1002,6 +985,23 @@ first-miss identity build for brush recipes now reads about 0.17 ms in the bench
 process-wide stroke memo is already warm from earlier iterations; a truly cold process still encodes
 each stroke once (about 56 ms for the large recipe).
 
+### Persisted package identity hash reuse (KRMA-753, 2026-10-01)
+
+Release last-known-frame capture after reusing the asset record's content hash for an unchanged
+embedded original: `scripts/run-kromora-capture.sh --benchmark last-known-frame --source
+realworldtest/DSC01019.ARW --iterations 30 --capture-id KRMA753 --output-dir
+/tmp/kromora-capture-krma753`. One run on Apple M1 Pro / macOS 27.0 (26A428), Xcode 27.0,
+9504×6336 DSC01019.ARW, 1440×897-point viewport, 30 warm navigation samples. The warm Edit
+first-pixel p50/p95 was 264.3 / 283.0 ms, versus the three-run KRMA-746/747 baseline median p95
+of 293 ms (about 10 ms lower in this run). The 50 ms p95 target remains unmet. Main-actor time
+before first suspension was 1.96 ms p95. Exact and stale warm Edit structural checks passed; the
+warm 30-cell grid p95 was 221.9 ms and remains over its 100 ms target. Capture records and trace:
+`/tmp/kromora-capture-krma753/KRMA753-DSC01019-20261001-201014-report.jsonl` and
+`/tmp/kromora-capture-krma753/KRMA753-DSC01019-20261001-201014.trace`.
+
+Also fixed in this pass: a package-library photo selected from the filmstrip left the previous
+photo's pixels on the canvas while its record resolved. `AppViewModel.openImage` now clears the
+surface and resets the presentation session before that suspension, covered by
 `LibraryBrowsingProjectionTests`. Full gate on `4bbc5c5f`: warning gate, `fast`, `serial` (455
 tests), and `identity` (4 tests) all pass.
 

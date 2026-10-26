@@ -52,9 +52,18 @@ final class LUTLibrary {
         }
     }
 
+    /// Bundled category order is explicit rather than alphabetical. A category outside the list
+    /// sorts alphabetically after Cine and before Monochrome, so Monochrome always stays last.
+    nonisolated static let starterCategoryOrder = ["Slide", "Negative", "Cine", "Monochrome"]
+
     nonisolated static func starterCategoryPrecedes(_ left: String, _ right: String) -> Bool {
-        if left == "Monochrome" { return right != "Monochrome" }
-        if right == "Monochrome" { return false }
+        let unknownRank = Double(starterCategoryOrder.count) - 1.5
+        func rank(_ name: String) -> Double {
+            // Unknown categories share the slot between Cine and the final (Monochrome) entry.
+            starterCategoryOrder.firstIndex(of: name).map(Double.init) ?? unknownRank
+        }
+        let leftRank = rank(left), rightRank = rank(right)
+        if leftRank != rightRank { return leftRank < rightRank }
         return left.localizedStandardCompare(right) == .orderedAscending
     }
 
@@ -76,7 +85,7 @@ final class LUTLibrary {
     /// while the inspector gets one stable collection for each provenance boundary.
     ///
     /// Starter Looks deliberately retain category ordering so the picker can present each
-    /// category as a contiguous group. Monochrome is the neutral starting point and appears first.
+    /// category as a contiguous group. The order is Slide, Negative, Cine, then Monochrome last.
     ///
     /// Memoized against `libraryRevision` (KRMA-521): filtering/sorting runs only when the
     /// canonical categories change, not on every access during grid/inspector reevaluation.

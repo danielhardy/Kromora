@@ -43,8 +43,18 @@ struct SlideLookParameters: Equatable {
         var amount: Double = 0
     }
 
+    /// Channel-mix luma for a black-and-white Look: the output is `weights . rgb` (perceptually
+    /// encoded), then shaped by the tone curve. Weights are non-negative and sum to one, so white
+    /// stays white and every channel keeps some signal. The hue/saturation stage is bypassed.
+    struct Monochrome: Equatable {
+        var red: Double
+        var green: Double
+        var blue: Double
+    }
+
     static let sectorCount = 12
 
+    var monochrome: Monochrome?
     var toneCurve: ToneCurve
     var globalSaturation: Double
     var hueSectors: [HueSector]
@@ -61,8 +71,10 @@ struct SlideLookParameters: Equatable {
         chromeDepth: ChromeDepth = .init(),
         shadowTint: Tint = .init(),
         highlightTint: Tint = .init(),
-        skinGuard: Double = 0
+        skinGuard: Double = 0,
+        monochrome: Monochrome? = nil
     ) {
+        self.monochrome = monochrome
         precondition(hueSectors.count == Self.sectorCount, "exactly \(Self.sectorCount) hue sectors")
         self.toneCurve = toneCurve
         self.globalSaturation = globalSaturation
@@ -88,6 +100,191 @@ struct SlideLookParameters: Equatable {
             skinGuard: 0.5
         )
     }()
+
+    /// Vivid Slide: strong S-curve with a firm toe, global saturation about 1.35 with extra in greens,
+    /// blues and reds, blues toward magenta, yellow toward orange, heavy chrome depth.
+    static let vividSlide: SlideLookParameters = {
+        var sectors = Array(repeating: HueSector(), count: sectorCount)
+        sectors[0] = .init(saturation: 1.25, hueShift: 0)       // red
+        sectors[2] = .init(saturation: 1, hueShift: -6)         // yellow toward orange
+        sectors[4] = .init(saturation: 0.85, hueShift: 0)       // green (about 1.15 effective)
+        sectors[8] = .init(saturation: 1.3, hueShift: 8)        // blue toward magenta
+        return SlideLookParameters(
+            toneCurve: .init(toe: 0, slope: 1.3, shoulder: 0.15),
+            globalSaturation: 1.35,
+            hueSectors: sectors,
+            chromeDepth: .init(warm: 0.25, blue: 0.15),
+            skinGuard: 0.85
+        )
+    }()
+
+    /// Soft Slide: softer S-curve, flattened shoulder, firm shadows, saturation about 1.10 with extra
+    /// in greens, fair skin slightly less saturated and nudged away from red.
+    static let softSlide: SlideLookParameters = {
+        var sectors = Array(repeating: HueSector(), count: sectorCount)
+        sectors[1] = .init(saturation: 0.95, hueShift: 3)       // skin-range orange, away from red
+        sectors[4] = .init(saturation: 1.2, hueShift: 0)        // green
+        sectors[6] = .init(saturation: 1, hueShift: 6)          // cyan toward blue
+        return SlideLookParameters(
+            toneCurve: .init(toe: 0, slope: 1.05, shoulder: 0.35),
+            globalSaturation: 1.10,
+            hueSectors: sectors,
+            chromeDepth: .init(warm: 0.1, blue: 0.08),
+            skinGuard: 0.3
+        )
+    }()
+
+    /// Field Report: documentary character. Firm shadows, soft highlights, global saturation about
+    /// 0.78 with yellows and yellow-greens pulled back most (effective about 0.6), dark blues and
+    /// purples about 0.7, blues toward cyan, magenta eased in the sky range, slight cool shadow tint.
+    static let fieldReport: SlideLookParameters = {
+        var sectors = Array(repeating: HueSector(), count: sectorCount)
+        sectors[2] = .init(saturation: 0.77, hueShift: 0)       // yellow
+        sectors[3] = .init(saturation: 0.77, hueShift: 0)       // yellow-green
+        sectors[8] = .init(saturation: 0.9, hueShift: -12)      // blue toward cyan
+        sectors[9] = .init(saturation: 0.9, hueShift: -6)       // purple
+        sectors[10] = .init(saturation: 0.9, hueShift: 0)       // magenta eased
+        return SlideLookParameters(
+            toneCurve: .init(toe: 0, slope: 1.1, shoulder: 0.3),
+            globalSaturation: 0.78,
+            hueSectors: sectors,
+            shadowTint: .init(hue: 210, amount: 0.015),
+            skinGuard: 0.5
+        )
+    }()
+
+    /// Portrait Soft: negative-style, very low slope, global saturation about 0.85, hues untouched,
+    /// skin protected.
+    static let portraitSoft: SlideLookParameters = SlideLookParameters(
+        toneCurve: .init(toe: 0, slope: 1.02, shoulder: 0.1),
+        globalSaturation: 0.85,
+        skinGuard: 0.8
+    )
+
+    /// Street Negative: very high contrast with an uneven per-hue response. Reds boosted (about 1.2),
+    /// yellows about 0.7, dark greens about 0.65, blues and purples about 0.7; a slight red lean
+    /// (orange and magenta nudged toward red); cool shadows with warm highlights.
+    static let streetNegative: SlideLookParameters = {
+        var sectors = Array(repeating: HueSector(), count: sectorCount)
+        sectors[0] = .init(saturation: 1.23, hueShift: 0)       // red (about 1.1 effective)
+        sectors[1] = .init(saturation: 1, hueShift: -3)         // orange toward red
+        sectors[2] = .init(saturation: 0.78, hueShift: 0)       // yellow
+        sectors[4] = .init(saturation: 0.72, hueShift: 0)       // green
+        sectors[8] = .init(saturation: 0.78, hueShift: 0)       // blue
+        sectors[9] = .init(saturation: 0.78, hueShift: 0)       // purple
+        sectors[11] = .init(saturation: 1, hueShift: 3)         // magenta toward red
+        return SlideLookParameters(
+            toneCurve: .init(toe: 0, slope: 1.22, shoulder: 0.1),
+            globalSaturation: 0.9,
+            hueSectors: sectors,
+            shadowTint: .init(hue: 215, amount: 0.02),
+            highlightTint: .init(hue: 40, amount: 0.012),
+            skinGuard: 0.5
+        )
+    }()
+
+    /// Amber Print: soft slope with a lifted toe, saturation about 0.95, greens toward yellow, blues
+    /// toward purple, slightly rosy skin, blue-green shadows and amber highlights.
+    static let amberPrint: SlideLookParameters = {
+        var sectors = Array(repeating: HueSector(), count: sectorCount)
+        sectors[1] = .init(saturation: 1, hueShift: -3)         // skin-range orange, rosy
+        sectors[4] = .init(saturation: 1, hueShift: -8)         // green toward yellow
+        sectors[8] = .init(saturation: 1, hueShift: 5)          // blue toward purple
+        return SlideLookParameters(
+            toneCurve: .init(toe: 0.06, slope: 1.04, shoulder: 0.1),
+            globalSaturation: 0.95,
+            hueSectors: sectors,
+            shadowTint: .init(hue: 190, amount: 0.025),
+            highlightTint: .init(hue: 40, amount: 0.03),
+            skinGuard: 0.3
+        )
+    }()
+
+    /// True Color: near-neutral. Saturation 1, no tints, moderate slope; depth comes only from
+    /// luminance shifts (blues darker, warm colors slightly deeper).
+    static let trueColor: SlideLookParameters = SlideLookParameters(
+        toneCurve: .init(toe: 0, slope: 1.1, shoulder: 0.08),
+        globalSaturation: 1.0,
+        chromeDepth: .init(warm: 0.05, blue: 0.1),
+        skinGuard: 0.5
+    )
+
+    /// Portrait Crisp: the same hues as Portrait Soft with a steeper slope, slightly more saturation
+    /// and slightly richer darks (a little luminance drop in saturated colors).
+    static let portraitCrisp: SlideLookParameters = SlideLookParameters(
+        toneCurve: .init(toe: 0, slope: 1.15, shoulder: 0.1),
+        globalSaturation: 0.92,
+        chromeDepth: .init(warm: 0.06, blue: 0.06),
+        skinGuard: 0.8
+    )
+
+    // MARK: Cine (KRMA-1107)
+
+    /// Cine Flat: a grading base. Very low slope with a lifted toe and a soft shoulder, saturation about
+    /// 0.65 with greens, purples and magentas lowest (about 0.5). Middle gray is untouched by the curve.
+    static let cineFlat: SlideLookParameters = {
+        var sectors = Array(repeating: HueSector(), count: sectorCount)
+        sectors[4] = .init(saturation: 0.77, hueShift: 0)       // green (about 0.5 effective)
+        sectors[9] = .init(saturation: 0.77, hueShift: 0)       // purple
+        sectors[10] = .init(saturation: 0.77, hueShift: 0)      // magenta
+        return SlideLookParameters(
+            toneCurve: .init(toe: 0.04, slope: 1, shoulder: 0.4),
+            globalSaturation: 0.65,
+            hueSectors: sectors,
+            skinGuard: 0.5
+        )
+    }()
+
+    /// Silver Bypass: very steep curve (crushed shadows, bright highlights), low uniform saturation
+    /// about 0.35, no hue shift and no tint.
+    static let silverBypass = SlideLookParameters(
+        toneCurve: .init(toe: 0, slope: 1.5, shoulder: 0),
+        globalSaturation: 0.35
+    )
+
+    // MARK: Monochrome (KRMA-1108)
+
+    /// Fine Mono: neutral luma weights (the authoring space's own luma), hard from the lower mid-tones
+    /// into the highlights, with a lifted toe so shadows soften rather than block up.
+    /// Differs from Soft Mono (flat, low contrast), Silver Noir (dark, crushed) and Plain Mono (flatter).
+    static let fineMono = SlideLookParameters(
+        toneCurve: .init(toe: 0.03, slope: 1.35, shoulder: 0.1),
+        monochrome: .init(red: 0.229, green: 0.692, blue: 0.079)
+    )
+
+    /// Yellow filter: blue (sky) darkens, reds and greens lighten a little.
+    static let fineMonoYellow = SlideLookParameters(
+        toneCurve: fineMono.toneCurve,
+        monochrome: .init(red: 0.33, green: 0.62, blue: 0.05)
+    )
+
+    /// Red filter: blue darkens strongly, and red-bearing colors (including sunlit foliage) lighten.
+    static let fineMonoRed = SlideLookParameters(
+        toneCurve: fineMono.toneCurve,
+        monochrome: .init(red: 0.58, green: 0.40, blue: 0.02)
+    )
+
+    /// Green filter: green dominates, so foliage tones collapse together (softer foliage contrast)
+    /// while reds and blues darken.
+    static let fineMonoGreen = SlideLookParameters(
+        toneCurve: fineMono.toneCurve,
+        monochrome: .init(red: 0.15, green: 0.80, blue: 0.05)
+    )
+
+    /// Plain Mono: the same luma weights as Fine Mono on a flatter curve that holds highlights.
+    static let plainMono = SlideLookParameters(
+        toneCurve: .init(toe: 0, slope: 1.1, shoulder: 0.35),
+        monochrome: .init(red: 0.229, green: 0.692, blue: 0.079)
+    )
+
+    /// Warm Tone: Plain Mono's curve with a sepia-style split: deep amber shadows, light cream
+    /// highlights. The tint is luma-held, so the tone ordering matches Plain Mono.
+    static let warmTone = SlideLookParameters(
+        toneCurve: plainMono.toneCurve,
+        shadowTint: .init(hue: 35, amount: 0.05),
+        highlightTint: .init(hue: 45, amount: 0.04),
+        monochrome: .init(red: 0.229, green: 0.692, blue: 0.079)
+    )
 }
 
 /// The transfer function node coordinates are encoded with.
@@ -122,6 +319,7 @@ enum SlideLookEncoding: String, CaseIterable {
 
 struct SlideLookGenerator {
     static let latticeSize = 33
+    private static let maximumSerializedValueBelowWhite = 0.999999
     private static let serializationLocale = Locale(identifier: "en_US_POSIX")
 
     let parameters: SlideLookParameters
@@ -155,7 +353,7 @@ struct SlideLookGenerator {
         let curve = parameters.toneCurve
         let x = min(max(x, 0), 1)
         let c = min(max(2 * (curve.slope - 1), 0), 1)
-        var y = x - c * x * (1 - x) * (2 * x - 1)
+        var y = x + c * x * (1 - x) * (2 * x - 1)
         if y < 0.5 {
             let t = 1 - 2 * y
             y += min(max(curve.toe, 0), 0.25) * t * t
@@ -243,6 +441,18 @@ struct SlideLookGenerator {
         var rgb = RGB(repeating: luma + mean) + rotated
         rgb += RGB(repeating: luma - (rgb * w).sum())   // hold luma through hue/saturation changes
 
+        // Boosted saturation can push the brightest channel past white. Soft-limit only that excess,
+        // scaling chroma about the gray so hue and luma hold and the channel stays strictly below 1
+        // and strictly monotonic instead of clipping onto a plateau.
+        let inputPeak = max(input.x, input.y, input.z)
+        let peak = max(rgb.x, rgb.y, rgb.z)
+        if peak > inputPeak, peak > luma, inputPeak < 1 {
+            let room = 1 - inputPeak
+            let limited = inputPeak + room * tanh((peak - inputPeak) / room)
+            let scale = (limited - luma) / (peak - luma)
+            rgb = RGB(repeating: luma) + (rgb - RGB(repeating: luma)) * scale
+        }
+
         let weights = Self.chromeWeights(hue: hue)
         let depth = (parameters.chromeDepth.warm * weights.warm + parameters.chromeDepth.blue * weights.blue)
             * min(chroma * saturation, 1) * keep
@@ -266,7 +476,12 @@ struct SlideLookGenerator {
 
     /// The Look applied to a perceptually encoded RGB triple; the result is clamped to 0...1.
     func shape(_ input: RGB) -> RGB {
-        var rgb = colorStage(input)
+        var rgb: RGB
+        if let mix = parameters.monochrome {
+            rgb = RGB(repeating: mix.red * input.x + mix.green * input.y + mix.blue * input.z)
+        } else {
+            rgb = colorStage(input)
+        }
         rgb = RGB(tone(rgb.x), tone(rgb.y), tone(rgb.z))
         rgb = tint(rgb)
         return RGB(min(max(rgb.x, 0), 1), min(max(rgb.y, 0), 1), min(max(rgb.z, 0), 1))
@@ -281,7 +496,16 @@ struct SlideLookGenerator {
             encoding == .sRGBTransfer ? p : encoding.encode(SlideLookEncoding.sRGBTransfer.decode(p))
         }
         let shaped = shape(RGB(toPerceptual(input.x), toPerceptual(input.y), toPerceptual(input.z)))
-        return RGB(fromPerceptual(shaped.x), fromPerceptual(shaped.y), fromPerceptual(shaped.z))
+        func preserveSerializedHeadroom(_ output: Double, input: Double) -> Double {
+            // Cube rows use six decimal places. Keep values below white from rounding to 1.000000,
+            // which would otherwise turn a smooth near-white result into a clipped LUT node.
+            input < 1 ? min(fromPerceptual(output), Self.maximumSerializedValueBelowWhite) : fromPerceptual(output)
+        }
+        return RGB(
+            preserveSerializedHeadroom(shaped.x, input: input.x),
+            preserveSerializedHeadroom(shaped.y, input: input.y),
+            preserveSerializedHeadroom(shaped.z, input: input.z)
+        )
     }
 
     /// Stable `.cube` row encoding, independent of the user's decimal separator.

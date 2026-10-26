@@ -55,8 +55,13 @@ extension Sequence where Element == CubeLUT {
     /// Deliberately a plain lookup over the scan results rather than a cached map: the library is
     /// re-scanned often enough that a cache would be the thing to go stale, and the ID is
     /// deterministic precisely so a fresh scan can answer this.
+    ///
+    /// A retired starter Look (`BundledLookLibrary.retiredLookReplacements`) resolves to its
+    /// replacement when no Look with the exact ID exists.
     func first(matching id: LUTID) -> CubeLUT? {
-        first { $0.id == id.raw }
+        if let exact = first(where: { $0.id == id.raw }) { return exact }
+        guard let replacement = BundledLookLibrary.replacementID(forRetired: id.raw) else { return nil }
+        return first { $0.id == replacement }
     }
 }
 

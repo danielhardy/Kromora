@@ -69,7 +69,7 @@ effect, not every wide-gamut input color.
 
 ### P3 starter assets
 
-`Sources/KromoraKit/Resources/StarterLooks` holds the active Display P3 set of the 13 resampled starter Looks plus the directly authored slide family
+`Sources/KromoraKit/Resources/StarterLooks` holds the active Display P3 set of the 10 resampled starter Looks plus the directly authored slide family
 (stable ids, names and categories, all stamped `displayP3`). The sRGB originals, the defined source
 parameters, are kept outside the bundle in `scripts/starter-looks-srgb`.
 
@@ -84,8 +84,8 @@ counterpart and prints the maximum 8-bit difference.
 Visual review (2026-10-25, recorded in each manifest entry's `approval`, record
 `KRMA-1121-P3-STARTER-2026-10-25`): neutrals agree within 4/255 for every Look (asserted by
 `BundledP3LookTests` against the sRGB sources); in-gamut colors match closely, while fully
-saturated primaries differ most (up to about 18/255, in Warm Slide, Evening Cinema, Muted Film and
-Honey Negative) because the P3 lattice samples a nonlinear conversion. The slide-family generator below
+saturated primaries differ most (up to about 18/255, in Warm Slide, Evening Cinema and
+Honey Negative; Muted Film was among them before it was retired) because the P3 lattice samples a nonlinear conversion. The slide-family generator below
 emits and stamps the same authoring space.
 
 ### Slide family generator (KRMA-1103)
@@ -124,7 +124,33 @@ approximations of public qualitative descriptions (`FILM_SIMULATION_LOOKS_RESEAR
 reference to verify against, and tests check structure only (monotonic tone, neutrals, no clipping,
 ordering), never a camera or tolerance.
 
-First Look: **Clean Slide** (category "Slide"), gentle S-curve, slightly lifted reds, light chrome depth.
+Looks (category "Slide"): **Clean Slide** (gentle S-curve, slightly lifted reds, light chrome depth),
+**Vivid Slide** (strong S-curve, saturation about 1.35 with extra in reds, greens and blues, blues toward
+magenta, yellow toward orange, heavier chrome depth) and **Soft Slide** (softer S-curve, flattened
+shoulder, firm shadows, saturation about 1.10 with extra in greens, skin slightly less saturated).
+The generator soft-limits saturation boosts so the brightest channel of a saturated color never clips onto
+a plateau. Regenerate each with `KROMORA_WRITE_SLIDE_LOOKS=1` and its `testBundled…MatchesTheGenerator` test.
+Further best-guess Looks from the same generator: **Field Report** (category "Negative": firm shadows,
+soft highlights, saturation about 0.78 with yellows and yellow-greens lowest, blues toward cyan, slight cool
+shadow tint) and, also in "Negative", **Portrait Soft** (very low slope, saturation about 0.85, no hue shift,
+skin protected) and **Portrait Crisp** (same hues, steeper slope, slightly richer darks).
+More "Negative" Looks: **Street Negative** (very high contrast, uneven per-hue response with reds up and
+yellows, greens, blues and purples suppressed, slight red lean, cool shadows and warm highlights),
+**Amber Print** (soft slope, lifted toe, greens toward yellow, amber highlights over cool shadows) and
+**True Color** (near-neutral; depth only from luminance shifts). Amber Print and True Color rest on the
+thinnest public evidence and are especially rough guesses.
+Cine Looks (category "Cine", KRMA-1107): **Cine Flat** (very low slope, lifted toe, soft shoulder, saturation about
+0.65 with greens, purples and magentas lowest; a grading base that leaves middle gray untouched) and **Silver
+Bypass** (steepest curve, crushed shadows, bright highlights, uniform saturation about 0.35, no hue shift).
+Monochrome Looks (category "Monochrome", KRMA-1108) use a channel-mix luma (`SlideLookParameters.monochrome`,
+weights sum to one) through a tone curve instead of the hue/saturation stage, so output is neutral R=G=B:
+**Fine Mono** (Display P3 luma weights, hard from the lower mid-tones into the highlights, lifted toe) with
+**Fine Mono Yellow** (blue sky darkens), **Fine Mono Red** (sky darkens more, red-bearing colors and sunlit
+foliage lighten) and **Fine Mono Green** (green dominates, foliage tones compress together); **Plain Mono**
+(same weights, flatter curve, rolled-off highlights); and **Warm Tone** (Plain Mono's curve with luma-held amber
+shadows and cream highlights, the only non-neutral one). They differ from the older Monochrome starters:
+Soft Mono is a flat, low-contrast conversion, and Blueprint Mono and Infrared Mono are stylized
+treatments; none are channel-mix filter variants. No grain is baked in.
 Bundle size impact: one 33³ text cube is about 970 KB (the 600 KB estimate was low), taking the starter
 folder from about 1.7 MB to about 2.7 MB. Each further Look in the family adds roughly the same.
 
@@ -178,27 +204,31 @@ scratch Look until the user saves it.
 
 ## Starter library and storage
 
-The bundled library contains 13 original procedural cubes:
+The bundled library contains 27 original procedural cubes in four categories, shown in this fixed
+order: Slide, Negative, Cine, Monochrome (last). `LUTLibrary.starterCategoryOrder` defines it; a bundled
+category outside the list sorts alphabetically between Cine and Monochrome. Imported and saved Looks
+stay in the user-owned collection after the bundled ones.
+
+The original 13 Looks (10 remain; see Retired Looks below) were moved by changing only their manifest `category`; ids, names and cube
+bytes are unchanged. The 2026-10-26 decision was to rename, not keep the old categories: Warm
+slide-inspired and High-contrast map to Slide, Film-inspired maps to Negative, Cinematic, Pastel,
+and Faded map to Cine, and Monochrome remains Monochrome. The table below records each Look's new
+category.
 
 | Category | Look |
 | --- | --- |
-| Monochrome | Soft Mono |
-| Monochrome | Silver Noir |
-| Monochrome | Paper Grain |
-| Monochrome | Blueprint Mono |
-| Monochrome | Infrared Mono |
-| Cinematic | Evening Cinema |
-| Cinematic | Ember & Cyan |
-| Film-inspired | Muted Film |
-| Film-inspired | Honey Negative |
-| Warm slide-inspired | Warm Slide |
-| Pastel | Pastel Wash |
-| Faded | Bleached Daylight |
-| High-contrast | Hard Light |
+| Slide | Warm Slide, Hard Light, Clean Slide, Vivid Slide, Soft Slide |
+| Negative | Honey Negative, Field Report, Portrait Soft, Portrait Crisp, Street Negative, Amber Print, True Color |
+| Cine | Evening Cinema, Ember & Cyan, Pastel Wash, Bleached Daylight, Cine Flat, Silver Bypass |
+| Monochrome | Soft Mono, Blueprint Mono, Infrared Mono, Fine Mono, Fine Mono Yellow, Fine Mono Red, Fine Mono Green, Plain Mono, Warm Tone |
 
-These are intentionally distinct starting points rather than minor intensity variants. The
-monochrome entries use different luminance curves, while the color entries cover cinematic
-orange-and-teal, warm natural negative-film-inspired, pastel, faded, and high-contrast directions.
+Slide groups the original Warm Slide and Hard Light entries with the generated slide family;
+Negative groups Honey Negative with the documentary, portrait, and other negative
+Looks; Cine contains the original cinematic pair, Pastel Wash, Bleached Daylight, and the two new
+Cine Looks; Monochrome retains its three remaining original entries and adds the filter and toned variants.
+Pastel Wash and Bleached Daylight sit in Cine because they share Cine Flat's low-contrast,
+low-saturation territory. The monochrome entries span neutral and toned conversions with different
+luminance behavior.
 
 Their machine-readable provenance, licensing, redistribution terms, and approval metadata live
 beside the assets in the bundled manifest; the package and tests fail closed for missing or
@@ -213,3 +243,28 @@ dependency; the browser file is only a reusable user-facing copy.
 
 The selected Look is persisted by stable `LUTID`. A missing file leaves the edit reference intact
 and renders without the unresolved LUT until it can be resolved again.
+
+### Retired Looks (KRMA-1131)
+
+The film-look family made three starter Looks redundant. The decision (2026-10-26) followed an A/B
+contact sheet (`FilmLookContactSheetTests`) of neutral RAW develops, viewed by a person:
+
+| Retired | Replaced by | Why |
+| --- | --- | --- |
+| Muted Film (`kromora.starter.muted-film`) | Field Report (`kromora.starter.field-report`) | Nearly identical soft, slightly cool, muted look. |
+| Paper Grain (`kromora.starter.paper-grain`) | Soft Mono (`kromora.starter.soft-mono`) | Near-identical to Soft Mono and flatter than Plain Mono. |
+| Silver Noir (`kromora.starter.silver-noir`) | Fine Mono (`kromora.starter.fine-mono`) | Very close high-contrast mono; Fine Mono is marginally deeper. |
+
+Kept despite the draft proposal: **Honey Negative** (strong yellow-green cast; Amber Print is subtle) and
+**Soft Mono** (flatter than Plain Mono, a role Plain Mono does not cover). Pastel Wash, Bleached Daylight,
+Warm Slide, Blueprint Mono, Infrared Mono, Hard Light, Evening Cinema and Ember & Cyan are unchanged.
+
+Retired ids are aliased, not dropped. `BundledLookLibrary.retiredLookReplacements` maps each to its
+replacement, and `first(matching:)` falls back to it when no Look has the exact id, so a current edit or
+an undo-history revision that names a retired Look renders the replacement. The alias covers the
+`kromora.starter.*` id and the older path form whose last two components are `StarterLooks/<stem>.cube`
+(any bundle location); an arbitrary user file with the same name is not aliased.
+`BundledLookTests.testRetiredStarterLooksResolveToTheirReplacements` covers both forms.
+
+Bundle size: the three 17³ cubes were about 133 KB each, so the bundle shrinks by about 400 KB.
+

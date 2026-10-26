@@ -85,8 +85,10 @@ final class FilmLookContactSheetTests: XCTestCase {
                 draw(try await render(source, nil), "neutral  (\(photo.deletingPathExtension().lastPathComponent))")
                 let replacement = try look(pair.new)
                 draw(try await render(source, replacement), "NEW  \(replacement.name)")
+                // Candidates removed by the review (muted-film, paper-grain, silver-noir) are no
+                // longer bundled; the sheet keeps the Looks that still are.
                 for id in pair.old {
-                    let candidate = try look(id)
+                    guard let candidate = library.looks.first(where: { $0.id == id }) else { continue }
                     draw(try await render(source, candidate), "remove?  \(candidate.name)")
                 }
                 row += 1

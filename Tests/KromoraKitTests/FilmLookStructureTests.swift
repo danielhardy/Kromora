@@ -19,6 +19,9 @@ final class FilmLookStructureTests: XCTestCase {
         case monochrome
         /// A deliberate split tone: the ramp stays ordered but may carry a tint.
         case toned
+        /// Black and white with a deliberate warm tint: luminance carries the image, so the clipping,
+        /// gamut-edge and skin checks use luminance like `.monochrome`.
+        case tonedMonochrome
     }
 
     private struct Declaration {
@@ -31,6 +34,22 @@ final class FilmLookStructureTests: XCTestCase {
 
     private static let declarations: [String: Declaration] = [
         "kromora.starter.clean-slide": .init(neutralAxis: .neutral, skinChromaChange: 0.15, skinHueShift: 6),
+        "kromora.starter.vivid-slide": .init(neutralAxis: .neutral, skinChromaChange: 0.40, skinHueShift: 6),
+        "kromora.starter.soft-slide": .init(neutralAxis: .neutral, skinChromaChange: 0.15, skinHueShift: 6),
+        "kromora.starter.field-report": .init(neutralAxis: .toned, skinChromaChange: 0.15, skinHueShift: 6),
+        "kromora.starter.portrait-soft": .init(neutralAxis: .neutral, skinChromaChange: 0.15, skinHueShift: 6),
+        "kromora.starter.portrait-crisp": .init(neutralAxis: .neutral, skinChromaChange: 0.15, skinHueShift: 6),
+        "kromora.starter.street-negative": .init(neutralAxis: .toned, skinChromaChange: 0.20, skinHueShift: 6),
+        "kromora.starter.amber-print": .init(neutralAxis: .toned, skinChromaChange: 0.15, skinHueShift: 6),
+        "kromora.starter.true-color": .init(neutralAxis: .neutral, skinChromaChange: 0.15, skinHueShift: 6),
+        "kromora.starter.cine-flat": .init(neutralAxis: .neutral, skinChromaChange: 0.40, skinHueShift: 6),
+        "kromora.starter.silver-bypass": .init(neutralAxis: .neutral, skinChromaChange: 0.70, skinHueShift: 6),
+        "kromora.starter.fine-mono": .init(neutralAxis: .monochrome, skinChromaChange: 0, skinHueShift: 0),
+        "kromora.starter.fine-mono-yellow": .init(neutralAxis: .monochrome, skinChromaChange: 0, skinHueShift: 0),
+        "kromora.starter.fine-mono-red": .init(neutralAxis: .monochrome, skinChromaChange: 0, skinHueShift: 0),
+        "kromora.starter.fine-mono-green": .init(neutralAxis: .monochrome, skinChromaChange: 0, skinHueShift: 0),
+        "kromora.starter.plain-mono": .init(neutralAxis: .monochrome, skinChromaChange: 0, skinHueShift: 0),
+        "kromora.starter.warm-tone": .init(neutralAxis: .tonedMonochrome, skinChromaChange: 0, skinHueShift: 0),
     ]
 
     /// Relative-ordering checks between Looks. A row is skipped while either Look is not yet shipped.
@@ -49,6 +68,9 @@ final class FilmLookStructureTests: XCTestCase {
         .init(metric: .contrast, higher: "kromora.starter.clean-slide", lower: "kromora.starter.portrait-soft"),
         .init(metric: .contrast, higher: "kromora.starter.portrait-crisp", lower: "kromora.starter.portrait-soft"),
         .init(metric: .contrast, higher: "kromora.starter.clean-slide", lower: "kromora.starter.cine-flat"),
+        .init(metric: .contrast, higher: "kromora.starter.silver-bypass", lower: "kromora.starter.clean-slide"),
+        .init(metric: .chroma, higher: "kromora.starter.cine-flat", lower: "kromora.starter.silver-bypass"),
+        .init(metric: .contrast, higher: "kromora.starter.fine-mono", lower: "kromora.starter.plain-mono"),
     ]
 
     // MARK: Fixtures
@@ -139,7 +161,7 @@ final class FilmLookStructureTests: XCTestCase {
     ) -> [Int] {
         zip(inputs, outputs).enumerated().compactMap { index, pair in
             let (input, output) = pair
-            if neutralAxis == .monochrome {
+            if neutralAxis == .monochrome || neutralAxis == .tonedMonochrome {
                 let inputLuma = luma(input)
                 guard inputLuma > 0.05 && inputLuma < 0.95 else { return nil }
                 let outputLuma = luma(output)
@@ -209,7 +231,7 @@ final class FilmLookStructureTests: XCTestCase {
                 for (i, c) in try render(chart.all, through: look).enumerated() {
                     XCTAssertLessThan(chroma(c), 2e-3, "\(id) patch \(i) not monochrome")
                 }
-            case .toned:
+            case .toned, .tonedMonochrome:
                 break
             }
 
@@ -221,7 +243,7 @@ final class FilmLookStructureTests: XCTestCase {
                 XCTFail("\(id) clipped chart patch \(all[index]) to \(out[index])")
             }
             let edge = try render(chart.edge, through: look)
-            if declaration.neutralAxis != .monochrome {
+            if declaration.neutralAxis != .monochrome && declaration.neutralAxis != .tonedMonochrome {
                 // Distinct P3 gamut-edge patches must not collapse to one clipped color.
                 for i in edge.indices {
                     for j in edge.indices where j > i {
@@ -232,7 +254,7 @@ final class FilmLookStructureTests: XCTestCase {
 
             // Skin-hue patches stay within the skinGuard limit.
             let skin = try render(chart.skin, through: look)
-            for (input, result) in zip(chart.skin, skin) where declaration.neutralAxis != .monochrome {
+            for (input, result) in zip(chart.skin, skin) where declaration.neutralAxis != .monochrome && declaration.neutralAxis != .tonedMonochrome {
                 let change = abs(chroma(result) / chroma(input) - 1)
                 var shift = abs(hue(result) - hue(input)).truncatingRemainder(dividingBy: 360)
                 if shift > 180 { shift = 360 - shift }
