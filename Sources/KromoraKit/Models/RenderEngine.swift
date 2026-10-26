@@ -206,18 +206,19 @@ struct RenderBuildPlan: Sendable, Equatable {
     let hasEarlyCrop: Bool
     let finalFrameExtent: CGRect?
     let includePostRenderWhiteBalance: Bool
-    let maskIdentity: String
-    let documentIdentity: String
+    /// Memoized component digests for the request's document, built once at request entry.
+    let identity: RenderDocumentIdentity
+    var maskIdentity: String { identity.maskRecipe }
+    var documentIdentity: String { identity.sessionKey }
 
     static func make(
         source: ImageSource,
         document: EditDocument,
+        identity: RenderDocumentIdentity,
         scale: RenderScale,
         sourceROI: CGRect?,
         presentationROI: CGRect?
     ) -> Self {
-        let maskIdentity = RenderCacheHash.digest(RenderEngine.MaskRecipeIdentity(document.localAdjustments))
-        let documentIdentity = RenderCacheHash.digest(document)
         let nativeExtent = document.rotation.orientedExtent(source.nativeExtent)
         let cropNativeRect = document.crop.normalizedRect.map { rect in
             CGRect(
@@ -273,7 +274,7 @@ struct RenderBuildPlan: Sendable, Equatable {
             fullFrameExtent: fullFrameExtent, hasEarlyCrop: hasEarlyCrop,
             finalFrameExtent: finalFrameExtent,
             includePostRenderWhiteBalance: source.kind == .standard,
-            maskIdentity: maskIdentity, documentIdentity: documentIdentity
+            identity: identity
         )
     }
 
@@ -301,7 +302,7 @@ struct RenderBuildPlan: Sendable, Equatable {
             fullFrameExtent: fullFrameExtent, hasEarlyCrop: hasEarlyCrop,
             finalFrameExtent: finalFrameExtent,
             includePostRenderWhiteBalance: includePostRenderWhiteBalance,
-            maskIdentity: maskIdentity, documentIdentity: documentIdentity
+            identity: identity
         )
     }
 }
@@ -602,7 +603,7 @@ actor RenderEngine: RenderEngining {
         guard let spot = settings.spots.first(where: { $0.id == spotID }),
               !Task.isCancelled,
               let image = await developedSourceForBuild(
-                source, .neutral, .preview(maxSize: CGSize(width: 1024, height: 1024)), rotation: .zero,
+                source, .neutral, developHash: RenderDocumentIdentity.neutralRAWDevelop, .preview(maxSize: CGSize(width: 1024, height: 1024)), rotation: .zero,
                 space: .current, interactive: false, thumbnail: false
               ),
               let proxy = retouchProxy(image: image, fingerprint: source.cacheFingerprint) else { return nil }
@@ -660,7 +661,7 @@ actor RenderEngine: RenderEngining {
         }
 
         guard let image = await developedSourceForBuild(
-            source, .neutral, .full, rotation: .zero, space: .current,
+            source, .neutral, developHash: RenderDocumentIdentity.neutralRAWDevelop, .full, rotation: .zero, space: .current,
             interactive: false, thumbnail: false
         ) else { return source }
         return source.withNativeExtent(image.extent.size)
@@ -670,7 +671,7 @@ actor RenderEngine: RenderEngining {
         let source = await sourceWithResolvedExtent(declared)
         guard !Task.isCancelled,
               let image = await developedSourceForBuild(
-                source, .neutral, .preview(maxSize: CGSize(width: 1024, height: 1024)), rotation: .zero,
+                source, .neutral, developHash: RenderDocumentIdentity.neutralRAWDevelop, .preview(maxSize: CGSize(width: 1024, height: 1024)), rotation: .zero,
                 space: .current, interactive: false, thumbnail: false
               ) else { return nil }
         return retouchProxy(image: image, fingerprint: source.cacheFingerprint)
@@ -679,7 +680,7 @@ actor RenderEngine: RenderEngining {
     func retouchAnalysisCrop(source: ImageSource, bounds: CGRect) async -> RetouchAnalysisRegion? {
         guard !Task.isCancelled,
               let image = await developedSourceForBuild(
-                source, .neutral, .full, rotation: .zero, space: .current,
+                source, .neutral, developHash: RenderDocumentIdentity.neutralRAWDevelop, .full, rotation: .zero, space: .current,
                 interactive: false, thumbnail: false
               ) else { return nil }
         let crop = bounds.integral.intersection(image.extent.integral)
@@ -786,8 +787,8 @@ actor RenderEngine: RenderEngining {
     private var developedSourceFlights: [DevelopedSourceCacheKey: DevelopedSourceFlight] = [:]
     private var thumbnailDevelopedSourceFlights: [DevelopedSourceCacheKey: DevelopedSourceFlight] = [:]
     private var memoryPressureSource: DispatchSourceMemoryPressure?
-    /// Session identity for `document`, reusing component digests the memo already holds. Not yet
-    /// consumed by the render path (KRMA-1101).
+    /// Session identity for `document`, reusing component digests the memo already holds. Built
+    /// once at request entry and threaded through every session cache key on the render path.
     func documentIdentity(for document: EditDocument, source: RenderSourceFingerprint) -> RenderDocumentIdentity {
         documentIdentityMemo.identity(for: document, source: source)
     }
@@ -1146,7 +1147,11 @@ actor RenderEngine: RenderEngining {
             }
         }
         let scale = request.renderScale
-        let previewKey = previewCacheKey(for: request, scale: scale)
+        let previewKey = previewCacheKey(
+            for: request,
+            identity: documentIdentity(
+                for: request.document, source: RenderSourceFingerprint(request.source)),
+            scale: scale)
         if let previewKey {
             var cacheInterval = KromoraObservability.begin(.cache, source: request.source,
                                                         quality: request.quality)
@@ -1506,16 +1511,16 @@ actor RenderEngine: RenderEngining {
         // Everything in this plan is value state. It is intentionally prepared before entering
         // the decoder/graph section so a future concurrent build worker can do this work without
         // borrowing the actor-owned Core Image resources.
+        let sourceFingerprint = RenderSourceFingerprint(source)
+        let identity = documentIdentity(for: document, source: sourceFingerprint)
         let plan = RenderBuildPlan.make(
-            source: source, document: document, scale: scale,
+            source: source, document: document, identity: identity, scale: scale,
             sourceROI: sourceROI,
             presentationROI: presentationROI
         )
-        let maskIdentity = plan.maskIdentity
-        let documentIdentity = plan.documentIdentity
         noteMaskRequest(
             source: source, revision: requestRevision,
-            maskIdentity: maskIdentity, documentIdentity: documentIdentity
+            maskIdentity: identity.maskRecipe, documentIdentity: identity.sessionKey
         )
         defer {
             revisionLedger.endMaskRequest(sourceKey: source.cacheFingerprint, revision: requestRevision)
@@ -1523,14 +1528,14 @@ actor RenderEngine: RenderEngining {
         // These are explicit Core Image resource boundaries even though the transfer function is
         // mathematically source/space independent. A replaced source or working-space switch must
         // not retain a resource from the prior render session.
-        let sourceFingerprint = RenderSourceFingerprint(source)
         if toneCurveSource != sourceFingerprint || toneCurveSpace != space {
             toneCurveCache.removeAll()
             toneCurveSource = sourceFingerprint
             toneCurveSpace = space
         }
         guard let developedFull = await developedSourceForBuild(
-            source, document.rawDevelop, scale, rotation: document.rotation, space: space,
+            source, document.rawDevelop, developHash: identity.rawDevelop, scale, rotation: document.rotation,
+            space: space,
             interactive: quality == .interactive,
             thumbnail: quality == .thumbnail
         ) else { return nil }
@@ -1582,7 +1587,8 @@ actor RenderEngine: RenderEngining {
             document, lut: lut, includePostRenderWhiteBalance: includePostRenderWhiteBalance
         ) {
             upstream = await processingPrefix(
-                source: source, document: document, lut: lut, developed: working, scale: scale,
+                source: source, document: document, identity: identity, lut: lut, developed: working,
+                scale: scale,
                 sourceROI: processingROI,
                 spatialReferenceExtent: fullFrameExtent,
                 space: space, includePostRenderWhiteBalance: includePostRenderWhiteBalance,
@@ -1606,7 +1612,8 @@ actor RenderEngine: RenderEngining {
             maskExtent: fullFrameExtent,
             quality: quality, transform: maskTransform, assetID: assetID,
             requestRevision: requestRevision,
-            maskIdentity: maskIdentity, documentIdentity: documentIdentity,
+            maskIdentity: identity.maskRecipe, documentIdentity: identity.sessionKey,
+            componentDigests: identity.maskComponents,
             resolveSemanticMasks: resolveSemanticMasks
         )
         // Give a newer request a chance to run between value resolution and final graph material-
@@ -1624,7 +1631,8 @@ actor RenderEngine: RenderEngining {
         if !scale.isFull, resolveSemanticMasks,
            let cacheIdentity = resolvedMasks.cacheIdentity {
             localAdjusted = await postLocalProcessingPrefix(
-                source: source, document: document, lut: lut, localAdjusted: localAdjustedGraph,
+                source: source, document: document, identity: identity, lut: lut,
+                localAdjusted: localAdjustedGraph,
                 scale: scale, sourceROI: processingROI, space: space,
                 includePostRenderWhiteBalance: includePostRenderWhiteBalance,
                 quality: quality, cacheIdentity: cacheIdentity
@@ -1742,6 +1750,7 @@ actor RenderEngine: RenderEngining {
     private func developedSourceForBuild(
         _ source: ImageSource,
         _ rawDevelop: RAWDevelopSettings,
+        developHash: String,
         _ scale: RenderScale,
         rotation: ImageRotation,
         space: WorkingSpace,
@@ -1750,13 +1759,13 @@ actor RenderEngine: RenderEngining {
     ) async -> CIImage? {
         guard source.kind == .standard else {
             return developedSource(
-                source, rawDevelop, scale, rotation: rotation, space: space, interactive: interactive,
+                source, rawDevelop, developHash: developHash, scale, rotation: rotation, space: space, interactive: interactive,
                 thumbnail: thumbnail
             )
         }
         let key: DevelopedSourceCacheKey? = scale.isFull ? nil : DevelopedSourceCacheKey(
             source: RenderSourceFingerprint(source),
-            developHash: RenderCacheHash.digest(rawDevelop),
+            developHash: developHash,
             scale: RenderScaleKey(
                 scale, nativeExtent: rotation.orientedExtent(source.nativeExtent)
             ),
@@ -1856,6 +1865,7 @@ actor RenderEngine: RenderEngining {
         requestRevision: UInt64,
         maskIdentity: String?,
         documentIdentity: String?,
+        componentDigests: [UUID: String],
         resolveSemanticMasks: Bool,
         includeIdentity: Bool,
         onlyComponentID: UUID?
@@ -1870,7 +1880,9 @@ actor RenderEngine: RenderEngining {
             for component in layer.components where component.isUsable
                 && (onlyComponentID == nil || component.id == onlyComponentID) {
                 if !resolveSemanticMasks, component.source.semanticDefinition != nil { continue }
-                let definitionHash = RenderCacheHash.digest(component.source)
+                guard let definitionHash = componentDigests[component.id] else {
+                    throw LocalMaskResolutionError.invalidPayload
+                }
                 let targetSize = maskTargetSize(for: component, extent: extent, quality: quality)
                 let key = LocalMaskCacheKey(
                     source: RenderSourceFingerprint(source), definitionHash: definitionHash,
@@ -1890,7 +1902,8 @@ actor RenderEngine: RenderEngining {
                     definitionHash: definitionHash,
                     request: LocalMaskResolveRequest(
                         source: source, assetID: assetID, component: component,
-                        targetSize: targetSize, quality: quality, transform: transform
+                        targetSize: targetSize, quality: quality, transform: transform,
+                        definitionHash: definitionHash
                     ),
                     isSemantic: component.source.semanticDefinition != nil
                 ))
@@ -1947,6 +1960,7 @@ actor RenderEngine: RenderEngining {
         requestRevision: UInt64,
         maskIdentity: String? = nil,
         documentIdentity: String? = nil,
+        componentDigests: [UUID: String]? = nil,
         resolveSemanticMasks: Bool = true,
         includeIdentity: Bool = false,
         onlyComponentID: UUID? = nil
@@ -1962,10 +1976,13 @@ actor RenderEngine: RenderEngining {
         // rasterize those definitions. Render the mask in the complete frame and clip it back to
         // the working extent only after its source-space coverage has been established.
         let renderExtent = maskExtent ?? extent
+        // The overlay path has no document identity; it digests only its own layer's components.
+        let componentDigests = componentDigests ?? RenderDocumentIdentity.maskComponentDigests(for: layers)
         let (payloads, duplicateKeys) = try await resolveMaskPayloads(
             for: layers, source: source, extent: renderExtent, quality: quality,
             transform: transform, assetID: assetID, requestRevision: requestRevision,
             maskIdentity: maskIdentity, documentIdentity: documentIdentity,
+            componentDigests: componentDigests,
             resolveSemanticMasks: resolveSemanticMasks, includeIdentity: includeIdentity,
             onlyComponentID: onlyComponentID
         )
@@ -1994,7 +2011,9 @@ actor RenderEngine: RenderEngining {
             for component in layer.components where component.isUsable
                 && (onlyComponentID == nil || component.id == onlyComponentID) {
                 if !resolveSemanticMasks, component.source.semanticDefinition != nil { continue }
-                let definitionHash = RenderCacheHash.digest(component.source)
+                guard let definitionHash = componentDigests[component.id] else {
+                    throw LocalMaskResolutionError.invalidPayload
+                }
                 let componentTargetSize = maskTargetSize(
                     for: component, extent: renderExtent, quality: quality
                 )
@@ -2064,7 +2083,7 @@ actor RenderEngine: RenderEngining {
             resolutionState: resolveSemanticMasks
                 ? "resolved"
                 : "deferred:\(requestRevision)",
-            payloadVersion: RenderCacheHash.digest(payloadVersions.sorted())
+            payloadVersion: payloadVersions.sorted().joined(separator: "|")
         ) : nil
         return ResolvedLocalMaskSet(images: result, cacheIdentity: cacheIdentity)
     }
@@ -2343,6 +2362,7 @@ actor RenderEngine: RenderEngining {
     private func processingPrefix(
         source: ImageSource,
         document: EditDocument,
+        identity: RenderDocumentIdentity,
         lut: CubeLUT?,
         developed: CIImage,
         scale: RenderScale,
@@ -2354,9 +2374,9 @@ actor RenderEngine: RenderEngining {
     ) async -> CIImage? {
         let key = ProcessingPrefixCacheKey(
             source: RenderSourceFingerprint(source),
-            developHash: RenderCacheHash.digest(document.rawDevelop),
-            upstreamHash: prefixDocumentHash(
-                document, lut: lut, includePostRenderWhiteBalance: includePostRenderWhiteBalance
+            developHash: identity.rawDevelop,
+            upstreamHash: prefixUpstreamHash(
+                identity, lut: lut, includePostRenderWhiteBalance: includePostRenderWhiteBalance
             ),
             scale: RenderScaleKey(scale, nativeExtent: source.nativeExtent),
             sourceROI: sourceROI,
@@ -2412,6 +2432,7 @@ actor RenderEngine: RenderEngining {
     private func postLocalProcessingPrefix(
         source: ImageSource,
         document: EditDocument,
+        identity: RenderDocumentIdentity,
         lut: CubeLUT?,
         localAdjusted: CIImage,
         scale: RenderScale,
@@ -2423,12 +2444,12 @@ actor RenderEngine: RenderEngining {
     ) async -> CIImage {
         let key = ProcessingPrefixCacheKey(
             source: RenderSourceFingerprint(source),
-            developHash: RenderCacheHash.digest(document.rawDevelop),
-            upstreamHash: prefixDocumentHash(
-                document, lut: lut, includePostRenderWhiteBalance: includePostRenderWhiteBalance
+            developHash: identity.rawDevelop,
+            upstreamHash: prefixUpstreamHash(
+                identity, lut: lut, includePostRenderWhiteBalance: includePostRenderWhiteBalance
             ),
             stage: .postLocal,
-            localAdjustmentsHash: RenderCacheHash.digest(document.localAdjustments),
+            localAdjustmentsHash: identity.localAdjustments,
             maskResolutionState: cacheIdentity.resolutionState,
             maskPayloadVersion: cacheIdentity.payloadVersion,
             scale: RenderScaleKey(scale, nativeExtent: source.nativeExtent),
@@ -2472,31 +2493,17 @@ actor RenderEngine: RenderEngining {
         return completed?.image ?? localAdjusted
     }
 
-    private func prefixDocumentHash(
-        _ document: EditDocument,
+    /// The Look heads the prefix, so its settings and cube content are part of its identity.
+    /// Retouch is already composited into the developed image this cache stores, so the identity's
+    /// prefix document includes it; leaving it out reused the pre-spot bitmap.
+    private func prefixUpstreamHash(
+        _ identity: RenderDocumentIdentity,
         lut: CubeLUT?,
         includePostRenderWhiteBalance: Bool
     ) -> String {
-        let adjustments = includePostRenderWhiteBalance
-            ? document.adjustments
-            : document.adjustments.filter {
-                if case .temperatureTint = $0 { return false }
-                return true
-            }
-        // Retouch is already composited into the developed image this cache stores. Leaving it
-        // out reused the pre-spot bitmap, so a heal or clone stayed invisible until a later
-        // navigation missed the entry.
-        // The Look heads the prefix, so its settings and cube content are part of its identity.
-        let documentDigest = RenderCacheHash.digest(
-            EditDocument(
-                version: document.version, rawDevelop: .neutral, light: document.light,
-                color: document.color,
-                effects: EffectsAdjustments(
-                    texture: document.effects.texture, clarity: document.effects.clarity,
-                    dehaze: document.effects.dehaze, detail: document.effects.detail
-                ), crop: .neutral, adjustments: adjustments, lut: document.lut,
-                retouch: document.retouch
-            ))
+        let documentDigest = includePostRenderWhiteBalance
+            ? identity.prefixUpstream
+            : identity.prefixUpstreamWithoutWhiteBalance
         return documentDigest + ":" + (lut?.cacheFingerprint ?? "no-look")
     }
 
@@ -2525,6 +2532,7 @@ actor RenderEngine: RenderEngining {
     private func developedSource(
         _ source: ImageSource,
         _ rawDevelop: RAWDevelopSettings,
+        developHash: String,
         _ scale: RenderScale,
         rotation: ImageRotation = .zero,
         space: WorkingSpace,
@@ -2542,7 +2550,7 @@ actor RenderEngine: RenderEngining {
                 detail: "layer=interactiveRAWFilter reused=\(reused)"
             )
             let result = session.output(
-                rawDevelop: rawDevelop, scale: scale, rotation: rotation,
+                rawDevelop: rawDevelop, developHash: developHash, scale: scale, rotation: rotation,
                 materialize: { [self] image in
                     materializedImage(
                         image, space: space,
@@ -2561,7 +2569,7 @@ actor RenderEngine: RenderEngining {
         }
         let key = DevelopedSourceCacheKey(
             source: RenderSourceFingerprint(source),
-            developHash: RenderCacheHash.digest(rawDevelop),
+            developHash: developHash,
             scale: RenderScaleKey(
                 scale, nativeExtent: rotation.orientedExtent(source.nativeExtent)
             ),
@@ -2728,6 +2736,7 @@ actor RenderEngine: RenderEngining {
 
         func output(
             rawDevelop: RAWDevelopSettings,
+            developHash: String,
             scale: RenderScale,
             rotation: ImageRotation = .zero,
             materialize: (CIImage) -> CIImage?
@@ -2741,7 +2750,7 @@ actor RenderEngine: RenderEngining {
             let factor = scale.factor(for: orientedSize)
             let key = OutputKey(
                 sourceRevision: fingerprint,
-                developHash: RenderCacheHash.digest(rawDevelop),
+                developHash: developHash,
                 scale: RenderScaleKey(scale, nativeExtent: orientedSize)
             )
             if cachedOutputKey == key, let cachedOutput {
@@ -2909,7 +2918,9 @@ actor RenderEngine: RenderEngining {
         }
     }
 
-    private func previewCacheKey(for request: RenderRequest, scale: RenderScale) -> PreviewCacheKey? {
+    private func previewCacheKey(
+        for request: RenderRequest, identity: RenderDocumentIdentity, scale: RenderScale
+    ) -> PreviewCacheKey? {
         guard !scale.isFull, request.output == .raster else { return nil }
         guard request.quality == .thumbnail || request.quality == .interactive || request.quality == .preview else {
             return nil
@@ -2925,7 +2936,7 @@ actor RenderEngine: RenderEngining {
         }) else { return nil }
         return PreviewCacheKey(
             source: RenderSourceFingerprint(request.source),
-            documentHash: RenderCacheHash.digest(request.document),
+            documentHash: identity.sessionKey,
             lutFingerprint: request.lut?.cacheFingerprint ?? "none",
             targetScale: RenderScaleKey(scale, nativeExtent: request.source.nativeExtent),
             sourceROI: request.sourceROI,

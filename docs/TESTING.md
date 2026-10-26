@@ -927,6 +927,26 @@ above until KRMA-1101 lands):
 digest changes, memo miss versus cold build, a `NaN` field never reusing a digest, memo bounds,
 and the `==` audit over representative `EditDocument` field edits.
 
+**KRMA-1101 render path on `RenderDocumentIdentity` (2026-10-26).** `RenderEngine` builds the
+identity once per request (`documentIdentity(for:source:)`) and threads it through `RenderBuildPlan`
+(mask recipe fence and revision-ledger document key), the preview key, `DevelopedSourceCacheKey` and
+the RAW `OutputKey`, both processing-prefix keys, `LocalMaskCacheKey.definitionHash`, and
+`LocalMaskResolveRequest.definitionHash`. No `digest(document)`, `digest(rawDevelop)`,
+`digest(localAdjustments)`, or `digest(component.source)` call remains in `RenderEngine.swift` or
+`LocalMaskRendering.swift`. The benchmark's mirrored set is now the two memoized identity lookups a warm
+request makes (an exposure-tick build plus a memo hit) and, for a first cache miss, one cold build.
+Release, M4 Pro, macOS 27.2, 30 iterations, medians:
+
+| Recipe | Warm digest ms/request before → after | First cache miss ms before → after |
+| --- | ---: | ---: |
+| Plain document | 0.153 → 0.064 | 0.153 → 0.067 |
+| 5 brush masks | 4.7 → 0.068 | not baselined separately → 2.286 |
+| 5 brush masks, large recipe | 173.573 → 0.067 | 202.743 → 85.204 |
+
+`RenderCacheTests.testDocumentIdentityKeysReuseAndInvalidateTheRightCaches` proves an exposure tick
+reuses the developed-source and mask-payload entries, and that a brush edit, a RAW-develop edit, and a
+crop edit miss the mask, developed-source, and preview caches respectively.
+
 ### Persisted package identity hash reuse (KRMA-753, 2026-10-01)
 
 Release last-known-frame capture after reusing the asset record's content hash for an unchanged

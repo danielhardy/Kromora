@@ -12,6 +12,61 @@ final class RenderCacheTests: TempDirectoryTestCase {
         return ImageSource(url: url, nativeExtent: CGSize(width: 96, height: 64))
     }
 
+    /// KRMA-1101: keys come from the memoized document identity, so an exposure tick must reuse the
+    /// developed source and mask payload while a brush, develop, or crop edit misses the right cache.
+    func testDocumentIdentityKeysReuseAndInvalidateTheRightCaches() async throws {
+        let source = try makeSource()
+        let samples = (0..<8).map {
+            BrushSample(point: CGPoint(x: 0.1 + Double($0) * 0.1, y: 0.5), pressure: 0.8)
+        }
+        func brush(radius: Double) -> [LocalAdjustmentLayer] {
+            [LocalAdjustmentLayer(
+                name: "Brush",
+                components: [MaskComponent(
+                    name: "Brush",
+                    source: .brush(BrushMaskDefinition(strokes: [
+                        BrushStroke(samples: samples, radius: radius, feather: 0.5, flow: 0.8, density: 1)
+                    ])))],
+                adjustments: LocalAdjustments(exposure: 0.4))]
+        }
+        let layers = brush(radius: 0.04)
+        let engine = RenderEngine()
+        func render(_ document: EditDocument) async throws -> RenderCacheStatistics {
+            _ = try await engine.render(RenderRequest(
+                source: source, document: document, targetSize: CGSize(width: 48, height: 32),
+                quality: .preview
+            ))
+            return await engine.cacheStatistics()
+        }
+
+        let base = try await render(EditDocument(localAdjustments: layers))
+
+        var tick = EditDocument(localAdjustments: layers)
+        tick.light.exposure = 0.5
+        let afterTick = try await render(tick)
+        XCTAssertEqual(afterTick.developedSource.misses, base.developedSource.misses,
+                       "an exposure tick reuses the developed source")
+        XCTAssertEqual(afterTick.localMask.misses, base.localMask.misses,
+                       "an exposure tick reuses the mask payload")
+
+        let afterBrush = try await render(EditDocument(localAdjustments: brush(radius: 0.08)))
+        XCTAssertGreaterThan(afterBrush.localMask.misses, afterTick.localMask.misses,
+                             "a brush edit misses the mask payload cache")
+        XCTAssertEqual(afterBrush.developedSource.misses, afterTick.developedSource.misses)
+
+        var develop = EditDocument(localAdjustments: layers)
+        develop.rawDevelop.exposure = 0.5
+        let afterDevelop = try await render(develop)
+        XCTAssertGreaterThan(afterDevelop.developedSource.misses, afterBrush.developedSource.misses,
+                             "a RAW-develop edit misses the developed-source cache")
+
+        var cropped = EditDocument(localAdjustments: layers)
+        cropped.crop = CropAdjustments(normalizedRect: CGRect(x: 0.1, y: 0.1, width: 0.6, height: 0.6))
+        let afterCrop = try await render(cropped)
+        XCTAssertGreaterThan(afterCrop.preview.misses, afterDevelop.preview.misses,
+                             "a crop edit misses the preview cache")
+    }
+
     private func makeNoisySource() throws -> ImageSource {
         let width = 96
         let height = 64

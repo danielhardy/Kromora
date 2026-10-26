@@ -268,7 +268,7 @@ Every child must:
 3. **KRMA-1100 — `RenderDocumentIdentity` and its engine memo.** *(Landed: memoized build after an exposure tick 0.058 ms on the large recipe; cold 86.9 ms.)*
    - Add the value type and the equality-reuse memo, with no call-site changes yet.
    - Add the custom-`==` audit test.
-4. **KRMA-1101 — Thread `RenderDocumentIdentity` through the render path.**
+4. **KRMA-1101 — Thread `RenderDocumentIdentity` through the render path.** *(Landed: warm large-recipe digest cost 173.573 → 0.067 ms per request; first miss 202.743 → 85.204 ms. See `docs/TESTING.md`.)*
    - Replace the 19 per-request digests in `RenderBuildPlan`, the preview, developed-source, prefix
      and mask keys, and the mask payload validation in `LocalMaskRendering`.
 5. **KRMA-1102 — Per-stroke brush identity.**

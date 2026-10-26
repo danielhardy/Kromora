@@ -12,7 +12,8 @@ import XCTest
 /// inputs the engine derives for one warm masked interactive request. It also measures the extra
 /// default-resolver digest work on a cache miss. The digest sets are mirrored from `RenderEngine`
 /// call sites rather than counted inside the engine, so the benchmark adds no production
-/// instrumentation; keep `requestDigestSet` in step with those sites when they move.
+/// instrumentation; keep `requestDigestSet` in step with those sites when they move. Since KRMA-1101
+/// the set is the memoized `RenderDocumentIdentity` builds rather than per-site document digests.
 ///
 /// Opt-in: `KROMORA_RENDER_KEY_BENCHMARK=1 swift test -c release --filter RenderKeyHashingBenchmark`.
 final class RenderKeyHashingBenchmark: TempDirectoryTestCase {
@@ -75,58 +76,47 @@ final class RenderKeyHashingBenchmark: TempDirectoryTestCase {
         return document
     }
 
-    /// The same synthetic document `RenderEngine.prefixDocumentHash` builds for a standard
-    /// source (temperature/tint retained because post-render white balance is included).
-    private static func prefixDocument(_ document: EditDocument) -> EditDocument {
-        EditDocument(
-            version: document.version, rawDevelop: .neutral, light: document.light,
-            color: document.color,
-            effects: EffectsAdjustments(
-                texture: document.effects.texture, clarity: document.effects.clarity,
-                dehaze: document.effects.dehaze, detail: document.effects.detail
-            ), crop: .neutral, adjustments: document.adjustments, lut: document.lut,
-            retouch: document.retouch
-        )
+    /// Mutable memo and tick counter shared by the warm closures, which the engine would call on
+    /// the render actor in sequence.
+    private final class IdentityTicker {
+        var memo = RenderDocumentIdentityMemo()
+        var document: EditDocument
+        let source: RenderSourceFingerprint
+
+        init(document: EditDocument, source: RenderSourceFingerprint) {
+            self.document = document
+            self.source = source
+            _ = memo.identity(for: document, source: source)
+        }
+
+        /// One exposure tick: the next request's document, as a slider drag produces.
+        func tick() -> String {
+            document.light.exposure += 0.01
+            return memo.identity(for: document, source: source).sessionKey
+        }
+
+        /// A repeat lookup of the same document (the second use within one request).
+        func repeatLookup() -> String { memo.identity(for: document, source: source).sessionKey }
     }
 
-    /// Every `RenderCacheHash.digest` in a warm masked interactive standard-source preview.
-    /// A cache miss additionally hashes each definition inside `DefaultLocalMaskResolver.resolve`.
+    /// Every `RenderCacheHash.digest` a warm masked interactive standard-source preview still pays
+    /// after KRMA-1101: the engine builds the memoized `RenderDocumentIdentity` once for the preview
+    /// key and once more in `buildImage` (a memo hit), and nothing else digests a document, a
+    /// component source, or the RAW-develop settings. A first cache miss builds the identity cold;
+    /// the default resolver reuses the identity's component digests instead of hashing again.
     private static func requestDigestSet(
         _ document: EditDocument,
+        source: RenderSourceFingerprint,
         includeDefaultResolver: Bool = false
     ) -> [(String, () -> String)] {
-        var set: [(String, () -> String)] = [
-            ("previewCacheKey document", { RenderCacheHash.digest(document) }),
-            ("plan maskIdentity", {
-                RenderCacheHash.digest(RenderEngine.MaskRecipeIdentity(document.localAdjustments))
-            }),
-            ("plan documentIdentity", { RenderCacheHash.digest(document) }),
-            ("developedSource rawDevelop", { RenderCacheHash.digest(document.rawDevelop) }),
-            ("processingPrefix rawDevelop", { RenderCacheHash.digest(document.rawDevelop) }),
-            ("processingPrefix upstream", { RenderCacheHash.digest(prefixDocument(document)) }),
-        ]
-        guard !document.localAdjustments.isEmpty else { return set }
-        for layer in document.localAdjustments {
-            for component in layer.components {
-                // The engine hashes for payload-cache lookup and again during composition.
-                set.append(("mask cache lookup definition", {
-                    RenderCacheHash.digest(component.source)
-                }))
-                if includeDefaultResolver {
-                    // A payload-cache miss also hashes the definition in the default resolver.
-                    set.append(("mask resolver definition", {
-                        RenderCacheHash.digest(component.source)
-                    }))
-                }
-                set.append(("mask compose definition", { RenderCacheHash.digest(component.source) }))
-            }
+        if includeDefaultResolver {
+            return [("identity cold build", { RenderDocumentIdentity(document).sessionKey })]
         }
-        set.append(("postLocal rawDevelop", { RenderCacheHash.digest(document.rawDevelop) }))
-        set.append(("postLocal upstream", { RenderCacheHash.digest(prefixDocument(document)) }))
-        set.append(("postLocal localAdjustments", {
-            RenderCacheHash.digest(document.localAdjustments)
-        }))
-        return set
+        let ticker = IdentityTicker(document: document, source: source)
+        return [
+            ("previewCacheKey identity (memoized exposure tick)", { ticker.tick() }),
+            ("buildImage identity (memo hit)", { ticker.repeatLookup() }),
+        ]
     }
 
     // MARK: - Timing
@@ -191,8 +181,10 @@ final class RenderKeyHashingBenchmark: TempDirectoryTestCase {
         for recipe in Self.recipes {
             let document = Self.document(recipe)
             let json = try JSONEncoder().encode(document)
-            let warmDigestSet = Self.requestDigestSet(document)
-            let coldDigestSet = Self.requestDigestSet(document, includeDefaultResolver: true)
+            let benchmarkSource = RenderSourceFingerprint(source)
+            let warmDigestSet = Self.requestDigestSet(document, source: benchmarkSource)
+            let coldDigestSet = Self.requestDigestSet(
+                document, source: benchmarkSource, includeDefaultResolver: true)
 
             // A warm slider tick hits cached mask payloads but still hashes their definitions for
             // cache lookup and composition. The resolver hash is paid only on a payload miss.

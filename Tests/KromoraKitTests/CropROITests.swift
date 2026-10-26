@@ -296,14 +296,16 @@ final class CropROITests: TempDirectoryTestCase {
         let document = EditDocument(crop: CropAdjustments(straightenAngle: 20))
         let roi = CGRect(x: 10, y: 10, width: 30, height: 20)
         let legacy = RenderBuildPlan.make(
-            source: source, document: document, scale: .preview(maxSize: CGSize(width: 48, height: 32)),
+            source: source, document: document, identity: RenderDocumentIdentity(document),
+            scale: .preview(maxSize: CGSize(width: 48, height: 32)),
             sourceROI: roi, presentationROI: nil
         )
         XCTAssertNil(legacy.sourceROI, "a native ROI cannot be applied after geometry on its own")
         XCTAssertFalse(legacy.hasEarlyCrop)
 
         let aware = RenderBuildPlan.make(
-            source: source, document: document, scale: .preview(maxSize: CGSize(width: 48, height: 32)),
+            source: source, document: document, identity: RenderDocumentIdentity(document),
+            scale: .preview(maxSize: CGSize(width: 48, height: 32)),
             sourceROI: roi, presentationROI: CGRect(x: 0.2, y: 0.2, width: 0.3, height: 0.3)
         )
         XCTAssertNotNil(aware.sourceROI)

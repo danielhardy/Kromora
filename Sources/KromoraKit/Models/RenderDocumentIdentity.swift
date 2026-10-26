@@ -23,6 +23,18 @@ struct RenderDocumentIdentity: Sendable, Equatable {
     /// component covers (crop, rotation, full effects).
     let sessionKey: String
 
+    /// `RenderCacheHash.digest(RAWDevelopSettings.neutral)`, for renders that develop with no edit.
+    static let neutralRAWDevelop = RenderCacheHash.digest(RAWDevelopSettings.neutral)
+
+    /// Component definition digests for layers that have no document identity (the mask overlay).
+    static func maskComponentDigests(for layers: [LocalAdjustmentLayer]) -> [UUID: String] {
+        var digests: [UUID: String] = [:]
+        for layer in layers {
+            for component in layer.components { digests[component.id] = RenderCacheHash.digest(component.source) }
+        }
+        return digests
+    }
+
     /// Cold build: digests every component. Memo misses produce exactly this value.
     init(_ document: EditDocument) {
         self.init(inputs: Inputs(document), reusing: [])

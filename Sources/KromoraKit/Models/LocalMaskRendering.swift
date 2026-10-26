@@ -44,6 +44,10 @@ struct LocalMaskResolveRequest: Sendable, Equatable {
     let targetSize: PixelDimensions
     let quality: RenderQuality
     let transform: LocalMaskRenderTransform
+    /// Definition digest of `component.source`. `RenderEngine` passes the memoized
+    /// `RenderDocumentIdentity.maskComponents` value so resolvers never hash the source again.
+    /// Direct callers (tests, tools) may omit it and get the digest computed once here.
+    let definitionHash: String
 
     init(
         source: ImageSource,
@@ -51,7 +55,8 @@ struct LocalMaskResolveRequest: Sendable, Equatable {
         component: MaskComponent,
         targetSize: PixelDimensions,
         quality: RenderQuality,
-        transform: LocalMaskRenderTransform = .identity
+        transform: LocalMaskRenderTransform = .identity,
+        definitionHash: String? = nil
     ) {
         self.source = source
         self.assetID = assetID ?? PhotoAnalysisCoordinator.assetID(for: source)
@@ -59,6 +64,7 @@ struct LocalMaskResolveRequest: Sendable, Equatable {
         self.targetSize = targetSize
         self.quality = quality
         self.transform = transform
+        self.definitionHash = definitionHash ?? RenderCacheHash.digest(component.source)
     }
 }
 
@@ -280,7 +286,7 @@ struct DefaultLocalMaskResolver: LocalMaskResolving {
     func resolve(_ request: LocalMaskResolveRequest) async throws -> LocalMaskPayload {
         try Task.checkCancellation()
         let sourceFingerprint = request.source.cacheFingerprint
-        let definitionHash = RenderCacheHash.digest(request.component.source)
+        let definitionHash = request.definitionHash
         let descriptor: LocalMaskPayload.Descriptor
         switch request.component.source {
         case .semantic(let definition):
@@ -421,7 +427,7 @@ struct ResolvedSemanticMask: LocalMaskResolving {
         try Task.checkCancellation()
         guard sourceFingerprint == request.source.cacheFingerprint,
               assetID == request.assetID,
-              definitionHash == RenderCacheHash.digest(request.component.source),
+              definitionHash == request.definitionHash,
               mask.size == request.targetSize else {
             throw LocalMaskResolutionError.sourceMismatch
         }
@@ -521,7 +527,7 @@ actor CoordinatorLocalMaskResolver: LocalMaskResolving {
         )
         return LocalMaskPayload(
             sourceFingerprint: request.source.cacheFingerprint,
-            definitionHash: RenderCacheHash.digest(request.component.source),
+            definitionHash: request.definitionHash,
             targetSize: request.targetSize,
             quality: request.quality,
             assetID: request.assetID,
