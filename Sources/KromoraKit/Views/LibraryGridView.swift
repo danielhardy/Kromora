@@ -4,7 +4,8 @@ import SwiftUI
 /// The grid-first browsing surface for a source collection.
 ///
 /// `LazyVStack` is important here: the collection may contain thousands of `PhotoAsset` values, but
-/// SwiftUI only hosts the rows around the viewport. Hosted cells still request a fast preview from
+/// SwiftUI only hosts the rows around the viewport. Row models are cheap (an id and an index range)
+/// and every row is declared, so the scroll position never changes the view structure. Hosted cells still request a fast preview from
 /// `onAppear`, and release in-flight work from `onDisappear`. That callback is not the admission
 /// signal for the first screen — SwiftUI can leave visible cells unannounced until a click — so
 /// the grid also admits every photo in the visible grid, originals first and edited renders
@@ -66,12 +67,7 @@ struct LibraryGridView: View {
                     let metrics = layout.metrics(for: contentWidth)
                     let pitch = layout.rowHeight(for: metrics) + layout.spacing
                     let rowCount = layout.rowCount(itemCount: entries.count, columns: metrics.columns)
-                    let window = layout.rowWindow(
-                        rowCount: rowCount,
-                        firstVisibleRow: firstVisibleRow,
-                        viewportHeight: geometry.size.height,
-                        pitch: pitch
-                    )
+                    let window = 0..<rowCount
                     let rows = LibraryGridRowModel.rows(
                         in: window, itemCount: entries.count, columns: metrics.columns, entries: entries)
                     let rowHeight = CGFloat(layout.rowHeight(for: metrics))
@@ -83,13 +79,11 @@ struct LibraryGridView: View {
                         pitch: pitch
                     )
                     ScrollView {
-                        // Rows outside the window are fixed-height gaps, so the scroll extent and
-                        // offsets match a fully materialized grid while row models stay bounded.
+                        // Every row is declared; LazyVStack realizes only those near the viewport.
+                        // Swapping rows for gap spacers as the scroll position changed made the
+                        // pane's hosting view re-invalidate its constraints until AppKit aborted
+                        // (see the Library grid note in docs/ENGINEERING_GUIDE.md).
                         LazyVStack(alignment: .leading, spacing: spacing) {
-                            if window.lowerBound > 0 {
-                                Color.clear.frame(height: Self.gapHeight(
-                                    rows: window.lowerBound, rowHeight: rowHeight, spacing: spacing))
-                            }
                             ForEach(rows) { row in
                                 LibraryGridRow(
                                     indices: row.indices,
@@ -97,6 +91,7 @@ struct LibraryGridView: View {
                                     collection: collection,
                                     settings: viewModel.settings,
                                     cellEdge: metrics.cellEdge,
+                                    rowHeight: rowHeight,
                                     spacing: layout.spacing,
                                     admittedThumbnailIDs: admittedThumbnailIDs,
                                     onSelect: select(id:flags:),
@@ -104,10 +99,6 @@ struct LibraryGridView: View {
                                     viewModel: viewModel,
                                     onAppearIndex: { viewModel.loadMorePortableIfNeeded(currentIndex: $0) }
                                 )
-                            }
-                            if window.upperBound < rowCount {
-                                Color.clear.frame(height: Self.gapHeight(
-                                    rows: rowCount - window.upperBound, rowHeight: rowHeight, spacing: spacing))
                             }
                         }
                         .padding(CGFloat(contentPadding))
@@ -170,12 +161,6 @@ struct LibraryGridView: View {
                     .padding(12)
             }
         }
-    }
-
-    /// Height of `rows` skipped rows including the spacing LazyVStack places after each; zero
-    /// is skipped entirely when zero so no stray spacing is added.
-    private static func gapHeight(rows: Int, rowHeight: CGFloat, spacing: CGFloat) -> CGFloat {
-        max(0, CGFloat(rows) * (rowHeight + spacing) - spacing)
     }
 
     private func visibleThumbnailIDs(
@@ -294,6 +279,9 @@ private struct LibraryGridRow: View {
     @Bindable var collection: ImageCollection
     let settings: KromoraSettings
     let cellEdge: Double
+    /// The row height `LibraryGridLayout` budgets for. The row is pinned to it so the gap rows
+    /// that stand in for unrealized rows match the realized ones exactly.
+    let rowHeight: CGFloat
     let spacing: Double
     let admittedThumbnailIDs: [PhotoAssetID]
     let onSelect: (PhotoAssetID, NSEvent.ModifierFlags) -> Void
@@ -366,7 +354,10 @@ private struct LibraryGridRow: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // Pin each row to the height `LibraryGridLayout` budgets for: without names the caption
+        // block is shorter than the budget and a badge makes one row taller than its neighbours,
+        // which would make the scroll extent depend on which rows are realized.
+        .frame(maxWidth: .infinity, minHeight: rowHeight, maxHeight: rowHeight, alignment: .topLeading)
     }
 }
 

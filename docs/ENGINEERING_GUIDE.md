@@ -444,6 +444,32 @@ deliberate: `NeutralOriginSliderTests.testTheCellsBarDrawingIsReachedWhenTheCont
 canary for an SDK that stops routing the bar through `drawBar`, which would otherwise revert every
 slider to a left-origin fill with the arithmetic still passing.
 
+## Library grid and the AppKit constraint-pass crash
+
+On macOS 27 (SwiftUI 8.1) the Library has crashed intermittently on the main thread with
+`NSGenericException: The window has been marked as needing another Update Constraints in Window
+pass, but it has already had more Update Constraints in Window passes than there are views in the
+window`, thrown from `-[NSWindow(NSDisplayCycle) _postWindowNeedsUpdateConstraints]`. Two shapes
+appear: `NSHostingView.updateConstraints` re-marking itself during the display-cycle
+update-constraints observer, and `ScrollViewCommitMutation.commit` requesting an update while AppKit
+computes window drag regions (`_regionForOpaqueDescendants`). At the throw the only view flagged
+as needing constraints is the SwiftUI navigation-pane hosting view that fills the window, so the
+loop is SwiftUI re-invalidating the pane, not an app-owned `NSView`.
+
+The crash needs a library large enough to scroll (the 134-photo personal library, not a 12-photo
+one) and happens while scrolling the grid. It was bisected by hand-scrolling dev builds with
+features switched off: removing the per-cell AppKit overlay views did not help, and removing the
+scroll-driven row windowing stopped it. The grid used to declare only the rows around the viewport
+(`firstVisibleRow` from `onScrollGeometryChange` selected a window, with fixed-height spacer gaps
+standing in for the rest), so every row-boundary crossing changed the `LazyVStack`'s children. On
+macOS 27 that made the pane hosting view re-invalidate its constraints within one display cycle
+until AppKit aborted. The remaining mechanism inside SwiftUI is not proven and is not reproducible
+under a debugger that slows the main thread.
+
+Rule: do not change the Library grid's view structure from scroll position. Declare every row and
+let `LazyVStack` virtualize; keep `firstVisibleRow` for thumbnail admission only. Rows are pinned
+to the height `LibraryGridLayout` budgets so the scroll extent stays fixed.
+
 ## Change checklist
 
 - Keep the macOS 26 (Tahoe) Apple Silicon deployment target, Swift 6 language mode, and Apple-only dependency policy. Do not add fallbacks for earlier macOS releases or Intel hardware.
