@@ -57,10 +57,15 @@ struct RenderDocumentIdentity: Sendable, Equatable {
     static let neutralRAWDevelop = RenderCacheHash.digest(RAWDevelopSettings.neutral)
 
     /// Component definition digests for layers that have no document identity (the mask overlay).
-    static func maskComponentDigests(for layers: [LocalAdjustmentLayer]) -> RenderMaskComponentDigests {
+    /// `onlyComponentID` restricts digesting to that component, so an isolated overlay request
+    /// never hashes unrelated definitions.
+    static func maskComponentDigests(
+        for layers: [LocalAdjustmentLayer], onlyComponentID: UUID? = nil
+    ) -> RenderMaskComponentDigests {
         var digests = RenderMaskComponentDigests()
         for layer in layers {
-            for component in layer.components {
+            for component in layer.components
+            where onlyComponentID == nil || component.id == onlyComponentID {
                 digests.append(
                     id: component.id, source: component.source,
                     definitionHash: BrushStrokeDigest.definitionDigest(of: component.source)

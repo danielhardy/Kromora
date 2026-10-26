@@ -1983,8 +1983,10 @@ actor RenderEngine: RenderEngining {
         // rasterize those definitions. Render the mask in the complete frame and clip it back to
         // the working extent only after its source-space coverage has been established.
         let renderExtent = maskExtent ?? extent
-        // The overlay path has no document identity; it digests only its own layer's components.
-        let componentDigests = componentDigests ?? RenderDocumentIdentity.maskComponentDigests(for: layers)
+        // The overlay path has no document identity; it digests only the requested component(s).
+        let componentDigests = componentDigests ?? RenderDocumentIdentity.maskComponentDigests(
+            for: layers, onlyComponentID: onlyComponentID
+        )
         let (payloads, duplicateKeys) = try await resolveMaskPayloads(
             for: layers, source: source, extent: renderExtent, quality: quality,
             transform: transform, assetID: assetID, requestRevision: requestRevision,
