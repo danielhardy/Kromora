@@ -131,6 +131,18 @@ final class LookLUTExportTests: TempDirectoryTestCase {
     }
 
     @MainActor
+    func testPresentNamesTheSheetAfterTheSourcePhoto() {
+        let coordinator = LookSaveCoordinator(sheets: FakeSheets())
+        coordinator.present(
+            document: EditDocument(), lut: nil, sourceURL: URL(fileURLWithPath: "/tmp/IMG_0042.dng")
+        )
+        XCTAssertEqual(coordinator.name, "IMG_0042 Look")
+        coordinator.present(document: EditDocument(), lut: nil, sourceURL: nil)
+        XCTAssertEqual(coordinator.name, "Look")
+        coordinator.dismiss()
+    }
+
+    @MainActor
     func testAcceptedSaveSheetWritesTheLook() async throws {
         let sheets = FakeSheets()
         let coordinator = LookSaveCoordinator(sheets: sheets)

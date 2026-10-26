@@ -40,6 +40,12 @@ final class LookSaveCoordinator {
         self.sheets = sheets
     }
 
+    /// Present the sheet named after the source photo (`"<photo> Look"`), or `"Look"` without one.
+    func present(document: EditDocument, lut: CubeLUT?, sourceURL: URL?) {
+        let suggested = sourceURL.map { $0.deletingPathExtension().lastPathComponent + " Look" } ?? "Look"
+        present(document: document, lut: lut, suggestedName: suggested)
+    }
+
     func present(document: EditDocument, lut: CubeLUT?, suggestedName: String = "Look") {
         conversionTask?.cancel()
         self.document = document

@@ -108,6 +108,12 @@ struct GamutTally: Equatable, Sendable {
     }
 
     /// Tally linear, extended-range Display P3 pixels. Components outside 0...1 are out of P3.
+    /// Off-actor tally; a `@concurrent` function keeps the caller's cancellation and priority.
+    @concurrent
+    static func tally(_ pixels: [SIMD3<Float>]) async -> GamutTally {
+        GamutTally(linearDisplayP3: pixels)
+    }
+
     init(linearDisplayP3 pixels: [SIMD3<Float>], tolerance: Float = GamutTally.linearSampleTolerance) {
         var builder = Builder(measuresBeyondP3: true, tolerance: tolerance)
         for pixel in pixels { builder.add(linearP3: pixel) }

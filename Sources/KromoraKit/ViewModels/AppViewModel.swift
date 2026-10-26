@@ -4230,18 +4230,12 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
 
     // MARK: - Recipe extractor
 
-    func presentRecipeExtractor() {
-        derive.present()
-    }
+    func presentRecipeExtractor() { derive.present() }
 
-    func deriveRecipe(rawURL: URL, jpgURL: URL) {
-        derive.derive(rawURL: rawURL, jpgURL: jpgURL)
-    }
+    func deriveRecipe(rawURL: URL, jpgURL: URL) { derive.derive(rawURL: rawURL, jpgURL: jpgURL) }
 
     @discardableResult
-    func saveDerivedLUT() -> Task<Void, Never> {
-        derive.saveDialog()
-    }
+    func saveDerivedLUT() -> Task<Void, Never> { derive.saveDialog() }
 
     /// Present the support-matrix confirmation for the active photo's LUT-compatible edits.
     func presentSaveLook() {
@@ -4249,23 +4243,13 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
             statusMessage = "Open an image first"
             return
         }
-        let suggested: String
-        if let sourceURL {
-            suggested = sourceURL.deletingPathExtension().lastPathComponent + " Look"
-        } else {
-            suggested = "Look"
-        }
-        lookSave.present(document: document, lut: selectedLook, suggestedName: suggested)
+        lookSave.present(document: document, lut: selectedLook, sourceURL: sourceURL)
     }
 
-    func dismissSaveLook() {
-        lookSave.dismiss()
-    }
+    func dismissSaveLook() { lookSave.dismiss() }
 
     @discardableResult
-    func saveLook() -> Task<Void, Never> {
-        lookSave.saveDialog()
-    }
+    func saveLook() -> Task<Void, Never> { lookSave.saveDialog() }
 
     // MARK: - Look folder
 
@@ -4684,9 +4668,7 @@ extension AppViewModel: PreviewPublicationDestination {
         guard let sample = await engine.gamutSample(
             presentedImage: image, maxDimension: maxDimension
         ) else { return nil }
-        return await Task.detached(priority: .utility) {
-            GamutTally(linearDisplayP3: sample.linearDisplayP3)
-        }.value
+        return await GamutTally.tally(sample.linearDisplayP3)
     }
     func writeCanonicalPreview(_ image: CIImage, request: RenderRequest) {
         previewPresentation.writeCanonical(image, for: request)
