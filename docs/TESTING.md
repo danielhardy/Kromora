@@ -964,6 +964,27 @@ warm 30-cell grid p95 was 221.9 ms and remains over its 100 ms target. Capture r
 Also fixed in this pass: a package-library photo selected from the filmstrip left the previous
 photo's pixels on the canvas while its record resolved. `AppViewModel.openImage` now clears the
 surface and resets the presentation session before that suspension, covered by
+**KRMA-1102 per-stroke brush identity (2026-10-26).** `BrushStrokeDigest` memoizes
+`RenderCacheHash.digest(stroke)` per stroke ID and reuses it by `==` (O(1) for strokes that share
+sample storage). A brush definition digest is SHA-256 over the ordered per-stroke digests.
+`RenderDocumentIdentity` uses it for mask component digests, and for the `localAdjustments` and mask
+recipe digests through `RenderCacheHash.sessionDigest`, a session-only encoding that substitutes the
+composition for the samples; the durable `BrushMaskDefinition` encoding and `editHash` are unchanged.
+`LocalMaskRenderer`'s stroke raster cache key reuses the same per-stroke digest. The benchmark's
+`paint_tick_identity_ms` appends one sample to the last stroke of the last brush mask per tick and
+times the memoized identity build. Release, M4 Pro, macOS 27.2, 30 iterations, medians:
+
+| Recipe | Paint-tick identity ms before → after |
+| --- | ---: |
+| Plain document | not applicable (no brush) |
+| 5 brush masks (48-sample active stroke) | 1.68 → 0.198 |
+| 5 brush masks, large recipe (512-sample active stroke) | 61.9 → 0.839 |
+
+The plain document's warm request is unchanged by this ticket (0.061 ms, two memoized lookups). The
+first-miss identity build for brush recipes now reads about 0.17 ms in the benchmark only because the
+process-wide stroke memo is already warm from earlier iterations; a truly cold process still encodes
+each stroke once (about 56 ms for the large recipe).
+
 `LibraryBrowsingProjectionTests`. Full gate on `4bbc5c5f`: warning gate, `fast`, `serial` (455
 tests), and `identity` (4 tests) all pass.
 
