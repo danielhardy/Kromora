@@ -63,7 +63,7 @@ struct RenderDocumentIdentity: Sendable, Equatable {
             for component in layer.components {
                 digests.append(
                     id: component.id, source: component.source,
-                    definitionHash: RenderCacheHash.digest(component.source)
+                    definitionHash: BrushStrokeDigest.definitionDigest(of: component.source)
                 )
             }
         }
@@ -83,7 +83,7 @@ struct RenderDocumentIdentity: Sendable, Equatable {
                 let remembered = entry.identity[keyPath: output]
                 if !Self.isEncodingFailure(remembered) { return remembered }
             }
-            return RenderCacheHash.digest(value)
+            return RenderCacheHash.sessionDigest(value)
         }
 
         rawDevelop = digest(inputs.rawDevelop, \.rawDevelop, \.rawDevelop)
@@ -110,7 +110,7 @@ struct RenderDocumentIdentity: Sendable, Equatable {
             }.first
             components.append(
                 id: component.id, source: component.source,
-                definitionHash: rememberedHash ?? RenderCacheHash.digest(component.source)
+                definitionHash: rememberedHash ?? BrushStrokeDigest.definitionDigest(of: component.source)
             )
         }
         maskComponents = components

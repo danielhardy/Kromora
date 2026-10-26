@@ -229,7 +229,7 @@ final class LocalMaskRenderer {
         var outputTiles: [BrushOutputTileKey: BrushOutputTile] = [:]
         for stroke in definition.strokes where !stroke.samples.isEmpty && stroke.radius > 0 {
             guard !Task.isCancelled else { return nil }
-            let key = RenderCacheHash.digest(stroke)
+            let key = BrushStrokeDigest.digest(of: stroke)
                 + ":\(dimensions.width)x\(dimensions.height):\(RenderCacheHash.digest(transform))"
             guard let strokeRaster = cachedStrokeRaster(
                 for: stroke, key: key, dimensions: dimensions, width: width,

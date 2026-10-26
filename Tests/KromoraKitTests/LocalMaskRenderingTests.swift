@@ -1259,7 +1259,7 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
                 )
                 return LocalMaskPayload(
                     sourceFingerprint: sourceFingerprint,
-                    definitionHash: RenderCacheHash.digest(request.component.source),
+                    definitionHash: request.definitionHash,
                     targetSize: request.targetSize,
                     quality: request.quality,
                     descriptor: .raster(mask)
@@ -1303,7 +1303,7 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
                 let mask = try NormalizedMask(size: size, values: values)
                 return LocalMaskPayload(
                     sourceFingerprint: sourceFingerprint,
-                    definitionHash: RenderCacheHash.digest(request.component.source),
+                    definitionHash: request.definitionHash,
                     targetSize: request.targetSize,
                     quality: request.quality,
                     descriptor: .raster(mask)
@@ -1398,7 +1398,7 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
                 )
                 return LocalMaskPayload(
                     sourceFingerprint: sourceFingerprint,
-                    definitionHash: RenderCacheHash.digest(request.component.source),
+                    definitionHash: request.definitionHash,
                     targetSize: request.targetSize,
                     quality: request.quality,
                     descriptor: .raster(mask)
@@ -1707,7 +1707,7 @@ private actor ComponentRecordingMaskResolver: LocalMaskResolving {
         )
         return LocalMaskPayload(
             sourceFingerprint: sourceFingerprint,
-            definitionHash: RenderCacheHash.digest(request.component.source),
+            definitionHash: request.definitionHash,
             targetSize: request.targetSize,
             quality: request.quality,
             descriptor: .raster(mask)
@@ -1726,7 +1726,7 @@ private struct TestMaskResolver: LocalMaskResolving {
         let mask = try NormalizedMask(size: request.targetSize, values: payloadValues)
         return LocalMaskPayload(
             sourceFingerprint: sourceFingerprint,
-            definitionHash: RenderCacheHash.digest(request.component.source),
+            definitionHash: request.definitionHash,
             targetSize: request.targetSize,
             quality: request.quality,
             descriptor: .raster(mask)
@@ -1750,7 +1750,7 @@ private actor RecordingMaskResolver: LocalMaskResolving {
         )
         return LocalMaskPayload(
             sourceFingerprint: sourceFingerprint,
-            definitionHash: RenderCacheHash.digest(request.component.source),
+            definitionHash: request.definitionHash,
             targetSize: request.targetSize,
             quality: request.quality,
             descriptor: .raster(mask)
@@ -1783,7 +1783,7 @@ private struct FixtureMaskResolver: LocalMaskResolving {
         let mask = try NormalizedMask(size: request.targetSize, values: values)
         return LocalMaskPayload(
             sourceFingerprint: sourceFingerprint,
-            definitionHash: RenderCacheHash.digest(request.component.source),
+            definitionHash: request.definitionHash,
             targetSize: request.targetSize,
             quality: request.quality,
             descriptor: .raster(mask)
@@ -1799,7 +1799,7 @@ private struct SeedMaskResolver: LocalMaskResolving {
         let mask = try MaskOperations.resized(seed, to: request.targetSize)
         return LocalMaskPayload(
             sourceFingerprint: sourceFingerprint,
-            definitionHash: RenderCacheHash.digest(request.component.source),
+            definitionHash: request.definitionHash,
             targetSize: request.targetSize,
             quality: request.quality,
             descriptor: .raster(mask)
@@ -1918,7 +1918,7 @@ private actor SupersedingMaskResolver: LocalMaskResolving {
         )
         return LocalMaskPayload(
             sourceFingerprint: sourceFingerprint,
-            definitionHash: RenderCacheHash.digest(request.component.source),
+            definitionHash: request.definitionHash,
             targetSize: request.targetSize,
             quality: request.quality,
             descriptor: .raster(mask)
@@ -1938,7 +1938,7 @@ private struct OverlayMaskResolver: LocalMaskResolving {
         )
         return LocalMaskPayload(
             sourceFingerprint: sourceFingerprint,
-            definitionHash: RenderCacheHash.digest(request.component.source),
+            definitionHash: request.definitionHash,
             targetSize: request.targetSize,
             quality: request.quality,
             descriptor: .raster(mask)
@@ -1957,7 +1957,7 @@ private struct RepresentativeOverlayResolver: LocalMaskResolving {
             )
             return LocalMaskPayload(
                 sourceFingerprint: sourceFingerprint,
-                definitionHash: RenderCacheHash.digest(request.component.source),
+                definitionHash: request.definitionHash,
                 targetSize: request.targetSize,
                 quality: request.quality,
                 descriptor: .raster(mask)

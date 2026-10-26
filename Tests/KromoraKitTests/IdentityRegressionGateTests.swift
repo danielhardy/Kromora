@@ -421,7 +421,7 @@ private actor BlockingMaskResolver: LocalMaskResolving {
         )
         return LocalMaskPayload(
             sourceFingerprint: request.source.cacheFingerprint,
-            definitionHash: RenderCacheHash.digest(request.component.source),
+            definitionHash: request.definitionHash,
             targetSize: request.targetSize,
             quality: request.quality,
             assetID: request.assetID,

@@ -199,8 +199,20 @@ enum RenderCacheHash {
     }
 
     static func digest<T: Encodable>(_ value: T) -> String {
+        digest(value, sessionBrushIdentity: false)
+    }
+
+    /// Session-tier digest: brush definitions contribute their memoized per-stroke composition
+    /// (`BrushStrokeDigest`) instead of every sample. Only for `RenderDocumentIdentity`; the
+    /// result differs from `digest(_:)` for brush content and must never be persisted.
+    static func sessionDigest<T: Encodable>(_ value: T) -> String {
+        digest(value, sessionBrushIdentity: true)
+    }
+
+    private static func digest<T: Encodable>(_ value: T, sessionBrushIdentity: Bool) -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
+        if sessionBrushIdentity { encoder.userInfo[BrushStrokeDigest.sessionIdentityKey] = true }
         // A fixed fallback would let two different values that both fail to encode (e.g. a
         // non-conforming Double such as .nan) collide on the same cache key and serve each other's
         // pixels. A fresh identity per failure guarantees a miss instead — safe, just uncached.

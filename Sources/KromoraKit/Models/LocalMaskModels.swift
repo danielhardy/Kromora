@@ -282,6 +282,27 @@ struct BrushStroke: Codable, Sendable, Equatable, Identifiable {
 struct BrushMaskDefinition: Codable, Sendable, Equatable {
     var strokes: [BrushStroke]
     init(strokes: [BrushStroke] = []) { self.strokes = strokes }
+
+    private enum CodingKeys: String, CodingKey { case strokes }
+
+    /// Durable encoding is the synthesized `{"strokes": [...]}`. A session-identity encoder
+    /// (`RenderCacheHash.sessionDigest`) substitutes the memoized per-stroke composition so a
+    /// paint tick never re-encodes committed strokes. Never persist that form.
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        if encoder.userInfo[BrushStrokeDigest.sessionIdentityKey] as? Bool == true {
+            let digest = BrushStrokeDigest.definitionDigest(of: self)
+            // Embedding a unique failure would hash it into a stable value; fail the encode so the
+            // enclosing digest is itself an uncacheable `encoding-failed:` identity.
+            guard !digest.hasPrefix("encoding-failed:") else {
+                throw EncodingError.invalidValue(
+                    self, .init(codingPath: container.codingPath, debugDescription: "unencodable stroke"))
+            }
+            try container.encode(digest, forKey: .strokes)
+        } else {
+            try container.encode(strokes, forKey: .strokes)
+        }
+    }
 }
 
 struct LinearGradientDefinition: Codable, Sendable, Equatable {

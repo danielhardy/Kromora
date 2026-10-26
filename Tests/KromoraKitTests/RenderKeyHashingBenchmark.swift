@@ -279,6 +279,28 @@ final class RenderKeyHashingBenchmark: TempDirectoryTestCase {
                 recipe.name as NSString, coldIdentity.median, memoizedIdentity.median,
                 memoizedIdentity.p95))
 
+            // KRMA-1102: a paint tick appends one sample to the last stroke of the last brush
+            // mask. Identity work should scale with that stroke, not the whole mask.
+            if recipe.masks > 0 {
+                var paintMemo = RenderDocumentIdentityMemo()
+                _ = paintMemo.identity(for: document, source: fingerprint)
+                var paintDocument = document
+                let layerIndex = paintDocument.localAdjustments.count - 1
+                let paintTick = Self.time(iterations) {
+                    guard case .brush(var brush) = paintDocument.localAdjustments[layerIndex]
+                        .components[0].source else { return }
+                    let last = brush.strokes.count - 1
+                    let n = Double(brush.strokes[last].samples.count)
+                    brush.strokes[last].samples.append(
+                        BrushSample(point: CGPoint(x: 0.5 + 0.0001 * n.truncatingRemainder(dividingBy: 100), y: 0.5)))
+                    paintDocument.localAdjustments[layerIndex].components[0].source = .brush(brush)
+                    _ = paintMemo.identity(for: paintDocument, source: fingerprint)
+                }
+                print(String(
+                    format: "recipe=%@ paint_tick_identity_ms median=%.4f p95=%.4f",
+                    recipe.name as NSString, paintTick.median, paintTick.p95))
+            }
+
             // Real engine, interactive exposure ticks: masks hit their payload cache after the
             // first tick, while the global change misses the preview raster cache every time.
             let engine = RenderEngine()
