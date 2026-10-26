@@ -204,6 +204,7 @@ final class BrushStrokeDigestTests: XCTestCase {
         let retained = BrushStrokeDigest.retained
         XCTAssertLessThanOrEqual(retained.ids, BrushStrokeDigest.Memo.idLimit)
         XCTAssertLessThanOrEqual(retained.bytes, BrushStrokeDigest.defaultByteBudget)
+        XCTAssertEqual(retained.ids, committed.count + 1, "warm recipe was unexpectedly evicted")
         // Prewarm committed digests, then time ticks that encode only the changed active stroke.
         _ = BrushStrokeDigest.definitionDigest(of: BrushMaskDefinition(strokes: committed + [active]))
         let start = ContinuousClock.now
@@ -212,6 +213,7 @@ final class BrushStrokeDigestTests: XCTestCase {
             _ = BrushStrokeDigest.definitionDigest(of: BrushMaskDefinition(strokes: committed + [active]))
         }
         let elapsed = ContinuousClock.now - start
+        XCTAssertEqual(BrushStrokeDigest.retained.ids, committed.count + 1)
         print("KRMA-1137 5001-stroke recipe: 20 paint ticks in \(elapsed)")
     }
 }
