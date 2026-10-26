@@ -1,5 +1,35 @@
 import Foundation
 
+/// Definition digests preserve source values alongside component IDs because persisted edit data
+/// may contain duplicate IDs. A repeated ID must not make distinct mask sources share a cache key.
+struct RenderMaskComponentDigests: Sendable, Equatable {
+    struct Entry: Sendable, Equatable {
+        let id: UUID
+        let source: MaskSource
+        let definitionHash: String
+    }
+
+    private(set) var entries: [Entry] = []
+
+    mutating func append(id: UUID, source: MaskSource, definitionHash: String) {
+        entries.append(Entry(id: id, source: source, definitionHash: definitionHash))
+    }
+
+    func definitionHash(for component: MaskComponent) -> String? {
+        definitionHash(for: component.id, source: component.source)
+    }
+
+    func definitionHash(for id: UUID, source: MaskSource) -> String? {
+        let matchingID = entries.filter { $0.id == id }
+        if let exact = matchingID.first(where: { $0.source == source }) {
+            return exact.definitionHash
+        }
+        // Non-finite values compare unequal to themselves. When the component ID is unique, its
+        // stored digest is still unambiguous and must remain usable as an uncached identity.
+        return matchingID.count == 1 ? matchingID[0].definitionHash : nil
+    }
+}
+
 /// Session-tier identity for an `EditDocument`: one deterministic SHA-256 digest per render-relevant
 /// component, plus a whole-document key composed from them.
 ///
@@ -17,8 +47,8 @@ struct RenderDocumentIdentity: Sendable, Equatable {
     let localAdjustments: String
     /// `RenderEngine.MaskRecipeIdentity`, the semantic-mask restart fence.
     let maskRecipe: String
-    /// Definition digest of each mask component's `MaskSource`, keyed by component ID.
-    let maskComponents: [UUID: String]
+    /// Definition digest of each mask component's `MaskSource`, matched by ID and source value.
+    let maskComponents: RenderMaskComponentDigests
     /// Whole-document session key, composed from the component digests and the fields no
     /// component covers (crop, rotation, full effects).
     let sessionKey: String
@@ -27,10 +57,15 @@ struct RenderDocumentIdentity: Sendable, Equatable {
     static let neutralRAWDevelop = RenderCacheHash.digest(RAWDevelopSettings.neutral)
 
     /// Component definition digests for layers that have no document identity (the mask overlay).
-    static func maskComponentDigests(for layers: [LocalAdjustmentLayer]) -> [UUID: String] {
-        var digests: [UUID: String] = [:]
+    static func maskComponentDigests(for layers: [LocalAdjustmentLayer]) -> RenderMaskComponentDigests {
+        var digests = RenderMaskComponentDigests()
         for layer in layers {
-            for component in layer.components { digests[component.id] = RenderCacheHash.digest(component.source) }
+            for component in layer.components {
+                digests.append(
+                    id: component.id, source: component.source,
+                    definitionHash: RenderCacheHash.digest(component.source)
+                )
+            }
         }
         return digests
     }
@@ -63,14 +98,20 @@ struct RenderDocumentIdentity: Sendable, Equatable {
         localAdjustments = digest(inputs.localAdjustments, \.localAdjustments, \.localAdjustments)
         maskRecipe = digest(inputs.maskRecipe, \.maskRecipe, \.maskRecipe)
 
-        var components: [UUID: String] = [:]
-        for (id, source) in inputs.maskSources {
-            components[id] = entries.lazy.compactMap { entry -> String? in
-                guard entry.inputs.maskSources[id] == source,
-                      let remembered = entry.identity.maskComponents[id],
+        var components = RenderMaskComponentDigests()
+        for component in inputs.maskSources {
+            let rememberedHash = entries.lazy.compactMap { entry -> String? in
+                guard entry.inputs.maskSources.contains(component),
+                      let remembered = entry.identity.maskComponents.definitionHash(
+                        for: component.id, source: component.source
+                      ),
                       !Self.isEncodingFailure(remembered) else { return nil }
                 return remembered
-            }.first ?? RenderCacheHash.digest(source)
+            }.first
+            components.append(
+                id: component.id, source: component.source,
+                definitionHash: rememberedHash ?? RenderCacheHash.digest(component.source)
+            )
         }
         maskComponents = components
 
@@ -99,12 +140,17 @@ struct RenderDocumentIdentity: Sendable, Equatable {
             let effects: EffectsAdjustments
         }
 
+        struct MaskComponentSource: Sendable, Equatable {
+            let id: UUID
+            let source: MaskSource
+        }
+
         let rawDevelop: RAWDevelopSettings
         let prefixUpstream: EditDocument
         let prefixUpstreamWithoutWhiteBalance: EditDocument
         let localAdjustments: [LocalAdjustmentLayer]
         let maskRecipe: RenderEngine.MaskRecipeIdentity
-        let maskSources: [UUID: MaskSource]
+        let maskSources: [MaskComponentSource]
         let remainder: Remainder
 
         init(_ document: EditDocument) {
@@ -113,9 +159,11 @@ struct RenderDocumentIdentity: Sendable, Equatable {
             prefixUpstreamWithoutWhiteBalance = Self.prefixDocument(document, includeWhiteBalance: false)
             localAdjustments = document.localAdjustments
             maskRecipe = RenderEngine.MaskRecipeIdentity(document.localAdjustments)
-            var sources: [UUID: MaskSource] = [:]
+            var sources: [MaskComponentSource] = []
             for layer in document.localAdjustments {
-                for component in layer.components { sources[component.id] = component.source }
+                for component in layer.components {
+                    sources.append(MaskComponentSource(id: component.id, source: component.source))
+                }
             }
             maskSources = sources
             remainder = Remainder(

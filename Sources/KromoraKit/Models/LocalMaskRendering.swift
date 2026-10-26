@@ -46,7 +46,7 @@ struct LocalMaskResolveRequest: Sendable, Equatable {
     let transform: LocalMaskRenderTransform
     /// Definition digest of `component.source`. `RenderEngine` passes the memoized
     /// `RenderDocumentIdentity.maskComponents` value so resolvers never hash the source again.
-    /// Direct callers (tests, tools) may omit it and get the digest computed once here.
+    /// Every caller supplies it so resolver requests never re-encode the component source.
     let definitionHash: String
 
     init(
@@ -56,7 +56,7 @@ struct LocalMaskResolveRequest: Sendable, Equatable {
         targetSize: PixelDimensions,
         quality: RenderQuality,
         transform: LocalMaskRenderTransform = .identity,
-        definitionHash: String? = nil
+        definitionHash: String
     ) {
         self.source = source
         self.assetID = assetID ?? PhotoAnalysisCoordinator.assetID(for: source)
@@ -64,7 +64,7 @@ struct LocalMaskResolveRequest: Sendable, Equatable {
         self.targetSize = targetSize
         self.quality = quality
         self.transform = transform
-        self.definitionHash = definitionHash ?? RenderCacheHash.digest(component.source)
+        self.definitionHash = definitionHash
     }
 }
 

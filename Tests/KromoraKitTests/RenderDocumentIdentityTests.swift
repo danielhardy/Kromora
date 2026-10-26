@@ -99,8 +99,34 @@ final class RenderDocumentIdentityTests: XCTestCase {
             brushEdit.localAdjustments[0].components[0].source = .brush(definition)
         }
         let brushID = RenderDocumentIdentity(brushEdit)
-        let componentID = base.localAdjustments[0].components[0].id
-        XCTAssertNotEqual(brushID.maskComponents[componentID], baseID.maskComponents[componentID])
+        let baseComponent = base.localAdjustments[0].components[0]
+        let editedComponent = brushEdit.localAdjustments[0].components[0]
+        XCTAssertNotEqual(
+            brushID.maskComponents.definitionHash(for: editedComponent),
+            baseID.maskComponents.definitionHash(for: baseComponent)
+        )
+    }
+
+    func testDuplicateComponentIDsKeepDistinctDefinitionDigests() {
+        var document = Self.brushDocument()
+        var second = document.localAdjustments[0].components[0]
+        if case .brush(var definition) = second.source {
+            definition.strokes[0].radius += 0.04
+            second.source = .brush(definition)
+        }
+        document.localAdjustments.append(LocalAdjustmentLayer(components: [second]))
+
+        let first = document.localAdjustments[0].components[0]
+        let secondInDocument = document.localAdjustments[1].components[0]
+        XCTAssertEqual(first.id, secondInDocument.id)
+
+        var memo = RenderDocumentIdentityMemo()
+        let identity = memo.identity(for: document, source: source)
+        XCTAssertNotEqual(
+            identity.maskComponents.definitionHash(for: first),
+            identity.maskComponents.definitionHash(for: secondInDocument)
+        )
+        XCTAssertEqual(identity, memo.identity(for: document, source: source))
     }
 
     func testMemoMissMatchesColdBuildAndTickReusesUnchangedComponents() {
@@ -125,11 +151,14 @@ final class RenderDocumentIdentityTests: XCTestCase {
             definition.strokes[0].samples[0].point.x = .nan
             document.localAdjustments[0].components[0].source = .brush(definition)
         }
-        let componentID = document.localAdjustments[0].components[0].id
         var memo = RenderDocumentIdentityMemo()
         let first = memo.identity(for: document, source: source)
         let second = memo.identity(for: document, source: source)
-        XCTAssertNotEqual(first.maskComponents[componentID], second.maskComponents[componentID])
+        XCTAssertNotNil(first.maskComponents.definitionHash(for: document.localAdjustments[0].components[0]))
+        XCTAssertNotEqual(
+            first.maskComponents.entries[0].definitionHash,
+            second.maskComponents.entries[0].definitionHash
+        )
         XCTAssertNotEqual(first.localAdjustments, second.localAdjustments)
         XCTAssertNotEqual(first.sessionKey, second.sessionKey)
     }

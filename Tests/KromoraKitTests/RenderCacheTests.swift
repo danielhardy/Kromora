@@ -67,6 +67,40 @@ final class RenderCacheTests: TempDirectoryTestCase {
                              "a crop edit misses the preview cache")
     }
 
+    func testDuplicateMaskComponentIDsDoNotAliasDistinctDefinitions() async throws {
+        let source = try makeSource()
+        let sharedID = UUID()
+        func component(radius: Double) -> MaskComponent {
+            MaskComponent(
+                id: sharedID,
+                source: .brush(BrushMaskDefinition(strokes: [
+                    BrushStroke(
+                        samples: [BrushSample(point: CGPoint(x: 0.5, y: 0.5), pressure: 0.8)],
+                        radius: radius, feather: 0.5, flow: 0.8, density: 1
+                    )
+                ]))
+            )
+        }
+        let document = EditDocument(localAdjustments: [
+            LocalAdjustmentLayer(
+                components: [component(radius: 0.08)],
+                adjustments: LocalAdjustments(exposure: 0.4)
+            ),
+            LocalAdjustmentLayer(
+                components: [component(radius: 0.2)],
+                adjustments: LocalAdjustments(exposure: -0.4)
+            ),
+        ])
+        let engine = RenderEngine()
+        _ = try await engine.render(RenderRequest(
+            source: source, document: document, targetSize: CGSize(width: 48, height: 32),
+            quality: .preview
+        ))
+
+        let stats = await engine.cacheStatistics()
+        XCTAssertEqual(stats.localMask.misses, 2)
+    }
+
     private func makeNoisySource() throws -> ImageSource {
         let width = 96
         let height = 64

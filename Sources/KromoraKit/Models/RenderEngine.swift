@@ -1865,7 +1865,7 @@ actor RenderEngine: RenderEngining {
         requestRevision: UInt64,
         maskIdentity: String?,
         documentIdentity: String?,
-        componentDigests: [UUID: String],
+        componentDigests: RenderMaskComponentDigests,
         resolveSemanticMasks: Bool,
         includeIdentity: Bool,
         onlyComponentID: UUID?
@@ -1880,7 +1880,7 @@ actor RenderEngine: RenderEngining {
             for component in layer.components where component.isUsable
                 && (onlyComponentID == nil || component.id == onlyComponentID) {
                 if !resolveSemanticMasks, component.source.semanticDefinition != nil { continue }
-                guard let definitionHash = componentDigests[component.id] else {
+                guard let definitionHash = componentDigests.definitionHash(for: component) else {
                     throw LocalMaskResolutionError.invalidPayload
                 }
                 let targetSize = maskTargetSize(for: component, extent: extent, quality: quality)
@@ -1960,7 +1960,7 @@ actor RenderEngine: RenderEngining {
         requestRevision: UInt64,
         maskIdentity: String? = nil,
         documentIdentity: String? = nil,
-        componentDigests: [UUID: String]? = nil,
+        componentDigests: RenderMaskComponentDigests? = nil,
         resolveSemanticMasks: Bool = true,
         includeIdentity: Bool = false,
         onlyComponentID: UUID? = nil
@@ -2011,7 +2011,7 @@ actor RenderEngine: RenderEngining {
             for component in layer.components where component.isUsable
                 && (onlyComponentID == nil || component.id == onlyComponentID) {
                 if !resolveSemanticMasks, component.source.semanticDefinition != nil { continue }
-                guard let definitionHash = componentDigests[component.id] else {
+                guard let definitionHash = componentDigests.definitionHash(for: component) else {
                     throw LocalMaskResolutionError.invalidPayload
                 }
                 let componentTargetSize = maskTargetSize(

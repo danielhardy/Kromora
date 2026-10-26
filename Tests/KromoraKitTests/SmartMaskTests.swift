@@ -34,7 +34,8 @@ final class SmartMaskTests: TempDirectoryTestCase {
         let component = MaskComponent(source: .semantic(SemanticMaskDefinition(target: .subject)))
         let request = LocalMaskResolveRequest(
             source: source, assetID: assetID, component: component,
-            targetSize: PixelDimensions(width: 4, height: 4), quality: .preview
+            targetSize: PixelDimensions(width: 4, height: 4), quality: .preview,
+            definitionHash: RenderCacheHash.digest(component.source)
         )
         let resolver = CoordinatorLocalMaskResolver(coordinator: coordinator)
 
@@ -61,7 +62,8 @@ final class SmartMaskTests: TempDirectoryTestCase {
         let component = MaskComponent(source: .semantic(SemanticMaskDefinition(target: .foreground)))
         let request = LocalMaskResolveRequest(
             source: source, assetID: assetID, component: component,
-            targetSize: PixelDimensions(width: 8, height: 8), quality: .export
+            targetSize: PixelDimensions(width: 8, height: 8), quality: .export,
+            definitionHash: RenderCacheHash.digest(component.source)
         )
         let payload = try await CoordinatorLocalMaskResolver(coordinator: coordinator).resolve(request)
 
@@ -84,7 +86,8 @@ final class SmartMaskTests: TempDirectoryTestCase {
         let component = MaskComponent(source: .semantic(SemanticMaskDefinition(target: .subject)))
         let request = LocalMaskResolveRequest(
             source: source, assetID: .photos(localIdentifier: "expected"), component: component,
-            targetSize: PixelDimensions(width: 4, height: 4), quality: .preview
+            targetSize: PixelDimensions(width: 4, height: 4), quality: .preview,
+            definitionHash: RenderCacheHash.digest(component.source)
         )
 
         do {
@@ -103,7 +106,8 @@ final class SmartMaskTests: TempDirectoryTestCase {
         )))
         let request = LocalMaskResolveRequest(
             source: makeSource(), assetID: .photos(localIdentifier: "version"), component: component,
-            targetSize: PixelDimensions(width: 8, height: 8), quality: .preview
+            targetSize: PixelDimensions(width: 8, height: 8), quality: .preview,
+            definitionHash: RenderCacheHash.digest(component.source)
         )
 
         do {
@@ -138,7 +142,8 @@ final class SmartMaskTests: TempDirectoryTestCase {
         let payload = try await resolver.resolve(LocalMaskResolveRequest(
             source: source, assetID: PhotoAnalysisCoordinator.assetID(for: source),
             component: MaskComponent(source: .semantic(definition)),
-            targetSize: targetSize, quality: .preview
+            targetSize: targetSize, quality: .preview,
+            definitionHash: RenderCacheHash.digest(MaskSource.semantic(definition))
         ))
 
         XCTAssertEqual(payload.targetSize, targetSize)
@@ -167,7 +172,8 @@ final class SmartMaskTests: TempDirectoryTestCase {
             let payload = try await resolver.resolve(LocalMaskResolveRequest(
                 source: source, assetID: PhotoAnalysisCoordinator.assetID(for: source),
                 component: MaskComponent(source: .semantic(definition)),
-                targetSize: targetSize, quality: .preview
+                targetSize: targetSize, quality: .preview,
+                definitionHash: RenderCacheHash.digest(MaskSource.semantic(definition))
             ))
             guard case .raster(let mask) = payload.descriptor else {
                 throw LocalMaskResolutionError.invalidPayload
@@ -208,7 +214,8 @@ final class SmartMaskTests: TempDirectoryTestCase {
             let payload = try await resolver.resolve(LocalMaskResolveRequest(
                 source: source, assetID: PhotoAnalysisCoordinator.assetID(for: source),
                 component: MaskComponent(source: .semantic(definition)),
-                targetSize: targetSize, quality: .preview
+                targetSize: targetSize, quality: .preview,
+                definitionHash: RenderCacheHash.digest(MaskSource.semantic(definition))
             ))
             guard case .raster(let resolved) = payload.descriptor else {
                 return XCTFail("semantic resolution should return a raster matte")
@@ -250,7 +257,8 @@ final class SmartMaskTests: TempDirectoryTestCase {
         let payload = try await resolver.resolve(LocalMaskResolveRequest(
             source: source, assetID: PhotoAnalysisCoordinator.assetID(for: source),
             component: MaskComponent(source: .semantic(definition)),
-            targetSize: targetSize, quality: .preview
+            targetSize: targetSize, quality: .preview,
+            definitionHash: RenderCacheHash.digest(MaskSource.semantic(definition))
         ))
         guard case .raster(let resolved) = payload.descriptor else {
             return XCTFail("semantic resolution should return a raster matte")

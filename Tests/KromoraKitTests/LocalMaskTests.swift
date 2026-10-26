@@ -60,11 +60,13 @@ final class LocalMaskTests: XCTestCase {
         let source = ImageSource(url: url, nativeExtent: CGSize(width: 16, height: 16))
         let resolver = DefaultLocalMaskResolver()
         let request: (MaskSource) -> LocalMaskResolveRequest = { sourceDefinition in
-            LocalMaskResolveRequest(
+            let component = MaskComponent(source: sourceDefinition)
+            return LocalMaskResolveRequest(
                 source: source,
-                component: MaskComponent(source: sourceDefinition),
+                component: component,
                 targetSize: PixelDimensions(width: 16, height: 16),
-                quality: .preview
+                quality: .preview,
+                definitionHash: RenderCacheHash.digest(component.source)
             )
         }
 
