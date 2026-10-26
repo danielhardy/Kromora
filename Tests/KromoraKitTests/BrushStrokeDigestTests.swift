@@ -105,4 +105,117 @@ final class BrushStrokeDigestTests: XCTestCase {
         edited.strokes[0].samples.append(BrushSample(point: CGPoint(x: 0.9, y: 0.9)))
         XCTAssertNotEqual(RenderCacheHash.sessionDigest(definition), RenderCacheHash.sessionDigest(edited))
     }
+
+    // MARK: Retention (KRMA-1137)
+
+    func testMemoByteBudgetBoundsRetainedBytesAndEvictsOldestFirst() {
+        var memo = BrushStrokeDigest.Memo(byteBudget: 64 * 1024)
+        let strokes = (0..<40).map { Self.stroke(Double($0), count: 100) }
+        for s in strokes { memo.store(s, digest: RenderCacheHash.digest(s)) }
+        XCTAssertLessThanOrEqual(memo.retainedBytes, 64 * 1024)
+        XCTAssertLessThan(memo.idCount, strokes.count)
+        XCTAssertNil(memo.lookup(strokes[0]))
+        XCTAssertEqual(memo.lookup(strokes[39]), RenderCacheHash.digest(strokes[39]))
+    }
+
+    func testMemoEvictionKeepsRecentlyUsedStrokes() {
+        var memo = BrushStrokeDigest.Memo(byteBudget: 64 * 1024)
+        let hot = Self.stroke(0, count: 100)
+        memo.store(hot, digest: "hot")
+        for n in 1..<60 {
+            let s = Self.stroke(Double(n), count: 100)
+            memo.store(s, digest: "d\(n)")
+            XCTAssertEqual(memo.lookup(hot), "hot", "recently used stroke evicted at \(n)")
+        }
+    }
+
+    func testMemoDoesNotRetainStrokeLargerThanBudgetAndStaysCorrect() {
+        var memo = BrushStrokeDigest.Memo(byteBudget: 4 * 1024)
+        let huge = Self.stroke(1, count: 1000)
+        memo.store(huge, digest: "x")
+        XCTAssertEqual(memo.retainedBytes, 0)
+        XCTAssertNil(memo.lookup(huge))
+    }
+
+    func testMemoByteBudgetCountsReservedSampleCapacity() {
+        var samples: [BrushSample] = []
+        samples.reserveCapacity(1000)
+        samples.append(BrushSample(point: CGPoint(x: 0.5, y: 0.5)))
+        let stroke = BrushStroke(samples: samples)
+        XCTAssertGreaterThan(stroke.samples.capacity, stroke.samples.count)
+
+        var memo = BrushStrokeDigest.Memo(byteBudget: 4 * 1024)
+        memo.store(stroke, digest: "reserved-capacity")
+        XCTAssertEqual(memo.retainedBytes, 0)
+        XCTAssertNil(memo.lookup(stroke))
+    }
+
+    func testOversizedStrokeDoesNotEvictOtherVersionsWithSameID() {
+        var memo = BrushStrokeDigest.Memo(byteBudget: 4 * 1024)
+        let recent = Self.stroke(0, count: 8)
+        var oversized = Self.stroke(1, count: 1000)
+        oversized.id = recent.id
+
+        memo.store(recent, digest: "recent")
+        memo.store(oversized, digest: "oversized")
+        XCTAssertEqual(memo.lookup(recent), "recent")
+        XCTAssertNil(memo.lookup(oversized))
+    }
+
+    func testEncodingFailuresRemainUncacheable() {
+        BrushStrokeDigest.removeAll()
+        var stroke = Self.stroke(1)
+        stroke.samples[0].pressure = .nan
+
+        let first = BrushStrokeDigest.digest(of: stroke)
+        let second = BrushStrokeDigest.digest(of: stroke)
+        XCTAssertTrue(first.hasPrefix("encoding-failed:"))
+        XCTAssertTrue(second.hasPrefix("encoding-failed:"))
+        XCTAssertNotEqual(first, second)
+        XCTAssertEqual(BrushStrokeDigest.retained.ids, 0)
+    }
+
+    func testMemoIDLimitEvictsWithoutClearingAndDigestsStayExact() {
+        var memo = BrushStrokeDigest.Memo(byteBudget: 64 * 1024 * 1024, idLimit: 8)
+        let strokes = (0..<30).map { Self.stroke(Double($0)) }
+        for s in strokes { memo.store(s, digest: RenderCacheHash.digest(s)) }
+        XCTAssertLessThanOrEqual(memo.idCount, 8)
+        XCTAssertGreaterThan(memo.idCount, 1)
+        // After eviction the public path recomputes the identical digest.
+        for s in strokes { XCTAssertEqual(BrushStrokeDigest.digest(of: s), RenderCacheHash.digest(s)) }
+    }
+
+    func testMemoEditedStrokeWithSameIDDoesNotAliasAfterEviction() {
+        var memo = BrushStrokeDigest.Memo(byteBudget: 64 * 1024)
+        let a = Self.stroke(1, count: 50)
+        var b = a; b.samples.append(BrushSample(point: CGPoint(x: 0.9, y: 0.9)))
+        memo.store(a, digest: "A")
+        XCTAssertNil(memo.lookup(b))
+        memo.store(b, digest: "B")
+        XCTAssertEqual(memo.lookup(a), "A")
+        XCTAssertEqual(memo.lookup(b), "B")
+    }
+
+    func testBeyondUUIDThresholdRepeatedPaintTicksReuseCommittedDigests() {
+        BrushStrokeDigest.removeAll()
+        let committed = (0..<5000).map { Self.stroke(Double($0 % 7), count: 4).withID(UUID()) }
+        var active = Self.stroke(9, count: 4)
+        _ = BrushStrokeDigest.definitionDigest(of: BrushMaskDefinition(strokes: committed + [active]))
+        let retained = BrushStrokeDigest.retained
+        XCTAssertLessThanOrEqual(retained.ids, BrushStrokeDigest.Memo.idLimit)
+        XCTAssertLessThanOrEqual(retained.bytes, BrushStrokeDigest.defaultByteBudget)
+        // Warm the most recent 4096, then time ticks that touch only the active stroke.
+        _ = BrushStrokeDigest.definitionDigest(of: BrushMaskDefinition(strokes: committed + [active]))
+        let start = ContinuousClock.now
+        for n in 0..<20 {
+            active.samples.append(BrushSample(point: CGPoint(x: 0.5, y: Double(n) / 20)))
+            _ = BrushStrokeDigest.definitionDigest(of: BrushMaskDefinition(strokes: committed + [active]))
+        }
+        let elapsed = ContinuousClock.now - start
+        print("KRMA-1137 5001-stroke recipe: 20 paint ticks in \(elapsed)")
+    }
+}
+
+private extension BrushStroke {
+    func withID(_ id: UUID) -> BrushStroke { var copy = self; copy.id = id; return copy }
 }
