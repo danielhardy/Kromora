@@ -151,7 +151,7 @@ final class DeriveCoordinator {
     /// anything that persists a document, after the OS temp sweep that path can be reused by an
     /// unrelated file, so a stale reference resolves to the *wrong* LUT rather than to none.
     nonisolated static func makeDerivedLUT(
-        cube: [SIMD3<Float>], size: Int, name: String, authoringSpace: WorkingSpace = .sRGB
+        cube: [SIMD3<Float>], size: Int, name: String, authoringSpace: WorkingSpace = .current
     ) -> CubeLUT {
         CubeLUT(cube: cube, size: size, name: name, category: "Derived", authoringSpace: authoringSpace)
     }

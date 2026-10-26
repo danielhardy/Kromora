@@ -124,7 +124,7 @@ struct CubeLUT: Identifiable, Hashable, Sendable {
         category: String = "Derived",
         sourceURL: URL? = nil,
         source: LUTSource = .derived,
-        authoringSpace: WorkingSpace = .sRGB
+        authoringSpace: WorkingSpace = .current
     ) {
         precondition(cube.count == size * size * size, "cube count must equal size^3")
         self.size = size

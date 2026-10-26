@@ -354,7 +354,7 @@ final class CubeLUTTests: TempDirectoryTestCase {
 
         // Compare against an in-memory LUT built from the same values: both must
         // grade an image identically.
-        let inMemory = CubeLUT(cube: cube, size: size, name: "memory")
+        let inMemory = CubeLUT(cube: cube, size: size, name: "memory", authoringSpace: .sRGB)
         let probe = solidImage(red: 0.75, green: 0.5, blue: 0.25)
         let fromFile = try XCTUnwrap(render(try XCTUnwrap(parsed.apply(to: probe))))
         let fromMemory = try XCTUnwrap(render(try XCTUnwrap(inMemory.apply(to: probe))))

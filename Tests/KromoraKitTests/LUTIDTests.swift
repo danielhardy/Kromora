@@ -96,7 +96,7 @@ final class LUTIDTests: TempDirectoryTestCase {
     /// Its stability was confirmed across separate `swift test` processes before it was written down.
     func testTheDerivedIDIsStableAcrossProcesses() {
         let cube = [SIMD3<Float>](repeating: .zero, count: 8)
-        let lut = CubeLUT(cube: cube, size: 2, name: "Pinned")
+        let lut = CubeLUT(cube: cube, size: 2, name: "Pinned", authoringSpace: .sRGB)
         XCTAssertEqual(
             lut.id, "derived://Pinned/df2a1e35e368561a",
             """
