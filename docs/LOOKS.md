@@ -120,6 +120,31 @@ First Look: **Clean Slide** (category "Slide"), gentle S-curve, slightly lifted 
 Bundle size impact: one 33³ text cube is about 970 KB (the 600 KB estimate was low), taking the starter
 folder from about 1.7 MB to about 2.7 MB. Each further Look in the family adds roughly the same.
 
+### Family structural tests (KRMA-1109)
+
+`FilmLookStructureTests` (serial lane) covers every manifest entry whose source is `SlideLookGenerator`;
+a new family Look must be added to its declarations table or the suite fails. It builds a synthetic
+Display P3 chart in the test target (33-step gray ramp, a 12-hue sweep at three luminances, four
+skin-hue patches, and saturated P3 primaries and secondaries beyond sRGB), renders it through each cube
+in a P3 context to float output, and asserts structure only; no golden images, camera, or tolerance
+against the research table. Asserted per Look:
+
+- parses at 33³, is stamped `KROMORA_AUTHORING_SPACE: displayP3` exactly once, reports a `displayP3`
+  authoring space, and records P3 authoring in its manifest notes (an unstamped or sRGB cube does not);
+- the gray ramp is strictly monotonic;
+- the neutral axis behaves as declared (`neutral`: R = G = B; `monochrome`: zero chroma on every patch;
+  `toned`: ordered, tint allowed);
+- no clipping: interior channels are not pinned to 0 or 1 (monochrome Looks are checked by luminance),
+  and the gamut-edge patches stay distinct unless a monochrome Look intentionally maps them to gray;
+- skin-hue patches stay within the declared chroma and hue-shift limit (the skinGuard limit);
+- relative ordering between Looks (saturation and contrast) comes from one table in the test; rows
+  are skipped until both Looks ship;
+- no Fujifilm or film-stock trademark (word-boundary match) in any bundled Look name, manifest entry,
+  bundled cube text, or the Look inspector and save-sheet source strings.
+
+The suite shares one Display P3 `CIContext` across chart renders within each test, since context setup
+is comparatively expensive and these structural checks run in the serial Core Image lane.
+
 ### Save as Look and Derive
 
 Save as Look and Derive sample or fit in one explicit authoring space and stamp it:
