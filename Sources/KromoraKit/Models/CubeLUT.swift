@@ -107,6 +107,45 @@ struct CubeLUT: Identifiable, Hashable, Sendable {
         return space
     }
 
+    // MARK: - Encoding header
+
+    /// The comment key that declares the transfer encoding of the table's node coordinates and values:
+    ///
+    ///     # KROMORA_ENCODING: sRGBTransfer
+    ///
+    /// The runtime interprets every table through the sRGB/Display P3 piecewise transfer function
+    /// (`CIColorCubeWithColorSpace` in the authoring space). `sRGBTransfer` is therefore the only
+    /// supported value, and an absent header means the same. Any other value (for example `hlg`) is
+    /// rejected at parse time rather than silently rendered with the wrong transfer function.
+    static let encodingHeaderKey = "KROMORA_ENCODING"
+    static let supportedEncoding = "sRGBTransfer"
+
+    /// Validates a `KROMORA_ENCODING` comment line; `false` when the line is not a declaration.
+    private static func validateEncodingDeclaration(inComment trimmed: String) throws -> Bool {
+        let body = trimmed.drop(while: { $0 == "#" || $0 == " " || $0 == "\t" })
+        guard body.hasPrefix(encodingHeaderKey) else { return false }
+        let suffix = body.dropFirst(encodingHeaderKey.count)
+        // Do not mistake similarly named vendor comments for this key, but fail closed when the
+        // exact key is present without its required colon. Otherwise a malformed HLG declaration
+        // would be treated as absent and the table could render with the sRGB transfer function.
+        guard suffix.isEmpty || suffix.first == ":" || suffix.first == " " || suffix.first == "\t" else {
+            return false
+        }
+        let rest = suffix.drop(while: { $0 == " " || $0 == "\t" })
+        guard rest.first == ":" else {
+            throw LUTError.invalidFormat(
+                "malformed \(encodingHeaderKey) declaration; expected `\(encodingHeaderKey): <encoding>`"
+            )
+        }
+        let value = rest.dropFirst().trimmingCharacters(in: .whitespaces)
+        guard value == supportedEncoding else {
+            throw LUTError.unsupported(
+                "\(encodingHeaderKey): \(value) is not supported; only \(supportedEncoding) tables can be rendered"
+            )
+        }
+        return true
+    }
+
     // MARK: - Hashable
 
     static func == (lhs: CubeLUT, rhs: CubeLUT) -> Bool { lhs.id == rhs.id }
@@ -264,6 +303,7 @@ struct CubeLUT: Identifiable, Hashable, Sendable {
                 : rawLine
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty || trimmed.hasPrefix("#") {
+                if trimmed.hasPrefix("#") { _ = try Self.validateEncodingDeclaration(inComment: trimmed) }
                 if trimmed.hasPrefix("#"), let space = try Self.authoringSpaceDeclaration(inComment: trimmed) {
                     guard !sawTableData else {
                         throw LUTError.invalidFormat(

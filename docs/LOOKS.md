@@ -108,6 +108,14 @@ sRGB tables. Cube interpolation uses the stamped authoring space (checked agains
 `RenderPipeline`: `WorkingSpace.current` is Display P3, and a cube is applied in its own stamp),
 independent of the canvas/export target.
 
+### Supported encodings
+
+`KROMORA_ENCODING` declares the transfer function of the table. The renderer interprets every table
+through the sRGB/Display P3 piecewise transfer function, so `sRGBTransfer` (or no header) is the only
+supported encoding for authoring and rendering. The generator can still emit `hlg` cubes, but
+`CubeLUT` rejects them with an "unsupported" error at parse time instead of rendering them with the
+wrong transfer. Rendering HLG Looks needs the app-wide HDR/EDR decision in KRMA-1128.
+
 Regenerate the bundled cube with
 `KROMORA_WRITE_SLIDE_LOOKS=1 swift test --filter SlideLookGeneratorTests/testBundledCleanSlideMatchesTheGenerator`;
 without the variable that test fails if the file is stale. The manifest entry is maintained by hand and

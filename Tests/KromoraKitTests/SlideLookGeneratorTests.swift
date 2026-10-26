@@ -44,7 +44,7 @@ final class SlideLookGeneratorTests: XCTestCase {
 
     func testHeaderStampsAuthoringSpaceAndEncodingAndParses() throws {
         for (space, encoding) in [(WorkingSpace.displayP3, SlideLookEncoding.sRGBTransfer),
-                                  (.sRGB, .sRGBTransfer), (.displayP3, .hlg)] {
+                                  (.sRGB, .sRGBTransfer)] {
             let text = generator(space: space, encoding: encoding).cubeText(title: "T", provenance: "P")
             XCTAssertTrue(text.contains("# KROMORA_AUTHORING_SPACE: \(space.rawValue)\n"))
             XCTAssertTrue(text.contains("# KROMORA_ENCODING: \(encoding.rawValue)\n"))
@@ -53,6 +53,45 @@ final class SlideLookGeneratorTests: XCTestCase {
             let lut = try CubeLUT(url: url, source: .user)
             XCTAssertEqual(lut.size, 33)
             XCTAssertEqual(lut.authoringSpace, space)
+        }
+    }
+
+    func testHLGEncodedCubeIsRejectedBeforeItCanRenderWithTheWrongTransfer() throws {
+        let hlgGenerator = generator(space: .displayP3, encoding: .hlg)
+        let input = RGB(0.7, 0.35, 0.25)
+        let generatedColor = hlgGenerator.evaluate(input)
+        XCTAssertGreaterThan(
+            abs(generatedColor.x - input.x) + abs(generatedColor.y - input.y) + abs(generatedColor.z - input.z),
+            0.01,
+            "the HLG chart must contain a non-neutral Look before runtime rejection is checked"
+        )
+
+        let text = hlgGenerator.cubeText(title: "T", provenance: "P")
+        XCTAssertTrue(text.contains("# KROMORA_ENCODING: hlg\n"))
+        let url = try Fixtures.writeCube(text, named: "hlg.cube", in: FileManager.default.temporaryDirectory)
+        defer { try? FileManager.default.removeItem(at: url) }
+        XCTAssertThrowsError(try CubeLUT(url: url, source: .user)) { error in
+            guard case LUTError.unsupported(let message) = error else {
+                return XCTFail("expected unsupported, got \(error)")
+            }
+            XCTAssertTrue(message.contains("hlg"))
+        }
+    }
+
+    func testMalformedEncodingHeaderCannotFallBackToSRGBTransfer() throws {
+        let text = generator().cubeText(title: "T", provenance: "P")
+            .replacingOccurrences(
+                of: "# KROMORA_ENCODING: sRGBTransfer",
+                with: "# KROMORA_ENCODING hlg"
+            )
+        let url = try Fixtures.writeCube(text, named: "malformed-encoding.cube", in: FileManager.default.temporaryDirectory)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        XCTAssertThrowsError(try CubeLUT(url: url, source: .user)) { error in
+            guard case LUTError.invalidFormat(let message) = error else {
+                return XCTFail("expected malformed encoding declaration, got \(error)")
+            }
+            XCTAssertTrue(message.contains("KROMORA_ENCODING"))
         }
     }
 
