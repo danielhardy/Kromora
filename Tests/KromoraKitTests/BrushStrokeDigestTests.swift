@@ -204,7 +204,7 @@ final class BrushStrokeDigestTests: XCTestCase {
         let retained = BrushStrokeDigest.retained
         XCTAssertLessThanOrEqual(retained.ids, BrushStrokeDigest.Memo.idLimit)
         XCTAssertLessThanOrEqual(retained.bytes, BrushStrokeDigest.defaultByteBudget)
-        // Warm the most recent 4096, then time ticks that touch only the active stroke.
+        // Prewarm committed digests, then time ticks that encode only the changed active stroke.
         _ = BrushStrokeDigest.definitionDigest(of: BrushMaskDefinition(strokes: committed + [active]))
         let start = ContinuousClock.now
         for n in 0..<20 {
