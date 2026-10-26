@@ -2360,6 +2360,7 @@ actor RenderEngine: RenderEngining {
             ),
             scale: RenderScaleKey(scale, nativeExtent: source.nativeExtent),
             sourceROI: sourceROI,
+            geometry: PrefixGeometryKey(document),
             space: space,
             includePostRenderWhiteBalance: includePostRenderWhiteBalance,
             pipelineVersion: RenderPipeline.pixelEpoch
@@ -2432,6 +2433,7 @@ actor RenderEngine: RenderEngining {
             maskPayloadVersion: cacheIdentity.payloadVersion,
             scale: RenderScaleKey(scale, nativeExtent: source.nativeExtent),
             sourceROI: sourceROI,
+            geometry: PrefixGeometryKey(document),
             space: space,
             includePostRenderWhiteBalance: includePostRenderWhiteBalance,
             pipelineVersion: RenderPipeline.pixelEpoch

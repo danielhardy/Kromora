@@ -884,6 +884,112 @@ final class CropWorkflowTests: TempDirectoryTestCase {
         viewModel.endPreviewInteraction()
     }
 
+    /// The drawn texture, not just the published image, must change with each live perspective value.
+    func testLivePerspectiveChangesTheDrawnTextureOnBothAxes() async throws {
+        let size = 160
+        let context = try XCTUnwrap(CGContext(
+            data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.setFillColor(CGColor(gray: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: size, height: size))
+        context.setFillColor(CGColor(gray: 0, alpha: 1))
+        for step in stride(from: 8, to: size, by: 24) {
+            context.fill(CGRect(x: step, y: 0, width: 6, height: size))
+            context.fill(CGRect(x: 0, y: step, width: size, height: 6))
+        }
+        let url = try Fixtures.writePNG(
+            try XCTUnwrap(context.makeImage()), named: "grid-drawn.png", in: tempDirectory)
+        let viewModel = makeAppViewModel(engine: RenderEngine(), editStore: makeInMemoryEditStore())
+        viewModel.openImage(url: url)
+        try await waitUntil("the source image") { viewModel.sourceImage != nil }
+        try await waitUntil("the first presented frame") { viewModel.previewSurface.image != nil }
+
+        viewModel.beginCrop()
+        viewModel.beginPreviewInteraction()
+        let coordinator = PreviewSurfaceView.Coordinator()
+        func drawnBytes() async throws -> [UInt8] {
+            let surface = viewModel.previewSurface
+            try await waitUntil("a materialized texture") { surface.presentationTexture != nil }
+            let texture = try XCTUnwrap(coordinator.renderRetainedTexture(
+                surface: surface, navigation: viewModel.canvasState.navigation,
+                destinationSize: CGSize(width: 160, height: 160)))
+            var bytes = [UInt8](repeating: 0, count: texture.width * texture.height * 4)
+            bytes.withUnsafeMutableBytes { raw in
+                texture.getBytes(
+                    raw.baseAddress!, bytesPerRow: texture.width * 4,
+                    from: MTLRegionMake2D(0, 0, texture.width, texture.height), mipmapLevel: 0)
+            }
+            return bytes
+        }
+        var previous = try await drawnBytes()
+        let changes: [(String, @MainActor () -> Void)] = [
+            ("vertical +", { viewModel.setCropVerticalPerspective(0.3) }),
+            ("vertical -", { viewModel.setCropVerticalPerspective(-0.3) }),
+            ("horizontal +", { viewModel.setCropHorizontalPerspective(0.3) }),
+            ("horizontal -", { viewModel.setCropHorizontalPerspective(-0.3) }),
+        ]
+        for (name, change) in changes {
+            let before = viewModel.previewSurface.revision
+            change()
+            try await waitUntil("\(name) presented frame") {
+                viewModel.previewSurface.revision > before
+                    && viewModel.previewSurface.presentationTexture != nil
+            }
+            let current = try await drawnBytes()
+            XCTAssertNotEqual(current, previous, "\(name) must change the drawn texture")
+            previous = current
+        }
+        viewModel.endPreviewInteraction()
+    }
+
+    /// The drawn texture, not just the published image, must change with each live perspective value.
+    /// A tone curve adds prefix work, which the engine caches for reduced-scale renders. The
+    /// cache key must include the crop geometry, or perspective set after the prefix was cached
+    /// keeps returning the unwarped image.
+    func testLivePerspectiveStillAppliesAfterAToneCurveEdit() async throws {
+        let size = 600
+        let context = try XCTUnwrap(CGContext(
+            data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.setFillColor(CGColor(gray: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: size, height: size))
+        context.setFillColor(CGColor(gray: 0.2, alpha: 1))
+        for step in stride(from: 20, to: size, by: 60) {
+            context.fill(CGRect(x: step, y: 0, width: 6, height: size))
+            context.fill(CGRect(x: 0, y: step, width: size, height: 6))
+        }
+        let url = try Fixtures.writePNG(
+            try XCTUnwrap(context.makeImage()), named: "curve-grid.png", in: tempDirectory)
+        let viewModel = makeAppViewModel(engine: RenderEngine(), editStore: makeInMemoryEditStore())
+        viewModel.openImage(url: url)
+        try await waitUntil("the source image") { viewModel.sourceImage != nil }
+        try await waitUntil("the first presented frame") { viewModel.previewSurface.image != nil }
+        viewModel.addToneCurvePoint(input: 0.5, output: 0.35)
+        try await waitUntil("the curve edit") { !viewModel.document.light.toneCurve.isIdentity }
+
+        viewModel.beginCrop()
+        viewModel.beginPreviewInteraction()
+        let ciContext = CIContext()
+        func presentedBytes() throws -> [UInt8] {
+            let image = try XCTUnwrap(viewModel.previewSurface.image)
+            return try Pixels.bytes(of: try XCTUnwrap(ciContext.createCGImage(image, from: image.extent)))
+        }
+        try await Task.sleep(for: .seconds(1))
+        viewModel.setCropHorizontalPerspective(0)
+        try await Task.sleep(for: .milliseconds(800))
+        let neutral = try presentedBytes()
+        let before = viewModel.previewSurface.revision
+        viewModel.setCropHorizontalPerspective(0.65)
+        try await waitUntil("the perspective frame") { viewModel.previewSurface.revision > before }
+        try await Task.sleep(for: .milliseconds(800))
+        XCTAssertNotEqual(try presentedBytes(), neutral, "perspective must change the frame with a tone curve applied")
+        viewModel.endPreviewInteraction()
+    }
+
     func testCropStraightenUsesViewSpaceRotationWhileThePreviewRequestStaysUnstraightened() async throws {
         let fake = FakeRenderEngine()
         let url = try Fixtures.writeGradientPNG(

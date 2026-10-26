@@ -83,6 +83,45 @@ enum ProcessingPrefixStage: String, Hashable, Sendable {
     case postLocal
 }
 
+/// The geometry applied to the developed source before the prefix is built. The prefix document
+/// digest neutralizes `crop`, but the cached image is built from the transformed source, so a
+/// flip, straighten, or perspective change must miss.
+struct PrefixGeometryKey: Hashable, Sendable {
+    let rotation: ImageRotation
+    let flipHorizontal: Bool
+    let flipVertical: Bool
+    let straightenAngle: Double
+    let verticalPerspective: Double
+    let horizontalPerspective: Double
+
+    static let neutral = PrefixGeometryKey(
+        rotation: .zero, flipHorizontal: false, flipVertical: false,
+        straightenAngle: 0, verticalPerspective: 0, horizontalPerspective: 0
+    )
+
+    init(
+        rotation: ImageRotation, flipHorizontal: Bool, flipVertical: Bool,
+        straightenAngle: Double, verticalPerspective: Double, horizontalPerspective: Double
+    ) {
+        self.rotation = rotation
+        self.flipHorizontal = flipHorizontal
+        self.flipVertical = flipVertical
+        self.straightenAngle = straightenAngle
+        self.verticalPerspective = verticalPerspective
+        self.horizontalPerspective = horizontalPerspective
+    }
+
+    init(_ document: EditDocument) {
+        self.init(
+            rotation: document.rotation,
+            flipHorizontal: document.crop.flipHorizontal, flipVertical: document.crop.flipVertical,
+            straightenAngle: document.crop.straightenAngle,
+            verticalPerspective: document.crop.verticalPerspective,
+            horizontalPerspective: document.crop.horizontalPerspective
+        )
+    }
+}
+
 /// Identity for the one intentionally materialized expensive prefix.
 struct ProcessingPrefixCacheKey: Hashable, Sendable {
     let source: RenderSourceFingerprint
@@ -94,6 +133,7 @@ struct ProcessingPrefixCacheKey: Hashable, Sendable {
     let maskPayloadVersion: String?
     let scale: RenderScaleKey
     let sourceROI: CGRect?
+    let geometry: PrefixGeometryKey
     let space: WorkingSpace
     let includePostRenderWhiteBalance: Bool
     let pipelineVersion: Int
@@ -108,6 +148,7 @@ struct ProcessingPrefixCacheKey: Hashable, Sendable {
         maskPayloadVersion: String? = nil,
         scale: RenderScaleKey,
         sourceROI: CGRect?,
+        geometry: PrefixGeometryKey = .neutral,
         space: WorkingSpace,
         includePostRenderWhiteBalance: Bool,
         pipelineVersion: Int
@@ -121,6 +162,7 @@ struct ProcessingPrefixCacheKey: Hashable, Sendable {
         self.maskPayloadVersion = maskPayloadVersion
         self.scale = scale
         self.sourceROI = sourceROI
+        self.geometry = geometry
         self.space = space
         self.includePostRenderWhiteBalance = includePostRenderWhiteBalance
         self.pipelineVersion = pipelineVersion
