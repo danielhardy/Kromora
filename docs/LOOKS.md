@@ -69,7 +69,7 @@ effect, not every wide-gamut input color.
 
 ### P3 starter assets
 
-`Sources/KromoraKit/Resources/StarterLooks` holds the active Display P3 set of the 13 starter Looks
+`Sources/KromoraKit/Resources/StarterLooks` holds the active Display P3 set of the 13 resampled starter Looks plus the directly authored slide family
 (stable ids, names and categories, all stamped `displayP3`). The sRGB originals, the defined source
 parameters, are kept outside the bundle in `scripts/starter-looks-srgb`.
 
@@ -85,8 +85,40 @@ Visual review (2026-10-25, recorded in each manifest entry's `approval`, record
 `KRMA-1121-P3-STARTER-2026-10-25`): neutrals agree within 4/255 for every Look (asserted by
 `BundledP3LookTests` against the sRGB sources); in-gamut colors match closely, while fully
 saturated primaries differ most (up to about 18/255, in Warm Slide, Evening Cinema, Muted Film and
-Honey Negative) because the P3 lattice samples a nonlinear conversion. The film-Look generator
-(KRMA-1103) should emit and stamp the same authoring space.
+Honey Negative) because the P3 lattice samples a nonlinear conversion. The slide-family generator below
+emits and stamps the same authoring space.
+
+### Slide family generator (KRMA-1103)
+
+`Tests/KromoraKitTests/SlideLookGenerator.swift` is a test-target tool that turns a
+`SlideLookParameters` value into a 33³ `.cube`, byte-for-byte reproducible (fixed `%.6f` formatting, no
+timestamps). Parameters: `toneCurve` (toe, slope, shoulder; strictly monotonic and per channel, so
+the neutral axis stays neutral and mid gray is unchanged), `globalSaturation`, 12 `hueSectors`
+(saturation multiplier and hue shift in degrees, smoothly and periodically interpolated),
+`chromeDepth` (luminance reduction proportional to saturation, warm and blue strengths),
+`shadowTint` / `highlightTint` (luma-held split tone) and `skinGuard` (removes that fraction of the
+hue, saturation and chrome change in the skin-hue range).
+
+The generator takes the authoring space (`WorkingSpace`, Display P3 by default) and an encoding
+(`sRGBTransfer`, the default, or `hlg` as the extended-range HDR option). It stamps
+`KROMORA_AUTHORING_SPACE` and `KROMORA_ENCODING` into the cube header, so the family can be
+regenerated for another space instead of redesigned. Cube inputs stay in 0...1; colors outside the
+authoring gamut are not represented. Parameters are expressed directly in P3, not converted from
+sRGB tables. Cube interpolation uses the stamped authoring space (checked against `CubeLUT` and
+`RenderPipeline`: `WorkingSpace.current` is Display P3, and a cube is applied in its own stamp),
+independent of the canvas/export target.
+
+Regenerate the bundled cube with
+`KROMORA_WRITE_SLIDE_LOOKS=1 swift test --filter SlideLookGeneratorTests/testBundledCleanSlideMatchesTheGenerator`;
+without the variable that test fails if the file is stale. The manifest entry is maintained by hand and
+`scripts/generate-p3-starter-looks.swift generate` carries it forward. Parameter values are best-guess
+approximations of public qualitative descriptions (`FILM_SIMULATION_LOOKS_RESEARCH.md`); there is no
+reference to verify against, and tests check structure only (monotonic tone, neutrals, no clipping,
+ordering), never a camera or tolerance.
+
+First Look: **Clean Slide** (category "Slide"), gentle S-curve, slightly lifted reds, light chrome depth.
+Bundle size impact: one 33³ text cube is about 970 KB (the 600 KB estimate was low), taking the starter
+folder from about 1.7 MB to about 2.7 MB. Each further Look in the family adds roughly the same.
 
 ### Save as Look and Derive
 

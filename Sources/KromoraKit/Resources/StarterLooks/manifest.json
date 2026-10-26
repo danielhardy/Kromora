@@ -234,6 +234,24 @@
       "resource" : "hard-light.cube",
       "source" : "Original in-house procedural asset; authored for Kromora. Display P3 regeneration: scripts/generate-p3-starter-looks.swift resamples the sRGB control lattice of the same Look onto a 17^3 Display P3 lattice (colour-managed conversion, not a relabelled sRGB table).",
       "sourceAuthor" : "Kromora project contributors"
+    },
+    {
+      "approval" : {
+        "approvedAt" : "2026-10-26",
+        "notes" : "Display P3 authoring space (KROMORA_AUTHORING_SPACE: displayP3), sRGB transfer encoding (KROMORA_ENCODING: sRGBTransfer), 33^3 lattice, inputs bounded to 0...1. Parameters are expressed in P3, not converted from sRGB tables; colours outside the P3 gamut are not represented. WorkingSpace.current is Display P3 and Look interpolation uses the cube's stamp (checked against RenderPipeline/CubeLUT). Best-guess approximation of a described neutral slide character; reviewed by eye on neutral RAW develops only, no fidelity to any camera claimed; no camera profile, reference pair or commercial emulation data used.",
+        "recordID" : "KRMA-1103-CLEAN-SLIDE-2026-10-26",
+        "reviewer" : "KRMA-1103 structural verification (SlideLookGeneratorTests); no reference to match",
+        "status" : "approved"
+      },
+      "attribution" : "No third-party attribution required; retain the Kromora MIT notice.",
+      "category" : "Slide",
+      "id" : "kromora.starter.clean-slide",
+      "license" : "MIT License (Kromora project license)",
+      "name" : "Clean Slide",
+      "redistribution" : "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement.",
+      "resource" : "clean-slide.cube",
+      "source" : "Original in-house procedural asset; authored for Kromora. Generated deterministically from SlideLookParameters.cleanSlide by Tests/KromoraKitTests/SlideLookGenerator.swift (regenerate with KROMORA_WRITE_SLIDE_LOOKS=1 swift test --filter SlideLookGeneratorTests/testBundledCleanSlideMatchesTheGenerator); 33^3 lattice authored directly in Display P3.",
+      "sourceAuthor" : "Kromora project contributors"
     }
   ],
   "schemaVersion" : 1

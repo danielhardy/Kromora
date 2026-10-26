@@ -9,7 +9,7 @@ are separate controls that Kromora already exposes as ordinary sliders.
 
 ## What a film simulation is
 
-A Fujifilm film simulation is a fixed in-camera transform from developed RAW to an sRGB JPEG. It is
+A Fujifilm film simulation is a fixed in-camera transform from developed RAW to an sRGB JPEG. (Kromora's Looks are not sRGB: they are authored in Display P3, the editor's working space, so this describes the source behavior, not the target encoding.) It is
 the combination of:
 
 1. a **tone curve** (toe, midtone slope, shoulder);
@@ -107,8 +107,9 @@ Hue-sector entries are written as saturation multiplier and hue shift. "–" mea
 - **Where they come from.** The existing procedural generator is not in the repo scripts. A new
   deterministic generator (script or test-target tool) that emits the cubes from the parameter
   table keeps them reproducible and reviewable.
-- **Input color space.** A cube is interpreted in the working color space at render time. Author
-  and verify against that space, and record it in the manifest notes.
+- **Input color space.** Per ADR-KRMA-1115 the family is authored in Display P3 (`WorkingSpace.current`),
+  stamped `KROMORA_AUTHORING_SPACE: displayP3`, and recorded in the manifest notes. Hue and saturation
+  targets below are described qualitatively and are tuned in P3; do not relabel sRGB tables.
 - **Base-look ordering.** Because the Look runs before Exposure/Color sliders, the Looks do not
   need to compensate for exposure; they should be exposure-neutral at middle gray.
 - **Intensity.** The existing Look Intensity crossfade is the Weak/Strong control; no extra

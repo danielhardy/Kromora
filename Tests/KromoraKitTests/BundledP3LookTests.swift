@@ -26,19 +26,24 @@ final class BundledP3LookTests: XCTestCase {
 
     func testTheActiveStarterSetIsDisplayP3() throws {
         let library = BundledLookLibrary.load()
-        XCTAssertEqual(library.looks.count, 13)
+        XCTAssertEqual(library.looks.count, 14)
         XCTAssertTrue(library.warnings.isEmpty, "\(library.warnings)")
         XCTAssertTrue(library.looks.allSatisfy { $0.authoringSpace == .displayP3 })
         XCTAssertEqual(BundledLookLibrary.resourceSubdirectory, "Resources/StarterLooks")
         let manifest = try BundledLookLibrary.validate(subdirectory: BundledLookLibrary.resourceSubdirectory)
         XCTAssertTrue(manifest.looks.allSatisfy { $0.approval.notes.contains("Display P3") })
-        XCTAssertTrue(manifest.looks.allSatisfy { $0.source.contains("generate-p3-starter-looks") })
+        // The 13 resampled starters name the P3 script; the film-family Looks are authored directly in P3.
+        XCTAssertTrue(manifest.looks.allSatisfy {
+            $0.source.contains("generate-p3-starter-looks") || $0.source.contains("SlideLookGenerator")
+        })
     }
 
     func testP3TablesAreRegeneratedNotRetagged() throws {
         let sources = try sourceLooks()
-        XCTAssertEqual(Set(sources.keys), Set(BundledLookLibrary.load().looks.map(\.id)))
-        for p3 in BundledLookLibrary.load().looks {
+        let resampled = BundledLookLibrary.load().looks.filter { sources[$0.id] != nil }
+        XCTAssertEqual(Set(sources.keys), Set(resampled.map(\.id)))
+        XCTAssertEqual(resampled.count, 13)
+        for p3 in resampled {
             let srgb = try XCTUnwrap(sources[p3.id])
             XCTAssertEqual(srgb.authoringSpace, .sRGB)
             XCTAssertGreaterThan(p3.size, srgb.size, "\(p3.name) is resampled on a finer P3 lattice")
@@ -66,7 +71,8 @@ final class BundledP3LookTests: XCTestCase {
         }
         let sources = try sourceLooks()
         for p3 in BundledLookLibrary.load().looks {
-            let a = try render(try XCTUnwrap(sources[p3.id]))
+            guard let source = sources[p3.id] else { continue }   // directly authored Looks have no sRGB source
+            let a = try render(source)
             let b = try render(p3)
             for i in 0..<steps {
                 for c in 0..<3 {
