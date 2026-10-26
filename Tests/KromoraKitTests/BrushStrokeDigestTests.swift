@@ -196,6 +196,57 @@ final class BrushStrokeDigestTests: XCTestCase {
         XCTAssertEqual(memo.lookup(b), "B")
     }
 
+    func testOverlayDigestsCoverOnlyTheSelectedComponent() {
+        BrushStrokeDigest.removeAll()
+        let selectedStrokes = (0..<3).map { Self.stroke(Double($0)).withID(UUID()) }
+        let otherStrokes = (0..<50).map { Self.stroke(Double($0)).withID(UUID()) }
+        let selected = MaskComponent(source: .brush(BrushMaskDefinition(strokes: selectedStrokes)))
+        let other = MaskComponent(source: .brush(BrushMaskDefinition(strokes: otherStrokes)))
+        let layer = LocalAdjustmentLayer(components: [other, selected])
+
+        let digests = RenderDocumentIdentity.maskComponentDigests(
+            for: [layer], onlyComponentID: selected.id)
+        XCTAssertEqual(digests.entries.map(\.id), [selected.id])
+        XCTAssertNil(digests.definitionHash(for: other))
+        XCTAssertEqual(BrushStrokeDigest.retained.ids, selectedStrokes.count,
+                       "unrelated component definitions were hashed")
+
+        let again = RenderDocumentIdentity.maskComponentDigests(
+            for: [layer], onlyComponentID: selected.id)
+        XCTAssertEqual(again, digests)
+        XCTAssertEqual(BrushStrokeDigest.retained.ids, selectedStrokes.count)
+
+        XCTAssertEqual(
+            RenderDocumentIdentity.maskComponentDigests(for: [layer]).entries.count, 2)
+    }
+
+    func testRepeatedOverlayRequestsReuseCompletedDefinitionDigest() {
+        BrushStrokeDigest.removeAll()
+        let strokes = (0..<2000).map { Self.stroke(Double($0 % 7), count: 4).withID(UUID()) }
+        let selected = MaskComponent(source: .brush(BrushMaskDefinition(strokes: strokes)))
+        let other = MaskComponent(source: .brush(BrushMaskDefinition(strokes: [Self.stroke(3).withID(UUID())])))
+        let layer = LocalAdjustmentLayer(components: [other, selected])
+
+        let first = RenderDocumentIdentity.maskComponentDigests(for: [layer], onlyComponentID: selected.id)
+        let afterFirst = BrushStrokeDigest.definitionComputations
+        for _ in 0..<5 {
+            XCTAssertEqual(
+                RenderDocumentIdentity.maskComponentDigests(for: [layer], onlyComponentID: selected.id), first)
+        }
+        XCTAssertEqual(BrushStrokeDigest.definitionComputations, afterFirst,
+                       "unchanged component recomputed its definition digest")
+        XCTAssertNil(first.definitionHash(for: other), "unrelated component was digested")
+
+        var edited = strokes
+        edited[0].samples.append(BrushSample(point: CGPoint(x: 0.9, y: 0.9)))
+        var changed = selected
+        changed.source = .brush(BrushMaskDefinition(strokes: edited))
+        let second = RenderDocumentIdentity.maskComponentDigests(
+            for: [LocalAdjustmentLayer(components: [changed])], onlyComponentID: selected.id)
+        XCTAssertEqual(BrushStrokeDigest.definitionComputations, afterFirst + 1)
+        XCTAssertNotEqual(second.definitionHash(for: changed), first.definitionHash(for: selected))
+    }
+
     func testBeyondUUIDThresholdRepeatedPaintTicksReuseCommittedDigests() {
         BrushStrokeDigest.removeAll()
         let committed = (0..<5000).map { Self.stroke(Double($0 % 7), count: 4).withID(UUID()) }

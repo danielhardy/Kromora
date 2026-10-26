@@ -114,12 +114,49 @@ enum BrushStrokeDigest {
         return digest
     }
 
+    /// Completed definition digests for the few most recently requested brush components, so
+    /// repeated overlay requests for an unchanged component skip rebuilding the ordered payload.
+    /// Hits are decided by `==`, so any change to the strokes misses. Session-only, never persisted.
+    struct DefinitionMemo {
+        static let entryLimit = 4
+        private var entries: [(definition: BrushMaskDefinition, digest: String)] = []
+
+        mutating func lookup(_ definition: BrushMaskDefinition) -> String? {
+            guard let index = entries.firstIndex(where: { $0.definition == definition }) else { return nil }
+            let hit = entries.remove(at: index)
+            entries.insert(hit, at: 0)
+            return hit.digest
+        }
+
+        mutating func store(_ definition: BrushMaskDefinition, digest: String) {
+            entries.removeAll { $0.definition == definition }
+            entries.insert((definition, digest), at: 0)
+            while entries.count > Self.entryLimit { entries.removeLast() }
+        }
+
+        mutating func removeAll() { entries.removeAll() }
+    }
+    private static let definitionMemo = Mutex<DefinitionMemo>(DefinitionMemo())
+    private static let definitionComputationCount = Atomic<Int>(0)
+
+    /// Diagnostics for tests: number of definition digests built without a definition-memo hit.
+    static var definitionComputations: Int { definitionComputationCount.load(ordering: .relaxed) }
+
     /// Diagnostics for tests: bytes and IDs currently retained by the process-wide memo.
     static var retained: (bytes: Int, ids: Int) { memo.withLock { ($0.retainedBytes, $0.idCount) } }
 
     /// Deterministic SHA-256 over the ordered per-stroke digests. Reordering, editing, adding, or
     /// removing a stroke changes it; an unchanged stroke list keeps it.
     static func definitionDigest(of definition: BrushMaskDefinition) -> String {
+        if let remembered = definitionMemo.withLock({ $0.lookup(definition) }) { return remembered }
+        let digest = computeDefinitionDigest(of: definition)
+        guard !digest.hasPrefix("encoding-failed:") else { return digest }
+        definitionMemo.withLock { $0.store(definition, digest: digest) }
+        return digest
+    }
+
+    private static func computeDefinitionDigest(of definition: BrushMaskDefinition) -> String {
+        definitionComputationCount.add(1, ordering: .relaxed)
         var payload = "brush-strokes-v1"
         for stroke in definition.strokes {
             let strokeDigest = digest(of: stroke)
@@ -139,5 +176,8 @@ enum BrushStrokeDigest {
     /// `JSONEncoder.userInfo` flag selecting the session-only brush encoding.
     static let sessionIdentityKey = CodingUserInfoKey(rawValue: "Kromora.sessionBrushIdentity")!
 
-    static func removeAll() { memo.withLock { $0.removeAll() } }
+    static func removeAll() {
+        memo.withLock { $0.removeAll() }
+        definitionMemo.withLock { $0.removeAll() }
+    }
 }
