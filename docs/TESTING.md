@@ -848,6 +848,23 @@ Proposed targets (proposals only; nothing is adopted in code, and KRMA-952 decid
 
 Reproduce with the command above; do not run `scripts/run-kromora-capture.sh` for this question.
 
+### Bundled Look load cost (KRMA-1113, 2026-10-26)
+
+`BundledLookLibrary.load()` runs synchronously inside `LUTLibrary.init` on the main thread. Measured in a
+release build (`swift test -c release -Xswiftc -enable-testing`, no window) on Apple M4 Pro with 20
+generated 33^3 text cubes (35,937 rows each, ~750,000 lines):
+
+| Loader | 20 x 33^3 cubes | Shipping set (14 cubes, one 33^3) |
+| --- | --- | --- |
+| Serial (before) | 0.748-0.753 s, main thread | 0.109 s |
+| Parallel across cores (after) | 0.216-0.239 s, main thread | not re-measured |
+
+About 37 ms per 33^3 cube serially, which is too much to add to launch for ~20 cubes. The fix parses the
+independent cubes with `DispatchQueue.concurrentPerform` and folds results back in manifest order, so
+duplicate detection, warnings, stable ids and Look output are unchanged. The load is still on the main
+thread (~0.22 s for the full film family); moving it off the main actor or to a binary resource is the
+next step if the budget is tightened.
+
 ### Render-key hashing baseline (KRMA-954, 2026-10-24)
 
 `RenderKeyHashingBenchmark` (optional lane; `KROMORA_RENDER_KEY_BENCHMARK=1 swift test -c release

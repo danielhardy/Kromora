@@ -1,4 +1,6 @@
+import Dispatch
 import Foundation
+import Synchronization
 
 /// The provenance record shipped beside each starter Look. Keeping this data in the bundle makes
 /// licensing review auditable without relying on a release note or a human-maintained spreadsheet.
@@ -98,6 +100,24 @@ struct BundledLookLibrary: Sendable {
         }
     }
 
+    private static func parseEntry(_ entry: BundledLookManifest.Entry, resourceDirectory: URL) throws -> CubeLUT {
+        try validateProvenance(entry)
+        guard isSafeRelativePath(entry.resource) else {
+            throw ValidationError.invalid("unsafe resource path \(entry.resource)")
+        }
+        let resourceURL = resourceDirectory.appendingPathComponent(entry.resource)
+        guard FileManager.default.fileExists(atPath: resourceURL.path) else {
+            throw ValidationError.missingResource(entry.resource)
+        }
+        return try CubeLUT(
+            url: resourceURL,
+            category: entry.category,
+            source: .bundled,
+            displayName: entry.name,
+            stableID: entry.id
+        )
+    }
+
     /// Runtime loader seam used to exercise partial-library behavior without modifying packaged
     /// resources. It is also useful to release tooling that stages a bundle before final signing.
     static func load(
@@ -108,23 +128,19 @@ struct BundledLookLibrary: Sendable {
         var warnings: [String] = []
         var seenIDs = Set<String>()
 
-        for entry in manifest.looks {
+        // Each 33^3 cube is ~36,000 text rows, so parsing is the launch cost. The cubes are
+        // independent, so parse them across cores and fold the results back in manifest order,
+        // which keeps duplicate detection and warning order deterministic.
+        let entries = manifest.looks
+        let parsed = Mutex([Result<CubeLUT, any Error>?](repeating: nil, count: entries.count))
+        DispatchQueue.concurrentPerform(iterations: entries.count) { index in
+            let result = Result { try parseEntry(entries[index], resourceDirectory: resourceDirectory) }
+            parsed.withLock { $0[index] = result }
+        }
+
+        for (entry, result) in zip(entries, parsed.withLock { $0 }) {
             do {
-                try validateProvenance(entry)
-                guard isSafeRelativePath(entry.resource) else {
-                    throw ValidationError.invalid("unsafe resource path \(entry.resource)")
-                }
-                let resourceURL = resourceDirectory.appendingPathComponent(entry.resource)
-                guard FileManager.default.fileExists(atPath: resourceURL.path) else {
-                    throw ValidationError.missingResource(entry.resource)
-                }
-                let lut = try CubeLUT(
-                    url: resourceURL,
-                    category: entry.category,
-                    source: .bundled,
-                    displayName: entry.name,
-                    stableID: entry.id
-                )
+                let lut = try result!.get()
                 guard seenIDs.insert(lut.id).inserted else {
                     throw ValidationError.duplicate("resource identity \(lut.id)")
                 }
