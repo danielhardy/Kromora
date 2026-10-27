@@ -179,6 +179,19 @@ final class ExportSemanticMaskTests: TempDirectoryTestCase {
             "Exported 1 of 3 (2 failed; first: a: no mask) to out"
         )
     }
+
+    func testCancelledSummaryKeepsTheFailureReason() {
+        let outcome = ExportCoordinator.BatchOutcome(
+            exported: 1, failed: 2, total: 4, cancelled: true,
+            failures: [
+                .init(name: "a", reason: "no mask"), .init(name: "b", reason: "no disk"),
+            ]
+        )
+        XCTAssertEqual(
+            ExportCoordinator.summary(for: outcome, folder: URL(fileURLWithPath: "/tmp/out")),
+            "Export cancelled after 3 of 4 (1 exported, 2 failed; first: a: no mask, 1 not started) to out"
+        )
+    }
 }
 
 private actor ExportStubSubjectMaskProvider: SemanticMaskProviding {

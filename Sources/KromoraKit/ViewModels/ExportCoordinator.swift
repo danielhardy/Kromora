@@ -991,7 +991,7 @@ final class ExportCoordinator {
         if outcome.cancelled {
             let processed = outcome.exported + outcome.failed
             let remaining = max(0, outcome.total - processed)
-            return "Export cancelled after \(processed) of \(outcome.total) (\(outcome.exported) exported, \(outcome.failed) failed, \(remaining) not started)\(photosSummary(for: outcome)) to \(destination)"
+            return "Export cancelled after \(processed) of \(outcome.total) (\(outcome.exported) exported, \(outcome.failed) failed\(failureDetail(for: outcome)), \(remaining) not started)\(photosSummary(for: outcome)) to \(destination)"
         }
         if outcome.failed == 0 {
             let plural = outcome.exported == 1 ? "" : "s"
