@@ -248,7 +248,7 @@ Cause: `FileHandle.read(upToCount:)` returns autoreleased chunks, and the import
 inside a single worker job, so no autorelease pool drained until the whole batch finished. Footprint
 rose by about 2x the batch size (one read to stage or hash, one to verify), about 185 MB per
 real RAW, reaching 38 GB for 240 files. Each chunk loop on the import path now drains its own pool.
-Metadata extraction also drains its per-source ImageIO temporaries before the next file is processed.
+Each source is also processed inside its own autorelease pool (KRMA-1140, below).
 
 Measured 2026-10-27 on an Apple M1 Pro with 16 GB, macOS 27.0.1, debug build, four real ARW sources
 (47 to 122 MB) repeated with unique trailing bytes. `phys_footprint` at the end of the import:
@@ -259,21 +259,60 @@ Measured 2026-10-27 on an Apple M1 Pro with 16 GB, macOS 27.0.1, debug build, fo
 | 120 | not run | 75 MiB |
 | 240 | about 38,000 MiB (see KRMA-1139) | 124 MiB |
 
-Ceiling for a 16 GB Mac: the importer should stay under 1 GiB for a 240-file batch; the measured
-124 MiB leaves wide margin. A residual growth of about 0.45 MB per file remains, linear and not yet
-attributed (it is not chunk retention); it projects to about 450 MiB for 1,000 files. This measures
-the importer alone. The supervised app-level re-run is recorded in KRMA-1016: all 240 full-size
-ARWs imported; scan peak was 4.1 GB, import peak 2.8 GB, and footprint settled to 565 MB. It used
-the unsandboxed development build, and a parallel test run overlapped later GUI steps, so this is
-import evidence rather than completion of the full 16 GB soak. An independent opt-in
-verification run cycled the 120-file `b120` fixture set twice through the 240-file importer path.
-Footprint started at 12 MiB, reached 28 MiB after 10 commits, then rose by about 4–5 MiB per 10
-commits to 124 MiB at 240; peak and final readings were both 124 MiB. The per-source metadata pool
-reduced the previous 131 MiB measurement to 124 MiB, but did not remove the residual per-file slope.
-Follow-up KRMA-1140 will investigate that remaining growth. The deterministic guard is
-`PortablePackageImportMemoryTests/testStagingDoesNotRetainSourceChunksAcrossABatch`, which imports 16
-sparse 48 MiB files in both copy modes and fails if footprint grows by more than a quarter of the
-batch (it measured 1,554 MiB before the fix).
+Ceiling for a 16 GB Mac: the importer should stay under 1 GiB for a 240-file batch.
+
+Residual growth (KRMA-1140). After the chunk fix, footprint still rose about 0.45 MiB per imported
+file (12 to 124 MiB over 240 files, linear). It is now attributed and fixed. Each importer stage
+was run alone over 240 unique-path clones of the same four ARWs, one process per stage
+(`PortablePackageImportMemoryTests/testAttributeResidualFootprintByStage`, with
+`KROMORA_IMPORT_MEMORY_PHASE=clone|metadata|fingerprint|begin|stage|commit|full`; add
+`KROMORA_IMPORT_MEMORY_VMMAP=1`, and `MallocStackLogging=1` for stacks, to dump `vmmap`, `heap`
+and `malloc_history` at the end). Last-half slope per file:
+
+| Stage | Slope |
+| --- | ---: |
+| clone, metadata read, source fingerprint | 1 KiB |
+| begin and abort a transaction | 26 KiB |
+| stage a RAW and abort | 60 KiB |
+| stage a RAW and commit | 140 KiB |
+| full importer | 447 KiB |
+
+`heap` at the end of a full 240-file run listed 108,000 live `NSPathStore2` (43 MB), 78,000
+`CFString`, 54,000 Swift string storages and 3,200 10 KB `NSConcreteData` blocks, plus
+autorelease-pool pages. `malloc_history` put the path strings under `PackagePath.url(in:)`
+(`standardizedFileURL`, `resolvingSymlinks`) in `PortablePackageTransaction.commit` and under the
+catalog and lease work between stages. The cause is the same mechanism as the chunk growth: those
+Foundation calls return autoreleased temporaries and the whole batch runs in one worker job, so
+nothing drained until it returned. It is not live per-item state (the catalog, hash index and
+result arrays are a few KiB per file), not ImageIO caching (metadata alone is flat) and not
+allocator high-water behavior (footprint is flat once the pool drains). The importer now runs each
+source inside its own `autoreleasepool`; control flow leaves the pool as a value, so identity,
+transaction durability, cancellation and per-item failure handling are unchanged.
+
+Measured 2026-10-27, same host and fixtures as above, debug build, `phys_footprint` after N commits:
+
+| RAW files | Before | After |
+| ---: | ---: | ---: |
+| 10 | 27 MiB | 24 MiB |
+| 120 | 71 MiB | 20 MiB |
+| 240 | 124 MiB | 20 MiB |
+| 1,000 | about 450 MiB (projected) | 24 MiB (slope 3 KiB per file) |
+
+The 1,000-file checkpoints were 20, 21, 22, 22 and 24 MiB at 100, 250, 500, 750 and 1,000 files.
+The budget is therefore a flat working set of about 25 MiB plus a few KiB of per-item index and result
+state, against 16 GB of physical memory. No batching or backpressure is needed: a bounded batch size
+would only hide a leak, and the per-item pool makes the footprint independent of batch size. The
+ceiling is enforced by `testImportDoesNotRetainPerItemTemporariesAcrossABatch`, which imports 120
+small files and fails above 16 MiB of growth (it measured 39 MiB without the pool and passes with it;
+the retention is per item, so file size does not matter).
+
+This measures the importer alone. The supervised app-level re-run is recorded in KRMA-1016: all 240
+full-size ARWs imported; scan peak was 4.1 GB, import peak 2.8 GB, and footprint settled to 565 MB. It
+used the unsandboxed development build, and a parallel test run overlapped later GUI steps, so this is
+import evidence rather than completion of the full 16 GB soak, and it predates the per-item pool.
+The chunk guard is `PortablePackageImportMemoryTests/testStagingDoesNotRetainSourceChunksAcrossABatch`,
+which imports 16 sparse 48 MiB files in both copy modes and fails if footprint grows by more than a
+quarter of the batch (it measured 1,554 MiB before the KRMA-1139 fix).
 
 For a reproducible `xctrace` run, use the supported wrapper with an explicit mode:
 
