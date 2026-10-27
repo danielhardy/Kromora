@@ -235,6 +235,38 @@ again outside the app. The cap therefore
 bounds the part that scales with selection size and is kept. The production cap is also exercised
 deterministically by `ShareCopyMemoryTests`.
 
+Folder-import peak memory (KRMA-1139) is measured through the real package importer (copy, hash,
+metadata, commit) with no window or grid, one process per batch size, cycling a folder of full-size RAWs:
+
+```sh
+KROMORA_IMPORT_MEMORY=1 KROMORA_IMPORT_MEMORY_DIR=/absolute/path/to/raw-folder \
+KROMORA_IMPORT_MEMORY_COUNT=240 \
+swift test --filter PortablePackageImportMemoryTests/testImportFootprintStaysFlatAcrossABatch
+```
+
+Cause: `FileHandle.read(upToCount:)` returns autoreleased chunks, and the importer reads every source
+inside a single worker job, so no autorelease pool drained until the whole batch finished. Footprint
+rose by about 2x the batch size (one read to stage or hash, one to verify), about 185 MB per
+real RAW, reaching 38 GB for 240 files. Each chunk loop on the import path now drains its own pool.
+
+Measured 2026-10-27 on an Apple M1 Pro with 16 GB, macOS 27.0.1, debug build, four real ARW sources
+(47 to 122 MB) repeated with unique trailing bytes. `phys_footprint` at the end of the import:
+
+| RAW files | Before | After |
+| ---: | ---: | ---: |
+| 40 | 7,480 MiB (still climbing) | 40 MiB |
+| 120 | not run | 75 MiB |
+| 240 | about 38,000 MiB (see KRMA-1139) | 130 MiB |
+
+Ceiling for a 16 GB Mac: the importer should stay under 1 GiB for a 240-file batch; the measured
+130 MiB leaves wide margin. A residual growth of about 0.45 MB per file remains, linear and not yet
+attributed (it is not chunk retention); it projects to about 450 MiB for 1,000 files. This measures
+the importer alone. The grid, thumbnail, and analysis work that follows each commit in the app was
+not re-measured here; the 16 GB soak (KRMA-1064) owns that end-to-end run. The deterministic guard is
+`PortablePackageImportMemoryTests/testStagingDoesNotRetainSourceChunksAcrossABatch`, which imports 16
+sparse 48 MiB files in both copy modes and fails if footprint grows by more than a quarter of the
+batch (it measured 1,554 MiB before the fix).
+
 For a reproducible `xctrace` run, use the supported wrapper with an explicit mode:
 
 ```sh

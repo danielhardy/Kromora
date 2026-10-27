@@ -147,9 +147,14 @@ struct PortablePhotoSourceFingerprint: Codable, Hashable, Sendable, Equatable {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
         var hasher = SHA256()
-        while let chunk = try handle.read(upToCount: streamingChunkSize), !chunk.isEmpty {
+        // Autoreleased chunks would otherwise all stay alive until the calling job returns.
+        while try autoreleasepool(invoking: {
+            guard let chunk = try handle.read(upToCount: streamingChunkSize), !chunk.isEmpty else {
+                return false
+            }
             hasher.update(data: chunk)
-        }
+            return true
+        }) {}
         return hasher.finalize().hexString
     }
 
