@@ -248,6 +248,7 @@ Cause: `FileHandle.read(upToCount:)` returns autoreleased chunks, and the import
 inside a single worker job, so no autorelease pool drained until the whole batch finished. Footprint
 rose by about 2x the batch size (one read to stage or hash, one to verify), about 185 MB per
 real RAW, reaching 38 GB for 240 files. Each chunk loop on the import path now drains its own pool.
+Metadata extraction also drains its per-source ImageIO temporaries before the next file is processed.
 
 Measured 2026-10-27 on an Apple M1 Pro with 16 GB, macOS 27.0.1, debug build, four real ARW sources
 (47 to 122 MB) repeated with unique trailing bytes. `phys_footprint` at the end of the import:
@@ -256,13 +257,20 @@ Measured 2026-10-27 on an Apple M1 Pro with 16 GB, macOS 27.0.1, debug build, fo
 | ---: | ---: | ---: |
 | 40 | 7,480 MiB (still climbing) | 40 MiB |
 | 120 | not run | 75 MiB |
-| 240 | about 38,000 MiB (see KRMA-1139) | 130 MiB |
+| 240 | about 38,000 MiB (see KRMA-1139) | 124 MiB |
 
 Ceiling for a 16 GB Mac: the importer should stay under 1 GiB for a 240-file batch; the measured
-130 MiB leaves wide margin. A residual growth of about 0.45 MB per file remains, linear and not yet
+124 MiB leaves wide margin. A residual growth of about 0.45 MB per file remains, linear and not yet
 attributed (it is not chunk retention); it projects to about 450 MiB for 1,000 files. This measures
-the importer alone. The grid, thumbnail, and analysis work that follows each commit in the app was
-not re-measured here; the 16 GB soak (KRMA-1064) owns that end-to-end run. The deterministic guard is
+the importer alone. The supervised app-level re-run is recorded in KRMA-1016: all 240 full-size
+ARWs imported; scan peak was 4.1 GB, import peak 2.8 GB, and footprint settled to 565 MB. It used
+the unsandboxed development build, and a parallel test run overlapped later GUI steps, so this is
+import evidence rather than completion of the full 16 GB soak. An independent opt-in
+verification run cycled the 120-file `b120` fixture set twice through the 240-file importer path.
+Footprint started at 12 MiB, reached 28 MiB after 10 commits, then rose by about 4–5 MiB per 10
+commits to 124 MiB at 240; peak and final readings were both 124 MiB. The per-source metadata pool
+reduced the previous 131 MiB measurement to 124 MiB, but did not remove the residual per-file slope.
+Follow-up KRMA-1140 will investigate that remaining growth. The deterministic guard is
 `PortablePackageImportMemoryTests/testStagingDoesNotRetainSourceChunksAcrossABatch`, which imports 16
 sparse 48 MiB files in both copy modes and fails if footprint grows by more than a quarter of the
 batch (it measured 1,554 MiB before the fix).

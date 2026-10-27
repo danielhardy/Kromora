@@ -503,7 +503,11 @@ struct PortablePackageImporter: Sendable {
                 )
                 try transaction.stage(data: try Self.encode(record), at: recordPath)
 
-                let sourceMetadata = ImageMetadata.read(from: stagedOriginalURL)
+                // ImageIO bridges temporary metadata dictionaries through Foundation. This worker
+                // handles the whole batch, so drain those per-source objects before advancing.
+                let sourceMetadata = autoreleasepool {
+                    ImageMetadata.read(from: stagedOriginalURL)
+                }
                 let sourceDimensions = PortablePackageAssetSummary.sourceDimensions(from: sourceMetadata)
                 let importedSummary = PortablePackageAssetSummary(
                     captureDateISO: sourceMetadata.dateTakenISO,
