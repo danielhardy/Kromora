@@ -33,8 +33,9 @@ struct GeometryPointMapping: Sendable {
         let dx = x * orientedSize.width - orientedSize.width / 2
         let dy = orientedSize.height / 2 - y * orientedSize.height
         // Core Image's positive affine angle is counter-clockwise in its y-up coordinate space.
-        let px = cos(radians) * dx - sin(radians) * dy + aabb.width / 2
-        let py = aabb.height / 2 - (sin(radians) * dx + cos(radians) * dy)
+        let scale = straightenScale(oriented: orientedSize, extent: aabb)
+        let px = scale.width * (cos(radians) * dx - sin(radians) * dy) + aabb.width / 2
+        let py = aabb.height / 2 - scale.height * (sin(radians) * dx + cos(radians) * dy)
         let normalized = CGPoint(x: px / aabb.width, y: py / aabb.height)
         return perspectiveForward(normalized)
     }
@@ -44,8 +45,9 @@ struct GeometryPointMapping: Sendable {
         guard valid, let unwarped = perspectiveInverse(point) else { return nil }
         let orientedSize = rotation.orientedExtent(sourceSize)
         let aabb = RenderPipeline.geometryExtent(of: orientedSize, for: crop)
-        let px = unwarped.x * aabb.width - aabb.width / 2
-        let py = aabb.height / 2 - unwarped.y * aabb.height
+        let scale = straightenScale(oriented: orientedSize, extent: aabb)
+        let px = (unwarped.x * aabb.width - aabb.width / 2) / scale.width
+        let py = (aabb.height / 2 - unwarped.y * aabb.height) / scale.height
         let radians = -crop.straightenAngle * .pi / 180
         let x = cos(radians) * px - sin(radians) * py + orientedSize.width / 2
         let y = orientedSize.height / 2 - (sin(radians) * px + cos(radians) * py)
@@ -53,6 +55,19 @@ struct GeometryPointMapping: Sendable {
         if crop.flipHorizontal { source.x = 1 - source.x }
         if crop.flipVertical { source.y = 1 - source.y }
         return inverseRotate(source)
+    }
+
+    /// Per-axis pixel scale applied after the straighten rotation. `CIStraightenFilter` scales the
+    /// rotated photograph up until it fills the original frame (no transparent wedges), and
+    /// `RenderPipeline.applyingGeometry` then stretches that frame onto the rotated bounding box.
+    /// Mapping a point through only the rotation misplaces everything away from the centre.
+    private func straightenScale(oriented: CGSize, extent: CGSize) -> CGSize {
+        guard crop.straightenAngle != 0 else { return CGSize(width: 1, height: 1) }
+        let radians = abs(crop.straightenAngle * .pi / 180)
+        let fill = cos(radians) + sin(radians) * max(oriented.width / oriented.height,
+                                                      oriented.height / oriented.width)
+        return CGSize(width: fill * extent.width / oriented.width,
+                      height: fill * extent.height / oriented.height)
     }
 
     /// Local radius scale in the output frame for a source-space radius, accounting for perspective.
@@ -119,21 +134,35 @@ struct GeometryPointMapping: Sendable {
     }
 
     private func perspectiveForward(_ point: CGPoint) -> CGPoint? {
-        guard crop.verticalPerspective != 0 || crop.horizontalPerspective != 0 else { return point }
-        let v = crop.verticalPerspective * 0.45
-        let h = crop.horizontalPerspective * 0.45
-        let quad = [CGPoint(x: v, y: -h), CGPoint(x: 1-v, y: h),
-                    CGPoint(x: 1+v, y: 1+h), CGPoint(x: -v, y: 1-h)]
-        return project(point, from: quad, to: [CGPoint(x: 0,y: 0), CGPoint(x: 1,y: 0), CGPoint(x: 1,y: 1), CGPoint(x: 0,y: 1)])
+        guard let quad = perspectiveQuad else { return point }
+        return project(point, from: quad, to: Self.unitCorners)
     }
 
     private func perspectiveInverse(_ point: CGPoint) -> CGPoint? {
-        guard crop.verticalPerspective != 0 || crop.horizontalPerspective != 0 else { return point }
+        guard let quad = perspectiveQuad else { return point }
+        return project(point, from: Self.unitCorners, to: quad)
+    }
+
+    private static let unitCorners = [CGPoint(x: 0, y: 0), CGPoint(x: 1, y: 0),
+                                      CGPoint(x: 1, y: 1), CGPoint(x: 0, y: 1)]
+
+    /// The source quadrilateral `RenderPipeline.applyingPerspective` feeds to
+    /// `CIPerspectiveCorrection`, in upper-left normalized corners (top-left, top-right,
+    /// bottom-right, bottom-left). The renderer clamps every corner to the image frame, so the
+    /// widening side of a keystone is cut off rather than extended; mapping the unclamped quad
+    /// misplaces everything but the centre line. Nil when no correction is applied, including the
+    /// degenerate case in which the renderer returns the image unchanged.
+    private var perspectiveQuad: [CGPoint]? {
+        guard crop.verticalPerspective != 0 || crop.horizontalPerspective != 0 else { return nil }
         let v = crop.verticalPerspective * 0.45
         let h = crop.horizontalPerspective * 0.45
-        let quad = [CGPoint(x: v, y: -h), CGPoint(x: 1-v, y: h),
-                    CGPoint(x: 1+v, y: 1+h), CGPoint(x: -v, y: 1-h)]
-        return project(point, from: [CGPoint(x: 0,y: 0), CGPoint(x: 1,y: 0), CGPoint(x: 1,y: 1), CGPoint(x: 0,y: 1)], to: quad)
+        func bounded(_ x: Double, _ y: Double) -> CGPoint {
+            CGPoint(x: min(max(x, 0), 1), y: min(max(y, 0), 1))
+        }
+        let quad = [bounded(v, h), bounded(1 - v, -h), bounded(1 + v, 1 + h), bounded(-v, 1 - h)]
+        guard quad[0].x < quad[1].x, quad[3].x < quad[2].x,
+              quad[0].y < quad[3].y, quad[1].y < quad[2].y else { return nil }
+        return quad
     }
 
     /// Four-point projective mapping, solved as an 8×8 linear system.
