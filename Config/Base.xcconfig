@@ -29,6 +29,10 @@ INFOPLIST_KEY_NSPrincipalClass = NSApplication
 INFOPLIST_KEY_NSPhotoLibraryUsageDescription = Kromora accesses your Photos library so you can choose photos to import into a Kromora library and save exported images back to Photos.
 KROMORA_GIT_COMMIT =
 
+// Empty in every shipping configuration. A verification build sets YES (scripts/app-store-build.sh
+// with KROMORA_VERIFICATION_BUILD=1) so KROMORA_LIBRARY_PACKAGE can point at a throwaway library.
+KROMORA_ALLOW_LIBRARY_OVERRIDE =
+
 // The standalone Xcode launcher uses Swift 6; package compiler settings remain in Package.swift.
 SWIFT_VERSION = 6.0
 

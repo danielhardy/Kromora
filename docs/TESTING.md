@@ -323,7 +323,8 @@ the source and test names are the authoritative coverage map.
 
 `scripts/disposable-app.sh start <package.kromoralibrary>` builds the development launcher, wraps it
 in an ad hoc signed bundle with its own bundle id (`com.kromora.disposable`) and preferences, and
-launches it on an APFS clone of the package through `KROMORA_LIBRARY_PACKAGE`. The variable replaces
+launches it on an APFS clone of the package through `KROMORA_LIBRARY_PACKAGE` (the bundle opts in with
+`KromoraAllowLibraryOverride`; the App Store configuration does not). The variable replaces
 the stored library choice and the default for that launch only and writes nothing to preferences.
 `stop` quits the app and deletes the clone and its preferences. This is the unsandboxed development
 launcher, so it is not evidence about the sandboxed App Store build: use it to exercise UI and
@@ -355,8 +356,10 @@ executable path), removes only its own temporary fixtures, and bounds every wait
 To run the signed sandboxed app without a second user or VM, build it under a throwaway bundle id
 (`PRODUCT_BUNDLE_IDENTIFIER=com.example.kromora.smoke`, ad hoc signed, separate derived data), then clone a
 library package into that bundle's own container (`~/Library/Containers/<id>/Data/Documents/Lib.kromoralibrary`,
-`cp -cR`, without `manifest.lock`) and pass it as `KROMORA_LIBRARY_PACKAGE`. The sandbox honors the override
-only inside its container, and a container's `Pictures` is a symlink to the real `~/Pictures`, so a different
+`cp -cR`, without `manifest.lock`) and pass it as `KROMORA_LIBRARY_PACKAGE`. The standard App Store build
+ignores that variable: build the throwaway bundle with `KROMORA_VERIFICATION_BUILD=1 scripts/app-store-build.sh`
+(verify mode only; archive refuses it), which sets the `KromoraAllowLibraryOverride` Info.plist key. The
+sandbox honors the override only inside its container, and a container's `Pictures` is a symlink to the real `~/Pictures`, so a different
 bundle id alone does not isolate the default library. Seed a persisted naming policy for the second pass by
 writing `export.batchFilenamePolicy` (JSON data) into the container's own preferences plist
 (`<container>/Data/Library/Preferences/<id>.plist`), never the user-level domain. Delete the clone and plist

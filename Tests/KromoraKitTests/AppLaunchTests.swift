@@ -72,11 +72,34 @@ final class AppLaunchTests: XCTestCase {
     func testLibraryPackageOverrideAcceptsOnlyAbsolutePaths() {
         let key = "KROMORA_LIBRARY_PACKAGE"
         XCTAssertEqual(
-            AppLaunch.libraryPackageOverride(environment: [key: "/tmp/Disposable.kromoralibrary"])?.path,
+            AppLaunch.libraryPackageOverride(
+                environment: [key: "/tmp/Disposable.kromoralibrary"], allowed: true)?.path,
             "/tmp/Disposable.kromoralibrary")
-        XCTAssertNil(AppLaunch.libraryPackageOverride(environment: [:]))
-        XCTAssertNil(AppLaunch.libraryPackageOverride(environment: [key: ""]))
-        XCTAssertNil(AppLaunch.libraryPackageOverride(environment: [key: "Relative.kromoralibrary"]))
+        XCTAssertNil(AppLaunch.libraryPackageOverride(environment: [:], allowed: true))
+        XCTAssertNil(AppLaunch.libraryPackageOverride(environment: [key: ""], allowed: true))
+        XCTAssertNil(AppLaunch.libraryPackageOverride(
+            environment: [key: "Relative.kromoralibrary"], allowed: true))
+    }
+
+    func testLibraryPackageOverrideIsIgnoredUnlessBuildAllowsIt() {
+        XCTAssertNil(AppLaunch.libraryPackageOverride(
+            environment: ["KROMORA_LIBRARY_PACKAGE": "/tmp/Disposable.kromoralibrary"], allowed: false))
+        XCTAssertFalse(AppLaunch.allowsLibraryOverride, "the test host is not a verification bundle")
+    }
+
+    func testProductionConfigurationExcludesOverrideAndVerificationBuildKeepsIt() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        func text(_ path: String) throws -> String {
+            try String(contentsOf: root.appendingPathComponent(path), encoding: .utf8)
+        }
+        XCTAssertTrue(try text("Config/Base.xcconfig").contains("\nKROMORA_ALLOW_LIBRARY_OVERRIDE =\n"))
+        XCTAssertFalse(try text("Config/Release.xcconfig").contains("KROMORA_ALLOW_LIBRARY_OVERRIDE"))
+        XCTAssertTrue(try text("Kromora/Info.plist").contains("$(KROMORA_ALLOW_LIBRARY_OVERRIDE)"))
+        let build = try text("scripts/app-store-build.sh")
+        XCTAssertTrue(build.contains("KROMORA_VERIFICATION_BUILD"))
+        XCTAssertTrue(build.contains("KROMORA_ALLOW_LIBRARY_OVERRIDE=YES"))
+        XCTAssertTrue(try text("scripts/disposable-app.sh").contains("KromoraAllowLibraryOverride"))
     }
 
     func testNoModelExistsUntilOpenIsRequested() throws {

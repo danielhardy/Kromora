@@ -69,14 +69,23 @@ final class AppLaunch {
         return model
     }
 
+    /// Whether this bundle was built for verification. `Kromora/Info.plist` substitutes the
+    /// `KROMORA_ALLOW_LIBRARY_OVERRIDE` build setting, which is empty unless
+    /// `scripts/app-store-build.sh` is run with `KROMORA_VERIFICATION_BUILD=1`.
+    static let allowsLibraryOverride: Bool =
+        Bundle.main.object(forInfoDictionaryKey: "KromoraAllowLibraryOverride") as? String == "YES"
+
     /// The package named by `KROMORA_LIBRARY_PACKAGE`, for live verification against a disposable
     /// library (`scripts/disposable-app.sh`). It replaces the stored choice and the default for that
     /// launch only: nothing is written to preferences, so a normal launch is unaffected. Unset,
-    /// empty and relative values are ignored.
+    /// empty and relative values are ignored. The override is honored only when the bundle opts in
+    /// through `KromoraAllowLibraryOverride` (``allowsLibraryOverride``), which the App Store
+    /// configuration leaves off, so an inherited environment variable cannot redirect that build.
     static func libraryPackageOverride(
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        allowed: Bool = allowsLibraryOverride
     ) -> URL? {
-        guard let path = environment["KROMORA_LIBRARY_PACKAGE"], path.hasPrefix("/") else { return nil }
+        guard allowed, let path = environment["KROMORA_LIBRARY_PACKAGE"], path.hasPrefix("/") else { return nil }
         return URL(fileURLWithPath: path, isDirectory: true)
     }
 

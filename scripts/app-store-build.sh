@@ -68,12 +68,19 @@ if [[ -n "$git_commit" ]]; then
   build_metadata_args+=("KROMORA_GIT_COMMIT=$git_commit")
 fi
 
+# KROMORA_VERIFICATION_BUILD=1 enables the KROMORA_LIBRARY_PACKAGE override for an isolated smoke
+# against a throwaway bundle id. It is verify-only so no archive can carry the override.
+if [[ "${KROMORA_VERIFICATION_BUILD:-}" == "1" ]]; then
+  [[ "$mode" == "verify" ]] || { print -u2 "KROMORA_VERIFICATION_BUILD=1 is not allowed for archive builds."; exit 1; }
+  build_metadata_args+=("KROMORA_ALLOW_LIBRARY_OVERRIDE=YES")
+fi
+
 if [[ "$mode" == "verify" ]]; then
   xcodebuild "${xcodebuild_args[@]}" "${signing_args[@]}" "${build_metadata_args[@]}" build
   "$project_root/scripts/verify-xcode-app.sh"
 else
   archive_path="$derived_data_path/Kromora.xcarchive"
   xcodebuild "${xcodebuild_args[@]}" "${signing_args[@]}" "${build_metadata_args[@]}" -archivePath "$archive_path" archive
-  print "Archive created at $archive_path"
-  print "Open Xcode Organizer (Window > Organizer), select the Kromora archive, then choose Distribute App > App Store Connect."
+  print "Archive created at ${archive_path:A}"
+  print "Open that .xcarchive to show it in Xcode Organizer, then choose Distribute App > App Store Connect."
 fi

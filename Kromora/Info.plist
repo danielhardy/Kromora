@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>KromoraAllowLibraryOverride</key>
+	<string>$(KROMORA_ALLOW_LIBRARY_OVERRIDE)</string>
 	<key>KromoraGitCommit</key>
 	<string>$(KROMORA_GIT_COMMIT)</string>
 	<!-- Xcode 27 has no INFOPLIST_KEY_ setting that emits NSHighResolutionCapable, so it stays here. -->

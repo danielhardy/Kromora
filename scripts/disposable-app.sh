@@ -47,6 +47,7 @@ case "${1:-}" in
 <key>CFBundleName</key><string>KromoraDisposable</string>
 <key>CFBundleExecutable</key><string>Kromora</string>
 <key>CFBundlePackageType</key><string>APPL</string>
+<key>KromoraAllowLibraryOverride</key><string>YES</string>
 <key>LSMinimumSystemVersion</key><string>26.0</string>
 <key>NSPrincipalClass</key><string>NSApplication</string>
 </dict></plist>
