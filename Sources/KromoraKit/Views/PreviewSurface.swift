@@ -116,6 +116,11 @@ final class PreviewSurface {
     @ObservationIgnored private var skippedPresentationConfirmations: Set<UInt64> = []
     @ObservationIgnored private var hasManagedPresentationLifecycle = false
     @ObservationIgnored var onPresentationFailure: (() -> Void)?
+    /// Test observer for what Metal reported about each submitted drawable, for any surface (the
+    /// Original pane publishes without a telemetry revision). `revision` is the surface revision
+    /// the draw encoded; `displayed` is false when the drawable was skipped (zero presented time).
+    /// Production leaves it nil. Command-buffer completion does not prove drawable presentation.
+    @ObservationIgnored var onDrawableReport: ((_ revision: UInt64, _ displayed: Bool) -> Void)?
     /// Optional test recorder. The production publication path has a single nil check and
     /// allocates no change records when no recorder is installed.
     @ObservationIgnored var presentationChangeLedger: PresentationChangeLedger?
@@ -1597,6 +1602,12 @@ struct PreviewSurfaceView: NSViewRepresentable {
                         textureGeneration: drawTextureGeneration,
                         succeeded: succeeded
                     )
+                }
+            }
+            if surface.onDrawableReport != nil {
+                drawable.addPresentedHandler { [weak surface] drawable in
+                    let displayed = drawable.presentedTime > 0
+                    Task { @MainActor in surface?.onDrawableReport?(drawRevision, displayed) }
                 }
             }
             if let revision = presentationRevision {
