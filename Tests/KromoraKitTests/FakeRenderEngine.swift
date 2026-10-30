@@ -187,6 +187,9 @@ actor FakeRenderEngine: RenderEngining {
     private(set) var activeEncodes = 0
     private(set) var maxConcurrentEncodes = 0
     var previewResult: CGImage?
+    /// Per-photo raster results (keyed by file URL) so a test can tell which photo a pane shows.
+    private var previewResultsByURL: [URL: CGImage] = [:]
+    func setPreviewResult(_ image: CGImage, for url: URL) { previewResultsByURL[url] = image }
     var shouldFailPreview = false
 
     init(previewResult: CGImage? = FakeRenderEngine.solidImage()) {
@@ -224,7 +227,9 @@ actor FakeRenderEngine: RenderEngining {
                 await withCheckedContinuation { parkedPreviews.append($0) }
             }
             if shouldFailPreview { throw ImageError.processingFailed }
-            guard let image = previewResult ?? Self.solidImage(),
+            var perSource: CGImage?
+            if case .url(let url) = request.source.backing { perSource = previewResultsByURL[url] }
+            guard let image = perSource ?? previewResult ?? Self.solidImage(),
                   let data = Self.pngData(for: image)
             else { throw ImageError.processingFailed }
             try Task.checkCancellation()
@@ -591,6 +596,17 @@ actor FakeRenderEngine: RenderEngining {
             space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ) else { return nil }
         ctx.setFillColor(red: 0.5, green: 0.25, blue: 0.75, alpha: 1)
+        ctx.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
+        return ctx.makeImage()
+    }
+
+    static func solidImage(red: CGFloat, green: CGFloat, blue: CGFloat) -> CGImage? {
+        guard let ctx = CGContext(
+            data: nil, width: 2, height: 2, bitsPerComponent: 8, bytesPerRow: 8,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        ctx.setFillColor(red: red, green: green, blue: blue, alpha: 1)
         ctx.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
         return ctx.makeImage()
     }
