@@ -5,6 +5,20 @@ import XCTest
 
 @MainActor
 final class PreviewAdmissionCoordinatorTests: TempDirectoryTestCase {
+    private actor Gate {
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+
+        func wait() async {
+            await withCheckedContinuation { waiters.append($0) }
+        }
+
+        func releaseAll() {
+            let parked = waiters
+            waiters.removeAll()
+            for waiter in parked { waiter.resume() }
+        }
+    }
+
     func testViewportAnimationDoesNotAdmitRendersAndZoomPlansTheVisibleROI() async throws {
         let engine = FakeRenderEngine()
         let destination = makeDestination(engine: engine)
@@ -393,6 +407,42 @@ final class PreviewAdmissionCoordinatorTests: TempDirectoryTestCase {
         await destination.scheduler.cancelAllAndWait()
     }
 
+    func testVisibleEmptyOriginalIsPinnedAheadOfSettledAdjustedPreview() async throws {
+        let engine = FakeRenderEngine()
+        let destination = makeDestination(engine: engine)
+        destination.admissionLastPresentedRequest = makeRequest(source: destination.source)
+        destination.admissionIsSideBySideVisible = true
+        let coordinator = makeCoordinator(destination: destination, engine: engine)
+        let gate = Gate()
+        var runningEditStarted = false
+
+        destination.scheduler.enqueue(
+            id: .init("running-edit"), lane: .editor, priority: .activeEditor
+        ) {
+            runningEditStarted = true
+            await gate.wait()
+        }
+        try await waitUntil("the active editor render to start") {
+            runningEditStarted
+        }
+
+        coordinator.scheduleOriginalPreview()
+        destination.scheduler.enqueue(
+            id: .init("settled-adjusted"), lane: .editor, priority: .activeEditor
+        ) {
+            destination.admissionRenderOrder.append("adjusted")
+        }
+
+        await gate.releaseAll()
+        try await waitUntil("the comparison and adjusted renders to finish") {
+            destination.scheduler.isIdle
+        }
+
+        XCTAssertEqual(destination.admissionRenderOrder, ["original", "adjusted"])
+        coordinator.shutdown()
+        await destination.scheduler.cancelAllAndWait()
+    }
+
     func testROIRequestDoesNotAdoptCanonicalStoredFrame() async throws {
         let engine = FakeRenderEngine()
         let destination = makeDestination(engine: engine)
@@ -694,6 +744,7 @@ private final class FakePreviewAdmissionDestination: PreviewAdmissionDestination
     var admissionHistogram: HistogramData?
     var admissionPresentationHistogramSample: HistogramData.PresentationSample?
     var admissionOriginalPreviewImage: CIImage?
+    var admissionRenderOrder: [String] = []
     var admissionHistogramErrorMessage: String?
     var admissionSourceName = "test"
     var admissionSourceSessionIsBusy = false
@@ -827,6 +878,10 @@ private final class FakePreviewAdmissionDestination: PreviewAdmissionDestination
     }
     func publishAdmissionHistogramError(_ message: String?) { admissionHistogramErrorMessage = message }
     func publishAdmissionStatus(_ message: String) { statusMessage = message }
-    func admissionPresentOriginalPreview(_ image: CIImage, request: RenderRequest) -> Bool { true }
+    func admissionPresentOriginalPreview(_ image: CIImage, request: RenderRequest) -> Bool {
+        admissionRenderOrder.append("original")
+        admissionHasOriginalPreview = true
+        return true
+    }
     func admissionClearOriginalPreview() {}
 }
