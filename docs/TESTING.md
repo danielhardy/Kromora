@@ -369,10 +369,12 @@ afterwards.
 | 2 | Deferred: no accessible UI session, automation refused, or the running terminal/app lacks Accessibility access. Not a pass; CI logs a warning |
 | 3 | Refused: disposable-profile confirmation missing |
 
-To run the harness without touching any real library, point it at the development bundle from
-`scripts/disposable-app.sh` and pass the clone through `KROMORA_LIBRARY_PACKAGE`, which the script
-forwards to the launched app. The packaged, sandboxed app ignores that variable, and its container
-holds the real profile, so the signed app's smoke needs a genuinely disposable profile or VM.
+To isolate the unsandboxed development bundle, point the harness at the bundle from
+`scripts/disposable-app.sh` and pass its clone through `KROMORA_LIBRARY_PACKAGE`, which the script
+forwards to the launched app. For the packaged sandboxed app, that override only works for a package
+inside the app's own container; external paths are denied by the sandbox. Use the throwaway
+bundle-ID/container-clone procedure above, or a disposable profile or VM. A different bundle ID alone
+is not sufficient because the container's `Pictures` directory links to the real `~/Pictures`.
 
 ```bash
 scripts/disposable-app.sh start "<package.kromoralibrary>"   # builds the bundle and clones; launches the app
