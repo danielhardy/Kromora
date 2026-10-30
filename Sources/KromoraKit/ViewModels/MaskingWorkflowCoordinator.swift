@@ -323,6 +323,7 @@ final class MaskingWorkflowCoordinator {
         targetSize: PixelDimensions,
         style: MaskOverlayStyle,
         transform: LocalMaskRenderTransform = .identity,
+        geometry: MaskSourceGeometry? = nil,
         selectedComponentID: UUID? = nil,
         soloComponentID: UUID? = nil
     ) async -> sending CGImage? {
@@ -335,6 +336,7 @@ final class MaskingWorkflowCoordinator {
             soloLayerID: soloLayerID,
             targetSize: targetSize,
             transform: transform,
+            geometry: geometry,
             style: style,
             // The overlay is exempt from mask-request revision supersession: previews note
             // displayRevision, which grows without bound and shares one max-slot per source

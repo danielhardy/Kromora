@@ -103,6 +103,34 @@ final class LocalMaskRenderer {
         }
     }
 
+    /// A source-derived raster payload resolved over `frame` (the oriented source), carried through
+    /// the same rotation and geometry stages as the photograph so it lands in `extent`.
+    func geometryImage(
+        for payload: LocalMaskPayload,
+        frame: CGRect,
+        geometry: MaskSourceGeometry,
+        extent: CGRect
+    ) -> CIImage? {
+        guard case .raster(let mask) = payload.descriptor,
+              payload.targetSize == mask.size,
+              let base = rasterImage(mask, extent: frame) else { return nil }
+        let projected = RenderPipeline.applyingGeometry(
+            geometry.crop, to: RenderPipeline.applyingRotation(geometry.rotation, to: base)
+        )
+        let actual = projected.extent
+        guard actual.width > 0, actual.height > 0,
+              actual.width.isFinite, actual.height.isFinite else { return nil }
+        // Rounding the frame to whole pixels can leave a sub-pixel difference from the planned
+        // extent; normalize so every mask component shares the render extent exactly.
+        return projected
+            .transformed(by: CGAffineTransform(
+                a: extent.width / actual.width, b: 0, c: 0, d: extent.height / actual.height,
+                tx: extent.minX - actual.minX * extent.width / actual.width,
+                ty: extent.minY - actual.minY * extent.height / actual.height
+            ))
+            .cropped(to: extent)
+    }
+
     func inverted(_ image: CIImage, extent: CGRect) -> CIImage {
         invertKernel?.apply(extent: extent, roiCallback: { _, rect in rect }, arguments: [image])?
             .cropped(to: extent) ?? image

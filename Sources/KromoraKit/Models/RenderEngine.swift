@@ -1066,7 +1066,7 @@ actor RenderEngine: RenderEngining {
                 for: [layer], source: request.source, extent: extent,
                 quality: request.quality, transform: request.transform, assetID: request.assetID,
                 requestRevision: request.requestRevision, includeIdentity: true,
-                onlyComponentID: onlyComponentID
+                onlyComponentID: onlyComponentID, geometry: request.geometry
             )
             guard let mask = masks.images[layer.id], !Task.isCancelled else {
                 if !Task.isCancelled {
@@ -1621,7 +1621,10 @@ actor RenderEngine: RenderEngining {
             requestRevision: requestRevision,
             maskIdentity: identity.maskRecipe, documentIdentity: identity.sessionKey,
             componentDigests: identity.maskComponents,
-            resolveSemanticMasks: resolveSemanticMasks
+            resolveSemanticMasks: resolveSemanticMasks,
+            geometry: MaskSourceGeometry(
+                nativeSize: source.nativeExtent, rotation: document.rotation, crop: document.crop
+            )
         )
         // Give a newer request a chance to run between value resolution and final graph material-
         // ization. This is the handoff point used by the GPU-submit fence below.
@@ -1875,7 +1878,8 @@ actor RenderEngine: RenderEngining {
         componentDigests: RenderMaskComponentDigests,
         resolveSemanticMasks: Bool,
         includeIdentity: Bool,
-        onlyComponentID: UUID?
+        onlyComponentID: UUID?,
+        geometry: MaskSourceGeometry?
     ) async throws -> ([LocalMaskCacheKey: LocalMaskPayload], Set<LocalMaskCacheKey>) {
         var payloads: [LocalMaskCacheKey: LocalMaskPayload] = [:]
         var pending: [MaskPayloadWork] = []
@@ -1890,7 +1894,9 @@ actor RenderEngine: RenderEngining {
                 guard let definitionHash = componentDigests.definitionHash(for: component) else {
                     throw LocalMaskResolutionError.invalidPayload
                 }
-                let targetSize = maskTargetSize(for: component, extent: extent, quality: quality)
+                let targetSize = maskTargetSize(
+                    for: component, extent: extent, quality: quality, geometry: geometry
+                )
                 let key = LocalMaskCacheKey(
                     source: RenderSourceFingerprint(source), definitionHash: definitionHash,
                     targetSize: targetSize, quality: quality, transform: transform,
@@ -1970,7 +1976,8 @@ actor RenderEngine: RenderEngining {
         componentDigests: RenderMaskComponentDigests? = nil,
         resolveSemanticMasks: Bool = true,
         includeIdentity: Bool = false,
-        onlyComponentID: UUID? = nil
+        onlyComponentID: UUID? = nil,
+        geometry: MaskSourceGeometry? = nil
     ) async throws -> ResolvedLocalMaskSet {
         guard !layers.isEmpty,
               extent.width.isFinite, extent.height.isFinite,
@@ -1993,7 +2000,7 @@ actor RenderEngine: RenderEngining {
             maskIdentity: maskIdentity, documentIdentity: documentIdentity,
             componentDigests: componentDigests,
             resolveSemanticMasks: resolveSemanticMasks, includeIdentity: includeIdentity,
-            onlyComponentID: onlyComponentID
+            onlyComponentID: onlyComponentID, geometry: geometry
         )
         var result: [UUID: CIImage] = [:]
         var composedKeys: Set<LocalMaskCacheKey> = []
@@ -2024,7 +2031,7 @@ actor RenderEngine: RenderEngining {
                     throw LocalMaskResolutionError.invalidPayload
                 }
                 let componentTargetSize = maskTargetSize(
-                    for: component, extent: renderExtent, quality: quality
+                    for: component, extent: renderExtent, quality: quality, geometry: geometry
                 )
                 let key = LocalMaskCacheKey(
                     source: RenderSourceFingerprint(source), definitionHash: definitionHash,
@@ -2063,9 +2070,18 @@ actor RenderEngine: RenderEngining {
                     throw LocalMaskResolutionError.sourceMismatch
                 }
 
-                guard let image = localMaskRenderer.image(
-                    for: payload, extent: renderExtent, transform: transform
-                ) else { throw LocalMaskResolutionError.invalidPayload }
+                let projected: CIImage?
+                if let geometry, !geometry.isIdentity, component.source.isSourceDerived,
+                   let frame = geometry.sourceFrame(forOutput: renderExtent) {
+                    projected = localMaskRenderer.geometryImage(
+                        for: payload, frame: frame, geometry: geometry, extent: renderExtent
+                    )
+                } else {
+                    projected = localMaskRenderer.image(
+                        for: payload, extent: renderExtent, transform: transform
+                    )
+                }
+                guard let image = projected else { throw LocalMaskResolutionError.invalidPayload }
                 var componentImage = image.cropped(to: extent)
                 if component.isInverted {
                     componentImage = localMaskRenderer.inverted(componentImage, extent: extent)
@@ -2097,9 +2113,22 @@ actor RenderEngine: RenderEngining {
         return ResolvedLocalMaskSet(images: result, cacheIdentity: cacheIdentity)
     }
 
+    /// The frame a component's matte is resolved over. Source-derived mattes live in the oriented
+    /// source frame and are projected through the geometry afterwards; everything else is authored
+    /// directly in the render extent.
+    private func maskFrame(
+        for component: MaskComponent, extent: CGRect, geometry: MaskSourceGeometry?
+    ) -> CGRect {
+        guard let geometry, !geometry.isIdentity, component.source.isSourceDerived,
+              let frame = geometry.sourceFrame(forOutput: extent) else { return extent }
+        return frame
+    }
+
     private func maskTargetSize(
-        for component: MaskComponent, extent: CGRect, quality: RenderQuality
+        for component: MaskComponent, extent: CGRect, quality: RenderQuality,
+        geometry: MaskSourceGeometry? = nil
     ) -> PixelDimensions {
+        let extent = maskFrame(for: component, extent: extent, geometry: geometry)
         let fullSize = PixelDimensions(width: Int(extent.width), height: Int(extent.height))
         guard quality.maskQuality == .preview,
               case .semantic = component.source else { return fullSize }

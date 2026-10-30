@@ -31,13 +31,14 @@ extension AppViewModel {
         targetSize: PixelDimensions,
         style: MaskOverlayStyle,
         transform: LocalMaskRenderTransform = .identity,
+        geometry: MaskSourceGeometry? = nil,
         selectedComponentID: UUID? = nil,
         soloComponentID: UUID? = nil
     ) async -> sending CGImage? {
         await maskingWorkflow.renderMaskOverlay(
             layers: layers, selectedLayerID: selectedLayerID, soloLayerID: soloLayerID,
             targetSize: targetSize, style: style, transform: transform,
-            selectedComponentID: selectedComponentID, soloComponentID: soloComponentID
+            geometry: geometry, selectedComponentID: selectedComponentID, soloComponentID: soloComponentID
         )
     }
 

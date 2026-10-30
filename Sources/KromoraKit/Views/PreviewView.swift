@@ -391,7 +391,8 @@ struct PreviewView: View {
                             await analysis.pixels(for: reference)
                         },
                         mapping: GeometryPointMapping(
-                            sourceSize: viewModel.sourceSize, rotation: viewModel.document.rotation,
+                            sourceSize: viewModel.maskingSource?.nativeExtent ?? viewModel.sourceSize,
+                            rotation: viewModel.document.rotation,
                             crop: viewModel.document.crop),
                         navigation: canvasState.navigation,
                         backingScale: maskOverlayBackingScale,
@@ -408,7 +409,12 @@ struct PreviewView: View {
                     MaskCanvasOverlay(
                         viewModel: viewModel,
                         maskingState: maskingState,
-                        sourceSize: viewModel.sourceSize,
+                        // The overlay frame is the post-geometry image the crop rectangle is
+                        // normalized against, not the unrotated source.
+                        sourceSize: GeometryPointMapping(
+                            sourceSize: viewModel.maskingSource?.nativeExtent ?? viewModel.sourceSize,
+                            rotation: viewModel.document.rotation,
+                            crop: viewModel.document.crop).outputSize,
                         crop: viewModel.document.crop,
                         navigation: canvasState.navigation,
                         backingScale: maskOverlayBackingScale

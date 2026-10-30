@@ -1529,6 +1529,7 @@ struct MaskCanvasOverlay: View {
                 sourceFingerprint: viewModel.maskingSource?.cacheFingerprint ?? "missing",
                 requestRevision: viewModel.maskingSourceRevision,
                 targetSize: targetSize,
+                geometry: sourceGeometry,
                 style: style,
                 resolveEpoch: maskingState.maskResolveEpoch
             )
@@ -1581,6 +1582,7 @@ struct MaskCanvasOverlay: View {
                     soloLayerID: overlaySelection.soloLayerID,
                     targetSize: targetSize,
                     style: style,
+                    geometry: sourceGeometry,
                     selectedComponentID: overlaySelection.componentID,
                     soloComponentID: overlaySelection.soloComponentID
                 )
@@ -1828,6 +1830,13 @@ struct MaskCanvasOverlay: View {
         return combined
     }
 
+    /// Projects source-derived mattes (Subject, Foreground, ranges) into the frame this overlay uses.
+    private var sourceGeometry: MaskSourceGeometry {
+        MaskSourceGeometry(
+            nativeSize: viewModel.maskingSource?.nativeExtent ?? viewModel.sourceSize,
+            rotation: viewModel.document.rotation, crop: crop)
+    }
+
     private func maskTargetSize(
         for transform: CanvasMaskTransform, viewportSize: CGSize
     ) -> PixelDimensions {
@@ -1856,6 +1865,7 @@ struct MaskCanvasOverlay: View {
         let sourceFingerprint: String
         let requestRevision: UInt64
         let targetSize: PixelDimensions
+        let geometry: MaskSourceGeometry
         let style: MaskOverlayStyle
         let resolveEpoch: UInt64
     }

@@ -31,6 +31,52 @@ struct LocalMaskRenderTransform: Codable, Hashable, Sendable, Equatable {
     }
 }
 
+/// Places a source-derived raster (semantic, luminance, colour, depth) into the post-geometry frame.
+/// Those mattes are computed from the EXIF-oriented source, so they must follow the photograph
+/// through the document's quarter-turn, flip, straighten, and perspective stages. Brush and
+/// gradient definitions are authored directly in the post-geometry frame and never use this.
+struct MaskSourceGeometry: Sendable, Equatable {
+    /// EXIF-oriented source size, before the document's quarter-turn.
+    let nativeSize: CGSize
+    let rotation: ImageRotation
+    let crop: CropAdjustments
+
+    init(nativeSize: CGSize, rotation: ImageRotation, crop: CropAdjustments) {
+        self.nativeSize = nativeSize
+        self.rotation = rotation
+        self.crop = crop
+    }
+
+    var isIdentity: Bool { rotation == .zero && !crop.hasGeometryTransform }
+
+    /// The oriented-source frame whose geometry projection fills `output`. Nil when the source
+    /// size is unusable, in which case callers fall back to the unwarped frame.
+    func sourceFrame(forOutput output: CGRect) -> CGRect? {
+        guard nativeSize.width.isFinite, nativeSize.height.isFinite,
+              nativeSize.width > 0, nativeSize.height > 0,
+              output.width > 0, output.height > 0 else { return nil }
+        let projected = RenderPipeline.geometryExtent(
+            of: rotation.orientedExtent(nativeSize), for: crop
+        )
+        guard projected.width > 0, projected.height > 0 else { return nil }
+        let scale = output.width / projected.width
+        let size = CGSize(width: (nativeSize.width * scale).rounded(),
+                          height: (nativeSize.height * scale).rounded())
+        guard size.width >= 1, size.height >= 1 else { return nil }
+        return CGRect(origin: .zero, size: size)
+    }
+}
+
+extension MaskSource {
+    /// True when the matte is derived from photograph pixels in the oriented source frame.
+    var isSourceDerived: Bool {
+        switch self {
+        case .semantic, .luminance, .color, .depth: return true
+        case .brush, .linear, .radial: return false
+        }
+    }
+}
+
 /// The value-only request crossing from `RenderEngine` to a mask resolver. No Core Image or Metal
 /// object is allowed here. A resolver may use a semantic cache, a Vision provider, or simply return
 /// the analytic/brush descriptor already present in the request. Request revisions stay in the
@@ -152,6 +198,8 @@ struct MaskOverlayRequest: Sendable, Equatable {
     let targetSize: PixelDimensions
     let quality: RenderQuality
     let transform: LocalMaskRenderTransform
+    /// Projects source-derived mattes into the post-geometry frame the overlay is drawn in.
+    let geometry: MaskSourceGeometry?
     /// RenderEngine-local supersession token; it is not part of the resolved payload identity.
     let requestRevision: UInt64
     let style: MaskOverlayStyle
@@ -165,6 +213,7 @@ struct MaskOverlayRequest: Sendable, Equatable {
         targetSize: PixelDimensions,
         quality: RenderQuality = .preview,
         transform: LocalMaskRenderTransform = .identity,
+        geometry: MaskSourceGeometry? = nil,
         style: MaskOverlayStyle,
         requestRevision: UInt64 = 0,
         selectedComponentID: UUID? = nil,
@@ -180,6 +229,7 @@ struct MaskOverlayRequest: Sendable, Equatable {
         self.targetSize = targetSize
         self.quality = quality
         self.transform = transform
+        self.geometry = geometry
         self.requestRevision = requestRevision
         self.style = style
     }
