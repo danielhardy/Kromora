@@ -279,6 +279,35 @@ final class ImageWorkSchedulerTests: XCTestCase {
         XCTAssertEqual(started, ["support-running", "visible"])
     }
 
+    /// KRMA-1140: an empty Original pane was blank until the full settled render finished because
+    /// the newer Adjusted job evicted the queued Original and it ran only after that render.
+    func testPinnedComparisonSurvivesActiveEditorAndStartsFirst() async throws {
+        let scheduler = ImageWorkScheduler(
+            configuration: .init(maxConcurrentThumbnails: 1, maxQueuedThumbnails: 4, maxQueuedEditorJobs: 4))
+        let gate = Gate()
+        var started: [String] = []
+
+        scheduler.enqueue(id: .init("running"), lane: .editor, priority: .activeEditor) {
+            started.append("running")
+            await gate.wait()
+        }
+        try await waitUntil("the first job to start") { started == ["running"] }
+
+        scheduler.enqueue(id: .init("original"), lane: .editor, priority: .comparison, pinned: true) {
+            started.append("original")
+        }
+        scheduler.enqueue(id: .init("unpinned"), lane: .editor, priority: .comparison) {
+            started.append("unpinned")
+        }
+        scheduler.enqueue(id: .init("settled"), lane: .editor, priority: .activeEditor) {
+            started.append("settled")
+        }
+
+        await gate.releaseAll()
+        try await waitUntil("the scheduler to drain") { scheduler.isIdle }
+        XCTAssertEqual(started, ["running", "original", "settled"])
+    }
+
     func testPackageIOUsesSharedLaneAndYieldsWhileEditorIsActive() async throws {
         let scheduler = ImageWorkScheduler(configuration: .init(
             maxConcurrentThumbnails: 1,

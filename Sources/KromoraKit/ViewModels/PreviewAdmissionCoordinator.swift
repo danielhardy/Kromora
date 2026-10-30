@@ -634,8 +634,11 @@ final class PreviewAdmissionCoordinator {
         comparisonPreviewScheduledRevision = comparisonRevision
         comparisonPreviewScheduledPlan = plan
 
+        // An empty Original pane is a visible blank, not background support: keep its render from
+        // being evicted by the settled Adjusted render and let it start first.
         let accepted = workScheduler.enqueue(
             id: comparisonPreviewJobID, lane: .editor, priority: .comparison,
+            pinned: destination.admissionIsSideBySideVisible && !destination.admissionHasOriginalPreview,
             onTerminal: { [weak self, weak destination] outcome in
                 guard outcome != .completed, let self, let destination,
                     assetID == destination.admissionActiveAssetID,

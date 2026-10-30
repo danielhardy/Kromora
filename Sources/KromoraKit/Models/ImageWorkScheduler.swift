@@ -113,6 +113,9 @@ final class ImageWorkScheduler {
         let sequence: UInt64
         let operation: ScheduledOperation
         let onTerminal: TerminalHandler
+        /// A support job the user is visibly waiting on (an empty side-by-side Original pane).
+        /// It is not evicted by a newer active-editor job and starts ahead of queued ones.
+        var isPinned = false
     }
 
     private struct Running {
@@ -219,6 +222,7 @@ final class ImageWorkScheduler {
         id: JobID,
         lane: Lane,
         priority: Priority,
+        pinned: Bool = false,
         onTerminal: @escaping TerminalHandler = { _ in },
         operation: @escaping Operation
     ) -> Bool {
@@ -227,7 +231,7 @@ final class ImageWorkScheduler {
         nextSequence &+= 1
         let job = Job(
             id: id, lane: lane, priority: priority, sequence: nextSequence,
-            operation: .mainActor(operation), onTerminal: onTerminal
+            operation: .mainActor(operation), onTerminal: onTerminal, isPinned: pinned
         )
 
         if lane == .thumbnail {
@@ -484,7 +488,7 @@ final class ImageWorkScheduler {
         // will be re-admitted after the frame is presented if it is still relevant.
         if job.priority == .activeEditor {
             let supportIDs = queued.values
-                .filter { $0.lane == .editor && $0.priority != .activeEditor }
+                .filter { $0.lane == .editor && $0.priority != .activeEditor && !$0.isPinned }
                 .map(\.id)
             for id in supportIDs {
                 guard let support = queued.removeValue(forKey: id) else { continue }
@@ -598,6 +602,7 @@ final class ImageWorkScheduler {
     }
 
     private func precedes(_ lhs: Job, _ rhs: Job) -> Bool {
+        if lhs.isPinned != rhs.isPinned { return lhs.isPinned }
         if lhs.priority != rhs.priority { return lhs.priority.rawValue < rhs.priority.rawValue }
         return lhs.sequence < rhs.sequence
     }
