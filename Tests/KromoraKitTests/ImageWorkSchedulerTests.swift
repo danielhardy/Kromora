@@ -279,7 +279,7 @@ final class ImageWorkSchedulerTests: XCTestCase {
         XCTAssertEqual(started, ["support-running", "visible"])
     }
 
-    /// KRMA-1140: an empty Original pane was blank until the full settled render finished because
+    /// KRMA-1147: an empty Original pane was blank until the full settled render finished because
     /// the newer Adjusted job evicted the queued Original and it ran only after that render.
     func testPinnedComparisonSurvivesActiveEditorAndStartsFirst() async throws {
         let scheduler = ImageWorkScheduler(

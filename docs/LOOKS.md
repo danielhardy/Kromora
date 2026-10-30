@@ -3,7 +3,7 @@
 This guide describes the current Look workflow and asset policy.
 
 Kromora's Look workflow supports text-based 3D LUTs, derives Looks from a RAW/JPG pair, and ships
-13 read-only starter Looks. The parser and renderer are implemented in `CubeLUT`, `LUTLibrary`,
+27 read-only starter Looks. The parser and renderer are implemented in `CubeLUT`, `LUTLibrary`,
 and `RenderPipeline`; this document records the supported interchange contract.
 
 ## Render order
@@ -263,8 +263,8 @@ Retired ids are aliased, not dropped. `BundledLookLibrary.retiredLookReplacement
 replacement, and `first(matching:)` falls back to it when no Look has the exact id, so a current edit or
 an undo-history revision that names a retired Look renders the replacement. The alias covers the
 `kromora.starter.*` id and the older path form whose last two components are `StarterLooks/<stem>.cube`
-(any bundle location); an arbitrary user file with the same name is not aliased.
+(any bundle location); a similarly named file under another directory, such as a user's `Looks` folder,
+is not aliased.
 `BundledLookTests.testRetiredStarterLooksResolveToTheirReplacements` covers both forms.
 
 Bundle size: the three 17³ cubes were about 133 KB each, so the bundle shrinks by about 400 KB.
-

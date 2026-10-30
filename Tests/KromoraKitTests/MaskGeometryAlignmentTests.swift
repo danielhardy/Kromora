@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 import XCTest
 @testable import KromoraKit
 
-/// KRMA-1139: source-derived mattes (Subject and the other smart masks) are computed from the
+/// KRMA-1146: source-derived mattes (Subject and the other smart masks) are computed from the
 /// oriented source, so they must follow the photograph through quarter-turn, flip, straighten,
 /// perspective, and crop. The oracle is the photograph itself: a bright block sits at a known
 /// place, the matte covers exactly that block, and a darkening local layer must therefore remove

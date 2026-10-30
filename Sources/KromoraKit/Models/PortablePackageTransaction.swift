@@ -986,17 +986,24 @@ struct PortablePackageTransaction {
         do {
             while true {
                 if isCancelled() { throw CancellationError() }
-                let chunk = try PortablePackageImportPhase.measure(.read, observer: timingObserver) {
-                    try input.read(upToCount: chunkSize) ?? Data()
+                // `read(upToCount:)` returns autoreleased storage. This loop runs inside one
+                // worker job for the whole batch, so without a pool per chunk every chunk of
+                // every file stays live until the job returns (KRMA-1139).
+                let finished = try autoreleasepool {
+                    let chunk = try PortablePackageImportPhase.measure(.read, observer: timingObserver) {
+                        try input.read(upToCount: chunkSize) ?? Data()
+                    }
+                    if chunk.isEmpty { return true }
+                    try PortablePackageImportPhase.measure(.write, observer: timingObserver) {
+                        try output.write(contentsOf: chunk)
+                    }
+                    PortablePackageImportPhase.measure(.hash, observer: timingObserver) {
+                        hasher.update(data: chunk)
+                    }
+                    byteCount += UInt64(chunk.count)
+                    return false
                 }
-                if chunk.isEmpty { break }
-                try PortablePackageImportPhase.measure(.write, observer: timingObserver) {
-                    try output.write(contentsOf: chunk)
-                }
-                PortablePackageImportPhase.measure(.hash, observer: timingObserver) {
-                    hasher.update(data: chunk)
-                }
-                byteCount += UInt64(chunk.count)
+                if finished { break }
                 bytesReadObserver(byteCount)
             }
             try input.close()
@@ -1633,10 +1640,15 @@ struct PortablePackageTransaction {
         do {
             while true {
                 if isCancelled() { throw CancellationError() }
-                let chunk = try input.read(upToCount: chunkSize) ?? Data()
-                if chunk.isEmpty { break }
-                hasher.update(data: chunk)
-                byteCount += UInt64(chunk.count)
+                // Per-chunk pool for the same reason as `stage(fileAt:)`.
+                let finished = try autoreleasepool {
+                    let chunk = try input.read(upToCount: chunkSize) ?? Data()
+                    if chunk.isEmpty { return true }
+                    hasher.update(data: chunk)
+                    byteCount += UInt64(chunk.count)
+                    return false
+                }
+                if finished { break }
             }
             try input.close()
         } catch {

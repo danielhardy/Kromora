@@ -397,180 +397,192 @@ struct PortablePackageImporter: Sendable {
         var hashesSeenThisImport: [String: PortablePhotoAssetID] = [:]
 
         for source in sources {
-            if isCancelled() {
-                cancelled = true
-                break
-            }
-
-            progressValue.currentName = source.name
-            progressValue.phase = .staging
-            progress(progressValue)
-
-            let assetID = PortablePhotoAssetID()
-            let shardName = PortableLibraryPackage.shard(for: assetID)
-            let filename = PortableLibraryPackage.safeFilename(source.name)
-            let sourcePath = "Assets/\(shardName)/\(assetID.raw)/Original/\(filename)"
-            let recordPath = "Assets/\(shardName)/\(assetID.raw)/asset.json"
-            var transaction: PortablePackageTransaction
-            do {
-                // A batch can outlive one lease duration. Refresh immediately before each
-                // transaction so a later item does not inherit the first item's expiry window.
-                transaction = try PortablePackageImportPhase.measure(.begin, observer: options.timingObserver) {
-                    try lease.renew(now: now())
-                    return try package.beginTransaction(
-                        lease: lease, now: now(), faultInjector: faultInjector
-                    )
-                }
-            } catch {
-                if error is CancellationError || isCancelled() {
-                    cancelled = true
-                    break
-                }
-                // Lease loss is session-fatal. Returning it as an item-local failure would make
-                // a batch look successful while silently leaving later edits unwritable.
-                if error is PortablePackageLeaseError { throw error }
-                failures.append(.init(source: source, reason: error.localizedDescription))
-                progressValue.processed += 1
-                progressValue.failed += 1
-                progress(progressValue)
-                continue
-            }
-
-            do {
-                let stageStart = options.timingObserver == nil ? nil : ContinuousClock.now
-                let bytesBeforeSource = progressValue.bytesRead
-                let staged: PortablePackageStagedFile
-                if let inlineData = source.inlineData {
-                    staged = try transaction.stage(
-                        data: inlineData,
-                        at: sourcePath,
-                        chunkSize: options.chunkSize,
-                        isCancelled: isCancelled,
-                        checksum: source.precomputedContentHash
-                    )
-                } else {
-                    staged = try transaction.stage(
-                        fileAt: source.url,
-                        to: sourcePath,
-                        chunkSize: options.chunkSize,
-                        copyMode: options.copyMode,
-                        isCancelled: isCancelled,
-                        sourceReadObserver: { sourceReadObserver(source) },
-                        timingObserver: options.timingObserver,
-                        bytesReadObserver: { byteCount in
-                            progressValue.bytesRead = bytesBeforeSource + byteCount
-                            progress(progressValue)
-                        }
-                    )
-                }
-                progressValue.bytesRead = bytesBeforeSource + staged.byteCount
-
-                let duplicateAssetID = catalog.existingHashes[staged.checksum]
-                    ?? hashesSeenThisImport[staged.checksum]
-                if let duplicateAssetID {
-                    let importAnyway = options.duplicatePolicy == .importAnyway
-                    duplicates.append(.init(
-                        source: source,
-                        contentHash: staged.checksum,
-                        existingAssetID: duplicateAssetID,
-                        importedAssetID: importAnyway ? assetID : nil
-                    ))
-                    progressValue.duplicates += 1
-                    if !importAnyway {
-                        try abort(&transaction, now: now())
-                        progressValue.processed += 1
-                        progress(progressValue)
-                        continue
-                    }
-                }
-
+            // Foundation path standardization, URL resolution, and ImageIO metadata all return
+            // autoreleased temporaries. This worker runs the whole batch in one job, so without
+            // a pool per source they accumulate until it returns (about 0.45 MiB per RAW,
+            // KRMA-1140). Control flow leaves the pool through the returned value.
+            let flow = try autoreleasepool { () throws -> SourceFlow in
                 if isCancelled() {
-                    throw CancellationError()
-                }
-                let stagedOriginalURL = try transaction.stagedURL(for: sourcePath)
-                let identity = PortablePhotoIdentity(
-                    assetID: assetID,
-                    sourceFingerprint: PortablePhotoSourceFingerprint(
-                        contentHash: staged.checksum,
-                        decoderVersion: "import-v1"
-                    )
-                )
-                let sourceChangeSignature = PhotoSourceFingerprint.file(at: stagedOriginalURL)
-                let record = PortablePackageAssetRecord(
-                    identity: identity,
-                    source: .embedded(relativePath: sourcePath),
-                    sourceChangeSignature: sourceChangeSignature
-                )
-                try transaction.stage(data: try Self.encode(record), at: recordPath)
-
-                let sourceMetadata = ImageMetadata.read(from: stagedOriginalURL)
-                let sourceDimensions = PortablePackageAssetSummary.sourceDimensions(from: sourceMetadata)
-                let importedSummary = PortablePackageAssetSummary(
-                    captureDateISO: sourceMetadata.dateTakenISO,
-                    cameraMake: sourceMetadata.make ?? "",
-                    cameraModel: sourceMetadata.model ?? "",
-                    lens: sourceMetadata.lens ?? "",
-                    coarseLocation: sourceMetadata.coarseLocation,
-                    captureSettings: PortablePackageCaptureSettings(sourceMetadata),
-                    dimensions: sourceDimensions,
-                    presentedAspectRatio: sourceDimensions.map {
-                        Double($0.width) / Double($0.height)
-                    },
-                    sourceFingerprint: identity.sourceFingerprint,
-                    displayName: source.name
-                )
-                var shard = try Self.requireShard(shardName, from: catalog.shards)
-                shard.entries.append(.init(
-                    assetID: assetID,
-                    recordPath: recordPath,
-                    summary: importedSummary
-                ))
-                try transaction.stage(
-                    data: try package.encodedMembershipShard(shard),
-                    at: "Catalog/Membership/\(shardName).json"
-                )
-
-                if let stageStart {
-                    options.timingObserver?(.staging, stageStart.duration(to: .now))
-                }
-                progressValue.phase = .committing
-                progress(progressValue)
-                try PortablePackageImportPhase.measure(.commit, observer: options.timingObserver) {
-                    try transaction.commit(now: now(), isCancelled: isCancelled)
-                }
-
-                catalog.shards[shardName] = shard
-                catalog.existingHashes[staged.checksum] = assetID
-                hashesSeenThisImport[staged.checksum] = assetID
-                let indexEntry = LibraryIndexEntry(
-                    assetID: assetID, recordPath: recordPath,
-                    summary: importedSummary
-                )
-                indexUpserts.append(indexEntry)
-                committed(indexEntry)
-                imported.append(.init(
-                    source: source,
-                    assetID: assetID,
-                    contentHash: staged.checksum,
-                    byteCount: staged.byteCount,
-                    usedClonefile: staged.usedClonefile
-                ))
-                progressValue.imported += 1
-                progressValue.processed += 1
-                progress(progressValue)
-            } catch {
-                try abort(&transaction, now: now())
-                if error is CancellationError || isCancelled() {
                     cancelled = true
-                    break
+                    return .stop
                 }
-                if error is PortablePackageLeaseError { throw error }
-                failures.append(.init(source: source, reason: error.localizedDescription))
-                progressValue.processed += 1
-                progressValue.failed += 1
+
+                progressValue.currentName = source.name
+                progressValue.phase = .staging
                 progress(progressValue)
-                continue
+
+                let assetID = PortablePhotoAssetID()
+                let shardName = PortableLibraryPackage.shard(for: assetID)
+                let filename = PortableLibraryPackage.safeFilename(source.name)
+                let sourcePath = "Assets/\(shardName)/\(assetID.raw)/Original/\(filename)"
+                let recordPath = "Assets/\(shardName)/\(assetID.raw)/asset.json"
+                var transaction: PortablePackageTransaction
+                do {
+                    // A batch can outlive one lease duration. Refresh immediately before each
+                    // transaction so a later item does not inherit the first item's expiry window.
+                    transaction = try PortablePackageImportPhase.measure(.begin, observer: options.timingObserver) {
+                        try lease.renew(now: now())
+                        return try package.beginTransaction(
+                            lease: lease, now: now(), faultInjector: faultInjector
+                        )
+                    }
+                } catch {
+                    if error is CancellationError || isCancelled() {
+                        cancelled = true
+                        return .stop
+                    }
+                    // Lease loss is session-fatal. Returning it as an item-local failure would make
+                    // a batch look successful while silently leaving later edits unwritable.
+                    if error is PortablePackageLeaseError { throw error }
+                    failures.append(.init(source: source, reason: error.localizedDescription))
+                    progressValue.processed += 1
+                    progressValue.failed += 1
+                    progress(progressValue)
+                    return .next
+                }
+
+                do {
+                    let stageStart = options.timingObserver == nil ? nil : ContinuousClock.now
+                    let bytesBeforeSource = progressValue.bytesRead
+                    let staged: PortablePackageStagedFile
+                    if let inlineData = source.inlineData {
+                        staged = try transaction.stage(
+                            data: inlineData,
+                            at: sourcePath,
+                            chunkSize: options.chunkSize,
+                            isCancelled: isCancelled,
+                            checksum: source.precomputedContentHash
+                        )
+                    } else {
+                        staged = try transaction.stage(
+                            fileAt: source.url,
+                            to: sourcePath,
+                            chunkSize: options.chunkSize,
+                            copyMode: options.copyMode,
+                            isCancelled: isCancelled,
+                            sourceReadObserver: { sourceReadObserver(source) },
+                            timingObserver: options.timingObserver,
+                            bytesReadObserver: { byteCount in
+                                progressValue.bytesRead = bytesBeforeSource + byteCount
+                                progress(progressValue)
+                            }
+                        )
+                    }
+                    progressValue.bytesRead = bytesBeforeSource + staged.byteCount
+
+                    let duplicateAssetID = catalog.existingHashes[staged.checksum]
+                        ?? hashesSeenThisImport[staged.checksum]
+                    if let duplicateAssetID {
+                        let importAnyway = options.duplicatePolicy == .importAnyway
+                        duplicates.append(.init(
+                            source: source,
+                            contentHash: staged.checksum,
+                            existingAssetID: duplicateAssetID,
+                            importedAssetID: importAnyway ? assetID : nil
+                        ))
+                        progressValue.duplicates += 1
+                        if !importAnyway {
+                            try abort(&transaction, now: now())
+                            progressValue.processed += 1
+                            progress(progressValue)
+                            return .next
+                        }
+                    }
+
+                    if isCancelled() {
+                        throw CancellationError()
+                    }
+                    let stagedOriginalURL = try transaction.stagedURL(for: sourcePath)
+                    let identity = PortablePhotoIdentity(
+                        assetID: assetID,
+                        sourceFingerprint: PortablePhotoSourceFingerprint(
+                            contentHash: staged.checksum,
+                            decoderVersion: "import-v1"
+                        )
+                    )
+                    let sourceChangeSignature = PhotoSourceFingerprint.file(at: stagedOriginalURL)
+                    let record = PortablePackageAssetRecord(
+                        identity: identity,
+                        source: .embedded(relativePath: sourcePath),
+                        sourceChangeSignature: sourceChangeSignature
+                    )
+                    try transaction.stage(data: try Self.encode(record), at: recordPath)
+
+                    // ImageIO bridges temporary metadata dictionaries through Foundation. This worker
+                    // handles the whole batch, so drain those per-source objects before advancing.
+                    let sourceMetadata = autoreleasepool {
+                        ImageMetadata.read(from: stagedOriginalURL)
+                    }
+                    let sourceDimensions = PortablePackageAssetSummary.sourceDimensions(from: sourceMetadata)
+                    let importedSummary = PortablePackageAssetSummary(
+                        captureDateISO: sourceMetadata.dateTakenISO,
+                        cameraMake: sourceMetadata.make ?? "",
+                        cameraModel: sourceMetadata.model ?? "",
+                        lens: sourceMetadata.lens ?? "",
+                        coarseLocation: sourceMetadata.coarseLocation,
+                        captureSettings: PortablePackageCaptureSettings(sourceMetadata),
+                        dimensions: sourceDimensions,
+                        presentedAspectRatio: sourceDimensions.map {
+                            Double($0.width) / Double($0.height)
+                        },
+                        sourceFingerprint: identity.sourceFingerprint,
+                        displayName: source.name
+                    )
+                    var shard = try Self.requireShard(shardName, from: catalog.shards)
+                    shard.entries.append(.init(
+                        assetID: assetID,
+                        recordPath: recordPath,
+                        summary: importedSummary
+                    ))
+                    try transaction.stage(
+                        data: try package.encodedMembershipShard(shard),
+                        at: "Catalog/Membership/\(shardName).json"
+                    )
+
+                    if let stageStart {
+                        options.timingObserver?(.staging, stageStart.duration(to: .now))
+                    }
+                    progressValue.phase = .committing
+                    progress(progressValue)
+                    try PortablePackageImportPhase.measure(.commit, observer: options.timingObserver) {
+                        try transaction.commit(now: now(), isCancelled: isCancelled)
+                    }
+
+                    catalog.shards[shardName] = shard
+                    catalog.existingHashes[staged.checksum] = assetID
+                    hashesSeenThisImport[staged.checksum] = assetID
+                    let indexEntry = LibraryIndexEntry(
+                        assetID: assetID, recordPath: recordPath,
+                        summary: importedSummary
+                    )
+                    indexUpserts.append(indexEntry)
+                    committed(indexEntry)
+                    imported.append(.init(
+                        source: source,
+                        assetID: assetID,
+                        contentHash: staged.checksum,
+                        byteCount: staged.byteCount,
+                        usedClonefile: staged.usedClonefile
+                    ))
+                    progressValue.imported += 1
+                    progressValue.processed += 1
+                    progress(progressValue)
+                } catch {
+                    try abort(&transaction, now: now())
+                    if error is CancellationError || isCancelled() {
+                        cancelled = true
+                        return .stop
+                    }
+                    if error is PortablePackageLeaseError { throw error }
+                    failures.append(.init(source: source, reason: error.localizedDescription))
+                    progressValue.processed += 1
+                    progressValue.failed += 1
+                    progress(progressValue)
+                    return .next
+                }
+                return .next
             }
+            if flow == .stop { break }
         }
 
         progressValue.currentName = nil
@@ -610,6 +622,8 @@ struct PortablePackageImporter: Sendable {
             sources: sources, options: options, progress: progress, faultInjector: faultInjector
         )
     }
+
+    private enum SourceFlow { case next, stop }
 
     private static func totalBytes(for sources: [PortablePackageImportSource]) -> UInt64? {
         var total: UInt64 = 0

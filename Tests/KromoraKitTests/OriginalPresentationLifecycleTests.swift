@@ -4,7 +4,7 @@ import XCTest
 
 @testable import KromoraKit
 
-/// KRMA-1141: the side-by-side Original pane must present the current photo's baseline without a
+/// KRMA-1148: the side-by-side Original pane must present the current photo's baseline without a
 /// focus transition or other user action. These tests drive the real `AppViewModel` and surfaces
 /// (fake render engine, no `NSWindow` or display) through Edit entry, photo switching, and Edit
 /// re-entry, and model defocus/refocus with the same window notifications the Metal view observes.

@@ -254,6 +254,15 @@ final class ExportCoordinator {
         }
     }
 
+    /// Why one batch item was not written. Kept on the outcome because the live "Skipped …" status
+    /// is replaced by the final summary a moment later.
+    struct ItemFailure: Equatable, Sendable {
+        let name: String
+        let reason: String
+    }
+
+    /// Equality compares the counts and flags only; `failures` is diagnostic text, so two outcomes
+    /// that failed the same items for different reasons are still the same outcome.
     struct BatchOutcome: Equatable {
         let exported: Int
         let failed: Int
@@ -262,11 +271,14 @@ final class ExportCoordinator {
         let photosFailed: Int
         /// Written items whose document had edits (`isIdentity == false`).
         let editedExportCount: Int
+        /// One entry per failed item, in batch order.
+        let failures: [ItemFailure]
 
         init(
             exported: Int, failed: Int, total: Int, cancelled: Bool = false,
-            photosFailed: Int = 0, editedExportCount: Int = 0
+            photosFailed: Int = 0, editedExportCount: Int = 0, failures: [ItemFailure] = []
         ) {
+            self.failures = failures
             self.editedExportCount = editedExportCount
             self.exported = exported
             self.failed = failed
@@ -276,6 +288,12 @@ final class ExportCoordinator {
         }
 
         var isCancelled: Bool { cancelled }
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.exported == rhs.exported && lhs.failed == rhs.failed && lhs.total == rhs.total
+                && lhs.cancelled == rhs.cancelled && lhs.photosFailed == rhs.photosFailed
+                && lhs.editedExportCount == rhs.editedExportCount
+        }
     }
 
     // MARK: - Naming
@@ -411,7 +429,7 @@ final class ExportCoordinator {
         for item: BatchItem, document: EditDocument, lut: CubeLUT?, options: ExportOptions
     ) async throws -> Data {
         try options.validate()
-        guard let sourceAccess = await Self.sourceAccess(for: item) else {
+        guard let sourceAccess = await Self.sourceAccess(for: item, using: exportEngine) else {
             throw ImageError.exportFailed
         }
         let itemAssetID = await item.resolvedAssetID()
@@ -656,6 +674,7 @@ final class ExportCoordinator {
         var failed = 0
         var photosFailed = 0
         var editedExportCount = 0
+        var failures: [ItemFailure] = []
         var cancelled = false
 
         // Reserve destinations in selection order before each render starts. The batch remains
@@ -675,7 +694,7 @@ final class ExportCoordinator {
             }
             batchCurrentItem = item.name
             onStatus?("Exporting \(batchCompleted) of \(total)… \(item.name)")
-            if let sourceAccess = await Self.sourceAccess(for: item) {
+            if let sourceAccess = await Self.sourceAccess(for: item, using: exportEngine) {
                 let source = sourceAccess.source
                 let itemAssetID = await item.resolvedAssetID()
                 let documentResolution: DocumentResolution
@@ -689,6 +708,7 @@ final class ExportCoordinator {
                     )
                 } catch {
                     failed += 1
+                    failures.append(ItemFailure(name: item.name, reason: error.localizedDescription))
                     onStatus?("Skipped \(item.name): \(error.localizedDescription)")
                     let done = exported + failed
                     batchCompleted = done
@@ -752,10 +772,12 @@ final class ExportCoordinator {
                     break
                 } catch {
                     failed += 1
+                    failures.append(ItemFailure(name: item.name, reason: error.localizedDescription))
                     onStatus?("Skipped \(item.name): \(error.localizedDescription)")
                 }
             } else {
                 failed += 1
+                failures.append(ItemFailure(name: item.name, reason: "source unavailable"))
                 onStatus?("Skipped \(item.name): source unavailable")
             }
 
@@ -772,7 +794,8 @@ final class ExportCoordinator {
             total: total,
             cancelled: cancelled,
             photosFailed: photosFailed,
-            editedExportCount: editedExportCount
+            editedExportCount: editedExportCount,
+            failures: failures
         )
         batchProgress = 0
         batchCompleted = 0
@@ -867,21 +890,29 @@ final class ExportCoordinator {
 
     /// How to reproduce a batch item, as an `ImageSource`.
     ///
-    /// `nativeExtent` is `.zero` because a batch export never measures one: the extent exists so a
-    /// *preview* can compute a downscale factor without decoding twice, and `RenderScale.full`
-    /// returns 1.0 regardless. The pipeline reads the decoder's own size anyway, never this field
-    /// (`RenderPipeline.developedSource`), so decoding every file up front just to fill it in would
-    /// be pure cost.
-    private static func sourceAccess(for item: BatchItem) async -> SourceAccess? {
+    /// The source is admitted through the export engine so `nativeExtent` is the decoder's real,
+    /// oriented size, as it is for the editor. Anything that regenerates a semantic mask at export
+    /// sizes its analysis image from that extent (`AnalysisImageFactory.make` rejects `.zero`), and
+    /// the extent is part of the source's cache identity, so an editor-resolved mask is only reused
+    /// when both sides agree on it. Preparation reads the header (standard) or opens the renderer's
+    /// RAW session without touching `outputImage`; the session is reused by the render that follows.
+    /// If the engine cannot prepare the source, the unmeasured source is kept and the render reports
+    /// its own failure.
+    private static func sourceAccess(
+        for item: BatchItem, using engine: any RenderEngining
+    ) async -> SourceAccess? {
         if let url = item.url {
             let resolved = resolveScopedURL(url: url, bookmarkData: item.bookmarkData)
-            return SourceAccess(
-                source: await ImageSource.resolve(url: resolved, nativeExtent: .zero),
-                url: resolved
-            )
+            let hasScope = resolved.startAccessingSecurityScopedResource()
+            defer { if hasScope { resolved.stopAccessingSecurityScopedResource() } }
+            let source = await ImageSource.resolve(url: resolved, nativeExtent: .zero)
+            let prepared = await engine.prepareSource(source)?.source ?? source
+            return SourceAccess(source: prepared, url: resolved)
         }
         if let data = item.data {
-            return SourceAccess(source: ImageSource(data: data, nativeExtent: .zero), url: nil)
+            let source = ImageSource(data: data, nativeExtent: .zero)
+            let prepared = await engine.prepareSource(source)?.source ?? source
+            return SourceAccess(source: prepared, url: nil)
         }
         return nil
     }
@@ -960,13 +991,20 @@ final class ExportCoordinator {
         if outcome.cancelled {
             let processed = outcome.exported + outcome.failed
             let remaining = max(0, outcome.total - processed)
-            return "Export cancelled after \(processed) of \(outcome.total) (\(outcome.exported) exported, \(outcome.failed) failed, \(remaining) not started)\(photosSummary(for: outcome)) to \(destination)"
+            return "Export cancelled after \(processed) of \(outcome.total) (\(outcome.exported) exported, \(outcome.failed) failed\(failureDetail(for: outcome)), \(remaining) not started)\(photosSummary(for: outcome)) to \(destination)"
         }
         if outcome.failed == 0 {
             let plural = outcome.exported == 1 ? "" : "s"
             return "Exported \(outcome.exported) image\(plural)\(photosSummary(for: outcome)) to \(destination)"
         }
-        return "Exported \(outcome.exported) of \(outcome.total) (\(outcome.failed) failed)\(photosSummary(for: outcome)) to \(destination)"
+        return "Exported \(outcome.exported) of \(outcome.total) (\(outcome.failed) failed\(failureDetail(for: outcome)))\(photosSummary(for: outcome)) to \(destination)"
+    }
+
+    /// The first failure's reason, so the final status line says why rather than only how many.
+    nonisolated private static func failureDetail(for outcome: BatchOutcome) -> String {
+        guard let first = outcome.failures.first else { return "" }
+        let more = outcome.failures.count > 1 ? "; first" : ""
+        return "\(more): \(first.name): \(first.reason)"
     }
 
     private func reportPhotosSuccess(_ result: PhotosDeliveryResult, filename: String) {
