@@ -352,6 +352,16 @@ The app imports into its own current library, so run it only in a disposable mac
 against a real photo library. The script quits only the instance it launched (matched by pid and
 executable path), removes only its own temporary fixtures, and bounds every wait; a failure names the stage.
 
+To run the signed sandboxed app without a second user or VM, build it under a throwaway bundle id
+(`PRODUCT_BUNDLE_IDENTIFIER=com.example.kromora.smoke`, ad hoc signed, separate derived data), then clone a
+library package into that bundle's own container (`~/Library/Containers/<id>/Data/Documents/Lib.kromoralibrary`,
+`cp -cR`, without `manifest.lock`) and pass it as `KROMORA_LIBRARY_PACKAGE`. The sandbox honors the override
+only inside its container, and a container's `Pictures` is a symlink to the real `~/Pictures`, so a different
+bundle id alone does not isolate the default library. Seed a persisted naming policy for the second pass by
+writing `export.batchFilenamePolicy` (JSON data) into the container's own preferences plist
+(`<container>/Data/Library/Preferences/<id>.plist`), never the user-level domain. Delete the clone and plist
+afterwards.
+
 | Exit | Meaning |
 | --- | --- |
 | 0 | Executed and passed |
