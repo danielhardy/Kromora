@@ -229,15 +229,23 @@ public struct ContentView: View {
         .inspector(
             isPresented: Binding(
                 get: {
-                    canvasState.isCropToolActive
-                        || (inspectorState.isPresented && !viewModel.libraryHandoff.isEntering)
-                        || viewModel.libraryHandoff.inspectorHeldOpen
+                    let handoff = viewModel.libraryHandoff
+                    return LibraryHandoffState.inspectorColumnIsPresented(
+                        modelPresented: inspectorState.isPresented,
+                        isEntering: handoff.isEntering,
+                        inspectorHeldOpen: handoff.inspectorHeldOpen,
+                        cropActive: canvasState.isCropToolActive
+                    )
                 },
                 set: { isPresented in
-                    // Crop owns the inspector for the duration of the mode.
-                    if !canvasState.isCropToolActive {
-                        inspectorState.isPresented = isPresented
-                    }
+                    let handoff = viewModel.libraryHandoff
+                    guard LibraryHandoffState.acceptsInspectorColumnWrite(
+                        isEntering: handoff.isEntering,
+                        inspectorHeldOpen: handoff.inspectorHeldOpen,
+                        cropActive: canvasState.isCropToolActive,
+                        suppressWriteback: handoff.suppressInspectorWriteback
+                    ) else { return }
+                    inspectorState.isPresented = isPresented
                 }
             )
         ) {

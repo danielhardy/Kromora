@@ -47,6 +47,44 @@ final class LibraryHandoffStateTests: XCTestCase {
         XCTAssertFalse(state.isLeaving)
     }
 
+    func testReturnDuringEntranceDoesNotRevealTheInspector() {
+        let state = LibraryHandoffState()
+        state.isEntering = true
+        state.prepareForReturn(isEditing: true, inspectorIsPresented: true)
+        XCTAssertFalse(
+            state.inspectorHeldOpen,
+            "the entrance has not shown the inspector yet, so the return must not slide it over the Library")
+        XCTAssertTrue(state.isLeaving)
+    }
+
+    func testEntranceHidesTheInspectorColumnAndIgnoresTheReconcileWrite() {
+        XCTAssertFalse(
+            LibraryHandoffState.inspectorColumnIsPresented(
+                modelPresented: true, isEntering: true, inspectorHeldOpen: false, cropActive: false))
+        XCTAssertFalse(
+            LibraryHandoffState.acceptsInspectorColumnWrite(
+                isEntering: true, inspectorHeldOpen: false, cropActive: false, suppressWriteback: true))
+        XCTAssertTrue(
+            LibraryHandoffState.inspectorColumnIsPresented(
+                modelPresented: true, isEntering: false, inspectorHeldOpen: false, cropActive: false))
+        XCTAssertTrue(
+            LibraryHandoffState.acceptsInspectorColumnWrite(
+                isEntering: false, inspectorHeldOpen: false, cropActive: false, suppressWriteback: false))
+        XCTAssertTrue(
+            LibraryHandoffState.inspectorColumnIsPresented(
+                modelPresented: false, isEntering: false, inspectorHeldOpen: true, cropActive: false),
+            "the return hold keeps the column up after the model flag is cleared")
+        XCTAssertFalse(
+            LibraryHandoffState.acceptsInspectorColumnWrite(
+                isEntering: false, inspectorHeldOpen: true, cropActive: false, suppressWriteback: false))
+        XCTAssertTrue(
+            LibraryHandoffState.inspectorColumnIsPresented(
+                modelPresented: false, isEntering: true, inspectorHeldOpen: false, cropActive: true))
+        XCTAssertFalse(
+            LibraryHandoffState.acceptsInspectorColumnWrite(
+                isEntering: false, inspectorHeldOpen: false, cropActive: true, suppressWriteback: false))
+    }
+
     func testFinishClearsFlightAndEntranceGate() {
         let state = LibraryHandoffState()
         state.flight = .init(image: NSImage(), frame: .zero, cornerRadius: 0, opacity: 1)
@@ -66,10 +104,32 @@ final class LibraryHandoffStateTests: XCTestCase {
         XCTAssertTrue(state.isEntering)
         XCTAssertTrue(state.isChromeHeld, "the filmstrip waits, with its space reserved, until the photo lands")
         XCTAssertTrue(state.isCanvasHeld, "the flight must be the only copy of the photo on screen")
+        XCTAssertTrue(state.suppressInspectorWriteback)
         state.finish()
         XCTAssertFalse(state.isEntering)
         XCTAssertFalse(state.isCanvasHeld)
+        XCTAssertFalse(state.suppressInspectorWriteback)
         XCTAssertNil(state.flight)
+    }
+
+    func testEntranceSettlesChromeAfterTheCanvasIsMeasured() async {
+        let state = LibraryHandoffState()
+        state.runEntrance(
+            image: NSImage(size: CGSize(width: 40, height: 30)),
+            from: CGRect(x: 0, y: 0, width: 20, height: 20), inspectorWidth: 280)
+        state.updateCanvasFrame(CGRect(x: 0, y: 40, width: 1000, height: 600))
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while ContinuousClock.now < deadline,
+            state.isEntering || state.isChromeHeld || state.isEditorHeld || state.flight != nil
+        {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertFalse(state.isEntering, "the inspector hold has to end when the entrance settles")
+        XCTAssertFalse(state.isChromeHeld, "the filmstrip hold has to end when the entrance settles")
+        XCTAssertFalse(state.isEditorHeld)
+        XCTAssertFalse(state.suppressInspectorWriteback)
+        XCTAssertNil(state.flight)
+        XCTAssertEqual(state.libraryScrim, 0)
     }
 
     func testReturnWithoutACanvasFinishesWithoutAFlight() {
