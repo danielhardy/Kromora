@@ -505,6 +505,44 @@ final class RenderPipelineTests: TempDirectoryTestCase {
         )
     }
 
+    /// A settled preview renders the visible crop of a large frame. The curve lookup is a 256×1
+    /// texture at the origin, sampled by pixel value rather than by destination position. A crop
+    /// that does not contain that texture must still evaluate it; otherwise the settled frame is
+    /// black while the smaller interactive frame (whose render region still covers the texture)
+    /// stays visible.
+    func testToneCurveStaysVisibleInACropThatMissesTheLookupTexture() throws {
+        let width = 900
+        let height = 120
+        var pixels = [Float](repeating: 0, count: width * height * 4)
+        for index in 0..<(width * height) {
+            pixels[index * 4] = 0.42
+            pixels[index * 4 + 1] = 0.42
+            pixels[index * 4 + 2] = 0.42
+            pixels[index * 4 + 3] = 1
+        }
+        let data = pixels.withUnsafeBytes { Data($0) }
+        let source = try XCTUnwrap(CIImage(
+            bitmapData: data,
+            bytesPerRow: width * 4 * MemoryLayout<Float>.size,
+            size: CGSize(width: width, height: height),
+            format: .RGBAf,
+            colorSpace: WorkingSpace.current.linearWorkingColorSpace
+        ))
+        let curve = LightToneCurve(points: [
+            LightCurvePoint(input: 0, output: 0),
+            LightCurvePoint(input: 0.42, output: 0.82),
+            LightCurvePoint(input: 1, output: 1),
+        ])
+        let curved = RenderPipeline.applyLight(LightAdjustments(toneCurve: curve), to: source)
+        let crop = CGRect(x: 520, y: 40, width: 64, height: 32)
+        let rendered = try Pixels.bytes(of: curved.cropped(to: crop))
+        let red = Int(rendered[0])
+        XCTAssertGreaterThan(
+            red, 80,
+            "a crop away from the curve texture rendered \(red), which is the settled black frame"
+        )
+    }
+
     func testToneCurveRenderIsUnchangedAtItsIdentity() throws {
         let source = try linearRamp(width: 96)
         let expected = try Pixels.bytes(of: source)

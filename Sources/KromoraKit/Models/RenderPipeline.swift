@@ -69,7 +69,9 @@ enum RenderPipeline {
     /// v38 uses a true affine straighten rotation and its uncropped analytic AABB. Frames produced
     /// with v37's straighten filter and compensating stretch contain different pixels and must be
     /// refined against the corrected geometry.
-    static let pixelEpoch = 38
+    /// v39 samples the tone-curve lookup from its own 256×1 extent. Settled crops that missed that
+    /// texture rendered black and must be refined against the corrected region.
+    static let pixelEpoch = 39
 
     /// Build the graph for `document` over `source`.
     ///

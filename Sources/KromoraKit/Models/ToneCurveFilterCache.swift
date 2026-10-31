@@ -62,9 +62,18 @@ final class ToneCurveFilterCache {
             working = image.transformed(
                 by: CGAffineTransform(translationX: -origin.x, y: -origin.y))
         }
+        // The curve is a 256×1 lookup indexed by pixel value, not by destination position.
+        // Core Image asks which region of each sampler a destination tile needs. Returning the
+        // destination rect for the lookup makes any settled crop or render tile that misses
+        // (0, 0, 256, 1) sample empty texels, so that region renders black. The interactive
+        // frame often still covers the texture and stays visible until the drag ends.
+        let curveExtent = sampledImage.extent
         let curved =
             kernel.apply(
-                extent: working.extent, roiCallback: { _, rect in rect },
+                extent: working.extent,
+                roiCallback: { index, rect in
+                    index == 0 ? rect : curveExtent
+                },
                 arguments: [working, sampledImage]
             ) ?? working
         if origin.x == 0, origin.y == 0 {
