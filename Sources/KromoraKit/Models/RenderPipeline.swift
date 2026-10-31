@@ -66,7 +66,10 @@ enum RenderPipeline {
     /// v37 is the Display P3 release (KRMA-1121): the engine evaluates the graph in extended linear
     /// Display P3 and every raster and export is encoded in Display P3, so frames and caches written
     /// by an sRGB-era build are stale.
-    static let pixelEpoch = 37
+    /// v38 uses a true affine straighten rotation and its uncropped analytic AABB. Frames produced
+    /// with v37's straighten filter and compensating stretch contain different pixels and must be
+    /// refined against the corrected geometry.
+    static let pixelEpoch = 38
 
     /// Build the graph for `document` over `source`.
     ///
@@ -381,43 +384,27 @@ enum RenderPipeline {
             result = result.transformed(by: transform)
         }
         if crop.straightenAngle != 0 {
+            // Rotate about the image centre with a plain affine transform. `CIStraightenFilter`
+            // keeps the source extent, clips the rotated corners, and zooms the pixels, so it
+            // cannot produce the full rotated bounding box the crop workspace and
+            // ResolutionPlanner describe (KRMA-1149). Core Image computes the exact rotated AABB
+            // for the affine path; rebase it to a zero origin to match the decoder convention.
             let sourceExtent = result.extent
             let radians = CGFloat(crop.straightenAngle * .pi / 180)
-            if let filter = CIFilter(name: "CIStraightenFilter") {
-                filter.setValue(result, forKey: kCIInputImageKey)
-                filter.setValue(radians, forKey: kCIInputAngleKey)
-                if let output = filter.outputImage { result = output }
-            } else {
-                // Keep a deterministic affine fallback for older Core Image runtimes that do not
-                // expose the named filter. Rotating around the image centre preserves the full
-                // transformed extent.
-                let center = CGPoint(x: result.extent.midX, y: result.extent.midY)
-                result = result.transformed(by: CGAffineTransform(translationX: center.x, y: center.y)
-                    .rotated(by: radians)
-                    .translatedBy(x: -center.x, y: -center.y))
-            }
-
-            // Some Core Image runtimes keep CIStraightenFilter's original extent even though
-            // the pixels occupy the rotated AABB. Rebase the result to the explicit geometry
-            // extent used by ResolutionPlanner so the renderer, ROI crop, and presenter share one
-            // coordinate system on every supported runtime.
-            let expected = CGRect(
-                origin: .zero,
-                size: geometryExtent(of: sourceExtent.size, for: CropAdjustments(
-                    straightenAngle: crop.straightenAngle
-                ))
-            )
-            let actual = result.extent
-            guard actual.width > 0, actual.height > 0,
-                  expected.width > 0, expected.height > 0 else { return result }
-            result = result
+            let center = CGPoint(x: sourceExtent.midX, y: sourceExtent.midY)
+            let rotated = result.transformed(by: CGAffineTransform(translationX: center.x, y: center.y)
+                .rotated(by: radians)
+                .translatedBy(x: -center.x, y: -center.y))
+            // Core Image rounds the rotated extent outward, which can add a pixel or two of
+            // transparent fringe per side. Crop to the analytic bounding box (nearest whole
+            // pixel) around the same centre so the extent matches `geometryExtent`.
+            let aabb = geometryExtent(of: sourceExtent.size, for: crop)
+            let width = max(1, aabb.width.rounded()), height = max(1, aabb.height.rounded())
+            result = rotated
                 .transformed(by: CGAffineTransform(
-                    a: expected.width / actual.width, b: 0,
-                    c: 0, d: expected.height / actual.height,
-                    tx: expected.minX - actual.minX * expected.width / actual.width,
-                    ty: expected.minY - actual.minY * expected.height / actual.height
+                    translationX: width / 2 - center.x, y: height / 2 - center.y
                 ))
-                .cropped(to: expected)
+                .cropped(to: CGRect(x: 0, y: 0, width: width, height: height))
         }
         return applyingPerspective(crop, to: result)
     }
@@ -521,8 +508,7 @@ enum RenderPipeline {
         ]
         let inverseAngles: [CGFloat] = crop.straightenAngle == 0
             ? [0]
-            // CIStraightenFilter and the affine compatibility fallback have differed in angle
-            // direction across OS implementations. Keeping both inverse enclosures is cheap at a
+            // Both angle directions are kept as a conservative enclosure; it is cheap at a
             // zoomed viewport and guarantees that the optimization cannot discard a corner.
             : [
                 -CGFloat(crop.straightenAngle * .pi / 180),

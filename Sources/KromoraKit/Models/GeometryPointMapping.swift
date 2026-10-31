@@ -33,9 +33,8 @@ struct GeometryPointMapping: Sendable {
         let dx = x * orientedSize.width - orientedSize.width / 2
         let dy = orientedSize.height / 2 - y * orientedSize.height
         // Core Image's positive affine angle is counter-clockwise in its y-up coordinate space.
-        let scale = straightenScale(oriented: orientedSize, extent: aabb)
-        let px = scale.width * (cos(radians) * dx - sin(radians) * dy) + aabb.width / 2
-        let py = aabb.height / 2 - scale.height * (sin(radians) * dx + cos(radians) * dy)
+        let px = cos(radians) * dx - sin(radians) * dy + aabb.width / 2
+        let py = aabb.height / 2 - (sin(radians) * dx + cos(radians) * dy)
         let normalized = CGPoint(x: px / aabb.width, y: py / aabb.height)
         return perspectiveForward(normalized)
     }
@@ -45,9 +44,8 @@ struct GeometryPointMapping: Sendable {
         guard valid, let unwarped = perspectiveInverse(point) else { return nil }
         let orientedSize = rotation.orientedExtent(sourceSize)
         let aabb = RenderPipeline.geometryExtent(of: orientedSize, for: crop)
-        let scale = straightenScale(oriented: orientedSize, extent: aabb)
-        let px = (unwarped.x * aabb.width - aabb.width / 2) / scale.width
-        let py = (aabb.height / 2 - unwarped.y * aabb.height) / scale.height
+        let px = unwarped.x * aabb.width - aabb.width / 2
+        let py = aabb.height / 2 - unwarped.y * aabb.height
         let radians = -crop.straightenAngle * .pi / 180
         let x = cos(radians) * px - sin(radians) * py + orientedSize.width / 2
         let y = orientedSize.height / 2 - (sin(radians) * px + cos(radians) * py)
@@ -55,19 +53,6 @@ struct GeometryPointMapping: Sendable {
         if crop.flipHorizontal { source.x = 1 - source.x }
         if crop.flipVertical { source.y = 1 - source.y }
         return inverseRotate(source)
-    }
-
-    /// Per-axis pixel scale applied after the straighten rotation. `CIStraightenFilter` scales the
-    /// rotated photograph up until it fills the original frame (no transparent wedges), and
-    /// `RenderPipeline.applyingGeometry` then stretches that frame onto the rotated bounding box.
-    /// Mapping a point through only the rotation misplaces everything away from the centre.
-    private func straightenScale(oriented: CGSize, extent: CGSize) -> CGSize {
-        guard crop.straightenAngle != 0 else { return CGSize(width: 1, height: 1) }
-        let radians = abs(crop.straightenAngle * .pi / 180)
-        let fill = cos(radians) + sin(radians) * max(oriented.width / oriented.height,
-                                                      oriented.height / oriented.width)
-        return CGSize(width: fill * extent.width / oriented.width,
-                      height: fill * extent.height / oriented.height)
     }
 
     /// Local radius scale in the output frame for a source-space radius, accounting for perspective.
