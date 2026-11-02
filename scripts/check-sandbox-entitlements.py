@@ -14,7 +14,6 @@ import sys
 EXPECTED = {
     "com.apple.security.app-sandbox": True,
     "com.apple.security.files.user-selected.read-write": True,
-    "com.apple.security.files.removable-media.read-only": True,
     "com.apple.security.files.bookmarks.app-scope": True,
     "com.apple.security.assets.pictures.read-write": True,
     "com.apple.security.personal-information.photos-library": True,

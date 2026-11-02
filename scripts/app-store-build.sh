@@ -30,9 +30,10 @@ if xcodebuild -project "$project" -list 2>/dev/null | grep -qx '[[:space:]]*Krom
   scheme="Kromora (Kromora project)"
 fi
 
-# One "label<TAB>team" line per valid codesigning identity. The team is the certificate
-# subject OU. An Apple Development common name puts a different identifier in parentheses,
-# so that display name is not the team Xcode shows.
+# One "label<TAB>team<TAB>hash" line per valid codesigning identity. The team is the
+# certificate subject OU. An Apple Development common name puts a different identifier in
+# parentheses, so that display name is not the team Xcode shows. The hash is the SHA-1
+# fingerprint, which codesign accepts when more than one certificate shares a label.
 signing_identity_rows() {
   local label pem rest cert hash team valid_hashes
   local -a labels=("Apple Development" "Apple Distribution" "Developer ID Application")
@@ -48,7 +49,7 @@ signing_identity_rows() {
       [[ -n "$hash" && "$valid_hashes" == *"$hash"* ]] || continue
       team="$(print -r -- "$cert" | openssl x509 -noout -subject -nameopt RFC2253 2>/dev/null | sed -nE 's/.*OU=([A-Z0-9]{10}).*/\1/p')"
       [[ -n "$team" ]] || continue
-      print -r -- "${label}"$'\t'"${team}"
+      print -r -- "${label}"$'\t'"${team}"$'\t'"${hash}"
     done
   done
 }
@@ -135,6 +136,19 @@ if [[ "$mode" == "verify" ]]; then
 else
   archive_path="$derived_data_path/Kromora.xcarchive"
   xcodebuild "${xcodebuild_args[@]}" "${signing_args[@]}" "${build_metadata_args[@]}" -archivePath "$archive_path" archive
+
+  # Archives are signed with the Apple Development certificate and Organizer re-signs the app with
+  # Apple Distribution at upload, but it leaves the SwiftPM resource bundle under Contents/Resources
+  # as it was. App Store Connect then rejects the build (ITMS-90284: the bundle must be signed with
+  # the certificate in the provisioning profile), so sign the bundle with Apple Distribution here.
+  distribution_identity="$(print -r -- "$identity_rows" | awk -F '\t' -v team="$DEVELOPMENT_TEAM" '$1 == "Apple Distribution" && $2 == team { print $3; exit }')"
+  [[ -n "$distribution_identity" ]] || {
+    print -u2 "no Apple Distribution certificate for team $DEVELOPMENT_TEAM in the keychain."
+    exit 1
+  }
+  for resource_bundle in "$archive_path"/Products/Applications/Kromora.app/Contents/Resources/*.bundle(N); do
+    codesign --force --sign "$distribution_identity" "$resource_bundle"
+  done
   print "Archive created at ${archive_path:A}"
   print "Open that .xcarchive to show it in Xcode Organizer, then choose Distribute App > App Store Connect."
 fi

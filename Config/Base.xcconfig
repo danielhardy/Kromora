@@ -8,7 +8,7 @@ ARCHS = arm64
 
 // The app's user-facing marketing version and monotonically increasing build number.
 MARKETING_VERSION = 0.1
-CURRENT_PROJECT_VERSION = 1
+CURRENT_PROJECT_VERSION = 2
 
 // The checked-in plist carries only the keys with no build-setting form: the exported package
 // UTIs and the KromoraGitCommit substitution. Everything else is generated from build settings.

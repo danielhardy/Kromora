@@ -125,7 +125,6 @@ has no app-initiated network requests; confirm the release build still has no si
 | --- | --- |
 | `com.apple.security.app-sandbox` | Runs the distributed app in the macOS App Sandbox ([entitlements](../Kromora/Kromora.entitlements#L1-L6), [audit rationale](APP_STORE_SANDBOX_AUDIT.md#L401-L414)). |
 | `com.apple.security.files.user-selected.read-write` | Reads and writes files or folders the user selects, including imports, exports, and Look files ([entitlements](../Kromora/Kromora.entitlements#L5-L9), [audit rationale](APP_STORE_SANDBOX_AUDIT.md#L401-L414)). |
-| `com.apple.security.files.removable-media.read-only` | Reads imported images from mounted camera cards without writing to the card ([entitlements](../Kromora/Kromora.entitlements#L7-L11), [audit rationale](APP_STORE_SANDBOX_AUDIT.md#L401-L414)). |
 | `com.apple.security.files.bookmarks.app-scope` | Retains access to user-selected external files and folders across launches ([entitlements](../Kromora/Kromora.entitlements#L9-L13), [audit rationale](APP_STORE_SANDBOX_AUDIT.md#L401-L414)). |
 | `com.apple.security.assets.pictures.read-write` | Stores the default library package, default exports, and app-owned Looks under Pictures ([entitlements](../Kromora/Kromora.entitlements#L11-L16), [audit rationale](APP_STORE_SANDBOX_AUDIT.md#L401-L414)). |
 | `com.apple.security.personal-information.photos-library` | Lets PhotoKit authorize, fetch originals for Photos import, and save exports to Photos in the sandbox ([entitlements](../Kromora/Kromora.entitlements#L16-L18)). |

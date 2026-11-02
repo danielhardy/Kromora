@@ -44,7 +44,7 @@ macOS grants at runtime; the required sandboxed checks are listed at the end of 
 ### Entitlements and system panels
 
 The checked-in app entitlements enable App Sandbox, user-selected read/write access, read-only
-removable-media access, app-scoped bookmarks, and read/write access to Pictures
+app-scoped bookmarks, and read/write access to Pictures
 ([`Kromora.entitlements`](../Kromora/Kromora.entitlements):5-14). Apple's current App
 Sandbox guide says standard `NSOpenPanel`/`NSSavePanel` interactions extend the sandbox to selected
 URLs and start security-scoped access; the app must stop that access when finished. It also documents
@@ -114,9 +114,9 @@ The access-lifetime risk is tracked in KRMA-818. Evidence: [`PreviewView.swift`:
   [`ExportCoordinator.swift`:267-272, 480-483, 526-529](../Sources/KromoraKit/ViewModels/ExportCoordinator.swift),
   [`KromoraSettings.swift`:213-217, 293-299, 451-459](../Sources/KromoraKit/Models/KromoraSettings.swift),
   [`LUTLibrary.swift`:196-221, 238-254, 449-493](../Sources/KromoraKit/Models/LUTLibrary.swift).
-- `MediaVolume` does not persist its bookmark; the read-only removable-media entitlement is the
-  normal mount path, with a folder Open panel as the recovery path. A fresh sandboxed run must
-  establish whether that fallback grant remains effective through the package worker's source read.
+- `MediaVolume` does not persist its bookmark. With no removable-media entitlement, the folder Open
+  panel is the only access path. A fresh sandboxed run must establish whether that grant remains
+  effective through the package worker's source read.
 
 ### Reopening the library package after relaunch
 
@@ -144,14 +144,15 @@ implemented here and should not be inferred from the package's internal XMP supp
 
 ### Removable-volume access
 
-The removable-media entitlement is read-only, matching `MountedMediaVolumeProvider`'s discovery,
-enumeration, metadata reads, and image validation. It does not authorize writes to the card; imports
-copy source files into the portable package under Pictures. If mount scanning is denied, the
+Kromora has no removable-media entitlement: App Store validation rejects
+`com.apple.security.files.removable-media.read-only` as unsupported on macOS. Mounted cards are
+listed, but their reads are denied until the user grants them; imports copy source files into the
+portable package under Pictures and never write to the card. When mount scanning is denied, the
 coordinator asks the user to select the volume folder in an Open panel, creates a bookmark, resolves
 it, and starts scoped access while scanning. The current import-preflight task rechecks readability
 under scope, then sends an asynchronous import request; its `defer` stops the scope as that callback
 returns, before the package worker necessarily opens the file. This is a should-fix risk (KRMA-818),
-and whether the removable-media entitlement masks it must be tested on the signed sandbox build.
+and because the Open panel is now the only path it must be tested on the signed sandbox build.
 Evidence: [`Kromora.entitlements`:7-14](../Kromora/Kromora.entitlements),
 [`MediaVolume.swift`:141-149, 170-195, 214-259](../Sources/KromoraKit/Models/MediaVolume.swift),
 [`LibraryMediaWorkflowCoordinator.swift`:151-188, 229-285, 322-332](../Sources/KromoraKit/ViewModels/LibraryMediaWorkflowCoordinator.swift),
@@ -176,8 +177,7 @@ runtime behaviors. Verify them with the packaged/signed app and inspect its effe
    a source read error.
 3. Drag a file URL and a folder from Finder onto the preview window. Separately drop an image from
    Photos to exercise its file-promise route.
-4. Import from a removable volume with the read-only entitlement, then exercise the Open-panel
-   access-recovery path. Confirm the package copy completes after preflight returns and confirm no
+4. Import from a removable volume through the Open-panel access-grant path. Confirm the package copy completes after preflight returns and confirm no
    write to the source volume is attempted.
 5. Save a rendered image, a derived Look, and an original-plus-settings bundle to a location outside
    Pictures; repeat saves to exercise scope release.
@@ -292,7 +292,6 @@ directory lookup returns no URL. There are no hard-coded user-home paths in the 
 | Entitlement | Conclusion |
 | --- | --- |
 | com.apple.security.assets.pictures.read-write | YES, required by current filesystem code: production creates/opens the default library package and the default export/Look folders under Pictures. This entitlement grants filesystem access to Pictures. PhotoKit import and delivery do not rely on it; PhotosPicker mediates import and PhotoKit handles delivery authorization. [Kromora.entitlements:5-14](../Kromora/Kromora.entitlements), [KromoraStorage.swift:64-96](../Sources/KromoraKit/Models/KromoraStorage.swift), [AppViewModel.swift:971-992](../Sources/KromoraKit/ViewModels/AppViewModel.swift), [PortableLibrarySession.swift:106-124](../Sources/KromoraKit/Models/PortableLibrarySession.swift), [PhotosDelivery.swift:89-130](../Sources/KromoraKit/Models/PhotosDelivery.swift) |
-| com.apple.security.files.removable-media.read-only | YES, exercised: MountedMediaVolumeProvider discovers removable/ejectable mounts, enumerates and reads supported images and metadata, and the production provider does not write to the source volume. Imports write their copies into the Pictures package. [Kromora.entitlements:5-14](../Kromora/Kromora.entitlements), [MediaVolume.swift:141-149, 155-195, 214-259](../Sources/KromoraKit/Models/MediaVolume.swift), [PortableLibrarySession.swift:886-925](../Sources/KromoraKit/Models/PortableLibrarySession.swift) |
 
 ### Findings
 
@@ -322,7 +321,7 @@ inspect effective entitlements:
    load without an external folder grant.
 7. Confirm package edits, library index rebuild, frame stores, caches, and temporary files remain
    usable or safely rebuildable after container recreation/movement, and inspect the signed app's
-   Pictures and removable-media entitlements.
+   Pictures entitlement.
 
 ## 3. Runtime, resources, and privacy inventory
 
@@ -409,7 +408,6 @@ API guidance](https://developer.apple.com/documentation/bundleresources/app-priv
 | --- | --- | --- |
 | `com.apple.security.app-sandbox` | Keep enabled. | Required for the Mac App Store sandboxed app. |
 | `com.apple.security.files.user-selected.read-write` | Keep enabled. | Supports user-selected image/folder imports, exports, and Look files through standard system panels. |
-| `com.apple.security.files.removable-media.read-only` | Keep enabled. | Mounted camera-card discovery and source-image reads are current import paths; imports copy into the Pictures library and do not write to the card. |
 | `com.apple.security.files.bookmarks.app-scope` | Keep enabled. | Settings and the Look library persist app-scoped bookmarks for user-selected external folders and files. |
 | `com.apple.security.assets.pictures.read-write` | Keep enabled. | The default library package, default exports, and app-owned Looks live under Pictures. |
 | `com.apple.security.network.client` | Do not declare. | No app-owned network request is part of the current product; user-opened browser links use the system browser. |

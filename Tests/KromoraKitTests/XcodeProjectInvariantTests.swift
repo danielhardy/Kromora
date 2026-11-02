@@ -22,7 +22,6 @@ final class XcodeProjectInvariantTests: XCTestCase {
     private static let intendedEntitlements: [String: Bool] = [
         "com.apple.security.app-sandbox": true,
         "com.apple.security.files.user-selected.read-write": true,
-        "com.apple.security.files.removable-media.read-only": true,
         "com.apple.security.files.bookmarks.app-scope": true,
         "com.apple.security.assets.pictures.read-write": true,
         "com.apple.security.personal-information.photos-library": true,

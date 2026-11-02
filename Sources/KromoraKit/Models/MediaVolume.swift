@@ -365,9 +365,9 @@ struct MountedMediaVolumeProvider: MediaVolumeProviding {
                   values.volumeIsRemovable == true || values.volumeIsEjectable == true else {
                 return nil
             }
-            // With the removable-media entitlement, most mounts are readable here. If the
-            // entitlement is unavailable or macOS requires a user grant, keep the volume visible
-            // so scan() can recover through the Open panel instead of hiding the device.
+            // The sandbox has no removable-media entitlement on macOS, so most mounts are
+            // unreadable until the user grants them. Keep the volume visible so scan() can
+            // recover through the Open panel instead of hiding the device.
             let isReadable = FileManager.default.isReadableFile(atPath: url.path)
             guard !isReadable || containsSupportedFile(in: url) else { return nil }
             let name = values.volumeName?.trimmingCharacters(in: .whitespacesAndNewlines)
