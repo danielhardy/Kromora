@@ -93,6 +93,7 @@ final class EditorSessionHistoryCostTests: XCTestCase {
 
     func testOpenGroupIsChargedAndCancelReleasesIt() {
         let base = document(exposure: 0.1, brushSamples: 3_000)
+        let changed = document(exposure: 0.2)
         let editor = EditorDocumentCoordinator()
         editor.activate(session: nil, for: asset)
         editor.commit(document: base, for: asset)
@@ -101,8 +102,15 @@ final class EditorSessionHistoryCostTests: XCTestCase {
 
         editor.beginGrouping(document: base)
         XCTAssertEqual(editor.estimatedResidentBytes, ungrouped + base.estimatedRetentionBytes)
+        editor.recordChange(from: base, to: changed)
+        editor.commit(document: changed, for: asset)
+        XCTAssertEqual(
+            editor.estimatedResidentBytes,
+            base.estimatedRetentionBytes + changed.estimatedRetentionBytes)
 
-        // A group that ends on the document it started from records nothing and releases the charge.
+        // Restoring the start document before ending the group is a cancel, so it adds no undo step.
+        editor.recordChange(from: changed, to: base)
+        editor.commit(document: base, for: asset)
         editor.endGrouping(document: base)
         XCTAssertEqual(editor.undoDepth, 0)
         XCTAssertEqual(editor.estimatedResidentBytes, ungrouped)
@@ -150,9 +158,7 @@ final class EditorSessionHistoryCostTests: XCTestCase {
         XCTAssertEqual(editor.evictionDeferrals, 1)
     }
 
-    func testHistoryCostSaturatesInsteadOfOverflowing() {
-        // Entry costs are bounded by real documents, so exercise the saturating add through the
-        // aggregate: a history's retained bytes never wrap below any single entry's cost.
+    func testRetainedBytesMatchesCachedEntryCosts() {
         var history = EditHistory()
         let heavy = document(brushSamples: 1_000)
         for step in 0..<10 { history.recordChange(from: heavy, to: document(exposure: Double(step + 1) / 20)) }
