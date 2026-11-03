@@ -260,6 +260,128 @@ final class PhotosDeliveryTests: TempDirectoryTestCase {
         XCTAssertTrue(ExportCoordinator.summary(for: outcome, folder: folder).contains("Photos: 1 failed"))
     }
 
+    func testBatchPhotosCancellationLeavesCommittedFileAndCountsAsPhotosFailure() async throws {
+        let photos = FakePhotosDelivery()
+        photos.error = CancellationError()
+        let coordinator = ExportCoordinator(engine: FakeRenderEngine(), photosDelivery: photos)
+        let folder = tempDirectory.appendingPathComponent("batch-cancelled-photos")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let url = try Fixtures.writeGradientPNG(
+            width: 16, height: 16, named: "cancelled-photos-source.png", in: tempDirectory
+        )
+
+        let outcome = await coordinator.performBatchExport(
+            [ExportCoordinator.BatchItem(url: url, data: nil, name: "cancelled-photos-source")],
+            document: EditDocument(),
+            lut: nil,
+            options: ExportOptions(
+                format: .png,
+                destination: .folder(folder),
+                photos: PhotosExportOptions()
+            ),
+            to: folder
+        )
+
+        let exported = folder.appendingPathComponent("cancelled-photos-source.png")
+        XCTAssertEqual(outcome, .init(exported: 1, failed: 0, total: 1, photosFailed: 1))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: exported.path))
+        XCTAssertTrue(ExportCoordinator.summary(for: outcome, folder: folder).contains("Photos: 1 failed"))
+    }
+
+    func testLimitedAuthorizationFailureLeavesBatchExportAndCountsPhotosFailure() async throws {
+        let photos = FakePhotosDelivery()
+        photos.error = PhotosDeliveryError.authorization(.limited)
+        let coordinator = ExportCoordinator(engine: FakeRenderEngine(), photosDelivery: photos)
+        let folder = tempDirectory.appendingPathComponent("batch-limited-photos")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let url = try Fixtures.writeGradientPNG(
+            width: 16, height: 16, named: "limited-photos-source.png", in: tempDirectory
+        )
+
+        let outcome = await coordinator.performBatchExport(
+            [ExportCoordinator.BatchItem(url: url, data: nil, name: "limited-photos-source")],
+            document: EditDocument(),
+            lut: nil,
+            options: ExportOptions(
+                format: .png,
+                destination: .folder(folder),
+                photos: PhotosExportOptions()
+            ),
+            to: folder
+        )
+
+        XCTAssertEqual(outcome, .init(exported: 1, failed: 0, total: 1, photosFailed: 1))
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: folder.appendingPathComponent("limited-photos-source.png").path
+        ))
+    }
+
+    func testBatchPhotosAlbumWarningIsCountedAndKeepsCommittedFile() async throws {
+        let photos = FakePhotosDelivery()
+        photos.result = PhotosDeliveryResult(
+            assetAdded: true, warning: "The requested album could not be updated."
+        )
+        let coordinator = ExportCoordinator(engine: FakeRenderEngine(), photosDelivery: photos)
+        var statuses: [String] = []
+        coordinator.onStatus = { statuses.append($0) }
+        let folder = tempDirectory.appendingPathComponent("batch-album-warning")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let url = try Fixtures.writeGradientPNG(
+            width: 16, height: 16, named: "album-warning-source.png", in: tempDirectory
+        )
+
+        let outcome = await coordinator.performBatchExport(
+            [ExportCoordinator.BatchItem(url: url, data: nil, name: "album-warning-source")],
+            document: EditDocument(),
+            lut: nil,
+            options: ExportOptions(
+                format: .png,
+                destination: .folder(folder),
+                photos: PhotosExportOptions(albumName: "Kromora")
+            ),
+            to: folder
+        )
+
+        let exported = folder.appendingPathComponent("album-warning-source.png")
+        XCTAssertEqual(outcome, .init(exported: 1, failed: 0, total: 1, photosFailed: 1))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: exported.path))
+        XCTAssertTrue(statuses.contains { $0.contains("Photos warning") })
+        XCTAssertTrue(statuses.contains { $0.contains("requested album could not be updated") })
+    }
+
+    func testBatchDeliveryHoldsFolderScopeUntilPhotosTransactionSettles() async throws {
+        let photos = FakePhotosDelivery()
+        let released = Mutex(0)
+        photos.isScopeReleased = { released.withLock { $0 } > 0 }
+        let coordinator = ExportCoordinator(engine: FakeRenderEngine(), photosDelivery: photos)
+        let folder = tempDirectory.appendingPathComponent("batch-scoped")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let url = try Fixtures.writeGradientPNG(
+            width: 16, height: 16, named: "scoped-source.png", in: tempDirectory
+        )
+        let access = SecurityScopedResourceAccess.systemGranted(for: folder) { _ in
+            released.withLock { $0 += 1 }
+        }
+
+        let outcome = await coordinator.performBatchExport(
+            [ExportCoordinator.BatchItem(url: url, data: nil, name: "scoped-source")],
+            document: EditDocument(),
+            lut: nil,
+            options: ExportOptions(
+                format: .png,
+                destination: .folder(folder),
+                photos: PhotosExportOptions()
+            ),
+            to: folder,
+            access: access
+        )
+
+        let call = try XCTUnwrap(photos.calls.first)
+        XCTAssertEqual(outcome, .init(exported: 1, failed: 0, total: 1, photosFailed: 0))
+        XCTAssertFalse(call.scopeReleasedDuringCall, "folder scope was released before Photos settled")
+        XCTAssertEqual(released.withLock { $0 }, 1, "folder scope is released once after delivery")
+    }
+
     /// Structural guard for PhotoKit's transaction rule: each album request and its mutation
     /// must stay inside a `performChanges` closure. Behavior needs real Photos authorization and
     /// a live library, so it is not exercised here.
