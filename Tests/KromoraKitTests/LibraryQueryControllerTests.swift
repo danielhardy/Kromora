@@ -163,7 +163,11 @@ final class LibraryQueryControllerTests: TempDirectoryTestCase {
             + second.items.map(\.assetID)
             + controller.page(at: 2, query: query).items.map(\.assetID)
         XCTAssertEqual(controller.orderedEntriesBuildCount, 1)
+        // The planner's read sorts for itself and leaves the paged ordering cached.
         XCTAssertEqual(controller.orderedAssetIDs(query: other), descending.reversed())
+        XCTAssertEqual(controller.orderedEntriesBuildCount, 1)
+        XCTAssertEqual(controller.page(at: 0, query: other).items.map(\.assetID),
+                       Array(descending.reversed().prefix(3)))
         XCTAssertEqual(controller.orderedEntriesBuildCount, 2)
 
         let rebuilt = LibraryQueryController(index: index, pageSize: 3)

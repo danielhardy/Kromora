@@ -639,12 +639,30 @@ struct LibraryQueryPage: Codable, Equatable, Sendable {
     }
 }
 
+/// One filtered and sorted result with a position map, built together so a lookup never rescans.
+private struct QueryOrdering: Sendable {
+    let query: LibraryQuery
+    let entries: [LibraryIndexEntry]
+    let positions: [PortablePhotoAssetID: Int]
+
+    init(query: LibraryQuery, entries: [LibraryIndexEntry]) {
+        self.query = query
+        self.entries = entries
+        self.positions = Dictionary(
+            uniqueKeysWithValues: entries.enumerated().map { ($1.assetID, $0) })
+    }
+}
+
 /// Holds the ordered result of the most recent query for one index generation.
+///
+/// The lock guards bookkeeping only: it reads or swaps the current `QueryOrdering` and never
+/// spans a filter or sort. A miss builds with the lock released, so a foreground reader of the
+/// cached query is never queued behind another copy's build (the idle planner shares this cache).
+/// Two callers that miss on the same query may both build; the results are identical, and the
+/// second install replaces the first.
 private final class OrderedEntriesCache: Sendable {
     private struct State {
-        var query: LibraryQuery?
-        var entries: [LibraryIndexEntry] = []
-        var positions: [PortablePhotoAssetID: Int] = [:]
+        var current: QueryOrdering?
         var buildCount = 0
     }
 
@@ -652,34 +670,25 @@ private final class OrderedEntriesCache: Sendable {
 
     var buildCount: Int { state.withLock { $0.buildCount } }
 
-    func entries(
+    /// The cached ordering for `query`, or one built outside the lock. `shouldInstall` is asked
+    /// after the build, so a background reader (the idle planner) or a cancelled preparation can
+    /// decline and leave the ordering the foreground is paging in place. `isCached` reports
+    /// whether the ordering is in the cache when the call returns.
+    func ordering(
         for query: LibraryQuery,
+        shouldInstall: @Sendable () -> Bool = { true },
         build: @Sendable () -> [LibraryIndexEntry]
-    ) -> [LibraryIndexEntry] {
-        state.withLock { Self.refresh(&$0, for: query, build: build).entries }
-    }
-
-    /// The position of an asset in the query's order, from a map built with the ordering.
-    func position(
-        of assetID: PortablePhotoAssetID,
-        for query: LibraryQuery,
-        build: @Sendable () -> [LibraryIndexEntry]
-    ) -> Int? {
-        state.withLock { Self.refresh(&$0, for: query, build: build).positions[assetID] }
-    }
-
-    private static func refresh(
-        _ state: inout State, for query: LibraryQuery,
-        build: @Sendable () -> [LibraryIndexEntry]
-    ) -> State {
-        if state.query != query {
-            state.entries = build()
-            state.positions = Dictionary(
-                uniqueKeysWithValues: state.entries.enumerated().map { ($1.assetID, $0) })
-            state.query = query
-            state.buildCount += 1
+    ) -> (ordering: QueryOrdering, isCached: Bool) {
+        if let hit = state.withLock({ $0.current?.query == query ? $0.current : nil }) {
+            return (hit, true)
         }
-        return state
+        let built = QueryOrdering(query: query, entries: build())
+        guard shouldInstall() else { return (built, false) }
+        state.withLock {
+            $0.current = built
+            $0.buildCount += 1
+        }
+        return (built, true)
     }
 }
 
@@ -754,22 +763,42 @@ struct LibraryQueryController: Sendable {
     /// Every matching asset ID in query order, from one filter and one sort. Index-side planners
     /// (idle warming) use this instead of walking `page(at:)`, which repeats the full ordering
     /// for each requested page.
+    ///
+    /// A planner is a background reader: when the query is not already cached it sorts without
+    /// installing, so it can never evict the ordering the foreground is paging.
     func orderedAssetIDs(query: LibraryQuery = .all) -> [PortablePhotoAssetID] {
-        orderedEntries(query: query).map(\.assetID)
+        orderCache.ordering(
+            for: query, shouldInstall: { false }, build: { buildOrderedEntries(query: query) }
+        ).ordering.entries.map(\.assetID)
     }
 
-    /// How many times this index generation has filtered and sorted for a query.
+    /// Filters and sorts for `query` off the caller's executor and installs the result in this
+    /// generation's cache, so the synchronous `page`, `pageIndex`, and selection calls that follow
+    /// are cache hits. A cancelled preparation discards its result rather than evicting the
+    /// ordering of the request that superseded it. Returns whether the ordering is now cached.
+    @concurrent
+    func prepareOrdering(query: LibraryQuery) async -> Bool {
+        orderCache.ordering(
+            for: query, shouldInstall: { !Task.isCancelled },
+            build: { buildOrderedEntries(query: query) }
+        ).isCached
+    }
+
+    /// How many times this index generation has installed a filtered and sorted ordering.
     var orderedEntriesBuildCount: Int { orderCache.buildCount }
 
     /// The page that holds an asset for a query, or nil when the query excludes it. The position
     /// comes from the ordering already cached for the query, so no page is built or scanned.
     func pageIndex(of assetID: PortablePhotoAssetID, query: LibraryQuery = .all) -> Int? {
-        orderCache.position(of: assetID, for: query, build: { buildOrderedEntries(query: query) })
-            .map { $0 / pageSize }
+        ordering(for: query).positions[assetID].map { $0 / pageSize }
     }
 
     private func orderedEntries(query: LibraryQuery) -> [LibraryIndexEntry] {
-        orderCache.entries(for: query, build: { buildOrderedEntries(query: query) })
+        ordering(for: query).entries
+    }
+
+    private func ordering(for query: LibraryQuery) -> QueryOrdering {
+        orderCache.ordering(for: query, build: { buildOrderedEntries(query: query) }).ordering
     }
 
     private func buildOrderedEntries(query: LibraryQuery) -> [LibraryIndexEntry] {
@@ -829,12 +858,10 @@ struct LibraryQueryController: Sendable {
     /// selection to this intersection and never adds new matches.
     mutating func restrictSelection(to query: LibraryQuery) {
         guard !selectedAssetIDs.isEmpty else { return }
-        let foldedSearchText = query.searchText?.foldedForLibrarySearch
-        let matching = Set(
-            index.entries.filter {
-                matches($0, query: query, foldedSearchText: foldedSearchText)
-            }.map(\.assetID))
-        selectedAssetIDs.formIntersection(matching)
+        // The ordering holds exactly the matching entries, and a caller that prepared it first
+        // makes this a lookup per selected id instead of a scan of the whole index.
+        let positions = ordering(for: query).positions
+        selectedAssetIDs = selectedAssetIDs.filter { positions[$0] != nil }
         if let activeAssetID, selectedAssetIDs.contains(activeAssetID) { return }
         activeAssetID = selectedAssetIDs.first
     }

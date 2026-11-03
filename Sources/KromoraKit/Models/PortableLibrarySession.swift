@@ -860,6 +860,25 @@ final class PortableLibrarySession {
         controller.facetCounts(query: query)
     }
 
+    /// Test seam awaited by `prepareOrdering(query:)` after it captures the index generation and
+    /// before the off-main build starts, so a test can change the index at a deterministic point.
+    var orderingPreparationGate: (@Sendable (UInt64) async -> Void)?
+
+    /// Prepares the ordering for `query` against the published index, off the main actor, so the
+    /// synchronous `page`, `pageIndex`, and selection calls that follow are cache hits. The result
+    /// is installed in the cache of the controller it was built from, which is exactly the
+    /// index-generation tag: if the index is replaced while the build runs, that cache is
+    /// discarded with its controller and the preparation repeats against the new generation.
+    func prepareOrdering(query: LibraryQuery) async {
+        while !Task.isCancelled {
+            let generation = indexGeneration
+            let controller = queryController
+            await orderingPreparationGate?(generation)
+            guard await controller.prepareOrdering(query: query) else { return }
+            if generation == indexGeneration { return }
+        }
+    }
+
     /// The page holding `assetID` under `query`, or nil when the query excludes it.
     func pageIndex(of assetID: PortablePhotoAssetID, query: LibraryQuery = .all) -> Int? {
         queryController.pageIndex(of: assetID, query: query)

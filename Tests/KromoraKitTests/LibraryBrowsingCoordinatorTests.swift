@@ -27,6 +27,9 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
         private(set) var selectedIDs = Set<PortablePhotoAssetID>()
         private(set) var activeID: PortablePhotoAssetID?
         private(set) var requestedPages: [Int] = []
+        private(set) var requestedQueries: [LibraryQuery] = []
+        /// Awaited by `prepareOrdering`, so a test decides when and in what order queries finish.
+        var orderingGate: (@MainActor (LibraryQuery) async -> Void)?
         private(set) var rebuildCount = 0
         private(set) var persistedStates: [(PortablePhotoAssetID, Int, PhotoFlag)] = []
         /// Ids whose browsing projection throws, failing any lookup that includes them.
@@ -75,6 +78,7 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
         func browsingWindow(pageIndex: Int, query: LibraryQuery) throws
             -> (assets: [PhotoAsset], totalCount: Int, pageSize: Int) {
             requestedPages.append(pageIndex)
+            requestedQueries.append(query)
             let visible = committedAssets
             let start = pageIndex * pageSize
             let end = min(start + pageSize, visible.count)
@@ -82,6 +86,8 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
         }
 
         func facetCounts(query: LibraryQuery) async -> LibraryFacetCounts { LibraryFacetCounts() }
+
+        func prepareOrdering(query: LibraryQuery) async { await orderingGate?(query) }
 
         func pageIndex(of assetID: PortablePhotoAssetID, query: LibraryQuery) -> Int? {
             committedAssets.firstIndex { $0.source.portableIdentity.assetID == assetID }
@@ -297,36 +303,116 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
         XCTAssertEqual(collection.portableTotalCount, 3)
     }
 
-    func testFilterSortAndSearchReloadPageZeroAndSkipNoOp() throws {
+    func testFilterSortAndSearchReloadPageZeroAndSkipNoOp() async throws {
         let (coordinator, _, library, destination) = makeCoordinator()
         try coordinator.reloadPortableWindow()
         coordinator.setPortableFilter(LibraryFilter(flag: .picks))
+        await coordinator.waitForQueryPreparation()
         coordinator.setPortableFilter(LibraryFilter(flag: .picks))
+        await coordinator.waitForQueryPreparation()
         coordinator.setPortableSort(LibraryQuerySort(key: .rating, direction: .descending))
+        await coordinator.waitForQueryPreparation()
         coordinator.setPortableSearch("  photo  ")
+        await coordinator.waitForQueryPreparation()
         coordinator.setPortableSearch("photo")
+        await coordinator.waitForQueryPreparation()
 
         XCTAssertEqual(library.requestedPages, [0, 0, 0, 0])
         XCTAssertEqual(destination.portableQuery.searchText, "photo")
     }
 
-    func testClearPortableFiltersResetsFiltersAndPreservesSort() throws {
+    func testBackToBackQueryChangesPublishOnlyTheNewestWindow() async throws {
+        let (coordinator, _, library, destination) = makeCoordinator()
+        try coordinator.reloadPortableWindow()
+        coordinator.setPortableFilter(LibraryFilter(flag: .picks))
+        coordinator.setPortableSort(LibraryQuerySort(key: .rating, direction: .descending))
+        coordinator.setPortableSearch("photo")
+        await coordinator.waitForQueryPreparation()
+
+        XCTAssertEqual(library.requestedQueries, [.all, destination.portableQuery])
+    }
+
+    func testQueryChangeKeepsThePreviousWindowAndSelectionUntilOrderingIsPrepared() async throws {
+        let (coordinator, collection, library, destination) = makeCoordinator()
+        try coordinator.reloadPortableWindow()
+        library.select(library.assets[0].source.portableIdentity.assetID)
+        let shownBefore = collection.items.map(\.id)
+        var release: CheckedContinuation<Void, Never>?
+        library.orderingGate = { _ in await withCheckedContinuation { release = $0 } }
+
+        let sort = LibraryQuerySort(key: .rating, direction: .descending)
+        coordinator.setPortableSort(sort)
+        for _ in 0..<5 { await Task.yield() }
+
+        XCTAssertEqual(destination.portableQuery.sort, sort, "the request is recorded at once")
+        XCTAssertEqual(collection.items.map(\.id), shownBefore, "the grid still shows the old window")
+        XCTAssertEqual(collection.portableQuery, .all)
+        XCTAssertEqual(library.requestedQueries, [.all])
+        XCTAssertEqual(library.portableSelectedIDs.count, 1)
+
+        // Paging while preparation is in flight continues the loaded window's own query.
+        coordinator.loadMorePortableIfNeeded(currentIndex: collection.items.count - 1)
+        XCTAssertEqual(library.requestedQueries, [.all, .all])
+
+        try XCTUnwrap(release).resume()
+        await coordinator.waitForQueryPreparation()
+        XCTAssertEqual(collection.portableQuery, destination.portableQuery)
+        XCTAssertEqual(library.requestedQueries.last, destination.portableQuery)
+    }
+
+    func testReverseCompletingQueryRequestsNeverInstallTheSupersededWindow() async throws {
+        let (coordinator, collection, library, destination) = makeCoordinator()
+        try coordinator.reloadPortableWindow()
+        var releases: [LibraryQuerySort: CheckedContinuation<Void, Never>] = [:]
+        library.orderingGate = { query in
+            await withCheckedContinuation { releases[query.sort] = $0 }
+        }
+        let first = LibraryQuerySort(key: .rating, direction: .descending)
+        let second = LibraryQuerySort(key: .displayName, direction: .ascending)
+
+        coordinator.setPortableSort(first)
+        for _ in 0..<5 { await Task.yield() }
+        let firstRelease = try XCTUnwrap(releases[first])
+        coordinator.setPortableSort(second)
+        for _ in 0..<5 { await Task.yield() }
+        let secondRelease = try XCTUnwrap(releases[second])
+
+        // The newer request finishes first; the older one completes afterwards and must be dropped.
+        secondRelease.resume()
+        await coordinator.waitForQueryPreparation()
+        XCTAssertEqual(collection.portableQuery.sort, second)
+        let loads = library.requestedQueries.count
+        firstRelease.resume()
+        for _ in 0..<10 { await Task.yield() }
+
+        XCTAssertEqual(library.requestedQueries.count, loads)
+        XCTAssertEqual(collection.portableQuery.sort, second)
+        XCTAssertEqual(destination.portableQuery.sort, second)
+    }
+
+    func testClearPortableFiltersResetsFiltersAndPreservesSort() async throws {
         let (coordinator, _, library, destination) = makeCoordinator()
         try coordinator.reloadPortableWindow()
         let sort = LibraryQuerySort(key: .rating, direction: .descending)
         coordinator.setPortableSort(sort)
+        await coordinator.waitForQueryPreparation()
         coordinator.setPortableFilter(LibraryFilter(flag: .picks, rating: .minimum(3)))
+        await coordinator.waitForQueryPreparation()
         coordinator.setPortableSearch("photo")
+        await coordinator.waitForQueryPreparation()
         var facets = LibraryFacetSelection()
         facets.toggle("Sony A7", in: .camera)
         coordinator.setPortableFacets(facets)
+        await coordinator.waitForQueryPreparation()
         let loads = library.requestedPages.count
 
         coordinator.clearPortableFilters()
+        await coordinator.waitForQueryPreparation()
         XCTAssertEqual(destination.portableQuery, LibraryQuery(sort: sort))
         XCTAssertEqual(library.requestedPages.count, loads + 1)
 
         coordinator.clearPortableFilters()
+        await coordinator.waitForQueryPreparation()
         XCTAssertEqual(library.requestedPages.count, loads + 1, "no-op when nothing is active")
     }
 

@@ -15,6 +15,9 @@ protocol LibraryBrowsingProviding: AnyObject {
     func page(at pageIndex: Int, query: LibraryQuery) -> LibraryQueryPage
     func pageIndex(of assetID: PortablePhotoAssetID, query: LibraryQuery) -> Int?
     func facetCounts(query: LibraryQuery) async -> LibraryFacetCounts
+    /// Filter and sort for `query` off the main actor so the synchronous page and selection calls
+    /// that follow are cache hits. Returns early when the calling task is cancelled.
+    func prepareOrdering(query: LibraryQuery) async
     func browsingAssets(for items: [LibraryQueryItem]) throws -> [PhotoAsset]
     func browsingAssets(forIDs ids: [PortablePhotoAssetID]) throws -> [PhotoAsset]
     func select(_ assetID: PortablePhotoAssetID, additive: Bool)
@@ -121,6 +124,9 @@ final class LibraryBrowsingCoordinator {
     private var metrics = LaunchHydrationMetrics()
     private var launchReadSuperseded = false
     private var hasPublishedVisibleIDs = false
+    /// The newest query change whose ordering is still being prepared off the main actor. Until it
+    /// installs, the grid and selection keep showing the previous query's window.
+    private var queryPreparationTask: Task<Void, Never>?
 
     private(set) var hasPublishedFirstIndexPage = false
     private(set) var hasPublishedVisibleWindow = false
@@ -347,6 +353,8 @@ final class LibraryBrowsingCoordinator {
     }
 
     func shutdown() async {
+        queryPreparationTask?.cancel()
+        queryPreparationTask = nil
         launchHintsWriteTask?.cancel()
         if let launchHintsWriteTask { await launchHintsWriteTask.value }
         launchHintsWriteTask = nil
@@ -357,13 +365,15 @@ final class LibraryBrowsingCoordinator {
 
 
     func loadMorePortableIfNeeded(currentIndex: Int) {
-        guard let library, let destination, collection.isPortableWindowed,
-              collection.portableHasMorePages else { return }
+        guard let library, collection.isPortableWindowed, collection.portableHasMorePages
+        else { return }
         let loaded = collection.items.count
         guard currentIndex >= loaded - collection.portablePageSize else { return }
         let nextPage = collection.portablePageIndex + 1
+        // Continue the loaded window's own query: while a query change is being prepared,
+        // `destination.portableQuery` is already the new one but the window is still the old one.
         guard let window = try? library.browsingWindow(
-            pageIndex: nextPage, query: destination.portableQuery
+            pageIndex: nextPage, query: collection.portableQuery
         ) else { return }
         collection.appendPortableWindow(assets: window.assets, pageIndex: nextPage)
     }
@@ -371,22 +381,19 @@ final class LibraryBrowsingCoordinator {
     func setPortableFilter(_ filter: LibraryFilter) {
         guard let destination, destination.portableQuery.filter != filter else { return }
         destination.portableQuery.filter = filter
-        library?.restrictPortableSelection(to: destination.portableQuery)
-        try? reloadPortableWindow(pageIndex: 0)
+        commitPortableQuery()
     }
 
     func setPortableFacets(_ facets: LibraryFacetSelection) {
         guard let destination, destination.portableQuery.facets != facets else { return }
         destination.portableQuery.facets = facets
-        library?.restrictPortableSelection(to: destination.portableQuery)
-        try? reloadPortableWindow(pageIndex: 0)
+        commitPortableQuery()
     }
 
     func clearPortableFilters() {
         guard let destination, destination.portableQuery.hasActiveFilters else { return }
         destination.portableQuery = destination.portableQuery.clearingFilters()
-        library?.restrictPortableSelection(to: destination.portableQuery)
-        try? reloadPortableWindow(pageIndex: 0)
+        commitPortableQuery()
     }
 
     func portableFacetCounts() async -> LibraryFacetCounts? {
@@ -397,8 +404,7 @@ final class LibraryBrowsingCoordinator {
     func setPortableSort(_ sort: LibraryQuerySort) {
         guard let destination, destination.portableQuery.sort != sort else { return }
         destination.portableQuery.sort = sort
-        library?.restrictPortableSelection(to: destination.portableQuery)
-        try? reloadPortableWindow(pageIndex: 0)
+        commitPortableQuery()
     }
 
     func setPortableSearch(_ text: String?) {
@@ -407,8 +413,32 @@ final class LibraryBrowsingCoordinator {
         let next = (normalized?.isEmpty == false) ? normalized : nil
         guard destination.portableQuery.searchText != next else { return }
         destination.portableQuery.searchText = next
-        library?.restrictPortableSelection(to: destination.portableQuery)
-        try? reloadPortableWindow(pageIndex: 0)
+        commitPortableQuery()
+    }
+
+    /// Waits for the newest query change to finish preparing and publishing.
+    func waitForQueryPreparation() async {
+        await queryPreparationTask?.value
+    }
+
+    /// Publishes the destination's new query without sorting on the main actor. The ordering is
+    /// prepared off-main first; only then are the selection narrowed and page 0 reloaded, both as
+    /// cache hits, in one main-actor turn. The previous window and selection stay on screen
+    /// meanwhile, so the grid never shows an empty or half-switched state. A newer change cancels
+    /// and supersedes an older one, so out-of-order completion cannot install a stale window.
+    private func commitPortableQuery() {
+        queryPreparationTask?.cancel()
+        queryPreparationTask = nil
+        guard let library, let destination else { return }
+        let query = destination.portableQuery
+        queryPreparationTask = Task { [weak self] in
+            await library.prepareOrdering(query: query)
+            guard let self, !Task.isCancelled,
+                  let destination = self.destination, destination.portableQuery == query
+            else { return }
+            self.library?.restrictPortableSelection(to: query)
+            try? self.reloadPortableWindow(pageIndex: 0)
+        }
     }
 
     /// The Select All command. A package-backed library selects every id the current query
