@@ -450,6 +450,232 @@ final class ImageWorkSchedulerTests: XCTestCase {
         try await waitUntil("the package scheduler to drain", timeout: 10) { scheduler.isIdle }
     }
 
+    // MARK: Cancelled work keeps its slot until the operation returns
+
+    /// Counts operations independently of the scheduler's dictionaries, so a scheduler that forgets
+    /// a cancelled-but-still-executing job cannot also under-report it here.
+    private actor Executions {
+        private(set) var entered = 0
+        private(set) var exited = 0
+        private(set) var peak = 0
+        private var isOpen = false
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+
+        var current: Int { entered - exited }
+
+        /// A non-cooperative operation: it parks on a continuation and ignores cancellation.
+        func run() async {
+            entered += 1
+            peak = max(peak, entered - exited)
+            if !isOpen { await withCheckedContinuation { waiters.append($0) } }
+            exited += 1
+        }
+
+        func open() {
+            isOpen = true
+            let parked = waiters
+            waiters.removeAll()
+            for waiter in parked { waiter.resume() }
+        }
+    }
+
+    private enum LaneUnderTest: CaseIterable {
+        case thumbnail, editor, packageIO, frameRead
+    }
+
+    private func makeLimitedScheduler() -> ImageWorkScheduler {
+        ImageWorkScheduler(configuration: .init(
+            maxConcurrentThumbnails: 1, maxQueuedThumbnails: 4,
+            maxQueuedEditorJobs: 4,
+            maxConcurrentPackageIO: 1, maxQueuedPackageIO: 4,
+            maxConcurrentFrameReads: 1, maxQueuedFrameReads: 4
+        ))
+    }
+
+    @discardableResult
+    private func enqueueGated(
+        _ lane: LaneUnderTest, id: String, on scheduler: ImageWorkScheduler,
+        executions: Executions,
+        onTerminal: @escaping ImageWorkScheduler.TerminalHandler = { _ in }
+    ) -> Bool {
+        let jobID = ImageWorkScheduler.JobID(id)
+        switch lane {
+        case .thumbnail:
+            return scheduler.enqueue(
+                id: jobID, lane: .thumbnail, priority: .visibleGrid, onTerminal: onTerminal,
+                operation: { await executions.run() })
+        case .editor:
+            return scheduler.enqueue(
+                id: jobID, lane: .editor, priority: .activeEditor, onTerminal: onTerminal,
+                operation: { await executions.run() })
+        case .packageIO:
+            return scheduler.enqueuePackageIO(
+                id: jobID, lane: .importCopyHash, onTerminal: onTerminal,
+                operation: { await executions.run() })
+        case .frameRead:
+            return scheduler.enqueueFrameRead(
+                id: jobID, onTerminal: onTerminal, operation: { await executions.run() })
+        }
+    }
+
+    func testCancelledOperationKeepsItsLaneSlotUntilItReturns() async throws {
+        for lane in LaneUnderTest.allCases {
+            let scheduler = makeLimitedScheduler()
+            let executions = Executions()
+            var outcomes: [ImageWorkScheduler.TerminalOutcome] = []
+
+            enqueueGated(lane, id: "first", on: scheduler, executions: executions)
+            try await waitUntilAsync("\(lane): the first operation to enter") {
+                await executions.current == 1
+            }
+            scheduler.cancel(id: .init("first"))
+            enqueueGated(
+                lane, id: "second", on: scheduler, executions: executions,
+                onTerminal: { outcomes.append($0) })
+
+            // Give a (buggy) scheduler time to start the replacement on the freed slot.
+            try await Task.sleep(for: .milliseconds(50))
+            let entered = await executions.entered
+            let peak = await executions.peak
+            XCTAssertEqual(entered, 1, "\(lane): replacement started while the cancelled op ran")
+            XCTAssertEqual(peak, 1, "\(lane)")
+            XCTAssertEqual(scheduler.drainingCount, 1, "\(lane)")
+            XCTAssertFalse(scheduler.isIdle, "\(lane)")
+
+            await executions.open()
+            try await waitUntil("\(lane): the scheduler to drain") { scheduler.isIdle }
+            let finalPeak = await executions.peak
+            let finalEntered = await executions.entered
+            let finalExited = await executions.exited
+            XCTAssertEqual(finalPeak, 1, "\(lane)")
+            XCTAssertEqual(finalEntered, 2, "\(lane)")
+            XCTAssertEqual(finalExited, 2, "\(lane)")
+            XCTAssertEqual(outcomes, [.completed], "\(lane)")
+        }
+    }
+
+    func testRepeatedJobIDReuseNeverExceedsTheLaneLimit() async throws {
+        for lane in LaneUnderTest.allCases {
+            let scheduler = makeLimitedScheduler()
+            let executions = Executions()
+            var outcomes: [String: [ImageWorkScheduler.TerminalOutcome]] = [:]
+
+            for generation in 0..<8 {
+                let key = "g\(generation)"
+                enqueueGated(
+                    lane, id: "same", on: scheduler, executions: executions,
+                    onTerminal: { outcomes[key, default: []].append($0) })
+                try await Task.sleep(for: .milliseconds(5))
+                let current = await executions.current
+                XCTAssertLessThanOrEqual(current, 1, "\(lane) generation \(generation)")
+            }
+            let peak = await executions.peak
+            XCTAssertEqual(peak, 1, "\(lane)")
+
+            await executions.open()
+            await scheduler.cancelAllAndWait()
+            XCTAssertTrue(scheduler.isIdle, "\(lane)")
+            XCTAssertEqual(scheduler.runningCount, 0, "\(lane)")
+            XCTAssertEqual(scheduler.drainingCount, 0, "\(lane)")
+            let finalPeak = await executions.peak
+            let entered = await executions.entered
+            let exited = await executions.exited
+            XCTAssertEqual(finalPeak, 1, "\(lane)")
+            XCTAssertEqual(entered, exited, "\(lane)")
+            // Every generation was told exactly once, however it ended.
+            for generation in 0..<8 {
+                XCTAssertEqual(outcomes["g\(generation)"]?.count, 1, "\(lane) g\(generation)")
+            }
+        }
+    }
+
+    func testCancelAllAndWaitBlocksOnPreviouslyCancelledOperations() async throws {
+        for lane in LaneUnderTest.allCases {
+            let scheduler = makeLimitedScheduler()
+            let executions = Executions()
+            var outcomes: [ImageWorkScheduler.TerminalOutcome] = []
+
+            enqueueGated(
+                lane, id: "job", on: scheduler, executions: executions,
+                onTerminal: { outcomes.append($0) })
+            try await waitUntilAsync("\(lane): the operation to enter") {
+                await executions.current == 1
+            }
+            // Cancelled first, so it is no longer in `running` when the barrier starts.
+            scheduler.cancel(id: .init("job"))
+            XCTAssertEqual(scheduler.runningCount, 0, "\(lane)")
+
+            var barrierReturned = false
+            let barrier = Task { @MainActor in
+                await scheduler.cancelAllAndWait()
+                barrierReturned = true
+            }
+            try await Task.sleep(for: .milliseconds(50))
+            XCTAssertFalse(barrierReturned, "\(lane): barrier returned with work still running")
+            let during = await executions.current
+            XCTAssertEqual(during, 1, "\(lane)")
+
+            await executions.open()
+            await barrier.value
+            let exited = await executions.exited
+            XCTAssertEqual(exited, 1, "\(lane)")
+            XCTAssertTrue(scheduler.isIdle, "\(lane)")
+            XCTAssertEqual(outcomes, [.cancelled], "\(lane)")
+        }
+    }
+
+    func testCancelAndWaitCoversAnOperationCancelledEarlier() async throws {
+        let scheduler = makeLimitedScheduler()
+        let executions = Executions()
+        enqueueGated(.packageIO, id: "writer", on: scheduler, executions: executions)
+        try await waitUntilAsync("the writer to enter") { await executions.current == 1 }
+        scheduler.cancel(id: .init("writer"))
+
+        var returned = false
+        let waiter = Task { @MainActor in
+            await scheduler.cancelAndWait(id: .init("writer"))
+            returned = true
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertFalse(returned)
+        await executions.open()
+        await waiter.value
+        let exited = await executions.exited
+        XCTAssertEqual(exited, 1)
+    }
+
+    func testCancelledEditorStillYieldsBackgroundWorkUntilItReturns() async throws {
+        let scheduler = makeLimitedScheduler()
+        let editor = Executions()
+        let frameRead = Executions()
+        let packageIO = Executions()
+
+        enqueueGated(.editor, id: "editor", on: scheduler, executions: editor)
+        try await waitUntilAsync("the editor operation to enter") { await editor.current == 1 }
+        scheduler.cancel(id: .init("editor"))
+
+        enqueueGated(.frameRead, id: "frame-read", on: scheduler, executions: frameRead)
+        scheduler.enqueuePackageIO(
+            id: .init("maintenance"), lane: .maintenance,
+            operation: { await packageIO.run() })
+
+        try await Task.sleep(for: .milliseconds(50))
+        let frameReadEntered = await frameRead.entered
+        let packageIOEntered = await packageIO.entered
+        XCTAssertEqual(frameReadEntered, 0, "frame reads must yield to draining editor work")
+        XCTAssertEqual(packageIOEntered, 0, "background package I/O must yield to draining editor work")
+
+        await editor.open()
+        try await waitUntilAsync("background work to start after the editor returns") {
+            let frameReadCurrent = await frameRead.current
+            let packageIOCurrent = await packageIO.current
+            return frameReadCurrent == 1 && packageIOCurrent == 1
+        }
+        await frameRead.open()
+        await packageIO.open()
+        try await waitUntil("the scheduler to drain") { scheduler.isIdle }
+    }
+
     private func waitUntil(
         _ description: String,
         timeout: TimeInterval = 2,

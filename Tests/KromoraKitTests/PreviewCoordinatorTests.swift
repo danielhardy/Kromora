@@ -29,12 +29,13 @@ final class PreviewCoordinatorTests: XCTestCase {
         XCTAssertEqual(interactiveRequests.first?.document.rawDevelop.exposure, 0.5)
 
         coordinator.endInteraction()
+        // The superseded interactive render keeps the editor slot until it returns.
+        await fake.releaseNext()
         try await waitUntil("the settled request") { await fake.requests.count == 2 }
         let allRequests = await fake.allRequests()
         XCTAssertEqual(allRequests[1].quality, .preview)
         XCTAssertEqual(allRequests[1].document.rawDevelop.exposure, 0.5)
 
-        await fake.releaseNext()
         await fake.releaseNext()
         try await waitUntil("the settled publication") { publications.count == 1 }
         XCTAssertEqual(publications.first?.phase, .settled)
@@ -62,6 +63,8 @@ final class PreviewCoordinatorTests: XCTestCase {
         )
         try await waitUntil("the interactive request") { await fake.requests.count == 1 }
         coordinator.endInteraction()
+        // The superseded interactive render keeps the editor slot until it returns.
+        await fake.releaseNext()
         try await waitUntil("the settled request") { await fake.requests.count == 2 }
         let requests = await fake.allRequests()
         XCTAssertEqual(requests.map(\.presentationROI), [roi, roi],
@@ -80,12 +83,14 @@ final class PreviewCoordinatorTests: XCTestCase {
         coordinator.submit(request(source: source, exposure: 0.1))
         try await waitUntil("the first request") { await fake.requests.count == 1 }
         coordinator.submit(request(source: source, exposure: 0.5))
-        try await waitUntil("the replacement request") { await fake.requests.count == 2 }
 
+        // The superseded render ignores cancellation and keeps the editor slot until it returns,
+        // so the replacement is only admitted once the stale result has been released.
         await fake.releaseNext()
         try await Task.sleep(for: .milliseconds(20))
         XCTAssertTrue(publications.isEmpty, "the superseded result must not reach UI state")
 
+        try await waitUntil("the replacement request") { await fake.requests.count == 2 }
         await fake.releaseNext()
         try await waitUntil("the current publication") { publications.count == 1 }
         XCTAssertEqual(publications[0].request.document.rawDevelop.exposure, 0.5)
@@ -128,12 +133,12 @@ final class PreviewCoordinatorTests: XCTestCase {
             request(source: source, exposure: 0.5), assetID: secondAsset,
             sourceRevision: 1, displayRevision: 1
         )
-        try await waitUntil("the second asset request") { await fake.requests.count == 2 }
 
         await fake.releaseNext()
         try await Task.sleep(for: .milliseconds(20))
         XCTAssertTrue(publications.isEmpty, "an equal source is not enough to identify the photo")
 
+        try await waitUntil("the second asset request") { await fake.requests.count == 2 }
         await fake.releaseNext()
         try await waitUntil("the second asset publication") { publications.count == 1 }
         XCTAssertEqual(publications[0].assetID, secondAsset)
@@ -475,11 +480,11 @@ final class PreviewCoordinatorTests: XCTestCase {
         coordinator.submit(maskedRequest(source: source, exposure: 0.1))
         try await waitUntil("the first base render") { await fake.requests.count == 1 }
         coordinator.submit(maskedRequest(source: source, exposure: 0.9))
-        try await waitUntil("the replacement base render") { await fake.requests.count == 2 }
 
         await fake.releaseNext()
         try await Task.sleep(for: .milliseconds(20))
         XCTAssertTrue(publications.isEmpty, "the superseded base frame must not reach the screen")
+        try await waitUntil("the replacement base render") { await fake.requests.count == 2 }
         let afterStale = await fake.allRequests()
         XCTAssertEqual(afterStale.count, 2, "a superseded base frame must not start a refinement")
 

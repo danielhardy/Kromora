@@ -608,15 +608,16 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         try await waitUntil("the first histogram") { await fake.histogramRequests.count == 1 }
 
         viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.5)] }
-        try await waitUntil("the newer histogram request") {
-            await fake.histogramRequests.count == 2
-        }
 
-        // Finish the old request first. The current request is still gated, so any publication here
-        // would prove that the revision guard is missing.
+        // The obsolete request ignores cancellation and keeps the editor slot until it returns,
+        // so finish it first; the newer request is admitted only afterwards. Nothing may publish
+        // from the old result, which is what the revision guard is for.
         await fake.releaseNextHistogram()
         try await Task.sleep(for: .milliseconds(50))
         XCTAssertNil(viewModel.info.histogram, "an obsolete histogram must not publish")
+        try await waitUntil("the newer histogram request") {
+            await fake.histogramRequests.count == 2
+        }
 
         await fake.releaseHistograms()
         try await waitUntil("the current histogram") { viewModel.info.histogram != nil }

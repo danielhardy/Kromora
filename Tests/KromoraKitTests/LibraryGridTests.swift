@@ -513,7 +513,12 @@ final class LibraryGridTests: TempDirectoryTestCase {
         XCTAssertLessThanOrEqual(scheduler.pendingThumbnailCount, 24)
 
         for id in first { collection.releaseThumbnail(for: id) }
-        XCTAssertEqual(scheduler.pendingThumbnailCount, 0, "released cells must not stay queued")
+        // The three cells adjacent to the selection stay in the working set and are not released.
+        // Cancelled cold-load decodes still hold their slots until they return, so those cells may
+        // be queued rather than running; nothing else may remain.
+        XCTAssertLessThanOrEqual(
+            scheduler.pendingThumbnailCount + scheduler.runningThumbnailCount, 3,
+            "released cells must not stay queued")
         await collection.shutdown()
     }
 

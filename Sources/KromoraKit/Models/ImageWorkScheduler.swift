@@ -119,6 +119,7 @@ final class ImageWorkScheduler {
     }
 
     private struct Running {
+        let id: JobID
         let lane: Lane
         let priority: Priority
         let token: UInt64
@@ -129,6 +130,12 @@ final class ImageWorkScheduler {
     private let configuration: Configuration
     private var queued: [JobID: Job] = [:]
     private var running: [JobID: Running] = [:]
+    /// Cancelled operations whose task has not yet returned, keyed by token. A cancelled job
+    /// leaves `running` (its logical ID is immediately reusable and its caller is already told),
+    /// but the physical operation may still be inside ImageIO, a GPU wait, or a package
+    /// transaction. Draining work keeps counting against its lane's limit and against the
+    /// shutdown barrier until the task actually finishes.
+    private var draining: [UInt64: Running] = [:]
     private var nextSequence: UInt64 = 0
     private var nextToken: UInt64 = 0
 
@@ -190,6 +197,15 @@ final class ImageWorkScheduler {
         running.values.filter { $0.lane == .frameRead }.count
     }
 
+    /// Cancelled operations still executing. They hold their lane slot until they return.
+    var drainingCount: Int { draining.count }
+
+    /// Operations that are physically executing in `lane`, whether or not they are still wanted.
+    private func physicalCount(in lane: Lane) -> Int {
+        running.values.filter { $0.lane == lane }.count
+            + draining.values.filter { $0.lane == lane }.count
+    }
+
     /// Jobs a frame read was ready for but held behind editor contention.
     private(set) var yieldedFrameReadCount = 0
     private(set) var peakRunningFrameReadCount = 0
@@ -205,16 +221,16 @@ final class ImageWorkScheduler {
     }
 
     var canQueueThumbnail: Bool {
-        runningThumbnailCount < configuration.maxConcurrentThumbnails
+        physicalCount(in: .thumbnail) < configuration.maxConcurrentThumbnails
             || pendingThumbnailCount < configuration.maxQueuedThumbnails
     }
 
     var canQueuePackageIO: Bool {
-        runningPackageIOCount < configuration.maxConcurrentPackageIO
+        physicalCount(in: .packageIO) < configuration.maxConcurrentPackageIO
             || pendingPackageIOCount < configuration.maxQueuedPackageIO
     }
 
-    var isIdle: Bool { queued.isEmpty && running.isEmpty }
+    var isIdle: Bool { queued.isEmpty && running.isEmpty && draining.isEmpty }
 
     /// Add or replace a job. Replacing a running job cancels it before the new value is admitted.
     @discardableResult
@@ -242,7 +258,7 @@ final class ImageWorkScheduler {
             }
             guard
                 configuration.maxQueuedThumbnails > 0
-                    || runningThumbnailCount < configuration.maxConcurrentThumbnails
+                    || physicalCount(in: .thumbnail) < configuration.maxConcurrentThumbnails
             else {
                 droppedThumbnailCount += 1
                 onTerminal(.rejected)
@@ -297,7 +313,7 @@ final class ImageWorkScheduler {
         }
         guard
             configuration.maxQueuedPackageIO > 0
-                || runningPackageIOCount < configuration.maxConcurrentPackageIO
+                || physicalCount(in: .packageIO) < configuration.maxConcurrentPackageIO
         else {
             droppedPackageIOCount += 1
             onTerminal(.rejected)
@@ -384,10 +400,12 @@ final class ImageWorkScheduler {
     /// detached body. This is the per-job teardown barrier used by the package lease heartbeat;
     /// releasing the lock before this returns could allow a late renewal to touch a new owner.
     func cancelAndWait(id: JobID) async {
-        let runningTask = running[id]?.task
         cancel(id: id, countAsCancellation: true)
         pump()
-        await runningTask?.value
+        let drainingTasks = draining.values.filter { $0.id == id }.map(\.task)
+        for task in drainingTasks {
+            await task.value
+        }
     }
 
     func cancel(ids: Set<JobID>) {
@@ -409,9 +427,10 @@ final class ImageWorkScheduler {
     /// about to remove a fixture must await this method so that the operation cannot touch the old
     /// source after cleanup.
     func cancelAllAndWait() async {
-        while !queued.isEmpty || !running.isEmpty {
-            let activeTasks = running.values.map(\.task)
+        while !isIdle {
             cancelAll()
+            // Snapshot after cancelling so the barrier covers work cancelled earlier as well.
+            let activeTasks = draining.values.map(\.task)
             for task in activeTasks {
                 await task.value
             }
@@ -427,14 +446,16 @@ final class ImageWorkScheduler {
         if let active = running.removeValue(forKey: id) {
             active.task.cancel()
             if countAsCancellation { cancelledCount += 1 }
-            // A detached package operation may still be inside a copy, fsync, or transaction
-            // rollback after Task.cancel(). Keep the package-I/O slot occupied until its task
-            // reaches `finished`; otherwise a queued writer could overlap the rollback and break
-            // the single-writer invariant. Thumbnail/editor cancellation retains the historical
-            // eager terminal callback because those operations do not mutate package state.
-            if active.lane == .packageIO {
-                running[id] = active
-            } else {
+            // Task.cancel() is only a request: the operation may still be inside ImageIO, a GPU
+            // wait, a copy, fsync, or transaction rollback. Every lane therefore keeps its slot
+            // (and its place in the shutdown barrier) in `draining` until the task returns, so a
+            // replacement cannot overlap it and the advertised limits hold.
+            draining[active.token] = active
+            // Package writers hold their terminal callback until the task has really exited:
+            // a caller that reacts to it (releasing a lock, starting the next writer) must not
+            // overlap a rollback. Other lanes mutate no package state, so their callers are told
+            // promptly and may start replacement work, which queues behind the draining slot.
+            if active.lane != .packageIO {
                 active.onTerminal(.cancelled)
             }
         }
@@ -497,7 +518,7 @@ final class ImageWorkScheduler {
             }
         }
 
-        guard configuration.maxQueuedEditorJobs > 0 || runningEditorCount == 0 else {
+        guard configuration.maxQueuedEditorJobs > 0 || physicalCount(in: .editor) == 0 else {
             droppedEditorCount += 1
             return false
         }
@@ -552,10 +573,10 @@ final class ImageWorkScheduler {
                 }
             }
             running[next.id] = Running(
-                lane: next.lane, priority: next.priority, token: token, task: task,
+                id: next.id, lane: next.lane, priority: next.priority, token: token, task: task,
                 onTerminal: next.onTerminal
             )
-            peakRunningFrameReadCount = max(peakRunningFrameReadCount, runningFrameReadCount)
+            peakRunningFrameReadCount = max(peakRunningFrameReadCount, physicalCount(in: .frameRead))
         }
     }
 
@@ -564,14 +585,14 @@ final class ImageWorkScheduler {
             .filter { job in
                 switch job.lane {
                 case .editor:
-                    return !running.values.contains(where: { $0.lane == .editor })
+                    return physicalCount(in: .editor) == 0
                 case .thumbnail:
-                    return runningThumbnailCount < configuration.maxConcurrentThumbnails
+                    return physicalCount(in: .thumbnail) < configuration.maxConcurrentThumbnails
                 case .frameRead:
-                    return runningFrameReadCount < configuration.maxConcurrentFrameReads
+                    return physicalCount(in: .frameRead) < configuration.maxConcurrentFrameReads
                         && !isEditorContended
                 case .packageIO:
-                    return runningPackageIOCount < configuration.maxConcurrentPackageIO
+                    return physicalCount(in: .packageIO) < configuration.maxConcurrentPackageIO
                         // A user-requested import must be able to finish while a render is
                         // deliberately gated (for example during a source switch). Background
                         // index/maintenance work still yields to editor demand below.
@@ -586,7 +607,7 @@ final class ImageWorkScheduler {
         }
         if isEditorContended,
             queued.values.contains(where: { $0.lane == .frameRead }),
-            runningFrameReadCount < configuration.maxConcurrentFrameReads
+            physicalCount(in: .frameRead) < configuration.maxConcurrentFrameReads
         {
             yieldedFrameReadCount += 1
         }
@@ -599,6 +620,7 @@ final class ImageWorkScheduler {
     private var isEditorContended: Bool {
         queued.values.contains { $0.lane == .editor || $0.priority == .activeEditor }
             || running.values.contains { $0.lane == .editor || $0.priority == .activeEditor }
+            || draining.values.contains { $0.lane == .editor || $0.priority == .activeEditor }
     }
 
     private func precedes(_ lhs: Job, _ rhs: Job) -> Bool {
@@ -613,6 +635,13 @@ final class ImageWorkScheduler {
     }
 
     private func finished(id: JobID, token: UInt64, outcome: TerminalOutcome) {
+        if let drained = draining.removeValue(forKey: token) {
+            // The caller of a cancelled thumbnail/editor/frame-read job was notified at cancel
+            // time; only package I/O defers its notification to here.
+            if drained.lane == .packageIO { drained.onTerminal(.cancelled) }
+            pump()
+            return
+        }
         guard running[id]?.token == token else { return }
         let active = running.removeValue(forKey: id)
         active?.onTerminal(outcome)
