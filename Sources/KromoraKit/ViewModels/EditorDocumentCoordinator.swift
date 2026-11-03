@@ -26,8 +26,11 @@ final class EditorDocumentCoordinator {
         var documentCost: Int
         var tick: UInt64
 
-        /// `(1 + undo + redo) x documentCost`; an open gesture group is charged separately.
-        var cost: Int { (1 + session.history.undoCount + session.history.redoCount) * documentCost }
+        /// The current document plus the cached cost of every retained history document.
+        func cost(history: EditHistory) -> Int {
+            let (sum, overflow) = documentCost.addingReportingOverflow(history.retainedBytes)
+            return overflow ? Int.max : sum
+        }
     }
 
     private(set) var activeHistory = EditHistory()
@@ -35,8 +38,6 @@ final class EditorDocumentCoordinator {
     @ObservationIgnored private var nextRevision: UInt64 = 0
     @ObservationIgnored private var nextTick: UInt64 = 0
     @ObservationIgnored private var activeAssetID: PhotoAssetID?
-    /// Cost of the open gesture group's undo point, charged to the active (pinned) session.
-    @ObservationIgnored private var activeGroupingCost = 0
 
     @ObservationIgnored let maximumResidentSessions: Int
     @ObservationIgnored let maximumResidentSessionBytes: Int
@@ -71,7 +72,18 @@ final class EditorDocumentCoordinator {
     }
     /// Deterministic payload estimate across resident sessions plus any open gesture group.
     var estimatedResidentBytes: Int {
-        entries.reduce(activeGroupingCost) { $0 + $1.value.cost }
+        var total = 0
+        for (assetID, entry) in entries {
+            let (sum, overflow) = total.addingReportingOverflow(cost(of: entry, assetID: assetID))
+            total = overflow ? Int.max : sum
+        }
+        return total
+    }
+
+    /// The active asset's live history can be ahead of its stored session (an open gesture group,
+    /// an undo not yet committed), so it is charged instead of the stored snapshot.
+    private func cost(of entry: Entry, assetID: PhotoAssetID) -> Int {
+        entry.cost(history: assetID == activeAssetID ? activeHistory : entry.session.history)
     }
 
     func session(for assetID: PhotoAssetID) -> PhotoEditSession? {
@@ -88,7 +100,6 @@ final class EditorDocumentCoordinator {
     func activate(session: PhotoEditSession?, for assetID: PhotoAssetID? = nil) {
         activeHistory = session?.history ?? EditHistory()
         activeAssetID = assetID
-        activeGroupingCost = 0
         if let assetID { touch(assetID) }
     }
 
@@ -96,7 +107,6 @@ final class EditorDocumentCoordinator {
     /// fresh in-memory undo stack, matching the historical AppViewModel behavior.
     func adoptStoredDocument(_ document: EditDocument, for assetID: PhotoAssetID) {
         activeHistory = EditHistory()
-        activeGroupingCost = 0
         store(
             PhotoEditSession(document: document, history: activeHistory),
             revision: entries[assetID]?.revision ?? 0, for: assetID)
@@ -108,7 +118,6 @@ final class EditorDocumentCoordinator {
         for assetID: PhotoAssetID
     ) {
         activeHistory = EditHistory()
-        activeGroupingCost = 0
         activeHistory.adoptTimeline(before: priorDocuments)
         nextRevision &+= 1
         store(
@@ -119,7 +128,6 @@ final class EditorDocumentCoordinator {
     func clearActiveHistory() {
         activeHistory = EditHistory()
         activeAssetID = nil
-        activeGroupingCost = 0
     }
 
     /// Record the latest in-memory document for a photo and return its new session revision.
@@ -145,7 +153,6 @@ final class EditorDocumentCoordinator {
     }
 
     func beginGrouping(document: EditDocument) {
-        if !activeHistory.isGrouping { activeGroupingCost = document.estimatedRetentionBytes }
         activeHistory.beginGrouping(document: document)
     }
 
@@ -155,7 +162,6 @@ final class EditorDocumentCoordinator {
     func endGrouping(document: EditDocument) -> Bool {
         let wasGrouping = activeHistory.isGrouping
         activeHistory.endGrouping(document: document)
-        activeGroupingCost = 0
         return wasGrouping
     }
 

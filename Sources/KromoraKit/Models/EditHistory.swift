@@ -10,14 +10,25 @@ struct EditHistory: Sendable, Equatable {
     /// A document to return to, plus the photographer-facing name of the edit that left it.
     /// `actionName` is nil when no single control or section describes the edit (and for history
     /// restored from durable revisions), so the menu falls back to plain "Undo"/"Redo".
+    ///
+    /// `cost` is `document.estimatedRetentionBytes`, estimated once when the entry is created so
+    /// summing a history never rescans documents.
     struct Entry: Sendable, Equatable {
         let document: EditDocument
         let actionName: String?
+        let cost: Int
+
+        init(document: EditDocument, actionName: String?) {
+            self.document = document
+            self.actionName = actionName
+            self.cost = document.estimatedRetentionBytes
+        }
     }
 
     private(set) var undoSnapshots: [Entry] = []
     private(set) var redoSnapshots: [Entry] = []
     private var groupingStart: EditDocument?
+    private var groupingStartCost = 0
 
     /// Name of the edit Undo would revert.
     var undoActionName: String? { undoSnapshots.last?.actionName }
@@ -30,13 +41,30 @@ struct EditHistory: Sendable, Equatable {
     var undoCount: Int { undoSnapshots.count }
     var redoCount: Int { redoSnapshots.count }
 
+    /// Estimated payload bytes retained by the undo stack, redo stack, and any open gesture
+    /// group's start document (saturating). The current document is charged by the owner.
+    var retainedBytes: Int {
+        var total = groupingStart == nil ? 0 : groupingStartCost
+        for entry in undoSnapshots { total = Self.saturatingAdd(total, entry.cost) }
+        for entry in redoSnapshots { total = Self.saturatingAdd(total, entry.cost) }
+        return total
+    }
+
+    private static func saturatingAdd(_ lhs: Int, _ rhs: Int) -> Int {
+        let (sum, overflow) = lhs.addingReportingOverflow(rhs)
+        return overflow ? Int.max : sum
+    }
+
     mutating func beginGrouping(document: EditDocument) {
-        if groupingStart == nil { groupingStart = document }
+        guard groupingStart == nil else { return }
+        groupingStart = document
+        groupingStartCost = document.estimatedRetentionBytes
     }
 
     mutating func endGrouping(document: EditDocument) {
         guard let start = groupingStart else { return }
         groupingStart = nil
+        groupingStartCost = 0
         guard start != document else { return }
         appendUndo(start, producing: document)
     }
@@ -52,6 +80,7 @@ struct EditHistory: Sendable, Equatable {
         undoSnapshots = documents.suffix(Self.maximumDepth).map { Entry(document: $0, actionName: nil) }
         redoSnapshots.removeAll(keepingCapacity: true)
         groupingStart = nil
+        groupingStartCost = 0
     }
 
     mutating func undo(current: EditDocument) -> EditDocument? {

@@ -15,13 +15,18 @@ newest document. This guide defines how many sessions stay resident and which on
 Both are initializer parameters so tests inject small values. The budget counts every resident
 session, but only eligible sessions are evicted, so the resident set can exceed it.
 
-The cost of a session is `(1 + undoCount + redoCount + (isGrouping ? 1 : 0)) × documentCost`; the
-extra document is the undo point held by an open gesture group. `EditDocument.estimatedRetentionBytes`
+The cost of a session is the current document's cost plus the cached cost of every document its
+history retains: each undo entry, each redo entry, and the start document of an open gesture group.
+Each `EditHistory.Entry` stores `EditDocument.estimatedRetentionBytes` when it is created, so
+`EditHistory.retainedBytes` sums cached integers (saturating) and never rescans documents. Entries
+keep their cost as they move between the undo and redo stacks; only the document an undo or redo
+pushes onto the opposite stack is estimated. The active asset is charged from the live
+`activeHistory`, which can be ahead of its stored snapshot. `EditDocument.estimatedRetentionBytes`
 is a deterministic value-payload estimate (a fixed 4 KiB shell, plus element stride for every
 variable-length collection in the document and its recipes, plus UTF-8 bytes of retained strings).
-It is computed when a session is stored (`commit`, `apply`, `adopt*`) and cached on the entry; reads
-never scan sessions or encode documents. It takes no copy-on-write discount and does not capture
-allocator or array-capacity overhead.
+The current document's cost is computed when a session is stored (`commit`, `apply`, `adopt*`) and
+cached on the entry; reads never scan sessions or encode documents. It takes no copy-on-write
+discount and does not capture allocator or array-capacity overhead.
 
 Recency is a monotonic tick stamped on `activate`, `commit`, `apply`, and `adopt*`. Plain
 `session(for:)` reads (thumbnails, admission, export) do not touch recency, so background readers
@@ -73,6 +78,8 @@ the saved edit in the categories the paste does not touch.
 
 - `EditorSessionEvictionTests` cover the budget, pinning, dirty and acknowledgement ordering,
   failed-write retry, cold-reopen parity, and revision monotonicity.
+- `EditorSessionHistoryCostTests` cover history-aware cost: heavy-to-light edits, undo/redo, mixed
+  payloads, open groups, and eviction against the sum of retained estimates.
 - `EditClipboardCoordinatorTests` cover the durable paste base and skipped-photo reporting.
 - `EditorSessionRetentionProbeTests` is window-independent. It measures estimated retained bytes for
   generated heavy documents (6 brush-mask layers plus 40 retouch spots, each history entry with a
