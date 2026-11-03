@@ -95,6 +95,13 @@ enum PhotoAnalysisCacheError: Error, Sendable, Equatable {
     case versionMismatch(expected: AnalysisVersion, actual: AnalysisVersion)
 }
 
+/// A stored analysis with the stage coverage it was computed with. `coverage` is `nil` for an entry
+/// written before coverage was recorded; the coordinator treats that as a miss.
+struct PhotoAnalysisCacheEntry: Sendable, Equatable {
+    let analysis: PhotoAnalysis
+    let coverage: PhotoAnalysisCoverage?
+}
+
 /// Small, durable storage for scalar `PhotoAnalysis` values.
 ///
 /// Mask pixels remain owned by `MaskStore`; this cache only stores the inexpensive facts and
@@ -104,6 +111,8 @@ actor PhotoAnalysisCache {
     private struct PersistedAnalysis: Codable, Sendable, Equatable {
         let key: AnalysisCacheKey
         let analysis: PhotoAnalysis
+        /// Absent in entries written before stage coverage was persisted.
+        let coverage: PhotoAnalysisCoverage?
     }
 
     private let directory: URL
@@ -116,6 +125,11 @@ actor PhotoAnalysisCache {
     /// Reads an exact key. A missing, malformed, or stale entry is a cache miss rather than a
     /// failure of photo analysis.
     func analysis(for key: AnalysisCacheKey) throws -> PhotoAnalysis? {
+        try entry(for: key)?.analysis
+    }
+
+    /// Like `analysis(for:)`, with the stage coverage the entry was stored with.
+    func entry(for key: AnalysisCacheKey) throws -> PhotoAnalysisCacheEntry? {
         try Task.checkCancellation()
         guard let data = try? Data(contentsOf: fileURL(for: key)) else { return nil }
         try Task.checkCancellation()
@@ -124,19 +138,21 @@ actor PhotoAnalysisCache {
               persisted.analysis.version == key.analysisVersion else {
             return nil
         }
-        return persisted.analysis
+        return PhotoAnalysisCacheEntry(analysis: persisted.analysis, coverage: persisted.coverage)
     }
 
     /// Stores one analysis using an atomic replacement. Cancellation is checked before the file
     /// operation so a cancelled write cannot replace a previously valid entry.
-    func store(_ analysis: PhotoAnalysis, for key: AnalysisCacheKey) throws {
+    func store(
+        _ analysis: PhotoAnalysis, coverage: PhotoAnalysisCoverage? = nil, for key: AnalysisCacheKey
+    ) throws {
         try Task.checkCancellation()
         guard analysis.version == key.analysisVersion else {
             throw PhotoAnalysisCacheError.versionMismatch(
                 expected: key.analysisVersion, actual: analysis.version
             )
         }
-        let data = try JSONEncoder().encode(PersistedAnalysis(key: key, analysis: analysis))
+        let data = try JSONEncoder().encode(PersistedAnalysis(key: key, analysis: analysis, coverage: coverage))
         try Task.checkCancellation()
         try data.write(to: fileURL(for: key), options: .atomic)
     }

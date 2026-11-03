@@ -222,7 +222,8 @@ struct PhotoAnalysisAssembler: Sendable {
         masks: [RegionMask],
         version: AnalysisVersion = .current,
         timings: AnalysisTimings = .zero,
-        classifications: [SceneClassificationObservation]? = nil
+        classifications: [SceneClassificationObservation]? = nil,
+        retainedRegions: [AnalyzedRegion] = []
     ) async throws -> PhotoAnalysis {
         let clock = ContinuousClock()
         let assemblyStart = clock.now
@@ -267,6 +268,7 @@ struct PhotoAnalysisAssembler: Sendable {
 
         try Task.checkCancellation()
 
+        regions = Self.merged(retained: retainedRegions, adding: regions)
         let quality = Self.quality(global: global.quality, regions: regions)
         let regionalDuration = regionalStart.duration(to: clock.now)
         let assemblyDuration = assemblyStart.duration(to: clock.now)
@@ -291,6 +293,22 @@ struct PhotoAnalysisAssembler: Sendable {
                 total: totalDuration
             )
         )
+    }
+
+    /// Combine regions kept from an earlier, narrower analysis with newly analyzed ones. A kind has
+    /// one region; the higher-quality mask wins, and a tie goes to the newer region.
+    static func merged(
+        retained: [AnalyzedRegion], adding added: [AnalyzedRegion]
+    ) -> [AnalyzedRegion] {
+        var result = retained
+        for region in added {
+            if let index = result.firstIndex(where: { $0.kind == region.kind }) {
+                if region.mask.quality >= result[index].mask.quality { result[index] = region }
+            } else {
+                result.append(region)
+            }
+        }
+        return result
     }
 
     private static func quality(

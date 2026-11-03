@@ -47,6 +47,8 @@ actor PhotoAnalysisCoordinator {
     /// `nil` and only reduce scene confidence; they never fail the analysis.
     private let sceneClassifier: any SceneClassifierProviding
     private let stages: [PhotoAnalysisLevel: [PhotoAnalysisStage]]
+    /// Wall clock for stage-failure backoff; injectable so tests do not sleep.
+    private let now: @Sendable () -> Date
 
     /// `waiters` is the count of callers currently attached to `task`. The shared task is only
     /// cancelled once every attached waiter has cancelled — otherwise cancelling one of several
@@ -67,8 +69,10 @@ actor PhotoAnalysisCoordinator {
         cache: PhotoAnalysisCache = PhotoAnalysisCache(),
         maskProvider: (any SemanticMaskProviding)? = nil,
         sceneClassifier: (any SceneClassifierProviding)? = nil,
-        stages: [PhotoAnalysisLevel: [PhotoAnalysisStage]]? = nil
+        stages: [PhotoAnalysisLevel: [PhotoAnalysisStage]]? = nil,
+        now: @escaping @Sendable () -> Date = { Date() }
     ) {
+        self.now = now
         self.maskStore = maskStore
         self.maskProvider = maskProvider ?? VisionSemanticMaskProvider(store: maskStore)
         self.sceneClassifier = sceneClassifier ?? VisionSceneClassifier()
@@ -105,6 +109,11 @@ actor PhotoAnalysisCoordinator {
     }
 
     /// Analyze one source at the requested level. Concurrent identical requests await one task.
+    ///
+    /// A stored result satisfies the request only when its persisted stage coverage accounts for
+    /// every stage of `level`; otherwise just the missing stages run and are merged into the stored
+    /// result. Work for one source is serialized across levels, so the read-merge-write of the
+    /// stored entry never races a request for another level.
     func analyze(
         assetID: PhotoAssetID,
         source: ImageSource,
@@ -121,47 +130,72 @@ actor PhotoAnalysisCoordinator {
             identity: key.identity,
             analysisVersion: .current
         )
-        do {
-            if let cached = try await cache.analysis(for: cacheKey) {
-                KromoraObservability.event(
-                    .cacheHit, source: source, maskQuality: .analysis, detail: "photoAnalysis"
-                )
-                return cached
-            }
-            KromoraObservability.event(
-                .cacheMiss, source: source, maskQuality: .analysis, detail: "photoAnalysis"
-            )
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch {
-            // A damaged or unavailable cache must never prevent Tier 0 analysis.
-        }
+        let required = stages[level, default: []]
 
-        let task: Task<PhotoAnalysis, Error>
-        if let existing = inFlightAnalyses[key] {
-            task = existing.task
-            inFlightAnalyses[key]?.waiters += 1
-        } else {
-            task = Task { [self] in
-                do {
-                    let result = try await performAnalysis(
-                        assetID: assetID, source: source, level: level, cacheKey: cacheKey
+        while true {
+            try Task.checkCancellation()
+            do {
+                if let entry = try await cache.entry(for: cacheKey),
+                   let coverage = entry.coverage {
+                    if coverage.missingStages(in: required, now: now()).isEmpty {
+                        KromoraObservability.event(
+                            .cacheHit, source: source, maskQuality: .analysis,
+                            detail: "photoAnalysis"
+                        )
+                        return entry.analysis
+                    }
+                    KromoraObservability.event(
+                        .cacheMiss, source: source, maskQuality: .analysis,
+                        detail: "photoAnalysisPartial"
                     )
-                    inFlightAnalyses.removeValue(forKey: key)
-                    return result
-                } catch {
-                    inFlightAnalyses.removeValue(forKey: key)
-                    throw error
+                } else {
+                    KromoraObservability.event(
+                        .cacheMiss, source: source, maskQuality: .analysis, detail: "photoAnalysis"
+                    )
                 }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // A damaged or unavailable cache must never prevent Tier 0 analysis.
             }
-            inFlightAnalyses[key] = InFlightEntry(task: task, waiters: 1)
-        }
 
-        let result = try await sharedValue(of: task) { [self] in
-            await analysisWaiterCancelled(key)
+            let task: Task<PhotoAnalysis, Error>
+            if let existing = inFlightAnalyses[key] {
+                task = existing.task
+                inFlightAnalyses[key]?.waiters += 1
+            } else if let other = inFlightAnalysis(forIdentity: key.identity, otherThan: level) {
+                // Another level is reading and rewriting this source's stored entry. Let it
+                // finish, then re-evaluate: it may have covered this level already.
+                _ = try? await other.value
+                continue
+            } else {
+                task = Task { [self] in
+                    do {
+                        let result = try await performAnalysis(
+                            assetID: assetID, source: source, level: level, cacheKey: cacheKey
+                        )
+                        inFlightAnalyses.removeValue(forKey: key)
+                        return result
+                    } catch {
+                        inFlightAnalyses.removeValue(forKey: key)
+                        throw error
+                    }
+                }
+                inFlightAnalyses[key] = InFlightEntry(task: task, waiters: 1)
+            }
+
+            let result = try await sharedValue(of: task) { [self] in
+                await analysisWaiterCancelled(key)
+            }
+            try Task.checkCancellation()
+            return result
         }
-        try Task.checkCancellation()
-        return result
+    }
+
+    private func inFlightAnalysis(
+        forIdentity identity: PortablePhotoIdentity, otherThan level: PhotoAnalysisLevel
+    ) -> Task<PhotoAnalysis, Error>? {
+        inFlightAnalyses.first { $0.key.identity == identity && $0.key.level != level }?.value.task
     }
 
     /// Request one semantic mask without assembling a full `PhotoAnalysis`.
@@ -277,10 +311,25 @@ actor PhotoAnalysisCoordinator {
             imagePreparation: preparationStart.duration(to: clock.now)
         )
 
-        var masks: [RegionMask] = []
-        masks.reserveCapacity(stages[level, default: []].count)
+        // The authoritative read: the caller's cache check may predate a task that has since
+        // finished for this source. Only an entry that records its coverage can be extended.
+        let stored: PhotoAnalysisCacheEntry?
+        do {
+            stored = try await cache.entry(for: cacheKey)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            stored = nil
+        }
+        let retained = stored.flatMap { $0.coverage == nil ? nil : $0.analysis }
+        var coverage = stored?.coverage ?? .empty
+        let missing = coverage.missingStages(in: stages[level, default: []], now: now())
+        if let retained, missing.isEmpty { return retained }
 
-        for stage in stages[level, default: []] {
+        var masks: [RegionMask] = []
+        masks.reserveCapacity(missing.count)
+
+        for stage in missing {
             try Task.checkCancellation()
             let stageStart = clock.now
             do {
@@ -299,11 +348,15 @@ actor PhotoAnalysisCoordinator {
                 }
                 try Task.checkCancellation()
                 masks.append(result)
+                coverage.recordProduced(stage)
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
                 // Mask stages are optional. PhotoAnalysisAssembler still requires Tier 0 and
-                // records the successfully populated mask tiers in its quality value.
+                // records the successfully populated mask tiers in its quality value. The
+                // failure is recorded so a transient error is retried after a backoff, while a
+                // deterministic "nothing there" answer is not asked again on every request.
+                coverage.recordFailure(stage, error: error, at: now())
                 timings = timings.adding(
                     duration: stageStart.duration(to: clock.now), for: stage.kind
                 )
@@ -317,17 +370,23 @@ actor PhotoAnalysisCoordinator {
         try Task.checkCancellation()
         // Scene labels are optional evidence: the classifier never throws, and a `nil` result
         // only reduces scene confidence downstream.
-        let sceneObservations = await sceneClassifier.classifications(for: image)
+        let sceneObservations: [SceneClassificationObservation]?
+        if let retained, !retained.sceneClassifications.isEmpty {
+            sceneObservations = retained.sceneClassifications
+        } else {
+            sceneObservations = await sceneClassifier.classifications(for: image)
+        }
         let result = try await assembler.assemble(
             image: image, masks: masks, timings: timings,
-            classifications: sceneObservations
+            classifications: sceneObservations,
+            retainedRegions: retained?.regions ?? []
         )
         try Task.checkCancellation()
         let completed = result.withTimings(
             result.timings.replacing(total: totalStart.duration(to: clock.now))
         )
         do {
-            try await cache.store(completed, for: cacheKey)
+            try await cache.store(completed, coverage: coverage, for: cacheKey)
         } catch is CancellationError {
             throw CancellationError()
         } catch {
