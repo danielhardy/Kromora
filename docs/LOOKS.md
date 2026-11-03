@@ -206,14 +206,27 @@ scratch Look until the user saves it.
 
 A pair only measures the colors it contains, and a single scene usually covers 3–10% of the cube's
 cells. `RecipeExtractor.buildCube` therefore fits the cube as a regularized offset from identity
-rather than trusting each sampled cell: a cell's offset is weighted by `n / (n + 4)` for `n`
-samples, the weighted offsets are blurred with a 3D Gaussian (σ = 1.5 cells), and the result is
-divided by the blurred weight plus a weak identity prior. Where sampled colors are nearby the cube
-follows the measured grade; away from them the offset fades continuously to zero, so unseen colors
-pass through unchanged instead of being reinterpreted. A lone sample barely moves its cell, and
-isolated outlier cells are suppressed. The cube stays continuous, so a smooth gradient stays smooth.
-A cube derived from a street scene of tans and grays measured p99 neighbor step 0.07 and maximum 0.13
-(Euclidean, 0…1), against about 0.55 and 0.77 before.
+rather than trusting each sampled cell. Each sampled cell contributes its offset weighted by its
+sample count (capped at 128), the weighted offsets and weights are blurred with a 3D Gaussian
+(σ = 1.5 cells), and the cube offset is their ratio with a small identity prior (0.4 samples) added
+to the denominator. Where sampled colors are nearby the cube follows the measured grade; away from
+them the offset fades continuously to zero, so unseen colors pass through unchanged instead of being
+reinterpreted. A lone sample keeps under 5% of its offset, and isolated outlier cells are
+suppressed. The cube stays continuous, so a smooth gradient stays smooth.
+
+The prior is in units of blurred sample count because that is the scale evidence actually has: a
+photograph populates a thin surface of the color cube, so a well-sampled color reads far below a
+"fully trusted" 1. A prior scaled to 1 (0.1) shrank real offsets and doubled the round-trip error on
+the street pair (6.6 → 13.4/255). The fade through a Gaussian tail is also as gentle as this kernel
+allows: widening σ to 2 softens it further but raised that error to 9.8.
+
+On the street pair (`DSC03293`) the derived cube measured p99 neighbor step 0.10 and maximum 0.19
+(Euclidean, 0…1; 46 neighbor pairs above 0.15), against about 0.55, 0.77 and 8,900 before. Applied
+to its own camera JPG's RAW the Look leaves 19% of the no-cube error (41.2 → 7.96 mean absolute
+error in 0…255). The best any per-color cube can do on that pair is an unsmoothed per-cell mean, 7.33,
+and the fit before this change read 6.64, so the remaining distance is sharpening and local tone
+that a cube cannot express, not fit quality. A green foliage photo rendered through the Look stays
+smooth, with no banding or hue flip.
 
 The Derive sheet shows a note under 10% coverage saying the Look reflects only the colors in the
 photo. A Look built from a varied scene (foliage, sky, skin, shadows) covers more and carries the

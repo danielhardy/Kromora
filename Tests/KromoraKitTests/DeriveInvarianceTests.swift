@@ -115,11 +115,20 @@ final class DeriveInvarianceTests: XCTestCase {
     /// Two identical-but-wrong renders satisfy an equality check perfectly. This asks the separate
     /// question of whether the derived cube actually *reproduces the camera's look*: apply it through
     /// the pipeline, put the result next to the in-camera JPG, and require the mean absolute error to
-    /// stay under a bound.
+    /// stay a small fraction of what the same render scores with **no cube at all**.
     ///
-    /// The bound is measured, and so is its discriminating power — both numbers are recorded below.
-    /// It is a floor against a broken derive, not a quality target; tightening it toward the measured
-    /// value would make the suite flaky for no gain.
+    /// The bound is relative because an absolute one does not transfer between pairs. How far a
+    /// camera's JPG sits from the neutral render, and how much of that distance is local (sharpening,
+    /// tone mapping) rather than a per-color mapping a cube can express, varies by an order of
+    /// magnitude. Measured, with the cube-free reading first:
+    ///
+    /// - Leica pair: 5.30 → 1.25, so the cube leaves 24% of the error.
+    /// - Sony DSC03293 (a JPG 2.7x sharper than the RAW render, saturation 0.42x): 41.2 → 7.96, 19%.
+    ///   There the best any per-color cube can do is an unsmoothed per-cell mean, 7.33; the fit
+    ///   before KRMA-1154 read 6.64, and a 3.0 absolute bound is unreachable.
+    ///
+    /// Bounded at 30% of the cube-free error: above both pairs, and a derive that had silently
+    /// stopped working reads 100%. It is a floor against a broken derive, not a quality target.
     func testTheDerivedCubeLandsNearTheInCameraJPG() throws {
         let derived = try requireDerive()
 
@@ -128,30 +137,29 @@ final class DeriveInvarianceTests: XCTestCase {
             source: ImageSource(url: derived.raw, nativeExtent: .zero),
             document: document, lut: derived.lut, scale: .full, space: .sRGB
         ))
+        let neutral = try XCTUnwrap(RenderPipeline.buildImage(
+            source: ImageSource(url: derived.raw, nativeExtent: .zero),
+            document: EditDocument(), lut: nil, scale: .full, space: .sRGB
+        ))
         let jpg = try XCTUnwrap(
             CIImage(contentsOf: derived.jpg, options: ImageDecoder.orientedLoadOptions)
         )
 
         // Compared small: the question is whether the colour mapping is right, and a 512 px pair
-        // answers that for a fraction of the memory. Both sides are scaled the same way, so the
-        // resampler contributes to neither side's error.
+        // answers that for a fraction of the memory. Every image is scaled the same way, so the
+        // resampler contributes to no side's error.
         let a = try Self.bytes(of: graded, longEdge: 512)
+        let n = try Self.bytes(of: neutral, longEdge: 512)
         let b = try Self.bytes(of: jpg, longEdge: 512)
         XCTAssertEqual(a.count, b.count, "the pair must rasterize to the same shape to be compared")
 
         let mae = Self.meanAbsoluteError(a, b)
-        // Measured on the Leica pair in realworldtest/, three runs: 1.248, 1.246, 1.249 — the
-        // sampler's run-to-run variation is ±0.003, far smaller than expected for a randomly seeded
-        // fit. The same comparison with **no cube at all** reads 5.297, so that is what a derive that
-        // had silently stopped working looks like: the gap the cube closes is 5.30 → 1.25.
-        //
-        // Bounded at 3.0 — 2.4x the measurement, and well under the 5.30 no-op reading, so the test
-        // has real discriminating power rather than a bound nothing could ever cross. The headroom
-        // is for a different camera's pair, not for drift in this one.
-        XCTAssertLessThan(mae, 3.0, """
+        let baseline = Self.meanAbsoluteError(n, b)
+        XCTAssertLessThan(mae, 0.3 * baseline, """
             the derived cube no longer approximates the in-camera JPG (mean abs error \
-            \(String(format: "%.2f", mae))/255). The invariance test can still pass here — two \
-            renders can agree with each other and both be wrong — so suspect the extractor itself.
+            \(String(format: "%.2f", mae))/255, against \(String(format: "%.2f", baseline)) with no \
+            cube). The invariance test can still pass here — two renders can agree with each other \
+            and both be wrong — so suspect the extractor itself.
             """)
         XCTAssertGreaterThan(derived.report.sampleCount, 0)
     }

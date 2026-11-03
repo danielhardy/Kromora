@@ -61,18 +61,25 @@ struct RecipeExtractor {
     /// Parameters of the regularized cube fit (see `buildCube`).
     ///
     /// The fit estimates, per cell, the offset from identity as a Gaussian-weighted mean of
-    /// nearby cells' offsets, with each cell weighted by `n / (n + confidenceSamples)` and a weak
-    /// identity prior of `fadeFloor`. A direct sample thus counts for little until a cell holds
-    /// several, and the offset fades continuously to zero (identity) away from sampled colors.
+    /// nearby cells' offsets, each cell counted by its sample count (capped at `saturationSamples`),
+    /// plus `priorWeight` of pseudo-evidence that the offset is zero. A color backed by little
+    /// evidence therefore stays near identity, and the offset fades continuously to zero away from
+    /// sampled colors.
     struct Regularization: Equatable {
-        /// Samples at which a cell is trusted at half weight. A 1-sample cell carries 1/(1+k).
-        var confidenceSamples: Float = 4
+        /// Most samples a single cell may contribute as evidence. Bounds how far one heavily
+        /// sampled color can push its offset into its neighbors.
+        var saturationSamples: Float = 128
         /// Standard deviation of the 3D Gaussian, in cube cells. Sets how far a sampled color's
         /// offset reaches and how gradually it fades.
         var sigma: Float = 1.5
-        /// Weight of the identity prior, relative to a fully trusted neighborhood (weight 1).
-        /// Smaller values keep the fit closer to the measured offsets inside the sampled region.
-        var fadeFloor: Float = 0.1
+        /// Pseudo-evidence for "no offset", in the same units as the blurred sample count.
+        /// The Gaussian is normalized over a 3D window, so one isolated sample contributes only
+        /// about 0.02 after blurring; at 0.4 a lone sample keeps under 5% of its offset, while a
+        /// cell with tens of samples or neighbors keeps nearly all of it. A prior scaled to a
+        /// fully trusted neighborhood instead (0.1 in units of a 0…1 confidence) shrank real
+        /// offsets too, because photographs populate only a thin surface of the color cube: it
+        /// raised the DSC03293 round-trip error from 6.6 to 13.4/255.
+        var priorWeight: Float = 0.4
     }
 
     /// How the accepted samples were distributed, kept to explain a low coverage figure.
@@ -664,15 +671,21 @@ struct RecipeExtractor {
         return best
     }
 
-    /// Fit the cube as a regularized, confidence-weighted offset from identity.
+    /// Fit the cube as a regularized, evidence-weighted offset from identity.
     ///
-    /// Every cell's measured mean `m` becomes an offset `δ = m − identity` with weight
-    /// `w = n / (n + k)`, so a single noisy sample barely moves its cell. The weighted offsets and
-    /// the weights are blurred with the same separable 3D Gaussian, and the cube offset is
-    /// `blur(w·δ) / (blur(w) + λ)`: a weighted local mean of the offsets, shrunk toward zero by a
-    /// weak identity prior. Where no sampled color is nearby `blur(w)` falls to zero, so the cube
-    /// eases into identity over a couple of cells rather than switching off at a cliff, and the
-    /// result is continuous everywhere because every term is a smooth function of position.
+    /// Every sampled cell's measured mean `m` becomes an offset `δ = m − identity`, counted with
+    /// weight `W = min(n, saturationSamples)`. The weighted offsets `W·δ` and the weights `W` are
+    /// blurred with the same separable 3D Gaussian, and the cube offset is
+    /// `blur(W·δ) / (blur(W) + λ)`: the posterior mean of the offset when each sample is evidence
+    /// for it and `λ = priorWeight` is pseudo-evidence for zero.
+    ///
+    /// The two parts of the denominator do separate jobs. Where sampled colors are near,
+    /// `blur(W) ≫ λ` and the offset is their local weighted average, so a well-sampled color
+    /// reproduces its measured mean. Where the evidence is thin or distant, `blur(W)` falls toward
+    /// zero and the offset eases into identity instead of switching off at a cliff: a lone sample is
+    /// shrunk to a few percent of its offset, and the influence of a sampled color dies out a couple
+    /// of cells beyond it. Every term is a smooth function of position, so the result is continuous
+    /// everywhere.
     ///
     /// This replaces an 8-pass neighbor pull that spread sampled colors up to 8 cells into
     /// unsampled territory and then hard-anchored the rest to identity (KRMA-1154). A regularized
@@ -695,11 +708,11 @@ struct RecipeExtractor {
             SIMD3(Float(i % size), Float((i / size) % size), Float(i / (size * size))) / denom
         }
 
-        // xyz = w·δ, w = weight
+        // xyz = W·δ, w channel = W
         var field = [SIMD4<Float>](repeating: .zero, count: total)
         for i in 0..<total where counts[i] > 0 {
             let n = Float(counts[i])
-            let w = n / (n + regularization.confidenceSamples)
+            let w = min(n, regularization.saturationSamples)
             let delta = sums[i] / n - identity(i)
             field[i] = SIMD4(delta * w, w)
         }
@@ -712,7 +725,7 @@ struct RecipeExtractor {
         var cube = [SIMD3<Float>](repeating: .zero, count: total)
         for i in 0..<total {
             let f = field[i]
-            let offset = SIMD3(f.x, f.y, f.z) / (f.w + regularization.fadeFloor)
+            let offset = SIMD3(f.x, f.y, f.z) / (f.w + regularization.priorWeight)
             cube[i] = simd_clamp(identity(i) + offset, .zero, .one)
         }
         return cube
