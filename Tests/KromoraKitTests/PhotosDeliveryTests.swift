@@ -1,3 +1,4 @@
+import Synchronization
 import XCTest
 @testable import KromoraKit
 
@@ -7,7 +8,11 @@ final class PhotosDeliveryTests: TempDirectoryTestCase {
     @MainActor
     private final class FakePhotosDelivery: PhotosDelivering {
         struct Call: Equatable {
-            let data: Data
+            let fileURL: URL
+            /// The file's bytes when delivery was called, so a test can prove the file was
+            /// complete and still present while the transaction ran.
+            let fileContents: Data?
+            let scopeReleasedDuringCall: Bool
             let filename: String
             let format: ExportFormat
             let options: PhotosExportOptions
@@ -16,14 +21,28 @@ final class PhotosDeliveryTests: TempDirectoryTestCase {
         var calls: [Call] = []
         var result = PhotosDeliveryResult(assetAdded: true)
         var error: Error?
+        var isScopeReleased: () -> Bool = { false }
 
         func deliver(
-            data: Data,
+            fileURL: URL,
             filename: String,
             format: ExportFormat,
             options: PhotosExportOptions
         ) async throws -> PhotosDeliveryResult {
-            calls.append(Call(data: data, filename: filename, format: format, options: options))
+            calls.append(Call(
+                fileURL: fileURL,
+                fileContents: try? Data(contentsOf: fileURL),
+                scopeReleasedDuringCall: isScopeReleased(),
+                filename: filename, format: format, options: options
+            ))
+            // Yield so a premature release would be observable after the suspension too.
+            await Task.yield()
+            calls[calls.count - 1] = Call(
+                fileURL: fileURL,
+                fileContents: calls[calls.count - 1].fileContents,
+                scopeReleasedDuringCall: calls[calls.count - 1].scopeReleasedDuringCall || isScopeReleased(),
+                filename: filename, format: format, options: options
+            )
             if let error { throw error }
             return result
         }
@@ -90,7 +109,7 @@ final class PhotosDeliveryTests: TempDirectoryTestCase {
         XCTAssertFalse(errors[0].hasPrefix("Export failed:"), errors[0])
     }
 
-    func testSinglePhotosDeliveryReceivesTheCompletedEncodedDataAndAlbum() async throws {
+    func testSinglePhotosDeliveryReceivesTheCommittedFileURLAndAlbum() async throws {
         let photos = FakePhotosDelivery()
         photos.result = PhotosDeliveryResult(assetAdded: true, albumAdded: true)
         let coordinator = ExportCoordinator(engine: FakeRenderEngine(), photosDelivery: photos)
@@ -110,10 +129,105 @@ final class PhotosDeliveryTests: TempDirectoryTestCase {
 
         XCTAssertEqual(photos.calls.count, 1)
         let call = try XCTUnwrap(photos.calls.first)
-        XCTAssertEqual(call.data, try Data(contentsOf: destination))
+        XCTAssertEqual(call.fileURL, destination)
+        XCTAssertFalse(try Data(contentsOf: destination).isEmpty)
+        XCTAssertEqual(call.fileContents, try Data(contentsOf: destination))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path), "export is retained")
         XCTAssertEqual(call.filename, "graded.jpg")
         XCTAssertEqual(call.format, .jpeg)
         XCTAssertEqual(call.options.albumName, "Kromora Exports")
+    }
+
+    func testSingleDeliveryHoldsTheDestinationScopeUntilTheTransactionSettles() async throws {
+        let photos = FakePhotosDelivery()
+        let released = Mutex(0)
+        photos.isScopeReleased = { released.withLock { $0 } > 0 }
+        let coordinator = ExportCoordinator(engine: FakeRenderEngine(), photosDelivery: photos)
+        coordinator.onError = { XCTFail("unexpected error: \($0)") }
+        let destination = tempDirectory.appendingPathComponent("scoped.jpg")
+        let access = SecurityScopedResourceAccess.systemGranted(for: destination) { _ in
+            released.withLock { $0 += 1 }
+        }
+
+        coordinator.performExport(
+            source: try source(), document: EditDocument(), lut: nil,
+            options: ExportOptions(
+                format: .jpeg, destination: .file(destination), photos: PhotosExportOptions()
+            ),
+            to: destination, access: access
+        )
+        try await waitUntil("the export") { !coordinator.isExporting }
+
+        let call = try XCTUnwrap(photos.calls.first)
+        XCTAssertFalse(call.scopeReleasedDuringCall, "scope was released before Photos settled")
+        XCTAssertEqual(released.withLock { $0 }, 1, "scope is released once after delivery")
+    }
+
+    func testPhotosCancellationLeavesTheCommittedFileInPlace() async throws {
+        let photos = FakePhotosDelivery()
+        photos.error = CancellationError()
+        let coordinator = ExportCoordinator(engine: FakeRenderEngine(), photosDelivery: photos)
+        var errors: [String] = []
+        coordinator.onError = { errors.append($0) }
+        let destination = tempDirectory.appendingPathComponent("cancelled.jpg")
+
+        coordinator.performExport(
+            source: try source(), document: EditDocument(), lut: nil,
+            options: ExportOptions(
+                format: .jpeg, destination: .file(destination), photos: PhotosExportOptions()
+            ),
+            to: destination
+        )
+        try await waitUntil("the export") { !coordinator.isExporting }
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
+        XCTAssertEqual(errors.count, 1)
+        XCTAssertTrue(errors[0].contains("file is safe"), errors[0])
+    }
+
+    func testBatchPhotosDeliveryUsesTheCommittedFileAndKeepsIt() async throws {
+        let photos = FakePhotosDelivery()
+        let coordinator = ExportCoordinator(engine: FakeRenderEngine(), photosDelivery: photos)
+        let folder = tempDirectory.appendingPathComponent("batch-ok")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let url = try Fixtures.writeGradientPNG(
+            width: 16, height: 16, named: "ok-source.png", in: tempDirectory
+        )
+
+        let outcome = await coordinator.performBatchExport(
+            [ExportCoordinator.BatchItem(url: url, data: nil, name: "ok-source")],
+            document: EditDocument(), lut: nil,
+            options: ExportOptions(
+                format: .png, destination: .folder(folder), photos: PhotosExportOptions()
+            ),
+            to: folder
+        )
+
+        let exported = folder.appendingPathComponent("ok-source.png")
+        XCTAssertEqual(outcome, .init(exported: 1, failed: 0, total: 1, photosFailed: 0))
+        XCTAssertEqual(photos.calls.map(\.fileURL), [exported])
+        XCTAssertFalse(try XCTUnwrap(photos.calls.first?.fileContents).isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: exported.path))
+    }
+
+    /// The file overload must not load the export into memory, and the file must not be moved.
+    func testPhotoKitFileDeliveryDoesNotReadTheFileOrMoveIt() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        for path in ["Models/PhotosDelivery.swift", "ViewModels/ExportCoordinator.swift"] {
+            let text = try String(
+                contentsOf: sourceURL.appendingPathComponent("Sources/KromoraKit/\(path)"),
+                encoding: .utf8
+            )
+            XCTAssertFalse(text.contains("Data(contentsOf: dest"), path)
+            XCTAssertFalse(text.contains("deliver(\n                            data:"), path)
+        }
+        let delivery = try String(
+            contentsOf: sourceURL.appendingPathComponent("Sources/KromoraKit/Models/PhotosDelivery.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(delivery.contains("addResource(with: .photo, fileURL: url"))
+        XCTAssertTrue(delivery.contains("shouldMoveFile = false"))
     }
 
     func testBatchPhotosFailuresAreCountedSeparatelyFromRenderFailures() async throws {

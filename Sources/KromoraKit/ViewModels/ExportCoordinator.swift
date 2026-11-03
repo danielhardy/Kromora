@@ -383,7 +383,7 @@ final class ExportCoordinator {
                 if let photos = options.photos, let delivery = self?.photosDelivery {
                     do {
                         let result = try await delivery.deliver(
-                            data: try Data(contentsOf: url, options: .mappedIfSafe),
+                            fileURL: url,
                             filename: url.lastPathComponent,
                             format: options.format,
                             options: photos
@@ -753,7 +753,7 @@ final class ExportCoordinator {
                     if let photos = options.photos, let delivery = photosDelivery {
                         do {
                             let result = try await delivery.deliver(
-                                data: try Data(contentsOf: dest, options: .mappedIfSafe),
+                                fileURL: dest,
                                 filename: dest.lastPathComponent,
                                 format: options.format,
                                 options: photos

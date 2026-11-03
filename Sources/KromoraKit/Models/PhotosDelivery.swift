@@ -70,8 +70,11 @@ enum PhotosDeliveryError: LocalizedError, Sendable, Equatable {
 /// The seam used by the export coordinator. Tests can provide a fake without Photos authorization.
 @MainActor
 protocol PhotosDelivering {
+    /// Add the committed export at `fileURL` to Photos. The file is copied by PhotoKit, never moved
+    /// or deleted, and the caller must keep any security-scope grant for `fileURL` alive until this
+    /// call returns, because the transaction reads the file while it is settling.
     func deliver(
-        data: Data,
+        fileURL: URL,
         filename: String,
         format: ExportFormat,
         options: PhotosExportOptions
@@ -88,7 +91,32 @@ final class PhotoKitDelivery: PhotosDelivering {
     }
 
     func deliver(
+        fileURL: URL,
+        filename: String,
+        format: ExportFormat,
+        options: PhotosExportOptions
+    ) async throws -> PhotosDeliveryResult {
+        try await deliver(resource: .file(fileURL), filename: filename, format: format, options: options)
+    }
+
+    /// For callers that already own the encoded bytes in memory. Exports written to disk use
+    /// `deliver(fileURL:…)` instead so the bytes are never read back into the process.
+    func deliver(
         data: Data,
+        filename: String,
+        format: ExportFormat,
+        options: PhotosExportOptions
+    ) async throws -> PhotosDeliveryResult {
+        try await deliver(resource: .data(data), filename: filename, format: format, options: options)
+    }
+
+    private enum Resource: Sendable {
+        case file(URL)
+        case data(Data)
+    }
+
+    private func deliver(
+        resource: Resource,
         filename: String,
         format: ExportFormat,
         options: PhotosExportOptions
@@ -103,7 +131,7 @@ final class PhotoKitDelivery: PhotosDelivering {
 
         let assetIdentifier: String
         do {
-            assetIdentifier = try await createAsset(data: data, filename: filename, format: format)
+            assetIdentifier = try await createAsset(resource: resource, filename: filename, format: format)
         } catch {
             throw PhotosDeliveryError.assetCreationFailed(error.localizedDescription)
         }
@@ -131,7 +159,7 @@ final class PhotoKitDelivery: PhotosDelivering {
         return Self.map(await PHPhotoLibrary.requestAuthorization(for: .readWrite))
     }
 
-    private func createAsset(data: Data, filename: String, format: ExportFormat) async throws -> String {
+    private func createAsset(resource: Resource, filename: String, format: ExportFormat) async throws -> String {
         let identifier = Mutex<String?>(nil)
         let uniformTypeIdentifier = format.utType.identifier
         // PhotoKit invokes change blocks on an arbitrary serial queue. Keep this block explicitly
@@ -141,7 +169,14 @@ final class PhotoKitDelivery: PhotosDelivering {
             let resourceOptions = PHAssetResourceCreationOptions()
             resourceOptions.originalFilename = filename
             resourceOptions.uniformTypeIdentifier = uniformTypeIdentifier
-            request.addResource(with: .photo, data: data, options: resourceOptions)
+            switch resource {
+            case .file(let url):
+                // The user's export stays where it is: PhotoKit copies it unless asked to move.
+                resourceOptions.shouldMoveFile = false
+                request.addResource(with: .photo, fileURL: url, options: resourceOptions)
+            case .data(let data):
+                request.addResource(with: .photo, data: data, options: resourceOptions)
+            }
             let createdIdentifier = request.placeholderForCreatedAsset?.localIdentifier
             identifier.withLock { $0 = createdIdentifier }
         }
