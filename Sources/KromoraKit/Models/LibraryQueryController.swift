@@ -271,14 +271,18 @@ struct LibraryIndexProjection: Codable, Equatable, Sendable {
             throw LibraryQueryError.invalidIndex(
                 "unsupported schema version \(value.schemaVersion)")
         }
-        return try Self(libraryID: value.libraryID, entries: value.entries)
+        // Decoding already validates, sorts, and builds the derived lookup map. Reconstructing
+        // the projection here would allocate and validate the same map a second time.
+        return value
     }
 
     func validated(for package: PortableLibraryPackage) throws -> Self {
         guard libraryID == package.manifest.libraryID else {
             throw LibraryQueryError.invalidIndex("library ID does not match the package")
         }
-        return try Self(libraryID: libraryID, entries: entries)
+        // The projection is immutable and every initializer validates its entries, so the
+        // package check is the only additional validation needed here.
+        return self
     }
 
     /// Reconcile the projection against the canonical membership summaries. The package is
