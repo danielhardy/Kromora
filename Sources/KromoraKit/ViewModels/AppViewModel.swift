@@ -1454,8 +1454,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
             guard let self, !self.isShuttingDown else { return }
             self.statusMessage = "Could not save the library index: \(message)"
         }
-        session.onIndexReplaced = { [weak self] in self?.libraryPresentation.noteIndexChanged() }
-        libraryPresentation.noteIndexChanged()
+        libraryPresentation.observeIndexReplacements(from: session)
         session.onPresentedAspectRatioUpdates = { [weak self] updates in
             self?.libraryBrowsingCoordinator.applyPresentedAspectRatioUpdates(updates)
         }
@@ -1859,8 +1858,8 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         libraryBrowsingCoordinator.clearPortableFilters()
     }
 
-    func portableFacetCounts() async -> LibraryFacetCounts? {
-        await libraryBrowsingCoordinator.portableFacetCounts()
+    func portableFacetCounts(query: LibraryQuery) async -> LibraryFacetCounts? {
+        await libraryBrowsingCoordinator.portableFacetCounts(query: query)
     }
 
     func setPortableSort(_ sort: LibraryQuerySort) {

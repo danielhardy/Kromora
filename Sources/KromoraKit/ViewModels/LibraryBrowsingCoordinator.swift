@@ -396,9 +396,9 @@ final class LibraryBrowsingCoordinator {
         commitPortableQuery()
     }
 
-    func portableFacetCounts() async -> LibraryFacetCounts? {
-        guard let library, let destination else { return nil }
-        return await library.facetCounts(query: destination.portableQuery)
+    func portableFacetCounts(query: LibraryQuery) async -> LibraryFacetCounts? {
+        guard let library else { return nil }
+        return await library.facetCounts(query: query)
     }
 
     func setPortableSort(_ sort: LibraryQuerySort) {

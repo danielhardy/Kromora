@@ -26,6 +26,11 @@ final class LibraryPresentationState {
 
     func setImportProgress(_ progress: PortablePackageImportProgress?) { importProgress = progress }
     func noteIndexChanged() { indexRevision &+= 1 }
+
+    func observeIndexReplacements(from session: PortableLibrarySession) {
+        session.onIndexReplaced = { [weak self] in self?.noteIndexChanged() }
+        noteIndexChanged()
+    }
 }
 
 /// Picker and panel visibility owned by the window chrome.

@@ -162,14 +162,18 @@ final class LibraryQueryPreparationTests: TempDirectoryTestCase {
         let sourceURL = try Fixtures.writeJPEG(
             width: 40, height: 20, orientation: 1, named: "notify.jpg", in: tempDirectory)
         let session = try PortableLibrarySession(at: packageURL, indexURL: indexURL)
-        var notifications = 0
-        session.onIndexReplaced = { notifications += 1 }
+        let presentation = LibraryPresentationState()
+        presentation.observeIndexReplacements(from: session)
+        let initialRevision = presentation.indexRevision
 
         _ = try session.importURLs([sourceURL])
-        XCTAssertGreaterThan(notifications, 0, "an import changes the index with the query unchanged")
-        let afterImport = notifications
+        XCTAssertGreaterThan(
+            presentation.indexRevision, initialRevision,
+            "an import changes the index with the query unchanged"
+        )
+        let afterImport = presentation.indexRevision
         _ = try session.refreshIndex()
-        XCTAssertGreaterThan(notifications, afterImport)
+        XCTAssertGreaterThan(presentation.indexRevision, afterImport)
         try session.lease.release()
     }
 

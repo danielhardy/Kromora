@@ -79,7 +79,9 @@ struct LibraryFacetSidebar: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Metadata filters")
         .task(id: countsKey) {
-            await countsModel.refresh(for: countsKey) { _ in await viewModel.portableFacetCounts() }
+            await countsModel.refresh(for: countsKey) { query in
+                await viewModel.portableFacetCounts(query: query)
+            }
         }
     }
 }

@@ -230,6 +230,7 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
 
         let fake = FakeRenderEngine()
         await fake.gatePreviews()
+        addTeardownBlock { await fake.releasePreviews() }
         let reader = FakeRenderEventReader(await fake.eventStream())
         let viewModel = makeAppViewModel(engine: fake, editStore: store)
         viewModel.collection.loadFromFolder(tempDirectory)

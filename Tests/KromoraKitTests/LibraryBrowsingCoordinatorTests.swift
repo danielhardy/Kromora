@@ -28,6 +28,7 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
         private(set) var activeID: PortablePhotoAssetID?
         private(set) var requestedPages: [Int] = []
         private(set) var requestedQueries: [LibraryQuery] = []
+        private(set) var facetQueries: [LibraryQuery] = []
         /// Awaited by `prepareOrdering`, so a test decides when and in what order queries finish.
         var orderingGate: (@MainActor (LibraryQuery) async -> Void)?
         private(set) var rebuildCount = 0
@@ -85,7 +86,10 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
             return (start < visible.count ? Array(visible[start..<end]) : [], visible.count, pageSize)
         }
 
-        func facetCounts(query: LibraryQuery) async -> LibraryFacetCounts { LibraryFacetCounts() }
+        func facetCounts(query: LibraryQuery) async -> LibraryFacetCounts {
+            facetQueries.append(query)
+            return LibraryFacetCounts()
+        }
 
         func prepareOrdering(query: LibraryQuery) async { await orderingGate?(query) }
 
@@ -266,6 +270,18 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
         XCTAssertEqual(collection.items[1].asset.thumbnailState, .loading)
         // The merge never reloads page zero.
         XCTAssertEqual(library.requestedPages, [0])
+    }
+
+    func testFacetCountsUseTheCapturedQuery() async {
+        let (coordinator, _, library, destination) = makeCoordinator()
+        defer { withExtendedLifetime(destination) {} }
+        destination.portableQuery = LibraryQuery(searchText: "current")
+        let capturedQuery = LibraryQuery(searchText: "captured")
+
+        let result = await coordinator.portableFacetCounts(query: capturedQuery)
+
+        XCTAssertNotNil(result)
+        XCTAssertEqual(library.facetQueries, [capturedQuery])
     }
 
     func testMergeCommittedImportsKeepsLoadedPagesAndBoundsWindowToThem() throws {
