@@ -62,6 +62,8 @@ actor PhotoAnalysisCoordinator {
     private var inFlightAnalyses: [AnalysisRequestKey: InFlightEntry<PhotoAnalysis>] = [:]
     private var inFlightMasks: [MaskRequestKey: InFlightEntry<RegionMask>] = [:]
     private var isShutdown = false
+    private var maintenanceTask: Task<Void, Never>?
+    private var hasRunStartupMaintenance = false
 
     init(
         engine: any RenderEngining = RenderEngine.shared,
@@ -92,6 +94,7 @@ actor PhotoAnalysisCoordinator {
         isShutdown = true
         let analysisTasks: [Task<PhotoAnalysis, Error>] = inFlightAnalyses.values.map { $0.task }
         let maskTasks: [Task<RegionMask, Error>] = inFlightMasks.values.map { $0.task }
+        maintenanceTask?.cancel()
         for task in analysisTasks {
             task.cancel()
         }
@@ -104,8 +107,43 @@ actor PhotoAnalysisCoordinator {
         for task in maskTasks {
             _ = try? await task.value
         }
+        await maintenanceTask?.value
+        maintenanceTask = nil
         inFlightAnalyses.removeAll()
         inFlightMasks.removeAll()
+    }
+
+    /// Starts one low-priority trim of the analysis and mask caches: once for the first request
+    /// of a session, then whenever enough has been written since the last trim to matter. A
+    /// repeated export-quality masking session therefore plateaus at the cache budget instead of
+    /// waiting for the next launch. The trim yields between asset directories and never touches
+    /// the library package.
+    private func scheduleMaintenanceIfNeeded() async {
+        guard !isShutdown else { return }
+        let due: Bool
+        if hasRunStartupMaintenance {
+            let masksDue = await maskStore.isTrimDue()
+            let analysisDue = await cache.isTrimDue()
+            due = masksDue || analysisDue
+        } else {
+            due = true
+        }
+        guard due, maintenanceTask == nil, !isShutdown else { return }
+        hasRunStartupMaintenance = true
+        maintenanceTask = Task(priority: .background) { [cache, maskStore, weak self] in
+            _ = try? await cache.trim()
+            _ = try? await maskStore.trim()
+            await self?.maintenanceFinished()
+        }
+    }
+
+    private func maintenanceFinished() {
+        maintenanceTask = nil
+    }
+
+    /// Waits for any scheduled cache maintenance; used by tests and orderly teardown.
+    func waitForCacheMaintenance() async {
+        await maintenanceTask?.value
     }
 
     /// Analyze one source at the requested level. Concurrent identical requests await one task.
@@ -175,6 +213,7 @@ actor PhotoAnalysisCoordinator {
                             assetID: assetID, source: source, level: level, cacheKey: cacheKey
                         )
                         inFlightAnalyses.removeValue(forKey: key)
+                        await scheduleMaintenanceIfNeeded()
                         return result
                     } catch {
                         inFlightAnalyses.removeValue(forKey: key)
@@ -227,6 +266,7 @@ actor PhotoAnalysisCoordinator {
                         assetID: assetID, source: source, kind: kind, quality: quality
                     )
                     inFlightMasks.removeValue(forKey: key)
+                    await scheduleMaintenanceIfNeeded()
                     return result
                 } catch {
                     inFlightMasks.removeValue(forKey: key)
@@ -255,8 +295,13 @@ actor PhotoAnalysisCoordinator {
     }
 
     func removeCaches(for assetID: PortablePhotoAssetID) async throws {
-        try await cache.remove(for: assetID)
-        try await maskStore.remove(for: assetID)
+        try await removeCaches(for: [assetID])
+    }
+
+    /// Batch form: one directory delete per asset in each store, independent of cache size.
+    func removeCaches(for assetIDs: [PortablePhotoAssetID]) async throws {
+        try await cache.remove(for: assetIDs)
+        try await maskStore.remove(for: assetIDs)
     }
 
     /// Explicitly establish the face/foreground signals the person gate requires.

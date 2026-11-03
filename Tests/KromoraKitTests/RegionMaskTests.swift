@@ -90,8 +90,12 @@ final class RegionMaskTests: XCTestCase {
         mask["size"] = ["width": Int.max, "height": 2]
         mask["values"] = [Double]()
         object["mask"] = mask
+        try FileManager.default.createDirectory(
+            at: MaskStoreTestSupport.assetDirectory(in: directory, for: exactKey),
+            withIntermediateDirectories: true
+        )
         try JSONSerialization.data(withJSONObject: object).write(
-            to: directory.appendingPathComponent(MaskStoreTestSupport.filename(for: exactKey))
+            to: MaskStoreTestSupport.metadataURL(in: directory, for: exactKey)
         )
 
         let store = MaskStore(directory: directory)
@@ -401,10 +405,11 @@ final class RegionMaskTests: XCTestCase {
         let loaded = await store.pixels(for: reference)
         XCTAssertEqual(loaded, pixels)
 
-        let files = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        let assetDirectory = MaskStoreTestSupport.assetDirectory(in: directory, for: key)
+        let files = try FileManager.default.contentsOfDirectory(atPath: assetDirectory.path)
         XCTAssertTrue(files.contains(where: { $0.hasSuffix(".json") }))
         XCTAssertTrue(files.contains(where: { $0.hasSuffix(".bin") }))
-        let metadata = try Data(contentsOf: directory.appendingPathComponent(
+        let metadata = try Data(contentsOf: assetDirectory.appendingPathComponent(
             files.first(where: { $0.hasSuffix(".json") })!
         ))
         let metadataObject = try XCTUnwrap(
@@ -414,10 +419,9 @@ final class RegionMaskTests: XCTestCase {
         XCTAssertNil(persistedMask["values"], "pixel values must stay out of JSON metadata")
     }
 
-    func testMaskStoreLoadsLegacyInlinePayloads() async throws {
-        // Files written before the binary sidecar inline the floats in the JSON metadata.
-        // Real user stores contain these at preview/analysis sizes, and the person gate
-        // depends on reading them, so they must keep loading.
+    func testMaskStoreIgnoresAndReclaimsLegacyFlatEntries() async throws {
+        // The flat layout (and the inline-float JSON before it) is no longer read. A legacy file
+        // is a miss, is never opened, and is reclaimed by the next trim.
         struct LegacyFile: Codable {
             let key: MaskCacheKey
             let mask: NormalizedMask
@@ -437,16 +441,18 @@ final class RegionMaskTests: XCTestCase {
             values: (0..<12).map { Float($0) / 11 }
         )
         let exactKey = key.with(quality: .analysis)
-        let data = try JSONEncoder().encode(LegacyFile(key: exactKey, mask: pixels))
-        try data.write(to: directory.appendingPathComponent(
-            MaskStoreTestSupport.filename(for: exactKey)
-        ))
+        let legacyURL = directory.appendingPathComponent(MaskStoreTestSupport.filename(for: exactKey))
+        try JSONEncoder().encode(LegacyFile(key: exactKey, mask: pixels)).write(to: legacyURL)
 
         let store = MaskStore(directory: directory)
-        let maybeReference = await store.mask(for: key, quality: .analysis)
-        let reference = try XCTUnwrap(maybeReference)
-        let loaded = await store.pixels(for: reference)
-        XCTAssertEqual(loaded, pixels)
+        let miss = await store.mask(for: key, quality: .analysis)
+        XCTAssertNil(miss)
+        let decoded = await store.metadataDecodeCount
+        XCTAssertEqual(decoded, 0, "a legacy flat file must never be opened")
+
+        let report = try await store.trim()
+        XCTAssertEqual(report.removed(.legacyLayout), 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacyURL.path))
     }
 
     func testRefineReusesStoredRenderResult() async throws {

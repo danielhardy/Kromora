@@ -35,6 +35,31 @@ final class PhotoAnalysisCoordinatorTests: XCTestCase {
         XCTAssertEqual(requested, [PhotoAnalysisStage(kind: .subject, quality: .preview)])
     }
 
+    func testFirstRequestSchedulesBackgroundCacheMaintenance() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("KromoraAnalysisMaintenance-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let masks = directory.appendingPathComponent("masks")
+        try FileManager.default.createDirectory(at: masks, withIntermediateDirectories: true)
+        let legacy = masks.appendingPathComponent("mask-legacy.bin")
+        try Data(repeating: 0, count: 16).write(to: legacy)
+        let coordinator = PhotoAnalysisCoordinator(
+            maskStore: MaskStore(directory: masks),
+            cache: PhotoAnalysisCache(directory: directory.appendingPathComponent("cache")),
+            maskProvider: CountingMaskProvider(gated: false),
+            stages: [:]
+        )
+
+        _ = try await coordinator.mask(
+            assetID: PhotoAssetID.data(Data([9, 9])), source: makeSource(),
+            kind: .subject, quality: .preview
+        )
+        await coordinator.waitForCacheMaintenance()
+        await coordinator.shutdown()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacy.path))
+    }
+
     func testConcurrentAnalysesShareOneInFlightAnalysisAndItsMaskStage() async throws {
         let provider = CountingMaskProvider(gated: true)
         let directory = FileManager.default.temporaryDirectory

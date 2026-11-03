@@ -1,18 +1,27 @@
-import CryptoKit
 import Foundation
 
 @testable import KromoraKit
 
 enum MaskStoreTestSupport {
     static func filename(for key: MaskCacheKey) -> String {
-        let identity = [
-            key.identity.cacheKey,
-            String(describing: key.kind),
-            key.quality.rawValue,
-            key.providerVersion
-        ].joined(separator: "\u{1f}")
-        let digest = SHA256.hash(data: Data(identity.utf8))
-            .map { String(format: "%02x", $0) }.joined()
-        return "mask-" + digest + ".json"
+        MaskStore.entryName(for: key).filename(extension: "json")
+    }
+
+    /// Where `MaskStore(directory:)` keeps the metadata file for `key`.
+    static func metadataURL(in directory: URL, for key: MaskCacheKey) -> URL {
+        entryURL(in: directory, for: key, extension: "json")
+    }
+
+    static func sidecarURL(in directory: URL, for key: MaskCacheKey) -> URL {
+        entryURL(in: directory, for: key, extension: "bin")
+    }
+
+    static func assetDirectory(in directory: URL, for key: MaskCacheKey) -> URL {
+        DiskCacheIO.assetDirectory(in: directory, for: key.identity.assetID)
+    }
+
+    private static func entryURL(in directory: URL, for key: MaskCacheKey, extension ext: String) -> URL {
+        assetDirectory(in: directory, for: key)
+            .appendingPathComponent(MaskStore.entryName(for: key).filename(extension: ext))
     }
 }

@@ -102,11 +102,13 @@ struct PhotoAnalysisCacheEntry: Sendable, Equatable {
     let coverage: PhotoAnalysisCoverage?
 }
 
-/// Small, durable storage for scalar `PhotoAnalysis` values.
+/// Small, disposable storage for scalar `PhotoAnalysis` values.
 ///
 /// Mask pixels remain owned by `MaskStore`; this cache only stores the inexpensive facts and
 /// references needed to rebuild an analysis result. Each key gets its own atomically replaced JSON
-/// file, so a failed or cancelled write cannot leave a partially written entry behind.
+/// file inside a per-asset directory, so a failed or cancelled write cannot leave a partially
+/// written entry, and removing an asset (or a batch) is a directory delete with no scan or decode.
+/// `trim(budget:)` enforces byte and age caps and drops entries of any other analysis version.
 actor PhotoAnalysisCache {
     private struct PersistedAnalysis: Codable, Sendable, Equatable {
         let key: AnalysisCacheKey
@@ -115,10 +117,21 @@ actor PhotoAnalysisCache {
         let coverage: PhotoAnalysisCoverage?
     }
 
-    private let directory: URL
+    /// A stored analysis is scalar facts plus region references; anything larger is corrupt.
+    private static let maxEntryBytes: Int64 = 4 << 20
 
-    init(directory: URL = PhotoAnalysisCache.defaultDirectory()) {
+    private let directory: URL
+    private let now: @Sendable () -> Date
+    private var bytesStoredSinceTrim: Int64 = 0
+    /// Entry documents decoded, so tests can assert that deletion never decodes.
+    private(set) var decodeCount = 0
+
+    init(
+        directory: URL = PhotoAnalysisCache.defaultDirectory(),
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) {
         self.directory = directory
+        self.now = now
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
 
@@ -131,13 +144,18 @@ actor PhotoAnalysisCache {
     /// Like `analysis(for:)`, with the stage coverage the entry was stored with.
     func entry(for key: AnalysisCacheKey) throws -> PhotoAnalysisCacheEntry? {
         try Task.checkCancellation()
-        guard let data = try? Data(contentsOf: fileURL(for: key)) else { return nil }
+        let url = fileURL(for: key)
+        guard let data = DiskCacheIO.boundedData(at: url, maxBytes: Self.maxEntryBytes) else {
+            return nil
+        }
         try Task.checkCancellation()
+        decodeCount += 1
         guard let persisted = try? JSONDecoder().decode(PersistedAnalysis.self, from: data),
               persisted.key == key,
               persisted.analysis.version == key.analysisVersion else {
             return nil
         }
+        DiskCacheIO.touch(url, now: now())
         return PhotoAnalysisCacheEntry(analysis: persisted.analysis, coverage: persisted.coverage)
     }
 
@@ -154,50 +172,78 @@ actor PhotoAnalysisCache {
         }
         let data = try JSONEncoder().encode(PersistedAnalysis(key: key, analysis: analysis, coverage: coverage))
         try Task.checkCancellation()
-        try data.write(to: fileURL(for: key), options: .atomic)
+        try FileManager.default.createDirectory(
+            at: assetDirectory(for: key.identity.assetID), withIntermediateDirectories: true
+        )
+        try DiskCacheIO.writeAtomically(data, to: fileURL(for: key))
+        bytesStoredSinceTrim += Int64(data.count)
     }
 
     /// Remove all analysis entries for an asset. Cache cleanup is keyed by the asset rather than
     /// by the current source fingerprint because a source may have been edited or relinked since
     /// an older analysis was written.
     func remove(for assetID: PhotoAssetID) throws {
-        try Task.checkCancellation()
-        let files = try FileManager.default.contentsOfDirectory(
-            at: directory, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
-        )
-        for url in files where url.pathExtension.lowercased() == "json" {
-            guard let data = try? Data(contentsOf: url),
-                  let persisted = try? JSONDecoder().decode(PersistedAnalysis.self, from: data),
-                  (persisted.key.assetID == assetID
-                    || persisted.key.identity.assetID
-                        == PortablePhotoAssetID.compatibility(from: assetID)) else { continue }
-            try Task.checkCancellation()
-            try FileManager.default.removeItem(at: url)
-        }
+        try remove(for: PortablePhotoAssetID.compatibility(from: assetID))
     }
 
     func remove(for assetID: PortablePhotoAssetID) throws {
-        try Task.checkCancellation()
-        let files = try FileManager.default.contentsOfDirectory(
-            at: directory, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
-        )
-        for url in files where url.pathExtension.lowercased() == "json" {
-            guard let data = try? Data(contentsOf: url),
-                  let persisted = try? JSONDecoder().decode(PersistedAnalysis.self, from: data),
-                  persisted.key.identity.assetID == assetID else { continue }
+        try remove(for: [assetID])
+    }
+
+    /// Batch form of `remove(for:)`: one directory delete per asset, independent of cache size.
+    func remove(for assetIDs: [PortablePhotoAssetID]) throws {
+        for assetID in assetIDs {
             try Task.checkCancellation()
-            try FileManager.default.removeItem(at: url)
+            do {
+                try FileManager.default.removeItem(at: assetDirectory(for: assetID))
+            } catch CocoaError.fileNoSuchFile {
+                continue
+            }
         }
     }
 
+    /// True once enough has been written since the last trim that a background pass is worthwhile.
+    func isTrimDue(budget: DiskCacheBudget = .analysis) -> Bool {
+        bytesStoredSinceTrim > budget.maxBytes / 8
+    }
+
+    /// Enforces `budget` and drops entries written by any other `AnalysisVersion`.
+    @discardableResult
+    func trim(budget: DiskCacheBudget = .analysis) async throws -> DiskCacheTrimReport {
+        bytesStoredSinceTrim = 0
+        return try await DiskCacheTrimmer.trim(
+            root: directory,
+            configuration: .init(
+                prefix: "analysis", requiredExtensions: ["json"], budget: budget,
+                liveVersion: Self.versionTag(.current)
+            ),
+            now: now()
+        )
+    }
+
+    private func assetDirectory(for assetID: PortablePhotoAssetID) -> URL {
+        DiskCacheIO.assetDirectory(in: directory, for: assetID)
+    }
+
     private func fileURL(for key: AnalysisCacheKey) -> URL {
-        directory.appendingPathComponent(Self.filename(for: key), isDirectory: false)
+        assetDirectory(for: key.identity.assetID)
+            .appendingPathComponent(Self.filename(for: key), isDirectory: false)
+    }
+
+    private static func versionTag(_ version: AnalysisVersion) -> String {
+        "v\(version.rawValue)"
+    }
+
+    static func entryName(for key: AnalysisCacheKey) -> DiskCacheEntryName {
+        let identity = "\(key.identity.cacheKey)|\(key.analysisVersion.rawValue)"
+        return DiskCacheEntryName(
+            prefix: "analysis", group: "a", version: versionTag(key.analysisVersion),
+            digest: SHA256.hash(data: Data(identity.utf8)).hexString
+        )
     }
 
     private static func filename(for key: AnalysisCacheKey) -> String {
-        let identity = "\(key.identity.cacheKey)|\(key.analysisVersion.rawValue)"
-        let digest = SHA256.hash(data: Data(identity.utf8)).hexString
-        return "analysis-\(digest).json"
+        entryName(for: key).filename(extension: "json")
     }
 
     private static func defaultDirectory() -> URL {

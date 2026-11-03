@@ -109,9 +109,9 @@ final class PhotoAnalysisCacheTests: TempDirectoryTestCase {
             colorStatistics: .neutral, quality: .globalOnly
         )
         try await cache.store(analysis, for: key)
-        let file = try XCTUnwrap(FileManager.default.contentsOfDirectory(
+        let file = try XCTUnwrap(FileManager.default.enumerator(
             at: tempDirectory, includingPropertiesForKeys: nil
-        ).first { $0.pathExtension == "json" })
+        )?.compactMap { $0 as? URL }.first { $0.pathExtension == "json" })
         let original = try Data(contentsOf: file)
 
         var root = try XCTUnwrap(JSONSerialization.jsonObject(with: original) as? [String: Any])
