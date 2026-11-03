@@ -50,7 +50,7 @@ Required-reason API declarations in a privacy manifest are not a current signing
 
 Identity and versions live only in [`Base.xcconfig`](../Config/Base.xcconfig) build settings, which generate the built `Info.plist`. The checked-in [`Info.plist`](../Kromora/Info.plist) carries only keys with no build-setting form: `UTExportedTypeDeclarations`, `KromoraGitCommit` (substituted from `KROMORA_GIT_COMMIT`), and `NSHighResolutionCapable` (Xcode 27 has no `INFOPLIST_KEY_` setting that emits it). Do not re-add identity or version keys to the plist.
 
-[`Base.xcconfig`](../Config/Base.xcconfig) defines `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION`; the current values are `0.1` and `2`. Bump `MARKETING_VERSION` for a new user-facing release. Increment `CURRENT_PROJECT_VERSION` for every uploaded build, including successive TestFlight builds, and do not reuse an uploaded build number.
+[`Base.xcconfig`](../Config/Base.xcconfig) defines `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION`; the current values are `0.1` and `3`. Bump `MARKETING_VERSION` for a new user-facing release. Increment `CURRENT_PROJECT_VERSION` for every uploaded build, including successive TestFlight builds, and do not reuse an uploaded build number.
 
 ## Release procedure
 
