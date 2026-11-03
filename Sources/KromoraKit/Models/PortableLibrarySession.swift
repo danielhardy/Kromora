@@ -1897,7 +1897,12 @@ final class PortableLibrarySession {
 
     func applyCommittedMembership(_ entry: PortablePackageMembershipEntry) {
         guard !entry.isTombstone else { return }
-        _ = try? applyIndexDelta(.init(upserts: [.init(from: entry)]))
+        let committed = LibraryIndexEntry(from: entry)
+        // A tone-only edit leaves the presented geometry, and so the whole summary, unchanged.
+        // Applying it would rebuild and re-sort the full projection and rewrite its file for no
+        // visible difference.
+        guard queryController.index.entry(for: committed.assetID) != committed else { return }
+        _ = try? applyIndexDelta(.init(upserts: [committed]))
     }
 
     /// One culling change for `updateLibraryState(_:)`.

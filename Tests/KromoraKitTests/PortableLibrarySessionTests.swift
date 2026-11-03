@@ -516,6 +516,59 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         try reopened.lease.release()
     }
 
+    /// KRMA-1161: an edit acknowledgement whose summary matches the projection must not rebuild,
+    /// re-sort, or rewrite the library index; a real geometry change still must.
+    func testEditAcknowledgementPublishesOnlyWhenTheSummaryChanges() throws {
+        let packageURL = tempDirectory.appendingPathComponent("Acknowledge.kromoralibrary")
+        let indexURL = tempDirectory.appendingPathComponent("Index/LibraryIndex.store")
+        let sourceURL = try Fixtures.writeJPEG(
+            width: 40, height: 20, orientation: 1, named: "acknowledge.jpg", in: tempDirectory
+        )
+        let session = try PortableLibrarySession(at: packageURL, indexURL: indexURL)
+        let assetID = try XCTUnwrap(session.importURLs([sourceURL]).imported.first?.assetID)
+        let halfWidth = EditDocument(
+            crop: CropAdjustments(normalizedRect: CGRect(x: 0, y: 0, width: 0.5, height: 1))
+        )
+        func commit(_ document: EditDocument) throws -> PortablePackageMembershipEntry {
+            try XCTUnwrap(
+                session.package.commitEditRevision(
+                    for: assetID, document: document, lease: session.lease
+                ).membership
+            )
+        }
+
+        session.applyCommittedMembership(try commit(halfWidth))
+        let cropped = try XCTUnwrap(session.queryController.index.entry(for: assetID))
+        XCTAssertEqual(try XCTUnwrap(cropped.summary.presentedAspectRatio), 0.5 * 40 / 20, accuracy: 1e-9)
+        _ = session.queryController.page(at: 0)
+        let controller = session.queryController
+        XCTAssertEqual(controller.orderedEntriesBuildCount, 1)
+        let generation = session.indexGeneration
+        try FileManager.default.removeItem(at: indexURL)
+
+        for exposure in [0.25, 0.5, 0.75] {
+            var toneOnly = halfWidth
+            toneOnly.adjustments = [.exposure(ev: exposure)]
+            session.applyCommittedMembership(try commit(toneOnly))
+        }
+
+        XCTAssertEqual(session.indexGeneration, generation)
+        _ = session.queryController.page(at: 0)
+        XCTAssertEqual(session.queryController.orderedEntriesBuildCount, 1)
+        XCTAssertEqual(session.queryController.index, controller.index)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: indexURL.path))
+
+        let fullFrame = try commit(EditDocument())
+        session.applyCommittedMembership(fullFrame)
+        XCTAssertEqual(session.indexGeneration, generation &+ 1)
+        XCTAssertEqual(
+            try XCTUnwrap(session.queryController.index.entry(for: assetID)?.summary.presentedAspectRatio),
+            2, accuracy: 1e-9
+        )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: indexURL.path))
+        try session.lease.release()
+    }
+
     /// KRMA-842: an index that is missing photos the package committed (a lost or interrupted
     /// index write) must be repaired from membership on open, not trusted because the library ID
     /// matches. A persisted index that still lists a removed photo must drop it too.
