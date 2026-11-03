@@ -7,7 +7,9 @@ protocol RetouchWorkflowDestination: AnyObject {
     var document: EditDocument { get }
     var sourceSize: CGSize { get }
     func updateDocument(_ transform: (inout EditDocument) -> Void)
-    func pickRetouchSource(spotID: UUID, rank: Int) async
+    /// Searches for and persists an automatic source. `isCurrent` is the coordinator's fence for this
+    /// invocation; the destination must consult it after its last suspension and before it mutates.
+    func pickRetouchSource(spotID: UUID, rank: Int, isCurrent: @MainActor () -> Bool) async
     func setRetouchCanvasActive(_ active: Bool)
     func beginUndoGrouping()
     func endUndoGrouping()
@@ -58,6 +60,23 @@ final class RetouchWorkflowCoordinator {
         init(maximum: Int) { self.maximum = maximum }
     }
     private var isShutDown = false
+
+    // Source-pick lifecycle. A pick is bound to the photo that was open when it started, to the
+    // `pickSession` (bumped whenever the photo changes or the coordinator shuts down), and to a
+    // per-spot generation so only the newest request for a spot may publish. Every task is owned here
+    // and awaited by `shutdown`.
+    private struct PickOperation {
+        let id: Int
+        let spotID: UUID
+        /// The open photo when the pick started; `nil` when none was open.
+        let fingerprint: String?
+        let session: Int
+        let closesUndoGroup: Bool
+    }
+    private var pickSession = 0
+    private var nextPickID = 0
+    private var latestPickBySpot: [UUID: Int] = [:]
+    private var pickTasks: [Int: Task<Void, Never>] = [:]
     private let detectLane = Lane(maximum: 500)
     private let visualizationLane = Lane(maximum: 1_000)
     private let worker: RetouchDustAnalysisWorker
@@ -81,7 +100,7 @@ final class RetouchWorkflowCoordinator {
     }
 
     func beginGesture(at point: CGPoint, pressure: Double? = nil, modifiers: NSEvent.ModifierFlags = []) {
-        guard let destination, interactionState.isArmed, normalized(point) else { return }
+        guard !isShutDown, let destination, interactionState.isArmed, normalized(point) else { return }
         startPoint = point
         isShiftSegment = modifiers.contains(.shift)
         isCommandCreatingSource = modifiers.contains(.command)
@@ -177,7 +196,7 @@ final class RetouchWorkflowCoordinator {
     }
 
     func endGesture() {
-        guard let destination, let gesture else { return }
+        guard !isShutDown, let destination, let gesture else { return }
         switch gesture {
         case .create:
             guard !samples.isEmpty else { cancelGesture(); return }
@@ -194,14 +213,7 @@ final class RetouchWorkflowCoordinator {
             destination.updateDocument { $0.retouch.spots.append(spot) }
             interactionState.select(id)
             interactionState.setShiftClickAnchor(samples.last?.point)
-            if needsAutoPick {
-                interactionState.setSolving(id, true)
-                Task { [weak self] in
-                    await destination.pickRetouchSource(spotID: id, rank: 0)
-                    self?.interactionState.setSolving(id, false)
-                    destination.endUndoGrouping()
-                }
-            }
+            if needsAutoPick { startPick(spotID: id, rank: 0, closesUndoGroup: true) }
         case .move(let id):
             let needsAutoPick: Bool = {
                 guard pendingSource == nil,
@@ -212,14 +224,7 @@ final class RetouchWorkflowCoordinator {
             }()
             if needsAutoPick { destination.beginUndoGrouping() }
             if let pendingRegion { updateSpot(id) { $0.region = pendingRegion; if let pendingSource { $0.source = pendingSource } } }
-            if needsAutoPick {
-                interactionState.setSolving(id, true)
-                Task { [weak self] in
-                    await destination.pickRetouchSource(spotID: id, rank: 0)
-                    self?.interactionState.setSolving(id, false)
-                    destination.endUndoGrouping()
-                }
-            }
+            if needsAutoPick { startPick(spotID: id, rank: 0, closesUndoGroup: true) }
         case .source(let id):
             if let pendingSource { updateSpot(id) { $0.source = pendingSource } }
         case .suggestion(let id):
@@ -237,18 +242,19 @@ final class RetouchWorkflowCoordinator {
 
     func deleteSelected() { if let id = interactionState.selectedSpotID { deleteSpot(id) } }
     func deleteSpot(_ id: UUID) {
+        guard !isShutDown else { return }
         destination?.updateDocument { $0.retouch.spots.removeAll { $0.id == id } }
         if interactionState.selectedSpotID == id { interactionState.select(nil) }
         if interactionState.shiftClickAnchor != nil { interactionState.setShiftClickAnchor(nil) }
     }
     func acceptDustSuggestion(_ id: UUID) {
-        guard suggestionsBelongToCurrentSource() else { return }
+        guard !isShutDown, suggestionsBelongToCurrentSource() else { return }
         guard let suggestion = interactionState.dustSuggestions.first(where: { $0.id == id }) else { return }
         addDustSpot(suggestion)
         interactionState.removeDustSuggestion(id)
     }
     func acceptAllDustSuggestions() {
-        guard suggestionsBelongToCurrentSource() else { return }
+        guard !isShutDown, suggestionsBelongToCurrentSource() else { return }
         let suggestions = interactionState.dustSuggestions
         guard !suggestions.isEmpty else { return }
         destination?.beginUndoGrouping()
@@ -376,6 +382,7 @@ final class RetouchWorkflowCoordinator {
     /// User preferences (threshold, overlay policy, visualization toggle) are preserved.
     func activeSourceDidChange() {
         invalidateAnalysis()
+        invalidatePicks()
         cancelGesture()
         interactionState.resetPhotoState()
         if destination?.retouchAnalysisSource == nil { Task { [worker] in await worker.reset() } }
@@ -385,12 +392,14 @@ final class RetouchWorkflowCoordinator {
     func shutdown() async {
         isShutDown = true
         invalidateAnalysis()
+        invalidatePicks()
         cancelGesture()
         interactionState.resetPhotoState()
         interactionState.setVisualizationCandidates([])
         // Each loop chains after its predecessor, so the latest task covers all owned work.
         await detectLane.task?.value
         await visualizationLane.task?.value
+        for task in Array(pickTasks.values) { await task.value }
         await worker.reset()
     }
 
@@ -404,6 +413,7 @@ final class RetouchWorkflowCoordinator {
         let sample = BrushSample(point: suggestion.point)
         let spot = RetouchSpot(id: suggestion.id, mode: .heal,
             region: RetouchRegion(samples: [sample], radius: suggestion.radius), seed: suggestion.seed)
+        guard !isShutDown else { return }
         destination?.updateDocument { $0.retouch.spots.append(spot) }
         interactionState.select(spot.id)
     }
@@ -415,15 +425,58 @@ final class RetouchWorkflowCoordinator {
         }
     }
     func nextSource() {
-        guard let d = destination, let id = interactionState.selectedSpotID,
+        guard !isShutDown, let d = destination, let id = interactionState.selectedSpotID,
               let spot = d.document.retouch.spots.first(where: { $0.id == id }) else { return }
         let rank: Int = { if case .auto(_, let r)? = spot.source { return r + 1 }; return 0 }()
-        interactionState.setSolving(id, true)
-        Task { [weak self] in
-            await d.pickRetouchSource(spotID: id, rank: rank)
-            self?.interactionState.setSolving(id, false)
+        startPick(spotID: id, rank: rank, closesUndoGroup: false)
+    }
+
+    /// Launches an owned pick. The newest request for a spot supersedes older ones, and nothing from a
+    /// request outlives a photo change or shutdown.
+    private func startPick(spotID: UUID, rank: Int, closesUndoGroup: Bool) {
+        guard !isShutDown, let destination else { return }
+        let fingerprint = destination.retouchAnalysisSource?.cacheFingerprint
+        nextPickID &+= 1
+        let operation = PickOperation(id: nextPickID, spotID: spotID, fingerprint: fingerprint,
+                                      session: pickSession, closesUndoGroup: closesUndoGroup)
+        latestPickBySpot[spotID] = operation.id
+        interactionState.setSolving(spotID, true)
+        pickTasks[operation.id] = Task { [weak self, weak destination] in
+            await destination?.pickRetouchSource(spotID: spotID, rank: rank) { [weak self] in
+                self?.isCurrent(operation) ?? false
+            }
+            self?.finish(operation)
         }
     }
+
+    /// The pick still targets the open photo in a live session and is the newest request for its spot.
+    private func isCurrent(_ operation: PickOperation) -> Bool {
+        isPhotoCurrent(operation) && latestPickBySpot[operation.spotID] == operation.id
+    }
+
+    private func isPhotoCurrent(_ operation: PickOperation) -> Bool {
+        !isShutDown && operation.session == pickSession
+            && destination?.retouchAnalysisSource?.cacheFingerprint == operation.fingerprint
+    }
+
+    private func finish(_ operation: PickOperation) {
+        pickTasks[operation.id] = nil
+        if latestPickBySpot[operation.spotID] == operation.id {
+            latestPickBySpot[operation.spotID] = nil
+            interactionState.setSolving(operation.spotID, false)
+        }
+        // Only the photo that opened the undo group may close it; a stale completion must not
+        // end the group that now belongs to another photo.
+        if operation.closesUndoGroup, isPhotoCurrent(operation) { destination?.endUndoGrouping() }
+    }
+
+    /// Invalidates every pick before anything is awaited: cancellation cannot stop a pick that ignores it.
+    private func invalidatePicks() {
+        pickSession &+= 1
+        latestPickBySpot = [:]
+        for task in pickTasks.values { task.cancel() }
+    }
+
     func hover(at point: CGPoint) {
         interactionState.hover(hitTest(point, spots: destination?.document.retouch.spots ?? [])?.id, at: point)
     }
@@ -434,6 +487,7 @@ final class RetouchWorkflowCoordinator {
         }
     }
     private func updateSpot(_ id: UUID, _ change: (inout RetouchSpot) -> Void) {
+        guard !isShutDown else { return }
         destination?.updateDocument { doc in
             guard let index = doc.retouch.spots.firstIndex(where: { $0.id == id }) else { return }
             change(&doc.retouch.spots[index])

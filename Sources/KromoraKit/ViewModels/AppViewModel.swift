@@ -3436,8 +3436,8 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
 
     /// Persist a deterministic automatic source choice only if the spot and open source still match
     /// the request. A manual source always wins over a late picker result.
-    func pickRetouchSource(spotID: UUID, rank: Int = 0) async {
-        guard let source = imageSource,
+    func pickRetouchSource(spotID: UUID, rank: Int = 0, isCurrent: @MainActor () -> Bool = { true }) async {
+        guard !isShuttingDown, let source = imageSource,
               let spot = document.retouch.spots.first(where: { $0.id == spotID }) else { return }
         if case .manual? = spot.source { return }
         let sourceFingerprint = source.cacheFingerprint
@@ -3445,7 +3445,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         let settings = document.retouch
         guard let picked = await engine.pickRetouchSource(
             source: source, settings: settings, spotID: spotID, rank: rank
-        ), imageSource?.cacheFingerprint == sourceFingerprint,
+        ), !isShuttingDown, isCurrent(), imageSource?.cacheFingerprint == sourceFingerprint,
            let current = document.retouch.spots.first(where: { $0.id == spotID }),
            current.region == originalRegion,
            current.source == nil || isAutomaticRetouchSource(current.source) else { return }

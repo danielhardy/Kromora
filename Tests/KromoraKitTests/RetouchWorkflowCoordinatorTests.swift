@@ -175,6 +175,157 @@ final class RetouchWorkflowCoordinatorTests: XCTestCase {
     }
 }
 
+// MARK: - Source-pick lifecycle (KRMA-1158)
+
+extension RetouchWorkflowCoordinatorTests {
+    /// Suspends each pick until the test releases it, by rank.
+    @MainActor private final class PickGates {
+        private var continuations: [Int: [CheckedContinuation<Void, Never>]] = [:]
+        private(set) var arrivals: [Int] = []
+        func wait(_ rank: Int) async {
+            arrivals.append(rank)
+            await withCheckedContinuation { continuations[rank, default: []].append($0) }
+        }
+        func release(_ rank: Int) { continuations.removeValue(forKey: rank)?.forEach { $0.resume() } }
+        func releaseAll() { for rank in Array(continuations.keys) { release(rank) } }
+    }
+
+    @MainActor private final class DrainFlag { var value = false }
+
+    private func makePickHarness(_ tag: String = "A") -> (FakeRetouchDestination, RetouchWorkflowCoordinator, PickGates) {
+        let destination = FakeRetouchDestination()
+        destination.retouchAnalysisSource = Self.source(tag)
+        let gates = PickGates()
+        destination.pickProvider = { rank in await gates.wait(rank); return true }
+        let workflow = RetouchWorkflowCoordinator(destination: destination)
+        workflow.setArmed(true)
+        return (destination, workflow, gates)
+    }
+
+    private func clickToCreateSpot(_ workflow: RetouchWorkflowCoordinator, at point: CGPoint = CGPoint(x: 0.3, y: 0.3)) {
+        workflow.beginGesture(at: point)
+        workflow.endGesture()
+    }
+
+    func testDelayedPickAfterNavigationDoesNotCloseNewPhotosUndoGroupOrMutateIt() async throws {
+        let (destination, workflow, gates) = makePickHarness("A")
+        clickToCreateSpot(workflow)
+        XCTAssertEqual(destination.undoGroupingDepth, 1)
+        while gates.arrivals.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
+
+        // Navigate to B, which opens its own undo group, then release A's pick.
+        destination.retouchAnalysisSource = Self.source("B")
+        destination.document = EditDocument()
+        destination.undoGroupingDepth = 0
+        workflow.activeSourceDidChange()
+        destination.beginUndoGrouping()
+        let updatesBefore = destination.documentUpdates
+        gates.releaseAll()
+        await workflow.shutdown()
+
+        XCTAssertEqual(destination.undoGroupingDepth, 1, "A's late pick must not end B's undo group")
+        XCTAssertEqual(destination.documentUpdates, updatesBefore)
+        XCTAssertTrue(destination.pickPublications.isEmpty)
+        XCTAssertTrue(workflow.interactionState.solvingSpotIDs.isEmpty)
+    }
+
+    func testStalePickCannotCloseUndoGroupOfNewGestureOnNewPhoto() async throws {
+        let (destination, workflow, gates) = makePickHarness("A")
+        clickToCreateSpot(workflow)
+        while gates.arrivals.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
+        destination.retouchAnalysisSource = Self.source("B")
+        destination.document = EditDocument()
+        destination.undoGroupingDepth = 0
+        workflow.activeSourceDidChange()
+
+        // A new gesture on B is in flight with its own (gated) pick.
+        clickToCreateSpot(workflow, at: CGPoint(x: 0.6, y: 0.6))
+        XCTAssertEqual(destination.undoGroupingDepth, 1)
+        while gates.arrivals.count < 2 { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertEqual(gates.arrivals, [0, 0])
+        gates.releaseAll()
+        try await waitUntil("new photo's pick to finish") { destination.undoGroupingDepth == 0 }
+        await workflow.shutdown()
+        // Only the pick for B's spot published; A's stale pick neither wrote nor closed B's group.
+        XCTAssertEqual(destination.pickPublications, [0])
+        XCTAssertEqual(destination.document.retouch.spots.count, 1)
+        XCTAssertEqual(destination.undoGroupingDepth, 0)
+    }
+
+    func testOutOfOrderNextSourceCompletionsApplyOnlyNewest() async throws {
+        let (destination, workflow, gates) = makePickHarness()
+        var spot = RetouchSpot(mode: .heal,
+                               region: RetouchRegion(samples: [BrushSample(point: CGPoint(x: 0.4, y: 0.4))], radius: 0.05),
+                               source: .auto(offset: CGVector(dx: 0.1, dy: 0), rank: 0))
+        destination.document.retouch.spots = [spot]
+        workflow.interactionState.select(spot.id)
+
+        workflow.nextSource()                       // rank 1
+        while gates.arrivals.count < 1 { try await Task.sleep(for: .milliseconds(5)) }
+        spot.source = .auto(offset: CGVector(dx: 0.1, dy: 0), rank: 1)
+        destination.document.retouch.spots = [spot]
+        workflow.nextSource()                       // rank 2 supersedes rank 1
+        while gates.arrivals.count < 2 { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertEqual(gates.arrivals, [1, 2])
+
+        gates.release(2)
+        try await waitUntil("newest pick to publish") { destination.pickPublications == [2] }
+        gates.release(1)                            // the older request finishes last
+        await workflow.shutdown()
+        XCTAssertEqual(destination.pickPublications, [2])
+        guard case .auto(_, let rank)? = destination.document.retouch.spots.first?.source else {
+            return XCTFail("Expected an automatic source")
+        }
+        XCTAssertEqual(rank, 2)
+        XCTAssertTrue(workflow.interactionState.solvingSpotIDs.isEmpty)
+    }
+
+    func testAssetDeletionDuringPickDropsResult() async throws {
+        let (destination, workflow, gates) = makePickHarness()
+        clickToCreateSpot(workflow)
+        while gates.arrivals.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
+        // The open photo is removed.
+        destination.retouchAnalysisSource = nil
+        destination.document = EditDocument()
+        workflow.activeSourceDidChange()
+        let updatesBefore = destination.documentUpdates
+        gates.releaseAll()
+        await workflow.shutdown()
+        XCTAssertEqual(destination.documentUpdates, updatesBefore)
+        XCTAssertTrue(destination.pickPublications.isEmpty)
+        XCTAssertTrue(workflow.interactionState.solvingSpotIDs.isEmpty)
+    }
+
+    func testShutdownDrainsPickAndRejectsNewCommands() async throws {
+        let (destination, workflow, gates) = makePickHarness()
+        clickToCreateSpot(workflow)
+        while gates.arrivals.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
+        let updatesBefore = destination.documentUpdates
+
+        let shutdown = Task { await workflow.shutdown() }
+        // Shutdown must wait for the owned pick rather than abandon it.
+        try await Task.sleep(for: .milliseconds(30))
+        let drained = DrainFlag()
+        Task { await shutdown.value; drained.value = true }
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertFalse(drained.value)
+        gates.releaseAll()
+        await shutdown.value
+
+        XCTAssertEqual(destination.documentUpdates, updatesBefore)
+        XCTAssertTrue(destination.pickPublications.isEmpty)
+        XCTAssertEqual(destination.undoGroupingDepth, 1, "no undo callback may arrive after the barrier")
+
+        // Admission is closed.
+        workflow.beginGesture(at: CGPoint(x: 0.5, y: 0.5))
+        workflow.endGesture()
+        workflow.nextSource()
+        workflow.deleteSpot(destination.document.retouch.spots[0].id)
+        XCTAssertEqual(destination.documentUpdates, updatesBefore)
+        XCTAssertEqual(destination.pickedRanks, [0])
+    }
+}
+
 // MARK: - Analysis lifecycle (KRMA-900)
 
 extension RetouchWorkflowCoordinatorTests {
@@ -440,7 +591,19 @@ private final class FakeRetouchDestination: RetouchWorkflowDestination {
         documentUpdates += 1
         transform(&document)
     }
-    func pickRetouchSource(spotID: UUID, rank: Int) async { pickedRanks.append(rank) }
+    /// Optional per-call hook that suspends a pick (and may return `false` to model a failed search).
+    var pickProvider: (@MainActor (Int) async -> Bool)?
+    var pickPublications: [Int] = []
+    func pickRetouchSource(spotID: UUID, rank: Int, isCurrent: @MainActor () -> Bool) async {
+        pickedRanks.append(rank)
+        guard let pickProvider else { return }
+        guard await pickProvider(rank), isCurrent() else { return }
+        pickPublications.append(rank)
+        updateDocument { document in
+            guard let index = document.retouch.spots.firstIndex(where: { $0.id == spotID }) else { return }
+            document.retouch.spots[index].source = .auto(offset: CGVector(dx: Double(rank), dy: 0), rank: rank)
+        }
+    }
     func setRetouchCanvasActive(_ active: Bool) {}
     var undoGroupingDepth = 0
     func beginUndoGrouping() { undoGroupingDepth += 1 }
