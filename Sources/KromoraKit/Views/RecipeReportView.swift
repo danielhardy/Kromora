@@ -16,6 +16,16 @@ struct RecipeReportView: View {
 
             statRow
 
+            if report.hasLowCoverage {
+                Label(
+                    "Low coverage: this Look only reflects the colors in the photo. Other colors fade toward neutral.",
+                    systemImage: "info.circle"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+
             if let cam = report.cameraInfo, !cam.make.isEmpty || !cam.model.isEmpty {
                 Divider()
                 cameraInfoRow(cam)
@@ -109,7 +119,7 @@ struct RecipeReportView: View {
             StatBadge(
                 label: "Coverage",
                 value: String(format: "%.0f%%", report.cubeCoveragePercent),
-                tint: report.cubeCoveragePercent >= 30 ? .green : .yellow
+                tint: report.hasLowCoverage ? .yellow : .green
             )
             StatBadge(
                 label: "Samples",

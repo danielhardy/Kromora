@@ -23,8 +23,8 @@ import simd
 ///      a center patch
 ///   7. Sample N random pixels; keep ones in smooth (low-edge) regions
 ///   8. Accumulate samples into an N³ cube (sum + count per cell)
-///   9. Smooth empty cells by iterative pull from filled neighbors; anchor
-///      remaining cells to identity
+///   9. Fit the cube as a confidence-weighted, 3D-smoothed offset from identity, so cells
+///      with few or no samples fade toward identity instead of being trusted or anchored
 ///  10. Build the report: tone curve, saturation ratio, sharpening estimate,
 ///      coverage %, alignment shift, EXIF camera info
 struct RecipeExtractor {
@@ -40,8 +40,8 @@ struct RecipeExtractor {
         var randomDrawCount: Int = 2_000_000
         /// Maximum smooth-region samples to actually accumulate.
         var samplesTarget: Int = 200_000
-        /// Iterations of neighbor-pull smoothing for empty cube cells.
-        var smoothingIterations: Int = 8
+        /// How the sparse per-cell means become a continuous cube.
+        var regularization = Regularization()
         /// Half-window for the alignment search (±N pixels).
         var alignmentSearchRadius: Int = 4
         /// Longest side, in pixels, that the pair is analyzed at. Sampling is
@@ -56,6 +56,35 @@ struct RecipeExtractor {
         /// The space the pair is compared in and the cube is stamped with. Defaults to Display P3
         /// (`WorkingSpace.current`); an sRGB fit renders both images in sRGB.
         var authoringSpace: WorkingSpace = .current
+    }
+
+    /// Parameters of the regularized cube fit (see `buildCube`).
+    ///
+    /// The fit estimates, per cell, the offset from identity as a Gaussian-weighted mean of
+    /// nearby cells' offsets, with each cell weighted by `n / (n + confidenceSamples)` and a weak
+    /// identity prior of `fadeFloor`. A direct sample thus counts for little until a cell holds
+    /// several, and the offset fades continuously to zero (identity) away from sampled colors.
+    struct Regularization: Equatable {
+        /// Samples at which a cell is trusted at half weight. A 1-sample cell carries 1/(1+k).
+        var confidenceSamples: Float = 4
+        /// Standard deviation of the 3D Gaussian, in cube cells. Sets how far a sampled color's
+        /// offset reaches and how gradually it fades.
+        var sigma: Float = 1.5
+        /// Weight of the identity prior, relative to a fully trusted neighborhood (weight 1).
+        /// Smaller values keep the fit closer to the measured offsets inside the sampled region.
+        var fadeFloor: Float = 0.1
+    }
+
+    /// How the accepted samples were distributed, kept to explain a low coverage figure.
+    struct SamplingSummary: Equatable {
+        /// Random pixel coordinates drawn before edge masking.
+        var draws: Int
+        /// Draws discarded by the edge mask.
+        var edgeRejected: Int
+        /// Share (0…1) of accepted samples that fell in the 16 most-populated cells.
+        var topCellShare: Float
+
+        var edgeRejectedFraction: Float { draws > 0 ? Float(edgeRejected) / Float(draws) : 0 }
     }
 
     enum ExtractorError: LocalizedError {
@@ -88,6 +117,7 @@ struct RecipeExtractor {
         let report: RecipeReport
         /// The space `cube` was fit in; the Look must be stamped and interpolated in it.
         var authoringSpace: WorkingSpace = .current
+        var sampling = SamplingSummary(draws: 0, edgeRejected: 0, topCellShare: 0)
     }
 
     /// Run the full extraction pipeline. Safe to call from a background task.
@@ -225,12 +255,12 @@ struct RecipeExtractor {
         progress?(0.80, "Building cube…")
 
         try checkCancelled()
-        // 8 + 9. Average + smooth + anchor empty cells to identity
+        // 8 + 9. Average, then fit the confidence-weighted, smoothed offset from identity
         let cube = buildCube(
             sums: sums,
             counts: counts,
             size: cubeN,
-            iterations: options.smoothingIterations
+            regularization: options.regularization
         )
 
         // Coverage: % of cells that received any direct samples
@@ -288,8 +318,16 @@ struct RecipeExtractor {
         try checkCancelled()
         progress?(1.0, "Done")
 
+        let topShare = counts.sorted(by: >).prefix(16).reduce(0) { $0 + Int($1) }
+        let sampling = SamplingSummary(
+            draws: stats.drawCount,
+            edgeRejected: stats.edgeRejected,
+            topCellShare: Float(topShare) / Float(sampleCount)
+        )
+
         return Result(
-            cube: cube, size: cubeN, report: report, authoringSpace: options.authoringSpace
+            cube: cube, size: cubeN, report: report,
+            authoringSpace: options.authoringSpace, sampling: sampling
         )
     }
 
@@ -302,6 +340,8 @@ struct RecipeExtractor {
         var sums: [SIMD3<Float>]
         var counts: [Int32]
         var sampleCount: Int
+        var drawCount = 0
+        var edgeRejected = 0
         var jpgChromaSum: Double
         var rawChromaSum: Double
         var jpgHFEnergy: Double
@@ -404,6 +444,7 @@ struct RecipeExtractor {
 
         for draw in 0..<options.randomDrawCount {
             if stats.sampleCount >= options.samplesTarget { break }
+            stats.drawCount += 1
             // Polling every draw would cost more than the sample itself.
             if draw & 0xFFFF == 0, isCancelled?() == true { break }
 
@@ -446,7 +487,10 @@ struct RecipeExtractor {
                 stats.rawHFEnergy += Double(nDiff * nDiff)
             }
 
-            if edge > edgeThreshU8 { continue }
+            if edge > edgeThreshU8 {
+                stats.edgeRejected += 1
+                continue
+            }
 
             let nr: UInt8 = rawBase[rawOff + 0]
             let ng: UInt8 = rawBase[rawOff + 1]
@@ -620,8 +664,21 @@ struct RecipeExtractor {
         return best
     }
 
-    /// Average filled cells, smooth empty cells from neighbors, anchor leftovers
-    /// to the identity cube.
+    /// Fit the cube as a regularized, confidence-weighted offset from identity.
+    ///
+    /// Every cell's measured mean `m` becomes an offset `δ = m − identity` with weight
+    /// `w = n / (n + k)`, so a single noisy sample barely moves its cell. The weighted offsets and
+    /// the weights are blurred with the same separable 3D Gaussian, and the cube offset is
+    /// `blur(w·δ) / (blur(w) + λ)`: a weighted local mean of the offsets, shrunk toward zero by a
+    /// weak identity prior. Where no sampled color is nearby `blur(w)` falls to zero, so the cube
+    /// eases into identity over a couple of cells rather than switching off at a cliff, and the
+    /// result is continuous everywhere because every term is a smooth function of position.
+    ///
+    /// This replaces an 8-pass neighbor pull that spread sampled colors up to 8 cells into
+    /// unsampled territory and then hard-anchored the rest to identity (KRMA-1154). A regularized
+    /// fit was chosen over a low-order color transform plus residual because the pairs this serves
+    /// sample a narrow color range, where a global transform extrapolates unpredictably outside it
+    /// while a prior toward identity degrades to "leave the color alone".
     ///
     /// Internal rather than private so `RecipeExtractorTests` can drive it with
     /// hand-built sample distributions — deriving from real files would need a
@@ -630,74 +687,68 @@ struct RecipeExtractor {
         sums: [SIMD3<Float>],
         counts: [Int32],
         size: Int,
-        iterations: Int
+        regularization: Regularization = Regularization()
     ) -> [SIMD3<Float>] {
         let total = size * size * size
-        var values = [SIMD3<Float>](repeating: .zero, count: total)
-        var filled = [Bool](repeating: false, count: total)
+        let denom = Float(max(1, size - 1))
+        func identity(_ i: Int) -> SIMD3<Float> {
+            SIMD3(Float(i % size), Float((i / size) % size), Float(i / (size * size))) / denom
+        }
 
+        // xyz = w·δ, w = weight
+        var field = [SIMD4<Float>](repeating: .zero, count: total)
         for i in 0..<total where counts[i] > 0 {
-            values[i] = sums[i] / Float(counts[i])
-            filled[i] = true
+            let n = Float(counts[i])
+            let w = n / (n + regularization.confidenceSamples)
+            let delta = sums[i] / n - identity(i)
+            field[i] = SIMD4(delta * w, w)
         }
 
-        // Iterative pull-from-neighbors (3D Moore neighborhood)
-        for _ in 0..<iterations {
-            var newValues = values
-            var newFilled = filled
-            for b in 0..<size {
-                for g in 0..<size {
-                    for r in 0..<size {
-                        let i = r + g * size + b * size * size
-                        if filled[i] { continue }
-                        var sum = SIMD3<Float>.zero
-                        var n = 0
-                        for db in -1...1 {
-                            let nb = b + db
-                            if nb < 0 || nb >= size { continue }
-                            for dg in -1...1 {
-                                let ng = g + dg
-                                if ng < 0 || ng >= size { continue }
-                                for dr in -1...1 {
-                                    let nr = r + dr
-                                    if nr < 0 || nr >= size { continue }
-                                    if dr == 0 && dg == 0 && db == 0 { continue }
-                                    let ni = nr + ng * size + nb * size * size
-                                    if filled[ni] {
-                                        sum += values[ni]
-                                        n += 1
-                                    }
-                                }
-                            }
-                        }
-                        if n > 0 {
-                            newValues[i] = sum / Float(n)
-                            newFilled[i] = true
-                        }
-                    }
-                }
-            }
-            values = newValues
-            filled = newFilled
+        let kernel = gaussianKernel(sigma: regularization.sigma)
+        if kernel.count > 1 {
+            for axis in 0..<3 { blur(&field, size: size, axis: axis, kernel: kernel) }
         }
 
-        // Anchor any still-unfilled cells to identity
-        let denom = Float(size - 1)
-        for b in 0..<size {
-            for g in 0..<size {
-                for r in 0..<size {
-                    let i = r + g * size + b * size * size
-                    if !filled[i] {
-                        values[i] = SIMD3<Float>(
-                            Float(r) / denom,
-                            Float(g) / denom,
-                            Float(b) / denom
-                        )
-                    }
-                }
-            }
+        var cube = [SIMD3<Float>](repeating: .zero, count: total)
+        for i in 0..<total {
+            let f = field[i]
+            let offset = SIMD3(f.x, f.y, f.z) / (f.w + regularization.fadeFloor)
+            cube[i] = simd_clamp(identity(i) + offset, .zero, .one)
         }
-        return values
+        return cube
+    }
+
+    /// One-sided Gaussian taps `[g(0), g(1), … g(r)]`, normalized so the symmetric kernel sums to
+    /// 1. A non-positive sigma yields the single tap `[1]` (no smoothing).
+    private static func gaussianKernel(sigma: Float) -> [Float] {
+        guard sigma > 0 else { return [1] }
+        let radius = max(1, Int((3 * sigma).rounded(.up)))
+        var taps = (0...radius).map { exp(-Float($0 * $0) / (2 * sigma * sigma)) }
+        let sum = taps[0] + 2 * taps.dropFirst().reduce(0, +)
+        taps = taps.map { $0 / sum }
+        return taps
+    }
+
+    /// In-place 1D convolution along `axis` (0 = r, 1 = g, 2 = b) with edge replication.
+    private static func blur(
+        _ field: inout [SIMD4<Float>],
+        size: Int,
+        axis: Int,
+        kernel: [Float]
+    ) {
+        let stride = [1, size, size * size][axis]
+        let source = field
+        let radius = kernel.count - 1
+        for i in 0..<field.count {
+            let coordinate = (i / stride) % size
+            var acc = source[i] * kernel[0]
+            for t in 1...radius {
+                let lo = max(0, coordinate - t)
+                let hi = min(size - 1, coordinate + t)
+                acc += (source[i + (lo - coordinate) * stride] + source[i + (hi - coordinate) * stride]) * kernel[t]
+            }
+            field[i] = acc
+        }
     }
 
     /// Pull the EXIF tags we want for the report card. ImageIO doesn't decode

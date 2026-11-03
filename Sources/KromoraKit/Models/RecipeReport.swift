@@ -43,8 +43,14 @@ struct RecipeReport: Equatable {
     let sampleCount: Int
 
     /// Percentage of cube cells that received at least one direct sample
-    /// (the rest were filled by neighbor smoothing or anchored to identity).
+    /// (the rest fade toward identity with distance from the sampled colors).
     let cubeCoveragePercent: Float
+
+    /// Coverage below which the Look only reflects the colors present in the photo. A typical
+    /// single scene lands at 3–10%; this marks the point to say so, not a quality failure.
+    static let lowCoverageThreshold: Float = 10
+
+    var hasLowCoverage: Bool { cubeCoveragePercent < Self.lowCoverageThreshold }
 
     /// Integer-pixel shift detected between the JPG and the neutral render
     /// (positive = JPG is shifted that many pixels down/right). Usually

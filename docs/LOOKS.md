@@ -202,6 +202,27 @@ Derive Look from JPG renders the RAW through the editor's neutral RAW baseline, 
 aligns the images, removes edge samples, and writes a smoothed 33³ cube. The derived result is a
 scratch Look until the user saves it.
 
+### Behavior outside the sampled colors
+
+A pair only measures the colors it contains, and a single scene usually covers 3–10% of the cube's
+cells. `RecipeExtractor.buildCube` therefore fits the cube as a regularized offset from identity
+rather than trusting each sampled cell: a cell's offset is weighted by `n / (n + 4)` for `n`
+samples, the weighted offsets are blurred with a 3D Gaussian (σ = 1.5 cells), and the result is
+divided by the blurred weight plus a weak identity prior. Where sampled colors are nearby the cube
+follows the measured grade; away from them the offset fades continuously to zero, so unseen colors
+pass through unchanged instead of being reinterpreted. A lone sample barely moves its cell, and
+isolated outlier cells are suppressed. The cube stays continuous, so a smooth gradient stays smooth.
+A cube derived from a street scene of tans and grays measured p99 neighbor step 0.07 and maximum 0.13
+(Euclidean, 0…1), against about 0.55 and 0.77 before.
+
+The Derive sheet shows a note under 10% coverage saying the Look reflects only the colors in the
+photo. A Look built from a varied scene (foliage, sky, skin, shadows) covers more and carries the
+grade to more colors. On the street pair (200k samples, 2.9% coverage) the edge mask rejected 38% of draws, not
+most of them, and 16 cells held half the accepted samples, so coverage tracks the photo's narrow color
+range rather than a sampling fault. Sampling was left unchanged; a run with the mask disabled or with
+more samples was attempted but did not complete, so it is unmeasured. Saved and imported Looks are
+not rewritten.
+
 ## Starter library and storage
 
 The bundled library contains 27 original procedural cubes in four categories, shown in this fixed
