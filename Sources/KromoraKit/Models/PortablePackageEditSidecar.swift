@@ -981,12 +981,19 @@ extension PortableLibraryPackage {
         return quarantine
     }
 
-    func readEmbeddedLook(_ reference: PortablePackageLookReference) throws -> Data {
+    /// The validated location of a reference's blob. The bytes are not checked here; a caller that
+    /// parses the file must compare the parsed content hash with `reference.contentHash`.
+    func embeddedLookURL(_ reference: PortablePackageLookReference) throws -> URL {
         try validateLookReference(reference)
         let url = try packageURL(for: reference.relativePath)
         guard FileManager.default.fileExists(atPath: url.path) else {
             throw PortablePackageError.missingLook(reference.contentHash)
         }
+        return url
+    }
+
+    func readEmbeddedLook(_ reference: PortablePackageLookReference) throws -> Data {
+        let url = try embeddedLookURL(reference)
         let data = try Data(contentsOf: url)
         let actual = SHA256.hash(data: data).hexString
         guard UInt64(data.count) == reference.byteCount, actual == reference.contentHash else {

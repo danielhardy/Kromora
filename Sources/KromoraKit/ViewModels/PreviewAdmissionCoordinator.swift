@@ -72,7 +72,7 @@ protocol PreviewAdmissionDestination: AnyObject {
     func admissionPrepareStaleRefinement(using digest: PerceptualDigest)
     func admissionDocument(for assetID: PhotoAssetID) -> EditDocument?
     func admissionSourceReference(for item: ImageCollection.Item) -> EditSourceReference
-    func admissionResolvedLUT(_ id: LUTID?) -> CubeLUT?
+    func admissionResolvedLUT(_ id: LUTID?, for reference: EditSourceReference) -> CubeLUT?
     func admissionAdjacentPlan(for document: EditDocument, nativeExtent: CGSize) -> ResolutionPlan
     func admissionCanonicalPlan(for document: EditDocument, nativeExtent: CGSize) -> ResolutionPlan
     func admissionSettledRequest(
@@ -1169,7 +1169,7 @@ final class PreviewAdmissionCoordinator {
                     destination.admissionSettledRequest(
                         source: source, assetID: candidate.reference.assetID,
                         document: document,
-                        lut: destination.admissionResolvedLUT(document.lut.lutID),
+                        lut: destination.admissionResolvedLUT(document.lut.lutID, for: candidate.reference),
                         plan: destination.admissionAdjacentPlan(
                             for: document, nativeExtent: source.nativeExtent
                         ), canonical: false

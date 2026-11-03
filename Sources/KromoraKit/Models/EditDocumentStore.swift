@@ -169,6 +169,14 @@ actor EditDocumentStore {
     /// True for a store created by `makeUnboundStore()` until `bind(package:lease:)` runs.
     private var awaitsBinding = false
     private var embeddedLookBytes: [String: Data] = [:]
+    /// Each asset's current stored Look, published for synchronous main-actor readers. See
+    /// `StoredLookRegistry`; the package, not the external Look browser, is its source.
+    nonisolated let storedLooks = StoredLookRegistry()
+    private var parsedEmbeddedLooks: [EmbeddedLookKey: CubeLUT] = [:]
+    private var parsedEmbeddedLookOrder: [EmbeddedLookKey] = []
+    /// Looks the user deliberately (re)selected from the browser since the asset's last save. The
+    /// next save embeds their bytes instead of carrying the saved revision's reference forward.
+    private var adoptedLooks: [PortablePhotoAssetID: CubeLUT] = [:]
     private var embeddedLookTask: Task<Void, Never>?
     private var embeddedLookGeneration: UInt64 = 0
     /// Receives the membership entry a package transaction committed beside an edit, so the
@@ -341,6 +349,7 @@ actor EditDocumentStore {
                 // Validate the immutable native/XMP pair even on a cache hit. The package remains
                 // authoritative if a sidecar is damaged or replaced outside this actor.
                 touch(source.portableAssetID)
+                publishStoredLook(of: sidecar.native, in: package)
                 return finishLoad(
                     document: entry.document, found: true, status: .ready,
                     lookSignature: LookSignature(
@@ -351,6 +360,7 @@ actor EditDocumentStore {
             }
             let document = sidecar.native.document
             insert(document, revision: sidecar.native.revision, for: source.portableAssetID)
+            publishStoredLook(of: sidecar.native, in: package)
             return finishLoad(
                 document: document, found: true, status: .ready,
                 lookSignature: LookSignature(
@@ -408,6 +418,12 @@ actor EditDocumentStore {
         ) {
             membershipObserver?(membership)
         }
+        adoptedLooks.removeValue(forKey: source.portableAssetID)
+        if let selected = try? package.readEditRevision(
+            for: source.portableAssetID, revision: revision
+        ) {
+            publishStoredLook(of: selected, in: package)
+        }
     }
 
     func save(_ document: EditDocument, for source: EditSourceReference) async throws {
@@ -448,13 +464,16 @@ actor EditDocumentStore {
             let commit = try package.commitEditRevision(
                 for: source.portableAssetID, document: document,
                 snapshotName: snapshotName, preservingCurrent: preservingCurrent,
-                lookBytes: sourceLookBytes(for: document), lease: packageLease
+                lookBytes: sourceLookBytes(for: document, source: source, in: package),
+                lease: packageLease
             )
             let sidecar = commit.sidecar
             if let membership = commit.membership { membershipObserver?(membership) }
             // A snapshot leaves the current revision alone, so the cached current edit stays valid.
             if !preservingCurrent {
                 insert(document, revision: sidecar.native.revision, for: source.portableAssetID)
+                adoptedLooks.removeValue(forKey: source.portableAssetID)
+                publishStoredLook(of: sidecar.native, in: package)
             }
             writeCount += 1
             status = .ready
@@ -486,11 +505,99 @@ actor EditDocumentStore {
 
     private(set) var writeStartSignal: AsyncStream<Void>.Continuation?
 
-    private func sourceLookBytes(for document: EditDocument) -> [Data] {
-        guard let lutID = document.lut.lutID, let bytes = embeddedLookBytes[lutID.raw] else {
+    /// The Look bytes a save embeds. An ordinary save of an unchanged Look carries the revision's
+    /// verified embedded bytes forward, so neither a missing nor a replaced external file can change
+    /// or drop it. A different Look, or one the user deliberately re-selected (`adoptLook`), embeds
+    /// the browser's current bytes.
+    private func sourceLookBytes(
+        for document: EditDocument, source: EditSourceReference, in package: PortableLibraryPackage
+    ) -> [Data] {
+        guard let lutID = document.lut.lutID else { return [] }
+        let external = embeddedLookBytes[lutID.raw]
+        if let adopted = adoptedLooks[source.portableAssetID], adopted.lutID == lutID {
+            if let external, PortablePackageLookReference(data: external).contentHash == adopted.contentHash {
+                return [external]
+            }
+            if let bytes = try? Data(contentsOf: adopted.url),
+               PortablePackageLookReference(data: bytes).contentHash == adopted.contentHash {
+                return [bytes]
+            }
+        }
+        if let current = try? package.readEditRevision(for: source.portableAssetID),
+           current.document.lut.lutID == lutID,
+           let reference = current.lookReferences.first
+        {
+            if let bytes = try? package.readEmbeddedLook(reference) { return [bytes] }
+            if let external, PortablePackageLookReference(data: external).contentHash == reference.contentHash {
+                return [external]
+            }
             return []
         }
-        return [bytes]
+        return external.map { [$0] } ?? []
+    }
+
+    /// Records that the user chose `look` from the Look browser for this asset. The look becomes the
+    /// asset's stored Look immediately, and the next save embeds its bytes, so an intentional
+    /// re-selection after the external file changed produces a new edit rather than being ignored.
+    func adoptLook(_ look: CubeLUT, for source: EditSourceReference) {
+        adoptedLooks[source.portableAssetID] = look
+        storedLooks.set(.embedded(look), for: source.portableAssetID)
+    }
+
+    private struct EmbeddedLookKey: Hashable {
+        let contentHash: String
+        let lutID: LUTID
+    }
+
+    private static let parsedEmbeddedLookCapacity = 32
+
+    /// Publishes the Look `revision` was written with. A revision without an embedded reference
+    /// (no Look, or written before Looks were embedded) leaves nothing to pin, so readers use the
+    /// Look library for it as before.
+    private func publishStoredLook(of revision: PortablePackageEditRevision, in package: PortableLibraryPackage) {
+        guard let lutID = revision.document.lut.lutID,
+              let reference = revision.lookReferences.first
+        else {
+            storedLooks.set(nil, for: revision.assetID)
+            return
+        }
+        if case .embedded(let existing)? = storedLooks.storedLook(for: revision.assetID),
+           existing.lutID == lutID, existing.contentHash == reference.contentHash
+        {
+            return
+        }
+        storedLooks.set(
+            loadEmbeddedLook(lutID: lutID, reference: reference, in: package), for: revision.assetID
+        )
+    }
+
+    /// Reads the reference's blob, verifies it against the stored hash, and parses it under the
+    /// document's own `LUTID` so every cache and signature keyed on that ID sees the same Look.
+    private func loadEmbeddedLook(
+        lutID: LUTID, reference: PortablePackageLookReference, in package: PortableLibraryPackage
+    ) -> StoredLook {
+        let key = EmbeddedLookKey(contentHash: reference.contentHash, lutID: lutID)
+        if let cached = parsedEmbeddedLooks[key] { return .embedded(cached) }
+        do {
+            let url = try package.embeddedLookURL(reference)
+            let name = URL(fileURLWithPath: lutID.raw).deletingPathExtension().lastPathComponent
+            let look = try CubeLUT(
+                url: url, category: "Embedded",
+                source: lutID.raw.hasPrefix("kromora.starter.") ? .bundled : .user,
+                displayName: name, stableID: lutID.raw
+            )
+            guard look.contentHash == reference.contentHash else {
+                return .unavailable(id: lutID, contentHash: reference.contentHash)
+            }
+            parsedEmbeddedLooks[key] = look
+            parsedEmbeddedLookOrder.append(key)
+            if parsedEmbeddedLookOrder.count > Self.parsedEmbeddedLookCapacity {
+                parsedEmbeddedLooks.removeValue(forKey: parsedEmbeddedLookOrder.removeFirst())
+            }
+            return .embedded(look)
+        } catch {
+            return .unavailable(id: lutID, contentHash: reference.contentHash)
+        }
     }
 
     private func delayIfNeeded() async {

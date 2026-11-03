@@ -641,7 +641,7 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
         )
         let fake = FakeRenderEngine()
         let coordinator = ExportCoordinator(
-            engine: fake, editStore: package.store(), lutResolver: { _ in nil }
+            engine: fake, editStore: package.store(), lutResolver: { _, _ in nil }
         )
 
         let outcome = await coordinator.performBatchExport(

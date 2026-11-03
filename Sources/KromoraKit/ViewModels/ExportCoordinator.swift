@@ -85,7 +85,7 @@ final class ExportCoordinator {
     /// The edit store is used for batch items that have not been opened in the current session.
     /// `lutResolver` is deliberately a value-returning main-actor seam: the store owns edit values,
     /// while the app's Look library owns the non-Codable LUT table.
-    var lutResolver: ((LUTID?) -> CubeLUT?)?
+    var lutResolver: ((LUTID?, EditSourceReference?) -> CubeLUT?)?
     private let editStore: EditDocumentStore?
 
     init(
@@ -93,7 +93,7 @@ final class ExportCoordinator {
         exportEngine: (any RenderEngining)? = nil,
         maskResolver: (any LocalMaskResolving)? = nil,
         editStore: EditDocumentStore? = nil,
-        lutResolver: ((LUTID?) -> CubeLUT?)? = nil,
+        lutResolver: ((LUTID?, EditSourceReference?) -> CubeLUT?)? = nil,
         photosDelivery: (any PhotosDelivering)? = PhotoKitDelivery(),
         sheets: any SheetPresenting = AppKitSheetPresenter(),
         defaults: UserDefaults = .standard
@@ -940,6 +940,8 @@ final class ExportCoordinator {
     private struct DocumentResolution {
         let document: EditDocument
         let isPerAsset: Bool
+        /// The item's package identity, so its Look resolves from its own saved revision.
+        var reference: EditSourceReference? = nil
     }
 
     private struct ItemExportError: LocalizedError {
@@ -949,22 +951,24 @@ final class ExportCoordinator {
     private func resolvedDocument(
         for item: BatchItem, assetID: PhotoAssetID?, fallback: EditDocument
     ) async throws -> DocumentResolution {
-        if let document = item.document { return DocumentResolution(document: document, isPerAsset: true) }
-        guard let editStore, let assetID else {
+        let reference = assetID.map {
+            EditSourceReference(assetID: $0, portableIdentity: item.portableIdentity, url: item.url)
+        }
+        if let document = item.document {
+            return DocumentResolution(document: document, isPerAsset: true, reference: reference)
+        }
+        guard let editStore, let reference else {
             return DocumentResolution(document: fallback, isPerAsset: false)
         }
-        let result = await editStore.load(
-            for: EditSourceReference(
-                assetID: assetID, portableIdentity: item.portableIdentity, url: item.url
-            )
-        )
+        let result = await editStore.load(for: reference)
         guard result.isUsableForPrefetch else {
             throw ItemExportError(
                 errorDescription: "its saved edit could not be read (\(result.status.message ?? "unreadable"))"
             )
         }
         return DocumentResolution(
-            document: result.found ? result.document : EditDocument(), isPerAsset: true
+            document: result.found ? result.document : EditDocument(), isPerAsset: true,
+            reference: reference
         )
     }
 
@@ -975,7 +979,7 @@ final class ExportCoordinator {
     ) throws -> CubeLUT? {
         if let itemLUT = item.lut { return itemLUT }
         let lutID = resolution.document.lut.lutID
-        let resolved = lutResolver?(lutID)
+        let resolved = lutResolver?(lutID, resolution.reference)
         if resolution.isPerAsset {
             if lutID != nil, resolved == nil {
                 throw ItemExportError(errorDescription: "its Look could not be loaded")

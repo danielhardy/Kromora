@@ -24,7 +24,7 @@ protocol EditedThumbnailDestination: AnyObject {
     func editedThumbnailItem(for assetID: PhotoAssetID) -> ImageCollection.Item?
     func editedThumbnailDocument(for assetID: PhotoAssetID) -> EditDocument?
     func editedThumbnailDocumentRevision(for assetID: PhotoAssetID) -> UInt64
-    func resolvedEditedThumbnailLUT(_ id: LUTID?) -> CubeLUT?
+    func resolvedEditedThumbnailLUT(_ id: LUTID?, for reference: EditSourceReference) -> CubeLUT?
     func markEditedThumbnailStale(for assetID: PhotoAssetID)
     func applyEditedThumbnail(_ image: NSImage?, for assetID: PhotoAssetID, revision: String)
     /// Show a persisted frame that has not been confirmed against the current edit. It carries no
@@ -257,7 +257,7 @@ final class EditedThumbnailCoordinator {
             destination.setEditedThumbnailPresentedCrop(
                 document.crop, rotation: document.rotation, for: assetID
             )
-            let lut = destination.resolvedEditedThumbnailLUT(document.lut.lutID)
+            let lut = destination.resolvedEditedThumbnailLUT(document.lut.lutID, for: sourceReference)
             let look = LookSignature(settings: document.lut, resolved: lut)
             // What to compare persisted pixels against: the live Look when it resolved, else the
             // saved revision's own. Pixels rendered here are always labelled with `look`, so an

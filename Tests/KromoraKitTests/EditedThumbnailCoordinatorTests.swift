@@ -659,7 +659,7 @@ private final class FakeDestination: EditedThumbnailDestination {
         storedDocument
     }
     func editedThumbnailDocumentRevision(for assetID: PhotoAssetID) -> UInt64 { 1 }
-    func resolvedEditedThumbnailLUT(_ id: LUTID?) -> CubeLUT? { lut }
+    func resolvedEditedThumbnailLUT(_ id: LUTID?, for reference: EditSourceReference) -> CubeLUT? { lut }
     func markEditedThumbnailStale(for assetID: PhotoAssetID) {
         item.markEditedThumbnailStale()
     }

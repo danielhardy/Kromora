@@ -27,6 +27,12 @@ final class LookSelectionCoordinator {
         case unchanged
         case cleared
         case missing(message: String)
+
+        /// The warning to show; nil when the Look resolves (or nothing changed).
+        var message: String? {
+            if case .missing(let message) = self { return message }
+            return nil
+        }
     }
 
     /// Keyboard audition result.
@@ -37,6 +43,8 @@ final class LookSelectionCoordinator {
     }
 
     private let library: LUTLibrary
+    /// Source of each photo's saved-revision Look. Nil where no package store is in play.
+    private let store: EditDocumentStore?
 
     /// LUTs a document can reference that no folder scan produces — a freshly derived LUT, and the
     /// file it becomes once saved.
@@ -45,8 +53,9 @@ final class LookSelectionCoordinator {
     /// Report one missing-reference transition at a time.
     private var lastReportedMissingLUT: LUTID?
 
-    init(library: LUTLibrary) {
+    init(library: LUTLibrary, store: EditDocumentStore? = nil) {
         self.library = library
+        self.store = store
     }
 
     // MARK: Resolution
@@ -58,6 +67,50 @@ final class LookSelectionCoordinator {
         guard let id else { return nil }
         if let scanned = library.allLUTs.first(matching: id) { return scanned }
         return derivedRegistry.lut(for: id)
+    }
+
+    /// Resolve a document's Look for a photo whose saved revision may pin exact bytes.
+    ///
+    /// A revision with embedded bytes is reproduced from them. If those bytes cannot be loaded, only
+    /// a library Look with the same content hash may stand in: a same-path replacement or a starter
+    /// Look retired in favour of a successor is a different grade, and presenting it as the saved
+    /// one would be a silent substitution. Without `stored`, or for a Look the photo no longer
+    /// uses, this is the ordinary library resolution.
+    func resolve(_ id: LUTID?, stored: StoredLook?) -> CubeLUT? {
+        guard let id else { return nil }
+        guard let stored, stored.lutID == id else { return resolve(id) }
+        switch stored {
+        case .embedded(let look):
+            return look
+        case .unavailable(_, let contentHash):
+            guard let candidate = resolve(id), candidate.contentHash == contentHash else { return nil }
+            return candidate
+        }
+    }
+
+    /// The Look the photo's current saved revision was written with, if it embeds one.
+    func storedLook(for reference: EditSourceReference?) -> StoredLook? {
+        reference.flatMap { store?.storedLooks.storedLook(for: $0.portableAssetID) }
+    }
+
+    /// Resolve a document's Look for the photo at `reference`. The photo's saved revision wins over
+    /// the browser, so its embedded, hash-verified bytes reproduce the saved render even when the
+    /// external file moved, vanished or was replaced in place.
+    func resolve(_ id: LUTID?, for reference: EditSourceReference?) -> CubeLUT? {
+        resolve(id, stored: storedLook(for: reference))
+    }
+
+    /// True when choosing `look` re-selects the Look the photo already uses but with different bytes
+    /// than its saved revision embeds (the external file changed since). That choice is deliberate,
+    /// so it replaces the embedded bytes; the document itself does not change.
+    func replacesStoredBytes(with look: CubeLUT, for reference: EditSourceReference) -> Bool {
+        guard let stored = storedLook(for: reference) else { return false }
+        return stored.lutID == look.lutID && stored.contentHash != look.contentHash
+    }
+
+    /// Makes `look` the photo's stored Look; its next save embeds the look's bytes.
+    func adopt(_ look: CubeLUT, for reference: EditSourceReference) async {
+        await store?.adoptLook(look, for: reference)
     }
 
     /// A derived LUT is in no library, so nothing but the registry can resolve it later. Remember
@@ -79,13 +132,19 @@ final class LookSelectionCoordinator {
 
     /// Evaluate the active document's Look reference. Waiting for scan completion avoids a false
     /// warning while the library is still assembling; the document retains the unresolved ID.
-    func refreshStatus(for id: LUTID?) -> StatusUpdate {
+    func refreshStatus(for id: LUTID?, reference: EditSourceReference? = nil) -> StatusUpdate {
+        let stored = storedLook(for: reference)
         guard let id else {
             lastReportedMissingLUT = nil
             return .cleared
         }
+        // Embedded bytes need no scan, so they settle the question immediately.
+        if case .embedded? = stored, stored?.lutID == id {
+            lastReportedMissingLUT = nil
+            return .cleared
+        }
         guard !library.isScanning else { return .unchanged }
-        guard resolve(id) == nil else {
+        guard resolve(id, stored: stored) == nil else {
             lastReportedMissingLUT = nil
             return .cleared
         }

@@ -278,6 +278,36 @@ dependency; the browser file is only a reusable user-facing copy.
 The selected Look is persisted by stable `LUTID`. A missing file leaves the edit reference intact
 and renders without the unresolved LUT until it can be resolved again.
 
+### Reproducing a saved revision (KRMA-1156)
+
+A `LUTID` names a file or starter Look, not its bytes, so a revision's `LUTID` alone cannot
+reproduce its pixels after the file moves, is deleted, or is replaced in place. The revision's
+content-addressed `PortablePackageLookReference` (`Looks/<sha256>.cube`) does. The rules:
+
+- **Load.** `EditDocumentStore` reads the blob, parses it under the document's own `LUTID`, checks
+  the parsed content hash against the stored hash, and publishes the result in `StoredLookRegistry`
+  on every load, save, and revision selection (history restore included). The editor, thumbnails,
+  preview admission, the idle warmer, and export resolve a photo's Look through
+  `LookSelectionCoordinator.resolve(_:for:)`, which prefers that verified embedded Look over the
+  browser. A package opened in a profile without the external Look folder therefore renders and
+  exports the same pixels as the original session, for the current revision and restored snapshots.
+- **Save.** An ordinary save, snapshot, or edit of an unchanged Look carries the current revision's
+  verified embedded reference forward, even when the external file is gone. Choosing a different
+  Look embeds that Look's browser bytes.
+- **Same-path replacement and retired IDs.** A rescan that finds different bytes at the same path,
+  or a starter ID later retired in favour of a successor, does not change a saved revision. Choosing
+  the same Look again in the Look browser while its bytes differ from the revision's is the
+  deliberate act that adopts them: it queues a new edit that embeds the new bytes. Retired-ID
+  aliasing (above) applies only to revisions with no embedded reference, such as ones written before
+  Looks were embedded.
+- **Unresolvable Looks.** If the embedded blob is missing, corrupt, or unparsable, only a browser
+  Look with exactly the stored content hash may stand in. No nearest or successor Look is
+  substituted. The revision keeps its `LUTID` and reference, the inspector reports the Look as
+  unavailable, the preview is ungraded, and a per-asset export of that photo fails visibly.
+- **Not covered.** A session-only derived Look (`derived://`) has no bytes to embed until it is
+  saved as a file. A virtual copy starts from the source photo's document but not its embedded
+  reference, so it embeds the browser's bytes when available.
+
 ### Retired Looks (KRMA-1131)
 
 The film-look family made three starter Looks redundant. The decision (2026-10-26) followed an A/B

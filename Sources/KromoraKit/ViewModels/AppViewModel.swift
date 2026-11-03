@@ -357,7 +357,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
     }
     /// Owns Look resolution (library scan, then derived registry), the missing-reference report,
     /// and selection/audition decisions. The document stays here; see `LookSelectionCoordinator`.
-    @ObservationIgnored private lazy var lookSelection = LookSelectionCoordinator(library: library)
+    @ObservationIgnored private lazy var lookSelection = LookSelectionCoordinator(library: library, store: editStore)
     /// Package-backed edit history, named snapshots, and virtual-copy I/O for the active photo.
     @ObservationIgnored lazy var editHistory = EditHistoryCoordinator(
         store: editStore,
@@ -379,7 +379,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
     /// The selected Look resolved from the active photo's persisted `LUTID`. Resolution is
     /// deliberately fresh: a library rescan may replace the in-memory `CubeLUT`, but it must not
     /// change the document's reference (§4.3).
-    var selectedLook: CubeLUT? { resolvedLUT(document.lut.lutID) }
+    var selectedLook: CubeLUT? { resolvedLUT(document.lut.lutID, for: activeSourceReference) }
 
     /// The active photo's persisted Look strength.
     var lookIntensity: Double { document.lut.intensity }
@@ -835,7 +835,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
     func editedThumbnailDocumentRevision(for assetID: PhotoAssetID) -> UInt64 {
         editorDocument.revision(for: assetID)
     }
-    func resolvedEditedThumbnailLUT(_ id: LUTID?) -> CubeLUT? { resolvedLUT(id) }
+    func resolvedEditedThumbnailLUT(_ id: LUTID?, for reference: EditSourceReference) -> CubeLUT? { resolvedLUT(id, for: reference) }
     func markEditedThumbnailStale(for assetID: PhotoAssetID) {
         editedThumbnailItem(for: assetID)?.markEditedThumbnailStale()
     }
@@ -1491,7 +1491,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         // Export resolves each selected asset's durable document on demand. The LUT table is not
         // part of that Codable record, so resolve its stable ID against the current Look library
         // only after the store has supplied the per-photo document.
-        export.lutResolver = { [weak self] id in self?.resolvedLUT(id) }
+        export.lutResolver = { [weak self] id, reference in self?.resolvedLUT(id, for: reference) }
 
         // A rescan can mean the bytes behind an unchanged `LUTID` have changed — a path is the
         // identity, so a `.cube` replaced in place keeps it. The library reports which IDs now
@@ -1690,7 +1690,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         let currentDocument = document
         let request = AutoWorkflowRequest(
             source: imageSource, assetID: assetID, document: currentDocument,
-            lut: resolvedLUT(document.lut.lutID)
+            lut: resolvedLUT(document.lut.lutID, for: activeSourceReference)
         )
         let runner = ProductionAutoWorkflow(engine: engine, analysis: photoAnalysisCoordinator)
         _ = autoWorkflowCoordinator.start(
@@ -3387,6 +3387,15 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         if let look, look.lutID.isDerived { lookSelection.register(look) }
         endUndoGrouping()
         updateDocument { $0.lut.lutID = look?.lutID }
+        if let look, let reference = activeSourceReference, lookSelection.replacesStoredBytes(with: look, for: reference) {
+            Task { [weak self] in
+                await self?.lookSelection.adopt(look, for: reference)
+                guard let self, !self.isShuttingDown, self.activeSourceReference == reference else { return }
+                queuePersistence(document, for: reference, reportsStatus: true)
+                schedulePreview()
+                editedThumbnailCoordinator.refreshMaterializedThumbnails(affecting: [look.lutID])
+            }
+        }
         refreshLUTResolutionStatus()
     }
 
@@ -3596,18 +3605,13 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         }
     }
 
-    private func resolvedLUT(_ id: LUTID?) -> CubeLUT? { lookSelection.resolve(id) }
+    private func resolvedLUT(_ id: LUTID?, for reference: EditSourceReference? = nil) -> CubeLUT? { lookSelection.resolve(id, for: reference) }
 
     private func refreshLUTResolutionStatus() {
-        switch lookSelection.refreshStatus(for: document.lut.lutID) {
-        case .unchanged:
-            break
-        case .cleared:
-            autoLook.setLUTResolutionStatus(nil)
-        case .missing(let message):
-            autoLook.setLUTResolutionStatus(message)
-            statusMessage = message
-        }
+        let update = lookSelection.refreshStatus(for: document.lut.lutID, reference: activeSourceReference)
+        guard update != .unchanged else { return }
+        autoLook.setLUTResolutionStatus(update.message)
+        if let message = update.message { statusMessage = message }
     }
 
     func selectPreviousLook() {
@@ -4211,7 +4215,8 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
             } else {
                 itemDocument = editorDocument.session(for: id)?.document
             }
-            let itemLUT = itemDocument.flatMap { resolvedLUT($0.lut.lutID) }
+            let itemReference = EditSourceReference(assetID: id, portableIdentity: asset.source.portableIdentity, url: asset.url)
+            let itemLUT = itemDocument.flatMap { resolvedLUT($0.lut.lutID, for: itemReference) }
             return ExportCoordinator.BatchItem(
                 url: asset.url,
                 data: asset.source.data,
@@ -4797,7 +4802,7 @@ extension AppViewModel: PreviewAdmissionDestination {
             assetID: item.id, portableIdentity: persistencePortableIdentity(for: item), url: item.url
         )
     }
-    func admissionResolvedLUT(_ id: LUTID?) -> CubeLUT? { resolvedLUT(id) }
+    func admissionResolvedLUT(_ id: LUTID?, for reference: EditSourceReference) -> CubeLUT? { resolvedLUT(id, for: reference) }
     func admissionAdjacentPlan(for document: EditDocument, nativeExtent: CGSize) -> ResolutionPlan {
         var planner = ResolutionPlanner()
         return planner.plan(
@@ -5003,7 +5008,7 @@ extension AppViewModel: IdleFrameWarmerDestination {
         return admissionStoredLookSignature(for: editorDocument.session(for: assetID)?.document.lut.lutID)
     }
 
-    func idleFrameWarmerResolvedLUT(_ id: LUTID?) -> CubeLUT? { resolvedLUT(id) }
+    func idleFrameWarmerResolvedLUT(_ id: LUTID?, for reference: EditSourceReference) -> CubeLUT? { resolvedLUT(id, for: reference) }
 
     func idleFrameWarmerCanonicalRequest(
         source: ImageSource, assetID: PhotoAssetID, document: EditDocument, lut: CubeLUT?

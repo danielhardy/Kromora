@@ -838,7 +838,7 @@ private final class FakePreviewAdmissionDestination: PreviewAdmissionDestination
     func admissionSourceReference(for item: ImageCollection.Item) -> EditSourceReference {
         EditSourceReference(assetID: item.id, url: item.url)
     }
-    func admissionResolvedLUT(_ id: LUTID?) -> CubeLUT? { nil }
+    func admissionResolvedLUT(_ id: LUTID?, for reference: EditSourceReference) -> CubeLUT? { nil }
     func admissionAdjacentPlan(for document: EditDocument, nativeExtent: CGSize) -> ResolutionPlan {
         admissionPresentation.plan(
             for: document, nativeExtent: nativeExtent,

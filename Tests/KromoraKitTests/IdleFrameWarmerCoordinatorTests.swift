@@ -171,7 +171,7 @@ final class IdleWarmTestDestination: IdleFrameWarmerDestination {
         savedLooks[assetID]
     }
 
-    func idleFrameWarmerResolvedLUT(_ id: LUTID?) -> CubeLUT? {
+    func idleFrameWarmerResolvedLUT(_ id: LUTID?, for reference: EditSourceReference) -> CubeLUT? {
         guard let id else { return nil }
         return luts[id]
     }

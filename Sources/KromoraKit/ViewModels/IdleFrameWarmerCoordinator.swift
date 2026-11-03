@@ -125,7 +125,7 @@ protocol IdleFrameWarmerDestination: AnyObject {
     var idleFrameWarmerActivePortableAssetID: PortablePhotoAssetID? { get }
     var idleFrameWarmerVisiblePortableAssetIDs: Set<PortablePhotoAssetID> { get }
     func idleFrameWarmerSavedLookSignature(for assetID: PhotoAssetID) -> LookSignature?
-    func idleFrameWarmerResolvedLUT(_ id: LUTID?) -> CubeLUT?
+    func idleFrameWarmerResolvedLUT(_ id: LUTID?, for reference: EditSourceReference) -> CubeLUT?
     func idleFrameWarmerCanonicalRequest(
         source: ImageSource, assetID: PhotoAssetID, document: EditDocument, lut: CubeLUT?
     ) -> RenderRequest
@@ -375,7 +375,7 @@ final class IdleFrameWarmerCoordinator {
 
         let document = loaded.document
         let savedLook: LookSignature? = candidate.inMemoryLookSignature ?? loaded.lookSignature
-        let lut = destination?.idleFrameWarmerResolvedLUT(document.lut.lutID)
+        let lut = destination?.idleFrameWarmerResolvedLUT(document.lut.lutID, for: candidate.reference)
         let renderLook = LookSignature(settings: document.lut, resolved: lut)
         let hasSavedLookReference = savedLook?.permitsExactReuse == true
             && savedLook?.lutID == document.lut.lutID
