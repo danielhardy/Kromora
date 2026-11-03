@@ -845,14 +845,20 @@ actor RenderEngine: RenderEngining {
         let task: Task<LocalMaskPayload, Error>
     }
     private var inFlightSemanticMaskResolutions: [UUID: InFlightSemanticMaskResolution] = [:]
+    /// Kernel availability, validated once. A document that needs an unavailable kernel fails
+    /// `buildImage` rather than rendering without the edit that kernel produces.
+    private let kernelStatus: CIKernelLibraryStatus
     private var activeRevisionedMaskSource: String?
 
     init(
         maskResolver: any LocalMaskResolving = DefaultLocalMaskResolver(),
         configuration: RenderCacheConfiguration = .default,
-        semanticMaskPreviewCap: PixelDimensions? = SemanticMaskPreviewResolution.defaultCap
+        semanticMaskPreviewCap: PixelDimensions? = SemanticMaskPreviewResolution.defaultCap,
+        kernelStatus: CIKernelLibraryStatus = .bundled
     ) {
-        self.resources = RenderEngineResources(configuration: configuration)
+        self.resources = RenderEngineResources(
+            configuration: configuration, kernelStatus: kernelStatus)
+        self.kernelStatus = kernelStatus
         self.localMaskResolver = maskResolver
         self.semanticMaskPreviewCap = semanticMaskPreviewCap
         Task { [weak self] in await self?.installMemoryPressureMonitor() }
@@ -871,9 +877,12 @@ actor RenderEngine: RenderEngining {
         context: CIContext,
         maskResolver: any LocalMaskResolving = DefaultLocalMaskResolver(),
         configuration: RenderCacheConfiguration = .default,
-        semanticMaskPreviewCap: PixelDimensions? = SemanticMaskPreviewResolution.defaultCap
+        semanticMaskPreviewCap: PixelDimensions? = SemanticMaskPreviewResolution.defaultCap,
+        kernelStatus: CIKernelLibraryStatus = .bundled
     ) {
-        self.resources = RenderEngineResources(context: context, configuration: configuration)
+        self.resources = RenderEngineResources(
+            context: context, configuration: configuration, kernelStatus: kernelStatus)
+        self.kernelStatus = kernelStatus
         self.localMaskResolver = maskResolver
         self.semanticMaskPreviewCap = semanticMaskPreviewCap
         Task { [weak self] in await self?.installMemoryPressureMonitor() }
@@ -1518,6 +1527,7 @@ actor RenderEngine: RenderEngining {
         // Everything in this plan is value state. It is intentionally prepared before entering
         // the decoder/graph section so a future concurrent build worker can do this work without
         // borrowing the actor-owned Core Image resources.
+        try kernelStatus.require(RenderKernelRequirements.names(for: document))
         let sourceFingerprint = RenderSourceFingerprint(source)
         let identity = documentIdentity(for: document, source: sourceFingerprint)
         let plan = RenderBuildPlan.make(
@@ -2084,24 +2094,24 @@ actor RenderEngine: RenderEngining {
                 guard let image = projected else { throw LocalMaskResolutionError.invalidPayload }
                 var componentImage = image.cropped(to: extent)
                 if component.isInverted {
-                    componentImage = localMaskRenderer.inverted(componentImage, extent: extent)
+                    componentImage = try localMaskRenderer.inverted(componentImage, extent: extent)
                 }
                 if let current = effective {
-                    effective = localMaskRenderer.combined(
+                    effective = try localMaskRenderer.combined(
                         current, with: componentImage,
                         mode: onlyComponentID == nil ? component.mode : .replace, extent: extent
                     )
                 } else {
                     // A first subtract/intersect component is defined against an empty mask, so
                     // composition remains deterministic regardless of component ordering.
-                    effective = localMaskRenderer.combined(
+                    effective = try localMaskRenderer.combined(
                         localMaskRenderer.emptyMask(extent: extent), with: componentImage,
                         mode: onlyComponentID == nil ? component.mode : .replace, extent: extent
                     )
                 }
             }
             guard var mask = effective else { continue }
-            if layer.isInverted { mask = localMaskRenderer.inverted(mask, extent: extent) }
+            if layer.isInverted { mask = try localMaskRenderer.inverted(mask, extent: extent) }
             result[layer.id] = mask
         }
         let cacheIdentity: MaskRasterCacheIdentity? = hasSemanticMask ? MaskRasterCacheIdentity(

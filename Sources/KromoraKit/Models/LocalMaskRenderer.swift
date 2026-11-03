@@ -40,8 +40,16 @@ final class LocalMaskRenderer {
     private var brushStrokeCacheNewest: String?
     private var brushStrokeCacheCostBytes = 0
 
-    init(maxBrushStrokeCacheCostBytes: Int = 64 * 1024 * 1024) {
+    /// Which kernels loaded. Composition steps consult it so an unavailable kernel throws instead
+    /// of returning the unmodified mask, which would apply a local adjustment to the wrong region.
+    private let kernelStatus: CIKernelLibraryStatus
+
+    init(
+        maxBrushStrokeCacheCostBytes: Int = 64 * 1024 * 1024,
+        kernelStatus: CIKernelLibraryStatus = .bundled
+    ) {
         self.maxBrushStrokeCacheCostBytes = max(0, maxBrushStrokeCacheCostBytes)
+        self.kernelStatus = kernelStatus
     }
 
     /// One value-only diagnostics boundary for the bounded brush cache. Callers do not receive
@@ -131,12 +139,18 @@ final class LocalMaskRenderer {
             .cropped(to: extent)
     }
 
-    func inverted(_ image: CIImage, extent: CGRect) -> CIImage {
-        invertKernel?.apply(extent: extent, roiCallback: { _, rect in rect }, arguments: [image])?
-            .cropped(to: extent) ?? image
+    func inverted(_ image: CIImage, extent: CGRect) throws -> CIImage {
+        try kernelStatus.require(["localInvertMask"])
+        guard let result = invertKernel?.apply(
+            extent: extent, roiCallback: { _, rect in rect }, arguments: [image]
+        ) else { throw CIKernelLibraryError.kernelUnavailable(name: "localInvertMask", underlying: nil) }
+        return result.cropped(to: extent)
     }
 
-    func combined(_ current: CIImage, with next: CIImage, mode: MaskCombineMode, extent: CGRect) -> CIImage {
+    func combined(
+        _ current: CIImage, with next: CIImage, mode: MaskCombineMode, extent: CGRect
+    ) throws -> CIImage {
+        try kernelStatus.require(["localCombineMask"])
         let value: CGFloat
         switch mode {
         case .replace: value = 0
@@ -144,11 +158,12 @@ final class LocalMaskRenderer {
         case .subtract: value = 2
         case .intersect: value = 3
         }
-        return combineKernel?.apply(
+        guard let result = combineKernel?.apply(
             extent: extent,
             roiCallback: { _, rect in rect },
             arguments: [current, next, CIVector(x: value, y: 0, z: 0, w: 0)]
-        )?.cropped(to: extent) ?? current
+        ) else { throw CIKernelLibraryError.kernelUnavailable(name: "localCombineMask", underlying: nil) }
+        return result.cropped(to: extent)
     }
 
     func emptyMask(extent: CGRect) -> CIImage {
@@ -170,7 +185,10 @@ final class LocalMaskRenderer {
         radial: CIVector,
         controls: CIVector
     ) -> CIImage? {
-        analyticKernel?.apply(
+        // A nil result is "no mask": the caller reports an invalid payload. The engine's kernel
+        // preflight reports the unavailable kernel itself before this is reached.
+        guard kernelStatus.failures["localAnalyticMask"] == nil else { return nil }
+        return analyticKernel?.apply(
             extent: extent,
             roiCallback: { _, rect in rect },
             arguments: [

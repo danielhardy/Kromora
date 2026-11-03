@@ -210,7 +210,10 @@ final class RenderEngineResources {
         return PerceptualDigest(bytes: cells)
     }
 
-    init(configuration: RenderCacheConfiguration) {
+    init(
+        configuration: RenderCacheConfiguration,
+        kernelStatus: CIKernelLibraryStatus = .bundled
+    ) {
         self.configuration = configuration
         // The graph evaluates in the app's working gamut, linear. Built-in filters such as
         // `CIToneCurve` clamp to the working gamut, so the default extended-linear-sRGB context would
@@ -248,10 +251,15 @@ final class RenderEngineResources {
             maxCostBytes: configuration.localMaskMaxCostBytes
         )
         self.localMaskRenderer = LocalMaskRenderer(
-            maxBrushStrokeCacheCostBytes: configuration.localMaskMaxCostBytes)
+            maxBrushStrokeCacheCostBytes: configuration.localMaskMaxCostBytes,
+            kernelStatus: kernelStatus)
     }
 
-    init(context: CIContext, configuration: RenderCacheConfiguration) {
+    init(
+        context: CIContext,
+        configuration: RenderCacheConfiguration,
+        kernelStatus: CIKernelLibraryStatus = .bundled
+    ) {
         self.configuration = configuration
         self.context = context
         // An injected context may target a device unknown to the caller. Keep the deterministic
@@ -279,7 +287,8 @@ final class RenderEngineResources {
             maxCostBytes: configuration.localMaskMaxCostBytes
         )
         self.localMaskRenderer = LocalMaskRenderer(
-            maxBrushStrokeCacheCostBytes: configuration.localMaskMaxCostBytes)
+            maxBrushStrokeCacheCostBytes: configuration.localMaskMaxCostBytes,
+            kernelStatus: kernelStatus)
     }
 
     func invalidateLUTDependentCaches() {
