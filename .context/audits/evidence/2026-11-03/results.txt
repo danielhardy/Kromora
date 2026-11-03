@@ -1,0 +1,28 @@
+Kromora code-quality audit, 2026-11-03
+Reviewed HEAD: b7e46d5c01dcc8057f48c8872e069801e3e30af9
+Toolchain: Apple Swift 6.4 (swiftlang-6.4.0.33.1), Xcode 27.0 (27A5252f)
+Execution OS: macOS 27.2 (26B123), arm64
+
+Baseline debug build: passed (18.36 s)
+Selected baseline tests: 72 executed, 0 failures (7.267 s execution, excluding build)
+Suites: ImageWorkSchedulerTests, EditDocumentRetentionCostTests,
+EditHistoryCoordinatorTests, PhotoAnalysisCoordinatorTests, EditDocumentStoreTests,
+LookSelectionCoordinatorTests, RetouchWorkflowCoordinatorTests
+
+code-quality-probes.swift (linked against freshly built production KromoraKit.o):
+scheduler: configured=1 peakActual=8 runningReported=0 actualAfterShutdownBarrier=8
+retention: byteBudget=1000000 reported=8192 sumOfRetainedDocumentEstimates=3208581 retainedSessions=1
+snapshot: liveExposure=0.9 durableExposure=0.1 loadReady=true
+
+additional-quality-probes.swift (linked against same production object):
+analysis: detailedRequestReturnedGlobalOnly=true requestedMaskStages=0
+retouch: undoGroupEndsAtShutdown=0 undoGroupEndsAfterShutdown=["B"]
+looks: embeddedBytesMatch=true freshLoadReady=true runtimeResolverFoundLook=false
+looks: embeddedReferencesAfterOrdinaryEdit=0
+
+The scheduler and retouch probes inject cancellation-oblivious/gated operations.
+Snapshot and Look persistence use real production package/store code with disposable files.
+The analysis probe seeds a valid global-only cache and requests detailed analysis.
+The retention count sums the production per-document payload estimates, not measured RSS.
+No original photos, user packages, or user preferences are modified by these probes.
+No GUI, full test lane, RAW benchmark, packaged-app qualification, or Instruments capture was run.
