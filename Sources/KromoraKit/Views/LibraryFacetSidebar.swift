@@ -2,12 +2,18 @@ import SwiftUI
 
 /// The optional advanced filter sidebar beside the Library grid.
 ///
-/// Counts come from the index off the main actor and are recomputed whenever the query changes.
+/// Counts come from the index off the main actor and are recomputed, coalesced, whenever the
+/// query or the published index changes.
 struct LibraryFacetSidebar: View {
     let viewModel: AppViewModel
-    @State private var counts = LibraryFacetCounts()
+    @State private var countsModel = LibraryFacetCountsModel()
+
+    private var counts: LibraryFacetCounts { countsModel.counts }
 
     private var query: LibraryQuery { viewModel.libraryPresentation.query }
+    private var countsKey: LibraryFacetCountsModel.Key {
+        .init(query: query, indexRevision: viewModel.libraryPresentation.indexRevision)
+    }
 
     /// Observed bounds, widened to include an active selection so it can always be adjusted.
     private func rangeBounds(for facet: LibraryRangeFacet) -> ClosedRange<Double>? {
@@ -72,7 +78,9 @@ struct LibraryFacetSidebar: View {
         .background(KromoraTheme.secondaryChrome)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Metadata filters")
-        .task(id: query) { counts = await viewModel.portableFacetCounts() ?? counts }
+        .task(id: countsKey) {
+            await countsModel.refresh(for: countsKey) { _ in await viewModel.portableFacetCounts() }
+        }
     }
 }
 

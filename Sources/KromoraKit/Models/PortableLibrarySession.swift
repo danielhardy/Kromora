@@ -61,7 +61,9 @@ final class PortableLibrarySession {
     private(set) var queryController: LibraryQueryController
     /// Advances whenever the published index is replaced, so an index-side plan built from an
     /// earlier `queryController` value can be recognized as stale.
-    private(set) var indexGeneration: UInt64 = 0
+    private(set) var indexGeneration: UInt64 = 0 {
+        didSet { onIndexReplaced?() }
+    }
     private var startupFirstPage: LibraryQueryPage?
     private var importCatalog: PortablePackageImportCatalog?
     private let leaseDuration: TimeInterval
@@ -82,6 +84,8 @@ final class PortableLibrarySession {
     private(set) var isLoadingIndex = false
     private(set) var didRepairIndexOnOpen = false
     var onIndexLoadingStateChange: (@MainActor (LibraryIndexLoadingState) -> Void)?
+    /// Called each time the published index is replaced, including by import and backfill deltas.
+    var onIndexReplaced: (@MainActor () -> Void)?
     var onIndexWriteFailure: (@MainActor (String) -> Void)?
     var onPresentedAspectRatioUpdates: (@MainActor ([PortablePhotoAssetID: Double]) -> Void)?
     /// Test seam: runs on the repair thread while it holds the writer mutation lock for a shard,

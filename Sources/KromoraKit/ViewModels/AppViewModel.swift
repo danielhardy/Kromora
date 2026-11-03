@@ -1454,6 +1454,8 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
             guard let self, !self.isShuttingDown else { return }
             self.statusMessage = "Could not save the library index: \(message)"
         }
+        session.onIndexReplaced = { [weak self] in self?.libraryPresentation.noteIndexChanged() }
+        libraryPresentation.noteIndexChanged()
         session.onPresentedAspectRatioUpdates = { [weak self] updates in
             self?.libraryBrowsingCoordinator.applyPresentedAspectRatioUpdates(updates)
         }

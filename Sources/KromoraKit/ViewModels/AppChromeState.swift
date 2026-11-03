@@ -16,12 +16,16 @@ final class StatusState {
 @Observable
 final class LibraryPresentationState {
     var query = LibraryQuery.all
+    /// Advances whenever the open library's index is replaced, so views that project the index
+    /// (facet counts) can refresh even though the query is unchanged.
+    private(set) var indexRevision: UInt64 = 0
     private(set) var importProgress: PortablePackageImportProgress?
     /// The model owns the immutable target snapshot so a late selection change cannot redirect a
     /// destructive action.
     var deletionConfirmation: LibraryDeletionConfirmation?
 
     func setImportProgress(_ progress: PortablePackageImportProgress?) { importProgress = progress }
+    func noteIndexChanged() { indexRevision &+= 1 }
 }
 
 /// Picker and panel visibility owned by the window chrome.
