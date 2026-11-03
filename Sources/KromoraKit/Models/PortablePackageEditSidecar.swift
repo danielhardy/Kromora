@@ -397,10 +397,16 @@ extension PortableLibraryPackage {
     /// The edit-revision transaction. The membership summary's `presentedAspectRatio` is staged in
     /// the same transaction as the asset record that advances the current revision, so a reader
     /// can never observe a new edit beside old geometry, or the reverse.
+    ///
+    /// `preservingCurrent` appends the revision to the history without moving the current-revision
+    /// pointer, discarding forward edits, or touching the presented geometry. A named snapshot
+    /// uses it so the captured value can never displace a newer accepted edit; the decision is
+    /// made under the writer lock, against the record as it is at commit time.
     func commitEditRevision(
         for assetID: PortablePhotoAssetID,
         document: EditDocument,
         snapshotName: String? = nil,
+        preservingCurrent: Bool = false,
         lookBytes: [Data] = [],
         lease: PortablePackageLease,
         now: Date = Date(),
@@ -410,6 +416,7 @@ extension PortableLibraryPackage {
         try lease.withWriterMutationLock {
             try commitEditRevisionUnderWriterLock(
                 for: assetID, document: document, snapshotName: snapshotName,
+                preservingCurrent: preservingCurrent,
                 lookBytes: lookBytes, lease: lease, now: now,
                 isCancelled: isCancelled, faultInjector: faultInjector
             )
@@ -420,6 +427,7 @@ extension PortableLibraryPackage {
         for assetID: PortablePhotoAssetID,
         document: EditDocument,
         snapshotName: String? = nil,
+        preservingCurrent: Bool = false,
         lookBytes: [Data] = [],
         lease: PortablePackageLease,
         now: Date = Date(),
@@ -507,6 +515,25 @@ extension PortableLibraryPackage {
             if isCancelled() { throw CancellationError() }
             try transaction.stage(data: xmpData, at: xmpPath)
             if isCancelled() { throw CancellationError() }
+
+            if preservingCurrent {
+                record.editHistory.edits.append(
+                    .init(
+                        revision: nextRevision,
+                        relativePath: nativePath,
+                        xmpRelativePath: xmpPath,
+                        isNamedSnapshot: snapshotName != nil
+                    )
+                )
+                try transaction.stage(
+                    data: try encodedAssetRecord(record), at: assetRecordPath(for: assetID)
+                )
+                try transaction.commit(now: now, isCancelled: isCancelled)
+                return PortablePackageEditCommit(
+                    sidecar: PortablePackageEditSidecar(native: persistedRevision, xmp: xmp),
+                    membership: nil
+                )
+            }
 
             // A new edit after history navigation starts a branch at the selected revision.
             // Keep named snapshots as durable, independently restorable states, while removing

@@ -176,6 +176,8 @@ actor EditDocumentStore {
     private var membershipObserver: (@Sendable (PortablePackageMembershipEntry) -> Void)?
     private var artificialWriteDelay: Duration
     private var failuresRemaining: Int
+    /// Test synchronization point immediately before the atomic package edit transaction.
+    private let beforeEditCommitGate: (@Sendable () async -> Void)?
     private let writeAcknowledgementGate: (@Sendable () async -> Void)?
 
     private init(awaitsBinding: Bool = false) {
@@ -185,6 +187,7 @@ actor EditDocumentStore {
         cacheCapacity = Self.defaultCacheCapacity
         artificialWriteDelay = .zero
         failuresRemaining = 0
+        beforeEditCommitGate = nil
         writeStartSignal = nil
         writeAcknowledgementGate = nil
     }
@@ -196,6 +199,7 @@ actor EditDocumentStore {
         cacheCapacity: Int = EditDocumentStore.defaultCacheCapacity,
         artificialWriteDelay: Duration = .zero,
         failuresBeforeSuccess: Int = 0,
+        beforeEditCommitGate: (@Sendable () async -> Void)? = nil,
         writeStartSignal: AsyncStream<Void>.Continuation? = nil,
         writeAcknowledgementGate: (@Sendable () async -> Void)? = nil
     ) {
@@ -204,6 +208,7 @@ actor EditDocumentStore {
         self.cacheCapacity = max(1, cacheCapacity)
         self.artificialWriteDelay = artificialWriteDelay
         self.failuresRemaining = max(0, failuresBeforeSuccess)
+        self.beforeEditCommitGate = beforeEditCommitGate
         self.writeStartSignal = writeStartSignal
         self.writeAcknowledgementGate = writeAcknowledgementGate
     }
@@ -215,13 +220,15 @@ actor EditDocumentStore {
         cacheCapacity: Int = EditDocumentStore.defaultCacheCapacity,
         artificialWriteDelay: Duration = .zero,
         failuresBeforeSuccess: Int = 0,
+        beforeEditCommitGate: (@Sendable () async -> Void)? = nil,
         writeStartSignal: AsyncStream<Void>.Continuation? = nil,
         writeAcknowledgementGate: (@Sendable () async -> Void)? = nil
     ) throws {
         try self.init(
             package: PortableLibraryPackage.openForQuery(at: packageRoot), lease: lease,
             cacheCapacity: cacheCapacity, artificialWriteDelay: artificialWriteDelay,
-            failuresBeforeSuccess: failuresBeforeSuccess, writeStartSignal: writeStartSignal,
+            failuresBeforeSuccess: failuresBeforeSuccess,
+            beforeEditCommitGate: beforeEditCommitGate, writeStartSignal: writeStartSignal,
             writeAcknowledgementGate: writeAcknowledgementGate
         )
     }
@@ -407,14 +414,17 @@ actor EditDocumentStore {
         try await save(document, for: source, snapshotName: nil)
     }
 
+    /// Stores `document` as a named snapshot in the edit history without changing which revision is
+    /// current, so a snapshot captured earlier can never replace a newer accepted edit.
     func saveSnapshot(_ document: EditDocument, named name: String, for source: EditSourceReference) async throws {
         let normalized = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { throw StoreError.cannotWrite("snapshot name cannot be empty") }
-        try await save(document, for: source, snapshotName: normalized)
+        try await save(document, for: source, snapshotName: normalized, preservingCurrent: true)
     }
 
     private func save(
-        _ document: EditDocument, for source: EditSourceReference, snapshotName: String?
+        _ document: EditDocument, for source: EditSourceReference, snapshotName: String?,
+        preservingCurrent: Bool = false
     ) async throws {
         markIO()
         await awaitEmbeddedLooks()
@@ -434,14 +444,18 @@ actor EditDocumentStore {
                 throw StoreError.cannotWrite("injected persistence failure")
             }
             let package = try PortableLibraryPackage.openForQuery(at: packageRoot)
+            await beforeEditCommitGate?()
             let commit = try package.commitEditRevision(
                 for: source.portableAssetID, document: document,
-                snapshotName: snapshotName,
+                snapshotName: snapshotName, preservingCurrent: preservingCurrent,
                 lookBytes: sourceLookBytes(for: document), lease: packageLease
             )
             let sidecar = commit.sidecar
             if let membership = commit.membership { membershipObserver?(membership) }
-            insert(document, revision: sidecar.native.revision, for: source.portableAssetID)
+            // A snapshot leaves the current revision alone, so the cached current edit stays valid.
+            if !preservingCurrent {
+                insert(document, revision: sidecar.native.revision, for: source.portableAssetID)
+            }
             writeCount += 1
             status = .ready
             writeStartSignal?.yield(())
