@@ -185,6 +185,21 @@ final class SnapshotCurrentRevisionTests: TempDirectoryTestCase {
         XCTAssertEqual(nextCurrent, next[2].revision)
     }
 
+    func testHistorySnapshotReturnsRevisionsAndSelectedPointerTogether() async throws {
+        let fixture = try await makeFixture()
+        let reference = fixture.references[0]
+        try await fixture.store.save(document(0.1), for: reference)
+        try await fixture.store.save(document(0.2), for: reference)
+        try await fixture.store.saveSnapshot(document(0.6), named: "Side", for: reference)
+        let history = try await fixture.store.history(for: reference)
+        try await fixture.store.selectRevision(history[0].revision, for: reference)
+
+        let snapshot = try await fixture.store.historySnapshot(for: reference)
+
+        XCTAssertEqual(snapshot.revisions, history)
+        XCTAssertEqual(snapshot.currentRevision, history[0].revision)
+    }
+
     func testSnapshotAfterHistoryNavigationKeepsSelectedRevisionCurrent() async throws {
         let fixture = try await makeFixture()
         let reference = fixture.references[0]

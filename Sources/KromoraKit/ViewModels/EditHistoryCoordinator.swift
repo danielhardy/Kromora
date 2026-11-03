@@ -4,8 +4,8 @@ import Observation
 /// The package edit-history operations the coordinator needs. `EditDocumentStore` conforms; tests
 /// supply a fake.
 protocol EditHistoryStore: Sendable {
-    func history(for source: EditSourceReference) async throws -> [PortablePackageEditRevision]
-    func currentRevision(for source: EditSourceReference) async throws -> UInt64
+    /// History and the selected revision from one read, so the pair describes a single moment.
+    func historySnapshot(for source: EditSourceReference) async throws -> PortablePackageEditHistorySnapshot
     func selectRevision(_ revision: UInt64, for source: EditSourceReference) async throws
     func saveSnapshot(_ document: EditDocument, named name: String, for source: EditSourceReference) async throws
     func save(_ document: EditDocument, for source: EditSourceReference) async throws
@@ -17,8 +17,12 @@ extension EditDocumentStore: EditHistoryStore {}
 /// store I/O that browses, restores, snapshots and branches it.
 ///
 /// Every async store call is fenced: its result is applied only if the active source reference is
-/// still the one it was issued for. Writes (restore, snapshot, virtual copy) first end the open
-/// undo gesture and wait for the persistence flush, so the package sees the latest document.
+/// still the one it was issued for. Refreshes carry a generation as well; a newer refresh, a write
+/// reaching the store, or a cleared source supersedes every older refresh, success or failure, and
+/// a refresh publishes history and current revision as one store snapshot. Restores and snapshots
+/// run one at a time in call order, so completion order never decides which command wins. Writes
+/// (restore, snapshot, virtual copy) first end the open undo gesture and wait for the persistence
+/// flush, so the package sees the latest document.
 /// `AppViewModel` stays the sole owner of the published `EditDocument`; it supplies narrow closures
 /// and applies the restored document itself. The coordinator never holds the view model.
 @MainActor
@@ -68,9 +72,31 @@ final class EditHistoryCoordinator {
     private var operations: [UInt64: Operation] = [:]
     private var nextOperationID: UInt64 = 0
 
+    /// Bumped by every refresh, clear, and write that reaches the store; a refresh publishes only
+    /// while its own generation is still the latest.
+    @ObservationIgnored private var refreshGeneration: UInt64 = 0
+    /// The most recently accepted restore or snapshot; the next one starts only after it finishes.
+    @ObservationIgnored private var writeTail: Task<Void, Never>?
+
     private func clear() {
+        refreshGeneration &+= 1
         history = []
         currentRevision = 0
+    }
+
+    private func isCurrent(_ reference: EditSourceReference, generation: UInt64) -> Bool {
+        isCurrent(reference) && generation == refreshGeneration
+    }
+
+    /// Own a conflicting write (restore or snapshot) that runs after every earlier one has finished.
+    private func spawnWrite(_ body: @escaping @MainActor () async -> Void) -> Task<Void, Never>? {
+        let previous = writeTail
+        let task = spawn {
+            await previous?.value
+            await body()
+        }
+        writeTail = task
+        return task
     }
 
     /// Publication fence: the lifecycle is live and the active photo is still the one the operation
@@ -121,15 +147,16 @@ final class EditHistoryCoordinator {
             clear()
             return nil
         }
+        refreshGeneration &+= 1
+        let generation = refreshGeneration
         return spawn(cancelOnShutdown: true) { [self, store] in
             do {
-                let history = try await store.history(for: reference)
-                let currentRevision = try await store.currentRevision(for: reference)
-                guard isCurrent(reference) else { return }
-                self.history = history
-                self.currentRevision = currentRevision
+                let snapshot = try await store.historySnapshot(for: reference)
+                guard isCurrent(reference, generation: generation) else { return }
+                history = snapshot.revisions
+                currentRevision = snapshot.currentRevision
             } catch {
-                guard isCurrent(reference) else { return }
+                guard isCurrent(reference, generation: generation) else { return }
                 clear()
             }
         }
@@ -141,8 +168,9 @@ final class EditHistoryCoordinator {
         guard !isShutDown, let value = history.first(where: { $0.revision == revision }) else { return nil }
         environment.endUndoGrouping()
         guard let reference = environment.activeSourceReference() else { return nil }
-        return spawn { [self, store, environment] in
+        return spawnWrite { [self, store, environment] in
             guard await environment.flushPersistence() else { return }
+            refreshGeneration &+= 1
             do {
                 try await store.selectRevision(revision, for: reference)
                 guard isCurrent(reference) else { return }
@@ -164,8 +192,9 @@ final class EditHistoryCoordinator {
         guard !isShutDown, let reference = environment.activeSourceReference() else { return nil }
         environment.endUndoGrouping()
         let document = environment.currentDocument()
-        return spawn { [self, store, environment] in
+        return spawnWrite { [self, store, environment] in
             guard await environment.flushPersistence() else { return }
+            refreshGeneration &+= 1
             do {
                 try await store.saveSnapshot(document, named: name, for: reference)
                 guard isCurrent(reference) else { return }

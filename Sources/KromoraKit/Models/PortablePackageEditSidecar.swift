@@ -6,6 +6,12 @@ import Foundation
 /// A revision is intentionally a value rather than an update to an `EditDocument` in place. The
 /// package can therefore recover the last known-good revision after a failed commit, and an older
 /// package copy can still reproduce the exact render graph even if a user Look is later removed.
+/// The edit history of one asset together with the revision selected as current, read as one value.
+struct PortablePackageEditHistorySnapshot: Equatable, Sendable {
+    let revisions: [PortablePackageEditRevision]
+    let currentRevision: UInt64
+}
+
 struct PortablePackageEditRevision: Codable, Equatable, Sendable {
     static let currentSchemaVersion = 1
 
@@ -878,10 +884,19 @@ extension PortableLibraryPackage {
 
     /// Returns durable revisions in package order, including named snapshots and branch points.
     func readEditHistory(for assetID: PortablePhotoAssetID) throws -> [PortablePackageEditRevision] {
+        try readEditHistorySnapshot(for: assetID).revisions
+    }
+
+    /// Durable revisions plus the selected revision, both derived from one asset-record read so the
+    /// pair always describes a single moment.
+    func readEditHistorySnapshot(for assetID: PortablePhotoAssetID) throws -> PortablePackageEditHistorySnapshot {
         let record = try readAssetRecord(for: assetID)
-        return try record.editHistory.edits
+        let revisions = try record.editHistory.edits
             .sorted { $0.revision < $1.revision }
             .map { try readEditRevision(for: assetID, revision: $0.revision, record: record) }
+        return PortablePackageEditHistorySnapshot(
+            revisions: revisions, currentRevision: record.editHistory.currentRevision
+        )
     }
 
     /// Moves the package's current edit position without creating a new revision. Returns the

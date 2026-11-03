@@ -25,6 +25,21 @@ final class EditHistoryCoordinatorTests: XCTestCase {
         private var gate: CheckedContinuation<Void, Never>?
         private var gateEntered: CheckedContinuation<Void, Never>?
         private var gating = false
+        private var holdReads = false
+        private var heldTotal = 0
+        private var heldReads: [Int: CheckedContinuation<Void, Never>] = [:]
+        private var heldWaiter: (count: Int, continuation: CheckedContinuation<Void, Never>)?
+
+        /// Every later history read captures its result on arrival, then waits for `releaseRead`.
+        func holdReadsFromNowOn() { holdReads = true }
+        func waitForHeldReads(_ count: Int) async {
+            if heldTotal >= count { return }
+            await withCheckedContinuation { heldWaiter = (count, $0) }
+        }
+        /// Release the held read that arrived `index`th (zero-based).
+        func releaseRead(_ index: Int) {
+            heldReads.removeValue(forKey: index)?.resume()
+        }
 
         func armGate() { gating = true }
         /// Suspends until the gated call (history read or snapshot write) has begun.
@@ -53,15 +68,24 @@ final class EditHistoryCoordinatorTests: XCTestCase {
         func setFailReads(_ value: Bool) { failReads = value }
         func setFailSelect(_ value: Bool) { failSelect = value }
 
-        func history(for source: EditSourceReference) async throws -> [PortablePackageEditRevision] {
+        func historySnapshot(for source: EditSourceReference) async throws -> PortablePackageEditHistorySnapshot {
             calls.append("history")
+            let fails = failReads
+            let snapshot = PortablePackageEditHistorySnapshot(revisions: revisions, currentRevision: current)
             await passGate()
-            if failReads { throw CocoaError(.fileReadUnknown) }
-            return revisions
-        }
-        func currentRevision(for source: EditSourceReference) async throws -> UInt64 {
-            if failReads { throw CocoaError(.fileReadUnknown) }
-            return current
+            if holdReads {
+                let index = heldTotal
+                heldTotal += 1
+                await withCheckedContinuation { continuation in
+                    heldReads[index] = continuation
+                    if let waiter = heldWaiter, heldTotal >= waiter.count {
+                        heldWaiter = nil
+                        waiter.continuation.resume()
+                    }
+                }
+            }
+            if fails { throw CocoaError(.fileReadUnknown) }
+            return snapshot
         }
         func selectRevision(_ revision: UInt64, for source: EditSourceReference) async throws {
             calls.append("select")
@@ -72,6 +96,10 @@ final class EditHistoryCoordinatorTests: XCTestCase {
             calls.append("snapshot")
             await passGate()
             snapshots.append(name)
+            revisions.append(PortablePackageEditRevision(
+                assetID: source.portableAssetID, revision: (revisions.last?.revision ?? 0) + 1,
+                document: document, snapshotName: name
+            ))
         }
         func save(_ document: EditDocument, for source: EditSourceReference) async throws {
             calls.append("save")
@@ -189,6 +217,211 @@ final class EditHistoryCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(coordinator.history.map(\.revision), [1])
         XCTAssertEqual(coordinator.currentRevision, 1)
+    }
+
+    /// Poll the main actor until `condition` holds; a stale publication would land well inside it.
+    private func waitUntil(_ condition: @MainActor () -> Bool, file: StaticString = #filePath, line: UInt = #line) async {
+        for _ in 0..<2_000 where !condition() { await Task.yield() }
+        XCTAssertTrue(condition(), file: file, line: line)
+    }
+
+    func testOlderRefreshSuccessFinishingAfterNewerIsIgnored() async throws {
+        let store = FakeStore()
+        await store.set(revisions: [revision(1, exposure: 0.1)], current: 1)
+        let host = Host()
+        host.reference = referenceA
+        let coordinator = makeCoordinator(store: store, host: host)
+        await store.holdReadsFromNowOn()
+
+        let older = try XCTUnwrap(coordinator.refresh())
+        await store.waitForHeldReads(1)
+        await store.set(revisions: [revision(1, exposure: 0.1), revision(2, exposure: 0.2)], current: 2)
+        let newer = try XCTUnwrap(coordinator.refresh())
+        await store.waitForHeldReads(2)
+
+        await store.releaseRead(1)
+        await newer.value
+        XCTAssertEqual(coordinator.history.map(\.revision), [1, 2])
+        XCTAssertEqual(coordinator.currentRevision, 2)
+
+        await store.releaseRead(0)
+        await older.value
+        XCTAssertEqual(coordinator.history.map(\.revision), [1, 2], "the older read must not overwrite")
+        XCTAssertEqual(coordinator.currentRevision, 2)
+    }
+
+    func testOlderRefreshFailureFinishingAfterNewerDoesNotClearHistory() async throws {
+        let store = FakeStore()
+        await store.set(revisions: [revision(1, exposure: 0.1)], current: 1)
+        let host = Host()
+        host.reference = referenceA
+        let coordinator = makeCoordinator(store: store, host: host)
+        await store.holdReadsFromNowOn()
+        await store.setFailReads(true)
+
+        let older = try XCTUnwrap(coordinator.refresh())
+        await store.waitForHeldReads(1)
+        await store.setFailReads(false)
+        await store.set(revisions: [revision(1, exposure: 0.1), revision(2, exposure: 0.2)], current: 2)
+        let newer = try XCTUnwrap(coordinator.refresh())
+        await store.waitForHeldReads(2)
+
+        await store.releaseRead(1)
+        await newer.value
+        await store.releaseRead(0)
+        await older.value
+
+        XCTAssertEqual(coordinator.history.map(\.revision), [1, 2])
+        XCTAssertEqual(coordinator.currentRevision, 2)
+    }
+
+    func testRefreshFromAToBBackToAIgnoresTheFirstAReadEvenThoughSourceMatches() async throws {
+        let store = FakeStore()
+        await store.set(revisions: [revision(1, exposure: 0.1)], current: 1)
+        let host = Host()
+        host.reference = referenceA
+        let coordinator = makeCoordinator(store: store, host: host)
+        await store.holdReadsFromNowOn()
+
+        let firstA = try XCTUnwrap(coordinator.refresh())
+        await store.waitForHeldReads(1)
+        host.reference = referenceB
+        let forB = try XCTUnwrap(coordinator.refresh())
+        await store.waitForHeldReads(2)
+        host.reference = referenceA
+        await store.set(revisions: [revision(1, exposure: 0.1), revision(2, exposure: 0.2)], current: 2)
+        let secondA = try XCTUnwrap(coordinator.refresh())
+        await store.waitForHeldReads(3)
+
+        await store.releaseRead(2)
+        await secondA.value
+        await store.releaseRead(0)
+        await firstA.value
+        await store.releaseRead(1)
+        await forB.value
+
+        XCTAssertEqual(coordinator.history.map(\.revision), [1, 2])
+        XCTAssertEqual(coordinator.currentRevision, 2)
+    }
+
+    func testClearingTheSourceInvalidatesAnInFlightRefresh() async throws {
+        let store = FakeStore()
+        await store.set(revisions: [revision(1, exposure: 0.1)], current: 1)
+        let host = Host()
+        host.reference = referenceA
+        let coordinator = makeCoordinator(store: store, host: host)
+        await store.holdReadsFromNowOn()
+
+        let inFlight = try XCTUnwrap(coordinator.refresh())
+        await store.waitForHeldReads(1)
+        host.reference = nil
+        XCTAssertNil(coordinator.refresh())
+        host.reference = referenceA
+        await store.releaseRead(0)
+        await inFlight.value
+
+        XCTAssertTrue(coordinator.history.isEmpty)
+        XCTAssertEqual(coordinator.currentRevision, 0)
+    }
+
+    func testRefreshOverlappingRestorePublishesTheRestoredPointerWithItsHistory() async throws {
+        let store = FakeStore()
+        await store.set(revisions: [revision(1, exposure: 0.1), revision(2, exposure: 0.2)], current: 2)
+        let host = Host()
+        host.reference = referenceA
+        let coordinator = makeCoordinator(store: store, host: host)
+        await coordinator.refresh()?.value
+        await store.holdReadsFromNowOn()
+
+        // This read starts before the restore moves the pointer, so it holds the old pair.
+        let overlapping = try XCTUnwrap(coordinator.refresh())
+        await store.waitForHeldReads(1)
+        await coordinator.restore(1)?.value
+        await store.waitForHeldReads(2)
+
+        await store.releaseRead(1)
+        await waitUntil { coordinator.currentRevision == 1 && coordinator.history.count == 2 }
+        await store.releaseRead(0)
+        await overlapping.value
+
+        XCTAssertEqual(coordinator.currentRevision, 1, "the pre-restore pointer must not come back")
+        XCTAssertEqual(coordinator.history.map(\.revision), [1, 2])
+        XCTAssertEqual(host.adopted.count, 1)
+    }
+
+    func testRefreshOverlappingSnapshotPublishesTheSnapshotWithUnchangedPointer() async throws {
+        let store = FakeStore()
+        await store.set(revisions: [revision(1, exposure: 0.1), revision(2, exposure: 0.2)], current: 2)
+        let host = Host()
+        host.reference = referenceA
+        let coordinator = makeCoordinator(store: store, host: host)
+        await coordinator.refresh()?.value
+        await store.armGate()
+
+        let saving = try XCTUnwrap(coordinator.saveSnapshot(named: "Keep"))
+        await store.waitUntilGateEntered()
+        await store.holdReadsFromNowOn()
+        let overlapping = try XCTUnwrap(coordinator.refresh())
+        await store.waitForHeldReads(1)
+        await store.releaseGate()
+        await saving.value
+        await store.waitForHeldReads(2)
+
+        await store.releaseRead(1)
+        await waitUntil { coordinator.history.count == 3 }
+        await store.releaseRead(0)
+        await overlapping.value
+
+        XCTAssertEqual(coordinator.history.map(\.revision), [1, 2, 3])
+        XCTAssertEqual(coordinator.history.last?.snapshotName, "Keep")
+        XCTAssertEqual(coordinator.currentRevision, 2, "a snapshot never moves the pointer")
+    }
+
+    func testRestoreIssuedAfterSnapshotWaitsForItAndWins() async throws {
+        let store = FakeStore()
+        await store.set(revisions: [revision(1, exposure: 0.1), revision(2, exposure: 0.2)], current: 2)
+        let host = Host()
+        host.reference = referenceA
+        let coordinator = makeCoordinator(store: store, host: host)
+        await coordinator.refresh()?.value
+        await store.armGate()
+
+        let saving = try XCTUnwrap(coordinator.saveSnapshot(named: "First"))
+        await store.waitUntilGateEntered()
+        let restoring = try XCTUnwrap(coordinator.restore(1))
+        for _ in 0..<50 { await Task.yield() }
+        var calls = await store.calls
+        XCTAssertFalse(calls.contains("select"), "the restore waits for the earlier snapshot")
+
+        await store.releaseGate()
+        await saving.value
+        await restoring.value
+        calls = await store.calls
+        XCTAssertEqual(calls.filter { $0 != "history" }, ["snapshot", "select"])
+        await waitUntil { coordinator.currentRevision == 1 && coordinator.history.count == 3 }
+        XCTAssertEqual(host.adopted.count, 1)
+    }
+
+    func testSnapshotIssuedAfterRestoreRunsAfterItAndKeepsTheRestoredPointer() async throws {
+        let store = FakeStore()
+        await store.set(revisions: [revision(1, exposure: 0.1), revision(2, exposure: 0.2)], current: 2)
+        let host = Host()
+        host.reference = referenceA
+        let coordinator = makeCoordinator(store: store, host: host)
+        await coordinator.refresh()?.value
+        host.gateFlush = true
+
+        let restoring = try XCTUnwrap(coordinator.restore(1))
+        await host.waitForFlush()
+        let saving = try XCTUnwrap(coordinator.saveSnapshot(named: "Later"))
+        host.releaseFlush()
+        await restoring.value
+        await saving.value
+
+        let calls = await store.calls
+        XCTAssertEqual(calls.filter { $0 != "history" }, ["select", "snapshot"])
+        await waitUntil { coordinator.history.count == 3 && coordinator.currentRevision == 1 }
+        XCTAssertEqual(coordinator.history.last?.snapshotName, "Later")
     }
 
     func testRefreshWithoutActivePhotoAndOnReadFailureClearsState() async throws {

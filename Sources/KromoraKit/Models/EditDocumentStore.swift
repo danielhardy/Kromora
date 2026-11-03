@@ -400,6 +400,16 @@ actor EditDocumentStore {
         return try package.readEditHistory(for: source.portableAssetID)
     }
 
+    /// History and the selected revision from one read. The body never suspends, so no commit or
+    /// revision move on this actor can land between the two values.
+    func historySnapshot(for source: EditSourceReference) async throws -> PortablePackageEditHistorySnapshot {
+        guard let packageRoot else {
+            throw StoreError.cannotWrite(unavailableDetail)
+        }
+        let package = try PortableLibraryPackage.openForQuery(at: packageRoot)
+        return try package.readEditHistorySnapshot(for: source.portableAssetID)
+    }
+
     func currentRevision(for source: EditSourceReference) async throws -> UInt64 {
         guard let packageRoot else {
             throw StoreError.cannotWrite(unavailableDetail)
