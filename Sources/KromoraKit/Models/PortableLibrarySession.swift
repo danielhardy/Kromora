@@ -860,6 +860,11 @@ final class PortableLibrarySession {
         controller.facetCounts(query: query)
     }
 
+    /// The page holding `assetID` under `query`, or nil when the query excludes it.
+    func pageIndex(of assetID: PortablePhotoAssetID, query: LibraryQuery = .all) -> Int? {
+        queryController.pageIndex(of: assetID, query: query)
+    }
+
     func page(at pageIndex: Int, query: LibraryQuery = .all) -> LibraryQueryPage {
         if pageIndex == 0, query == .all, let startupFirstPage {
             return startupFirstPage

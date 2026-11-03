@@ -13,6 +13,7 @@ protocol LibraryBrowsingProviding: AnyObject {
     func browsingWindow(pageIndex: Int, query: LibraryQuery) throws
         -> (assets: [PhotoAsset], totalCount: Int, pageSize: Int)
     func page(at pageIndex: Int, query: LibraryQuery) -> LibraryQueryPage
+    func pageIndex(of assetID: PortablePhotoAssetID, query: LibraryQuery) -> Int?
     func facetCounts(query: LibraryQuery) async -> LibraryFacetCounts
     func browsingAssets(for items: [LibraryQueryItem]) throws -> [PhotoAsset]
     func browsingAssets(forIDs ids: [PortablePhotoAssetID]) throws -> [PhotoAsset]
@@ -521,29 +522,20 @@ final class LibraryBrowsingCoordinator {
         }
 
         let query = destination.portableQuery
-        let pageSize = library.queryPageSize
-        var pageIndex = 0
-        while true {
-            let page = library.page(at: pageIndex, query: query)
-            if page.items.contains(where: { $0.assetID == assetID }) {
-                if let window = try? library.browsingWindow(pageIndex: pageIndex, query: query) {
-                    collection.loadPortableWindow(
-                        assets: window.assets, totalCount: window.totalCount,
-                        pageIndex: pageIndex, pageSize: window.pageSize, query: query
-                    )
-                    syncPortableSelection()
-                    if let item = collection.items.first(where: {
-                        $0.asset.source.portableIdentity.assetID == assetID
-                    }), let url = try? library.resolveEmbeddedSourceURL(for: assetID) {
-                        destination.openPortableLibraryAsset(url: url, assetID: item.id)
-                        return
-                    }
-                }
-                break
+        if let pageIndex = library.pageIndex(of: assetID, query: query),
+           let window = try? library.browsingWindow(pageIndex: pageIndex, query: query)
+        {
+            collection.loadPortableWindow(
+                assets: window.assets, totalCount: window.totalCount,
+                pageIndex: pageIndex, pageSize: window.pageSize, query: query
+            )
+            syncPortableSelection()
+            if let item = collection.items.first(where: {
+                $0.asset.source.portableIdentity.assetID == assetID
+            }), let url = try? library.resolveEmbeddedSourceURL(for: assetID) {
+                destination.openPortableLibraryAsset(url: url, assetID: item.id)
+                return
             }
-            guard page.hasNextPage else { break }
-            pageIndex += 1
-            if pageIndex * pageSize > 200_000 { break }
         }
         // The package committed this asset (the importer returned its id), so a miss means the
         // disposable index is stale. Rebuild it from membership once before reporting failure.

@@ -83,6 +83,11 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
 
         func facetCounts(query: LibraryQuery) async -> LibraryFacetCounts { LibraryFacetCounts() }
 
+        func pageIndex(of assetID: PortablePhotoAssetID, query: LibraryQuery) -> Int? {
+            committedAssets.firstIndex { $0.source.portableIdentity.assetID == assetID }
+                .map { $0 / pageSize }
+        }
+
         func page(at pageIndex: Int, query: LibraryQuery) -> LibraryQueryPage {
             let visible = committedAssets
             let start = pageIndex * pageSize

@@ -129,12 +129,35 @@ struct LibraryIndexProjection: Codable, Equatable, Sendable {
 
     let schemaVersion: Int
     let libraryID: UUID
+    /// Sorted by asset ID; the ordered array remains the paging authority.
     let entries: [LibraryIndexEntry]
+    /// Asset ID -> position in `entries`, built once with the validated entries so every lookup
+    /// and selection check is O(1). Not encoded: it is derived from `entries`.
+    private let positions: [PortablePhotoAssetID: Int]
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, libraryID, entries
+    }
 
     init(libraryID: UUID, entries: [LibraryIndexEntry]) throws {
         schemaVersion = Self.currentSchemaVersion
         self.libraryID = libraryID
-        self.entries = try Self.validated(entries)
+        (self.entries, positions) = try Self.validated(entries)
+    }
+
+    /// Decodes the stored fields and derives the lookup map. The decoded schema version is kept
+    /// so `load(from:)` can still reject an unsupported index.
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        libraryID = try container.decode(UUID.self, forKey: .libraryID)
+        (entries, positions) = try Self.validated(
+            try container.decode([LibraryIndexEntry].self, forKey: .entries))
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.schemaVersion == rhs.schemaVersion && lhs.libraryID == rhs.libraryID
+            && lhs.entries == rhs.entries
     }
 
     /// Rebuild the projection from the package's membership summaries only.
@@ -222,7 +245,11 @@ struct LibraryIndexProjection: Codable, Equatable, Sendable {
     var count: Int { entries.count }
 
     func entry(for assetID: PortablePhotoAssetID) -> LibraryIndexEntry? {
-        entries.first { $0.assetID == assetID }
+        positions[assetID].map { entries[$0] }
+    }
+
+    func contains(_ assetID: PortablePhotoAssetID) -> Bool {
+        positions[assetID] != nil
     }
 
     /// Store/load are intentionally small conveniences for a future application-support index.
@@ -319,8 +346,10 @@ struct LibraryIndexProjection: Codable, Equatable, Sendable {
         return entries
     }
 
-    private static func validated(_ entries: [LibraryIndexEntry]) throws -> [LibraryIndexEntry] {
-        var ids = Set<PortablePhotoAssetID>()
+    private static func validated(_ entries: [LibraryIndexEntry]) throws
+        -> ([LibraryIndexEntry], [PortablePhotoAssetID: Int])
+    {
+        var ids = Set<PortablePhotoAssetID>(minimumCapacity: entries.count)
         for entry in entries {
             guard ids.insert(entry.assetID).inserted else {
                 throw LibraryQueryError.duplicateAsset(entry.assetID.raw)
@@ -332,7 +361,10 @@ struct LibraryIndexProjection: Codable, Equatable, Sendable {
                     "record path does not match asset \(entry.assetID)")
             }
         }
-        return entries.sorted { $0.assetID.raw < $1.assetID.raw }
+        let sorted = entries.sorted { $0.assetID.raw < $1.assetID.raw }
+        var positions = [PortablePhotoAssetID: Int](minimumCapacity: sorted.count)
+        for (position, entry) in sorted.enumerated() { positions[entry.assetID] = position }
+        return (sorted, positions)
     }
 }
 
@@ -608,6 +640,7 @@ private final class OrderedEntriesCache: Sendable {
     private struct State {
         var query: LibraryQuery?
         var entries: [LibraryIndexEntry] = []
+        var positions: [PortablePhotoAssetID: Int] = [:]
         var buildCount = 0
     }
 
@@ -619,13 +652,30 @@ private final class OrderedEntriesCache: Sendable {
         for query: LibraryQuery,
         build: @Sendable () -> [LibraryIndexEntry]
     ) -> [LibraryIndexEntry] {
-        state.withLock { state in
-            if state.query == query { return state.entries }
+        state.withLock { Self.refresh(&$0, for: query, build: build).entries }
+    }
+
+    /// The position of an asset in the query's order, from a map built with the ordering.
+    func position(
+        of assetID: PortablePhotoAssetID,
+        for query: LibraryQuery,
+        build: @Sendable () -> [LibraryIndexEntry]
+    ) -> Int? {
+        state.withLock { Self.refresh(&$0, for: query, build: build).positions[assetID] }
+    }
+
+    private static func refresh(
+        _ state: inout State, for query: LibraryQuery,
+        build: @Sendable () -> [LibraryIndexEntry]
+    ) -> State {
+        if state.query != query {
             state.entries = build()
+            state.positions = Dictionary(
+                uniqueKeysWithValues: state.entries.enumerated().map { ($1.assetID, $0) })
             state.query = query
             state.buildCount += 1
-            return state.entries
         }
+        return state
     }
 }
 
@@ -654,13 +704,11 @@ struct LibraryQueryController: Sendable {
     ) {
         self.index = index
         self.pageSize = max(1, pageSize)
-        let validIDs = Set(index.entries.map(\.assetID))
-        let validSelectedIDs = selectedAssetIDs.intersection(validIDs)
+        let validSelectedIDs = selectedAssetIDs.filter(index.contains)
         self.selectedAssetIDs = validSelectedIDs
         self.activeAssetID =
-            activeAssetID.flatMap {
-            validIDs.contains($0) && validSelectedIDs.contains($0) ? $0 : nil
-        } ?? validSelectedIDs.first
+            activeAssetID.flatMap { validSelectedIDs.contains($0) ? $0 : nil }
+            ?? validSelectedIDs.first
     }
 
     init(package: PortableLibraryPackage, pageSize: Int = 500) throws {
@@ -709,13 +757,22 @@ struct LibraryQueryController: Sendable {
     /// How many times this index generation has filtered and sorted for a query.
     var orderedEntriesBuildCount: Int { orderCache.buildCount }
 
+    /// The page that holds an asset for a query, or nil when the query excludes it. The position
+    /// comes from the ordering already cached for the query, so no page is built or scanned.
+    func pageIndex(of assetID: PortablePhotoAssetID, query: LibraryQuery = .all) -> Int? {
+        orderCache.position(of: assetID, for: query, build: { buildOrderedEntries(query: query) })
+            .map { $0 / pageSize }
+    }
+
     private func orderedEntries(query: LibraryQuery) -> [LibraryIndexEntry] {
-        orderCache.entries(for: query) {
-            let foldedSearchText = query.searchText?.foldedForLibrarySearch
-            return index.entries
-                .filter { matches($0, query: query, foldedSearchText: foldedSearchText) }
-                .sorted { precedes($0, $1, by: query.sort) }
-        }
+        orderCache.entries(for: query, build: { buildOrderedEntries(query: query) })
+    }
+
+    private func buildOrderedEntries(query: LibraryQuery) -> [LibraryIndexEntry] {
+        let foldedSearchText = query.searchText?.foldedForLibrarySearch
+        return index.entries
+            .filter { matches($0, query: query, foldedSearchText: foldedSearchText) }
+            .sorted { precedes($0, $1, by: query.sort) }
     }
 
     func page(number: Int, query: LibraryQuery = .all) -> LibraryQueryPage {
@@ -723,7 +780,7 @@ struct LibraryQueryController: Sendable {
     }
 
     func contains(_ assetID: PortablePhotoAssetID) -> Bool {
-        index.entry(for: assetID) != nil
+        index.contains(assetID)
     }
 
     mutating func select(_ assetID: PortablePhotoAssetID) {
@@ -749,8 +806,7 @@ struct LibraryQueryController: Sendable {
 
     mutating func setSelection(_ assetIDs: [PortablePhotoAssetID], activeID: PortablePhotoAssetID?)
     {
-        let available = Set(index.entries.map(\.assetID))
-        selectedAssetIDs = Set(assetIDs.filter(available.contains))
+        selectedAssetIDs = Set(assetIDs.filter(index.contains))
         self.activeAssetID =
             activeID.flatMap { selectedAssetIDs.contains($0) ? $0 : nil }
             ?? selectedAssetIDs.first
@@ -785,11 +841,8 @@ struct LibraryQueryController: Sendable {
     }
 
     mutating func reconcileSelection() {
-        let validIDs = Set(index.entries.map(\.assetID))
-        selectedAssetIDs = selectedAssetIDs.intersection(validIDs)
-        if let activeAssetID,
-           validIDs.contains(activeAssetID),
-            selectedAssetIDs.contains(activeAssetID)
+        selectedAssetIDs = selectedAssetIDs.filter(index.contains)
+        if let activeAssetID, selectedAssetIDs.contains(activeAssetID)
         {
             self.activeAssetID = activeAssetID
         } else {

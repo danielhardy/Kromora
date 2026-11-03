@@ -171,6 +171,99 @@ final class LibraryQueryControllerTests: TempDirectoryTestCase {
         XCTAssertEqual(rebuilt.orderedEntriesBuildCount, 1)
     }
 
+    private func lookupEntries(count: Int) -> [LibraryIndexEntry] {
+        (0..<count).map { index in
+            let assetID = PortablePhotoAssetID()
+            return LibraryIndexEntry(from: .init(
+                assetID: assetID,
+                recordPath: "Assets/" + PortableLibraryPackage.shard(for: assetID)
+                    + "/" + assetID.raw + "/asset.json",
+                summary: .init(rating: index % 3, displayName: "Frame \(index)")
+            ))
+        }
+    }
+
+    func testProjectionLookupsResolveEveryEntryAndSurviveDeltasAndCodableRoundTrip() throws {
+        let entries = lookupEntries(count: 40)
+        let projection = try LibraryIndexProjection(libraryID: UUID(), entries: entries)
+        for entry in entries {
+            XCTAssertEqual(projection.entry(for: entry.assetID), entry)
+            XCTAssertTrue(projection.contains(entry.assetID))
+        }
+        XCTAssertNil(projection.entry(for: PortablePhotoAssetID()))
+
+        let removed = entries[3].assetID
+        let added = lookupEntries(count: 1)[0]
+        let updated = try projection.applying(.init(upserts: [added], removals: [removed]))
+        XCTAssertNil(updated.entry(for: removed))
+        XCTAssertEqual(updated.entry(for: added.assetID), added)
+        XCTAssertEqual(updated.entry(for: entries[4].assetID), entries[4])
+        XCTAssertEqual(updated.count, 40)
+
+        let decoded = try JSONDecoder().decode(
+            LibraryIndexProjection.self, from: JSONEncoder().encode(updated))
+        XCTAssertEqual(decoded, updated)
+        XCTAssertEqual(decoded.entry(for: added.assetID), added)
+        XCTAssertNil(decoded.entry(for: removed))
+    }
+
+    func testProjectionRejectsDuplicateAssetIDsAcrossInitAndDecode() throws {
+        let entry = lookupEntries(count: 1)[0]
+        XCTAssertThrowsError(try LibraryIndexProjection(libraryID: UUID(), entries: [entry, entry])) {
+            XCTAssertEqual(
+                $0 as? LibraryQueryError, .duplicateAsset(entry.assetID.raw))
+        }
+        let projection = try LibraryIndexProjection(libraryID: UUID(), entries: [entry])
+        var json = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(projection)) as? [String: Any])
+        json["entries"] = [try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(entry))), try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(entry)))]
+        let data = try JSONSerialization.data(withJSONObject: json)
+        XCTAssertThrowsError(try JSONDecoder().decode(LibraryIndexProjection.self, from: data))
+    }
+
+    func testPageIndexLookupsReuseOneOrderedBuildAndMatchPageContents() throws {
+        let entries = lookupEntries(count: 50)
+        let controller = LibraryQueryController(
+            index: try LibraryIndexProjection(libraryID: UUID(), entries: entries), pageSize: 7)
+        let query = LibraryQuery(sort: .init(key: .displayName, direction: .descending))
+        let copy = controller
+
+        for entry in entries {
+            let pageIndex = try XCTUnwrap(controller.pageIndex(of: entry.assetID, query: query))
+            XCTAssertTrue(
+                controller.page(at: pageIndex, query: query).items.contains { $0.assetID == entry.assetID })
+        }
+        // K lookups and K page reads share the single ordering built for this query.
+        XCTAssertEqual(controller.orderedEntriesBuildCount, 1)
+        XCTAssertEqual(copy.orderedEntriesBuildCount, 1)
+        XCTAssertNil(controller.pageIndex(of: PortablePhotoAssetID(), query: query))
+
+        let narrowed = LibraryQuery(filter: .init(flag: .all, rating: .minimum(2)))
+        let excluded = try XCTUnwrap(entries.first { ($0.summary.rating ?? 0) < 2 })
+        XCTAssertNil(controller.pageIndex(of: excluded.assetID, query: narrowed))
+        XCTAssertEqual(controller.orderedEntriesBuildCount, 2)
+    }
+
+    func testSelectionValidationUsesTheIndexForSelectionAndReconcile() throws {
+        let entries = lookupEntries(count: 5)
+        let index = try LibraryIndexProjection(libraryID: UUID(), entries: entries)
+        let stranger = PortablePhotoAssetID()
+        var controller = LibraryQueryController(
+            index: index, pageSize: 3,
+            selectedAssetIDs: [entries[0].assetID, stranger], activeAssetID: stranger)
+        XCTAssertEqual(controller.selectedIDs, [entries[0].assetID])
+        XCTAssertEqual(controller.activeID, entries[0].assetID)
+
+        controller.setSelection([entries[1].assetID, stranger], activeID: entries[1].assetID)
+        XCTAssertEqual(controller.selectedIDs, [entries[1].assetID])
+        controller.select(stranger)
+        XCTAssertEqual(controller.selectedIDs, [entries[1].assetID])
+        controller.reconcileSelection()
+        XCTAssertEqual(controller.activeID, entries[1].assetID)
+    }
+
     func testOrderedAssetIDsMatchTheConcatenatedPagesForAnyQuery() throws {
         let ids = (0..<7).map { _ in PortablePhotoAssetID() }
         let entries = ids.enumerated().map { index, assetID in
