@@ -273,6 +273,7 @@ extension RetouchWorkflowCoordinatorTests {
         gates.release(1)                            // the older request finishes last
         await workflow.shutdown()
         XCTAssertEqual(destination.pickPublications, [2])
+        XCTAssertEqual(destination.cancelledPickRanks, [1], "superseded source work should be cancelled")
         guard case .auto(_, let rank)? = destination.document.retouch.spots.first?.source else {
             return XCTFail("Expected an automatic source")
         }
@@ -594,10 +595,13 @@ private final class FakeRetouchDestination: RetouchWorkflowDestination {
     /// Optional per-call hook that suspends a pick (and may return `false` to model a failed search).
     var pickProvider: (@MainActor (Int) async -> Bool)?
     var pickPublications: [Int] = []
+    var cancelledPickRanks: [Int] = []
     func pickRetouchSource(spotID: UUID, rank: Int, isCurrent: @MainActor () -> Bool) async {
         pickedRanks.append(rank)
         guard let pickProvider else { return }
-        guard await pickProvider(rank), isCurrent() else { return }
+        let succeeded = await pickProvider(rank)
+        if Task.isCancelled { cancelledPickRanks.append(rank) }
+        guard succeeded, isCurrent() else { return }
         pickPublications.append(rank)
         updateDocument { document in
             guard let index = document.retouch.spots.firstIndex(where: { $0.id == spotID }) else { return }

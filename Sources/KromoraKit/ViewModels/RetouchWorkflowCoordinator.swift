@@ -435,6 +435,11 @@ final class RetouchWorkflowCoordinator {
     /// request outlives a photo change or shutdown.
     private func startPick(spotID: UUID, rank: Int, closesUndoGroup: Bool) {
         guard !isShutDown, let destination else { return }
+        // Superseded work cannot publish, so stop spending render/search time on it as well. The
+        // invocation fence remains necessary because providers may not observe cancellation.
+        if let previousID = latestPickBySpot[spotID] {
+            pickTasks[previousID]?.cancel()
+        }
         let fingerprint = destination.retouchAnalysisSource?.cacheFingerprint
         nextPickID &+= 1
         let operation = PickOperation(id: nextPickID, spotID: spotID, fingerprint: fingerprint,
