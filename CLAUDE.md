@@ -30,7 +30,7 @@ build from source using SwiftPM. We do not distribute DMGs or maintain an update
 
 ### Test policy for agents (inner loop vs. gates)
 
-The suite is ~2,900 tests and the lane audit alone needs a full test-target build, so **never run bare
+The suite is ~3,100 tests and the lane audit alone needs a full test-target build, so **never run bare
 `swift test` or a whole `ci-tests.sh` lane to check an edit**. Run tests in proportion to the change:
 
 1. **While iterating:** `scripts/test-affected.sh`. It maps changed files (vs. `HEAD`, or `--base main`) to

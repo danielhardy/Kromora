@@ -492,7 +492,7 @@ boundary suites so injected failures stay reproducible and do not depend on a sc
 | Transactional edit plus presented geometry and rollback | `PortableLibraryPackageTests.testEditRevisionAndPresentedGeometryPublishOrRollbackTogether` |
 | Packed-frame stable keys, read-window bounds, compaction, write interruptions, and retry | `ThumbnailFrameStoreTests`, `PortablePackageMaintenanceTests` |
 | Launch-hint schema faults, wrong library, removed IDs, viewport supersession, and stale completion | `LaunchHintsTests`, `LibraryBrowsingCoordinatorTests` |
-| Rapid selection, newest-pending work, stale render/thumbnail publication, and actual drawable callbacks | `FilmstripNavigationTests`, `ThumbnailSwitchLifecycleTests`, `IdentityRegressionGateTests`, `PreviewSurfaceTests` |
+| Rapid selection, newest-pending work, stale render/thumbnail publication, and actual drawable callbacks | `FilmstripThumbnailTests`, `ThumbnailSwitchLifecycleTests`, `IdentityRegressionGateTests`, `PreviewSurfaceTests` |
 
 Persisted presentation frame reads are recorded by `FrameLookupLedger` with their surface, outcome,
 and monotonic timestamp; the ledger stores no paths or image data. The one-line `FrameLookupSummary`

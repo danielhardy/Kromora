@@ -259,7 +259,7 @@ A masking command commits through `MaskingWorkflowDestination.updateDocument`, w
 normal persistence/undo/copy-paste path automatically — the coordinator never becomes a second
 document store. `AppViewModel` keeps every masking entry point (`createMask`, `createSmartMask`,
 `beginMaskGesture`, …) as a one-line forwarder in `AppViewModel+Masking.swift` so existing View and
-`KeyboardShortcuts` call sites are unaffected. Smart-mask and person-signal-warming tasks are owned
+`KeyboardCommandRouter` call sites are unaffected. Smart-mask and person-signal-warming tasks are owned
 and cancelled by the coordinator's own `shutdown()`, called once from `AppViewModel.shutdown`,
 rather than living in `AppViewModel`'s task-cancellation array.
 

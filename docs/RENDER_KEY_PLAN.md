@@ -270,7 +270,7 @@ Every child must:
    - Add the custom-`==` audit test.
 4. **KRMA-1101 — Thread `RenderDocumentIdentity` through the render path.** *(Landed: warm large-recipe digest cost 173.573 → 0.067 ms per request; first miss 202.743 → 85.204 ms. See `docs/TESTING.md`.)*
    - Replace the 19 per-request digests in `RenderBuildPlan`, the preview, developed-source, prefix
-     and mask keys, and the mask payload validation in `LocalMaskRendering`.
+     and mask keys, and the mask payload validation in `LocalMaskRenderer`.
 5. **KRMA-1102 — Per-stroke brush identity.**
    - Make a brush definition digest a combination of per-stroke digests, so painting re-encodes
      only the active stroke.
