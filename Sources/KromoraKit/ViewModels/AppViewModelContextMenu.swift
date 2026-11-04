@@ -132,7 +132,7 @@ extension AppViewModel {
             },
             didCreate: { [weak self] copy in
                 guard let self else { return }
-                try self.libraryBrowsingCoordinator.reloadPortableCollection()
+                try await self.libraryBrowsingCoordinator.reloadPortableCollectionPrepared()
                 self.statusMessage = "Created virtual copy ‘\(copy.displayName)’"
             }
         )

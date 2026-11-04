@@ -629,7 +629,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
     }
     /// The visible workspace. Library selection, the active edit document, and render surfaces
     /// remain owned by their existing collaborators; this value only composes those surfaces.
-    private(set) var navigation = NavigationState()
+    var navigation = NavigationState()
 
     /// Metadata and histogram for the Info inspector; views read `info.*` directly.
     let info = InfoState()
@@ -908,7 +908,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
     func waitForCanonicalWriteForDiagnostics(for identity: PortablePhotoIdentity) async {
         await previewPresentation.waitForCanonicalWriteForDiagnostics(for: identity)
     }
-    @ObservationIgnored private lazy var previewAdmissionCoordinator = PreviewAdmissionCoordinator(
+    @ObservationIgnored lazy var previewAdmissionCoordinator = PreviewAdmissionCoordinator(
         workScheduler: workScheduler, engine: engine, destination: self
     )
     @ObservationIgnored private lazy var idleFrameWarmerCoordinator = IdleFrameWarmerCoordinator(
@@ -1474,13 +1474,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         }
         // Launch paints the first query page from index summaries only; further pages fault in on
         // scroll/selection with stable identity.
-        do {
-            try reloadPortableWindow(pageIndex: 0)
-            if collection.isActive { navigation.move(to: .grid) }
-            collection.beginThumbnailDemand()
-        } catch {
-            presentError("Kromora could not read the library package: \(error.localizedDescription)")
-        }
+        publishLaunchWindow()
     }
 
     private static let comparisonModeKey = "Kromora.editor.comparisonMode.sideBySide"
@@ -1965,8 +1959,9 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
                         )
                         return
                     }
+                    Task { @MainActor in
                     do {
-                        try self.reloadPortableCollection()
+                        try await self.reloadPortableCollectionPrepared()
                         // Injected stores may be used by a second model while the first model still
                         // owns the package lease. Preserve the caller's URL as the edit locator in
                         // that mode; production remains copy-on-import and opens the embedded
@@ -1990,6 +1985,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
                             prefix: "Photo import"
                         )
                     } catch { self.presentError(error.localizedDescription) }
+                    }
                 },
                 onFailure: { [weak self] error in
                     guard let self, self.isCurrentImport(operationID) else { return }
@@ -2746,8 +2742,9 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
                 handle, operationID: operationID, total: urls.count, prefix: prefix,
                 onSuccess: { [weak self] result in
                     guard let self else { return }
+                    Task { @MainActor in
                     do {
-                        try self.reloadPortableCollection()
+                        try await self.reloadPortableCollectionPrepared()
                         self.applyDialogNames(from: result)
                         // Import results retain input order, while the browsing projection is
                         // sorted by display name. Open the first displayed item so selection
@@ -2763,6 +2760,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
                             total: urls.count, reason: error.localizedDescription)
                         self.presentImportOutcome(summary, prefix: prefix)
                         completion?(summary)
+                    }
                     }
                 },
                 onFailure: { [weak self] error in
@@ -2809,8 +2807,9 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
                 handle, operationID: operationID, total: 1, prefix: "Photo import",
                 onSuccess: { [weak self] result in
                     guard let self else { return }
+                    Task { @MainActor in
                     do {
-                        try self.reloadPortableCollection()
+                        try await self.reloadPortableCollectionPrepared()
                         if let assetID = result.imported.first?.assetID
                             ?? result.duplicates.first?.existingAssetID
                         {
@@ -2821,6 +2820,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
                             prefix: "Photo import"
                         )
                     } catch { self.presentError(error.localizedDescription) }
+                    }
                 },
                 onFailure: { [weak self] error in
                     guard let self, self.isCurrentImport(operationID) else { return }
@@ -3723,7 +3723,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         logFrameLookupSummaries([.editPreview])
     }
 
-    private func logFrameLookupSummaries(_ surfaces: [FrameLookupSurface]) {
+    func logFrameLookupSummaries(_ surfaces: [FrameLookupSurface]) {
         let ledger = frameLookupLedger
         Task {
             for surface in surfaces { await ledger.logSummary(for: surface) }
@@ -3878,7 +3878,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
             },
             didCreate: { [weak self] copy in
                 guard let self else { return }
-                try self.libraryBrowsingCoordinator.reloadPortableCollection()
+                try await self.libraryBrowsingCoordinator.reloadPortableCollectionPrepared()
                 self.statusMessage = "Created virtual copy ‘\(copy.displayName)’"
                 self.openPortableAsset(copy.assetID)
             }
@@ -5093,9 +5093,9 @@ extension AppViewModel: PackageSourceImportDestination {
 
     func reportPackageUnavailable() { reportPortableLibraryUnavailable() }
 
-    func mergeCommittedImports() { try? libraryBrowsingCoordinator.mergeCommittedImports() }
+    func mergeCommittedImports() { libraryBrowsingCoordinator.publishMergedImports() }
 
-    func reloadCollection() throws { try reloadPortableCollection() }
+    func reloadCollection() async throws { try await reloadPortableCollectionPrepared() }
 
     func openAsset(_ assetID: PortablePhotoAssetID) { openPortableAsset(assetID) }
 

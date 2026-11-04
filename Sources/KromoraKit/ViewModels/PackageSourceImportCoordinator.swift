@@ -10,7 +10,7 @@ protocol PackageSourceImportDestination: AnyObject {
     func reportPackageUnavailable()
     /// Fold the batches committed so far into the visible Library window.
     func mergeCommittedImports()
-    func reloadCollection() throws
+    func reloadCollection() async throws
     func openAsset(_ assetID: PortablePhotoAssetID)
     func presentOutcome(_ summary: ImportOutcomeSummary, prefix: String)
     func presentStatus(_ message: String)
@@ -108,15 +108,17 @@ final class PackageSourceImportCoordinator {
             observe(
                 handle, operationID: operationID, total: files.count, prefix: "Folder import",
                 onSuccess: { [weak self] result in
-                    guard let self, let destination = self.destination else { return }
-                    do {
-                        try destination.reloadCollection()
-                        self.openFirstAsset(of: result)
-                        destination.presentOutcome(
-                            ImportOutcomeSummary(result: result, total: files.count),
-                            prefix: "Folder import"
-                        )
-                    } catch { destination.presentError(error.localizedDescription) }
+                    Task { @MainActor [weak self] in
+                        guard let self, let destination = self.destination else { return }
+                        do {
+                            try await destination.reloadCollection()
+                            self.openFirstAsset(of: result)
+                            destination.presentOutcome(
+                                ImportOutcomeSummary(result: result, total: files.count),
+                                prefix: "Folder import"
+                            )
+                        } catch { destination.presentError(error.localizedDescription) }
+                    }
                 },
                 onFailure: { [weak self] error in
                     guard let self, self.imports.isCurrent(operationID) else { return }
@@ -180,19 +182,21 @@ final class PackageSourceImportCoordinator {
                 handle, operationID: operationID, total: files.count,
                 prefix: request.source.statusPrefix,
                 onSuccess: { [weak self] result in
-                    guard let self, let destination = self.destination else { return }
-                    do {
-                        try destination.reloadCollection()
-                        self.openFirstAsset(of: result)
-                        destination.finishMediaImport(
-                            ImportOutcomeSummary(
-                                result: result,
-                                total: request.totalSelected,
-                                preflightSkipped: request.totalSelected - files.count
-                            ),
-                            operationID: operationID
-                        )
-                    } catch { finish(failing: error) }
+                    Task { @MainActor [weak self] in
+                        guard let self, let destination = self.destination else { return }
+                        do {
+                            try await destination.reloadCollection()
+                            self.openFirstAsset(of: result)
+                            destination.finishMediaImport(
+                                ImportOutcomeSummary(
+                                    result: result,
+                                    total: request.totalSelected,
+                                    preflightSkipped: request.totalSelected - files.count
+                                ),
+                                operationID: operationID
+                            )
+                        } catch { finish(failing: error) }
+                    }
                 },
                 onFailure: { [weak self] error in
                     guard let self, self.imports.isCurrent(operationID) else { return }

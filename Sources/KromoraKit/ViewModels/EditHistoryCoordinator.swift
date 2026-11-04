@@ -217,7 +217,7 @@ final class EditHistoryCoordinator {
         of reference: EditSourceReference,
         storedDocument: (@MainActor () async throws -> EditDocument)? = nil,
         makeCopy: @escaping @MainActor () async throws -> VirtualCopy,
-        didCreate: @escaping @MainActor (VirtualCopy) throws -> Void
+        didCreate: @escaping @MainActor (VirtualCopy) async throws -> Void
     ) -> Task<Void, Never>? {
         guard !isShutDown, !isCreatingVirtualCopy else { return nil }
         isCreatingVirtualCopy = true
@@ -237,7 +237,7 @@ final class EditHistoryCoordinator {
                 let copy = try await makeCopy()
                 try await store.save(document, for: copy.sourceReference)
                 guard isStillValid() else { return }
-                try didCreate(copy)
+                try await didCreate(copy)
             } catch {
                 guard isStillValid() else { return }
                 environment.reportStatus("Could not create virtual copy: \(error.localizedDescription)")

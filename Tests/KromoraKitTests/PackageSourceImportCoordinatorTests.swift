@@ -22,7 +22,7 @@ final class PackageSourceImportCoordinatorTests: XCTestCase {
 
         func reportPackageUnavailable() { unavailableReports += 1 }
         func mergeCommittedImports() { merges += 1 }
-        func reloadCollection() throws { reloads += 1 }
+        func reloadCollection() async throws { reloads += 1 }
         func openAsset(_ assetID: PortablePhotoAssetID) { opened.append(assetID) }
         func presentOutcome(_ summary: ImportOutcomeSummary, prefix: String) {
             outcomes.append((summary, prefix))

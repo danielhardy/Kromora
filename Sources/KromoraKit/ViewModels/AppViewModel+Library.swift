@@ -59,6 +59,31 @@ extension AppViewModel {
         }
     }
 
+    /// The first window after the library opens, published once its query ordering is available.
+    func publishLaunchWindow() {
+        libraryBrowsingCoordinator.publishIndexUpdate(.init(
+            kind: .reload,
+            apply: { [weak self] in
+                guard let self else { return }
+                try self.reloadPortableWindow(pageIndex: 0)
+                if self.collection.isActive { self.navigation.move(to: .grid) }
+                self.collection.beginThumbnailDemand()
+            },
+            onFailure: { [weak self] error in
+                self?.presentError(
+                    "Kromora could not read the library package: \(error.localizedDescription)")
+            }
+        ))
+    }
+
+    /// `reloadPortableCollection` after an import published a new index generation: the ordering
+    /// is prepared off the main actor before the window is read.
+    func reloadPortableCollectionPrepared() async throws {
+        previewAdmissionCoordinator.cancelAdjacentPreviewPrefetch()
+        try await libraryBrowsingCoordinator.reloadPortableCollectionPrepared()
+        logFrameLookupSummaries([.gridOriginal, .gridEdited, .filmstrip, .launchHint])
+    }
+
     func handlePortableIndexLoadingState(_ state: LibraryIndexLoadingState) {
         guard !isShuttingDown else { return }
         if let error = state.errorMessage {
@@ -77,10 +102,15 @@ extension AppViewModel {
             statusMessage =
                 "Rebuilding library index… \(state.shardsRead) of \(state.totalShards) sections"
         }
-        do {
-            try reloadPortableWindow(pageIndex: 0)
-        } catch {
-            presentError("Could not read the library package: \(error.localizedDescription)")
-        }
+        // The new index generation starts without a cached ordering: the coordinator prepares the
+        // destination query off the main actor, keeping the published window up, before reading.
+        libraryBrowsingCoordinator.publishIndexUpdate(.init(
+            kind: .reload,
+            apply: { [weak self] in try self?.reloadPortableWindow(pageIndex: 0) },
+            onFailure: { [weak self] error in
+                self?.presentError(
+                    "Could not read the library package: \(error.localizedDescription)")
+            }
+        ))
     }
 }

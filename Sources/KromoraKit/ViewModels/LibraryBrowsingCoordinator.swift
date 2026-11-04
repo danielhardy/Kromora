@@ -18,6 +18,9 @@ protocol LibraryBrowsingProviding: AnyObject {
     /// Filter and sort for `query` off the main actor so the synchronous page and selection calls
     /// that follow are cache hits. Returns early when the calling task is cancelled.
     func prepareOrdering(query: LibraryQuery) async
+    /// Whether reading `pageIndex` of `query` now is a cache hit. A newly published index
+    /// generation starts with no cached ordering, so this is false until `prepareOrdering` ran.
+    func hasPreparedOrdering(for query: LibraryQuery, pageIndex: Int) -> Bool
     func browsingAssets(for items: [LibraryQueryItem]) throws -> [PhotoAsset]
     func browsingAssets(forIDs ids: [PortablePhotoAssetID]) throws -> [PhotoAsset]
     func select(_ assetID: PortablePhotoAssetID, additive: Bool)
@@ -127,6 +130,21 @@ final class LibraryBrowsingCoordinator {
     /// The newest query change whose ordering is still being prepared off the main actor. Until it
     /// installs, the grid and selection keep showing the previous query's window.
     private var queryPreparationTask: Task<Void, Never>?
+    /// The index-update publication waiting on, or draining through, off-main preparation.
+    private var pendingIndexUpdate: IndexUpdate?
+    private var indexUpdateTask: Task<Void, Never>?
+    /// An open-by-id retry waiting on off-main ordering preparation.
+    private var assetOpenTask: Task<Void, Never>?
+
+    /// A window publication caused by a new index generation (launch, index load, import merge,
+    /// rebuild). `apply` is the synchronous publish; it only runs once the destination query's
+    /// ordering is cached, so it never filters or sorts on the main actor.
+    struct IndexUpdate {
+        enum Kind { case merge, reload }
+        var kind: Kind
+        var apply: @MainActor () throws -> Void
+        var onFailure: @MainActor (Error) -> Void
+    }
 
     private(set) var hasPublishedFirstIndexPage = false
     private(set) var hasPublishedVisibleWindow = false
@@ -164,7 +182,93 @@ final class LibraryBrowsingCoordinator {
     /// is the recovery path for an index that disagrees with the package.
     func rebuildPortableIndex() throws {
         try library?.rebuildIndex()
+        publishIndexUpdate(IndexUpdate(
+            kind: .reload,
+            apply: { [weak self] in try self?.reloadPortableWindow(pageIndex: 0) },
+            onFailure: { [weak self] error in
+                self?.destination?.presentLibraryError(
+                    "The library index could not be refreshed: \(error.localizedDescription)")
+            }
+        ))
+    }
+
+    /// `reloadPortableCollection` for callers that open or select what they just imported: the new
+    /// index generation's ordering is prepared off the main actor first.
+    func reloadPortableCollectionPrepared() async throws {
+        if let library, let destination {
+            let query = destination.portableQuery
+            if !library.hasPreparedOrdering(for: query, pageIndex: 0) {
+                await library.prepareOrdering(query: query)
+                guard !Task.isCancelled else { return }
+            }
+        }
         try reloadPortableWindow(pageIndex: 0)
+    }
+
+    /// Waits until every index-update publication and open retry has drained.
+    func waitForIndexUpdate() async {
+        await indexUpdateTask?.value
+        await assetOpenTask?.value
+    }
+
+    /// Publishes a window update for a newly published index generation. The new generation's
+    /// query controller starts with an empty ordering cache, so when the destination query is not
+    /// cached the ordering is prepared off the main actor first; the previously published window
+    /// and selection stay up meanwhile. Requests arriving during preparation coalesce (a reload
+    /// supersedes a merge, the newest closures win), and a completion is discarded when the
+    /// destination query changed meanwhile, because the query-change path republishes it.
+    func publishIndexUpdate(_ update: IndexUpdate) {
+        var update = update
+        if let pending = pendingIndexUpdate, pending.kind == .reload { update.kind = .reload }
+        pendingIndexUpdate = update
+        guard indexUpdateTask == nil else { return }
+        if isOrderingReady(for: update.kind) {
+            drainReadyIndexUpdate()
+            return
+        }
+        indexUpdateTask = Task { [weak self] in
+            await self?.drainIndexUpdates()
+            self?.indexUpdateTask = nil
+        }
+    }
+
+    /// Folds assets committed by a running import into the window, preparing the new index
+    /// generation's ordering off the main actor first.
+    func publishMergedImports() {
+        publishIndexUpdate(.init(
+            kind: .merge,
+            apply: { [weak self] in try self?.mergeCommittedImports() },
+            onFailure: { _ in }
+        ))
+    }
+
+    private func isOrderingReady(for kind: IndexUpdate.Kind) -> Bool {
+        guard let library, let destination else { return true }
+        let pageIndex = kind == .merge && collection.isPortableWindowed ? collection.portablePageIndex : 0
+        return library.hasPreparedOrdering(for: destination.portableQuery, pageIndex: pageIndex)
+    }
+
+    private func drainReadyIndexUpdate() {
+        guard let update = pendingIndexUpdate else { return }
+        pendingIndexUpdate = nil
+        do { try update.apply() } catch { update.onFailure(error) }
+    }
+
+    private func drainIndexUpdates() async {
+        while let pending = pendingIndexUpdate {
+            guard let library, let destination else { break }
+            if !isOrderingReady(for: pending.kind) {
+                let query = destination.portableQuery
+                await library.prepareOrdering(query: query)
+                if Task.isCancelled { break }
+                guard destination.portableQuery == query else {
+                    pendingIndexUpdate = nil
+                    break
+                }
+            }
+            drainReadyIndexUpdate()
+        }
+        if Task.isCancelled { pendingIndexUpdate = nil }
     }
 
     /// Propagate a package ratio-only repair into retained cells without rebuilding their assets
@@ -355,6 +459,11 @@ final class LibraryBrowsingCoordinator {
     func shutdown() async {
         queryPreparationTask?.cancel()
         queryPreparationTask = nil
+        indexUpdateTask?.cancel()
+        indexUpdateTask = nil
+        assetOpenTask?.cancel()
+        assetOpenTask = nil
+        pendingIndexUpdate = nil
         launchHintsWriteTask?.cancel()
         if let launchHintsWriteTask { await launchHintsWriteTask.value }
         launchHintsWriteTask = nil
@@ -372,9 +481,23 @@ final class LibraryBrowsingCoordinator {
         let nextPage = collection.portablePageIndex + 1
         // Continue the loaded window's own query: while a query change is being prepared,
         // `destination.portableQuery` is already the new one but the window is still the old one.
-        guard let window = try? library.browsingWindow(
-            pageIndex: nextPage, query: collection.portableQuery
-        ) else { return }
+        let query = collection.portableQuery
+        guard library.hasPreparedOrdering(for: query, pageIndex: nextPage) else {
+            // The index was replaced since this window loaded; prepare its ordering off-main and
+            // fault the page in then, unless the window moved on meanwhile.
+            Task { [weak self] in
+                await library.prepareOrdering(query: query)
+                guard let self, !Task.isCancelled, self.collection.isPortableWindowed,
+                      self.collection.portableQuery == query,
+                      self.collection.portablePageIndex + 1 == nextPage,
+                      let window = try? self.library?.browsingWindow(pageIndex: nextPage, query: query)
+                else { return }
+                self.collection.appendPortableWindow(assets: window.assets, pageIndex: nextPage)
+            }
+            return
+        }
+        guard let window = try? library.browsingWindow(pageIndex: nextPage, query: query)
+        else { return }
         collection.appendPortableWindow(assets: window.assets, pageIndex: nextPage)
     }
 
@@ -450,7 +573,18 @@ final class LibraryBrowsingCoordinator {
             collection.selectAll()
             return
         }
-        library.selectAllPortable(query: destination.portableQuery)
+        let query = destination.portableQuery
+        guard library.hasPreparedOrdering(for: query, pageIndex: 0) else {
+            Task { [weak self] in
+                await library.prepareOrdering(query: query)
+                guard let self, !Task.isCancelled, self.destination?.portableQuery == query
+                else { return }
+                self.library?.selectAllPortable(query: query)
+                self.syncPortableSelection()
+            }
+            return
+        }
+        library.selectAllPortable(query: query)
         syncPortableSelection()
     }
 
@@ -529,7 +663,11 @@ final class LibraryBrowsingCoordinator {
         collection.select(at: index, modifiers: modifiers)
     }
 
-    func openPortableAsset(_ assetID: PortablePhotoAssetID, allowIndexRebuild: Bool = true) {
+    /// `ordered` is true on the retry that follows off-main ordering preparation, which proceeds
+    /// even if the ordering is not cached rather than preparing again.
+    func openPortableAsset(
+        _ assetID: PortablePhotoAssetID, allowIndexRebuild: Bool = true, ordered: Bool = false
+    ) {
         guard let destination else { return }
         guard let library else {
             destination.setLibraryStatusMessage("The library package is not open.")
@@ -552,6 +690,18 @@ final class LibraryBrowsingCoordinator {
         }
 
         let query = destination.portableQuery
+        if !ordered, !library.hasPreparedOrdering(for: query, pageIndex: 0) {
+            // The index was replaced since the window loaded: locate the asset against an
+            // ordering prepared off the main actor rather than sorting here.
+            assetOpenTask?.cancel()
+            assetOpenTask = Task { [weak self] in
+                await library.prepareOrdering(query: query)
+                guard let self, !Task.isCancelled else { return }
+                self.openPortableAsset(
+                    assetID, allowIndexRebuild: allowIndexRebuild, ordered: true)
+            }
+            return
+        }
         if let pageIndex = library.pageIndex(of: assetID, query: query),
            let window = try? library.browsingWindow(pageIndex: pageIndex, query: query)
         {
@@ -570,8 +720,13 @@ final class LibraryBrowsingCoordinator {
         // The package committed this asset (the importer returned its id), so a miss means the
         // disposable index is stale. Rebuild it from membership once before reporting failure.
         if allowIndexRebuild, (try? library.rebuildIndex()) != nil {
-            try? reloadPortableWindow(pageIndex: 0)
-            openPortableAsset(assetID, allowIndexRebuild: false)
+            assetOpenTask?.cancel()
+            assetOpenTask = Task { [weak self] in
+                await library.prepareOrdering(query: query)
+                guard let self, !Task.isCancelled else { return }
+                try? self.reloadPortableWindow(pageIndex: 0)
+                self.openPortableAsset(assetID, allowIndexRebuild: false, ordered: true)
+            }
             return
         }
         destination.setLibraryStatusMessage("The imported photo is not available in the package index.")

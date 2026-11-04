@@ -16,6 +16,23 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
         try await super.tearDown()
     }
 
+    private actor PreparationGate {
+        private var isOpen = false
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+        var waiterCount: Int { waiters.count }
+
+        func wait() async {
+            if isOpen { return }
+            await withCheckedContinuation { waiters.append($0) }
+        }
+
+        func open() {
+            isOpen = true
+            for waiter in waiters { waiter.resume() }
+            waiters.removeAll()
+        }
+    }
+
     private final class FakeLibrary: LibraryBrowsingProviding {
         let assets: [PhotoAsset]
         let pageSize: Int
@@ -32,6 +49,13 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
         /// Awaited by `prepareOrdering`, so a test decides when and in what order queries finish.
         var orderingGate: (@MainActor (LibraryQuery) async -> Void)?
         private(set) var rebuildCount = 0
+        /// False after `replaceIndex()` until `prepareOrdering` runs, like a new index generation.
+        private(set) var orderingReady = true
+        /// Window or page reads served while the ordering was not prepared (they would sort inline).
+        private(set) var unpreparedReads = 0
+        private(set) var preparedQueries: [LibraryQuery] = []
+        /// When set, preparation sorts this controller off-main and readiness follows its cache.
+        var sortingController: LibraryQueryController?
         private(set) var persistedStates: [(PortablePhotoAssetID, Int, PhotoFlag)] = []
         /// Ids whose browsing projection throws, failing any lookup that includes them.
         var failingIDs = Set<PortablePhotoAssetID>()
@@ -80,6 +104,7 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
             -> (assets: [PhotoAsset], totalCount: Int, pageSize: Int) {
             requestedPages.append(pageIndex)
             requestedQueries.append(query)
+            noteRead(query)
             let visible = committedAssets
             let start = pageIndex * pageSize
             let end = min(start + pageSize, visible.count)
@@ -91,7 +116,27 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
             return LibraryFacetCounts()
         }
 
-        func prepareOrdering(query: LibraryQuery) async { await orderingGate?(query) }
+        func prepareOrdering(query: LibraryQuery) async {
+            preparedQueries.append(query)
+            await orderingGate?(query)
+            if let sortingController { _ = await sortingController.prepareOrdering(query: query) }
+            orderingReady = true
+        }
+
+        func hasPreparedOrdering(for query: LibraryQuery, pageIndex: Int) -> Bool {
+            if let sortingController { return sortingController.hasCachedOrdering(for: query) }
+            return orderingReady
+        }
+
+        /// A new index generation: the next synchronous read would filter and sort.
+        func replaceIndex(with controller: LibraryQueryController? = nil) {
+            orderingReady = false
+            if let controller { sortingController = controller }
+        }
+
+        private func noteRead(_ query: LibraryQuery) {
+            if !hasPreparedOrdering(for: query, pageIndex: 0) { unpreparedReads += 1 }
+        }
 
         func pageIndex(of assetID: PortablePhotoAssetID, query: LibraryQuery) -> Int? {
             committedAssets.firstIndex { $0.source.portableIdentity.assetID == assetID }
@@ -99,6 +144,7 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
         }
 
         func page(at pageIndex: Int, query: LibraryQuery) -> LibraryQueryPage {
+            noteRead(query)
             let visible = committedAssets
             let start = pageIndex * pageSize
             let selected = start < visible.count ? Array(visible[start..<min(start + pageSize, visible.count)]) : []
@@ -270,6 +316,176 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
         XCTAssertEqual(collection.items[1].asset.thumbnailState, .loading)
         // The merge never reloads page zero.
         XCTAssertEqual(library.requestedPages, [0])
+    }
+
+    // MARK: KRMA-1163 index-generation updates
+
+    func testReloadAfterIndexReplacementPreparesOffMainAndKeepsTheOldWindowMeanwhile() async throws {
+        let (coordinator, collection, library, destination) = makeCoordinator(count: 6, pageSize: 4)
+        defer { withExtendedLifetime(destination) {} }
+        try coordinator.reloadPortableWindow()
+        let before = collection.items.map(\.id)
+        coordinator.selectPortableItem(at: 1)
+        let selected = collection.selectedItem?.id
+
+        let gate = PreparationGate()
+        library.orderingGate = { _ in await gate.wait() }
+        library.replaceIndex()
+        library.committedCount = 5
+        var failures = 0
+        coordinator.publishIndexUpdate(.init(
+            kind: .reload,
+            apply: { try coordinator.reloadPortableWindow() },
+            onFailure: { _ in failures += 1 }
+        ))
+        while await gate.waiterCount == 0 { await Task.yield() }
+
+        // Mid-preparation: nothing was read, and the previous window and selection are intact.
+        XCTAssertEqual(library.unpreparedReads, 0)
+        XCTAssertEqual(library.requestedPages, [0])
+        XCTAssertEqual(collection.items.map(\.id), before)
+        XCTAssertEqual(collection.selectedItem?.id, selected)
+
+        await gate.open()
+        await coordinator.waitForIndexUpdate()
+
+        XCTAssertEqual(library.unpreparedReads, 0, "the window was read from a prepared ordering")
+        XCTAssertEqual(library.requestedPages, [0, 0])
+        XCTAssertEqual(collection.portableTotalCount, 5)
+        XCTAssertEqual(failures, 0)
+    }
+
+    func testReadyOrderingPublishesTheIndexUpdateSynchronously() throws {
+        let (coordinator, collection, library, destination) = makeCoordinator(count: 3, pageSize: 2)
+        defer { withExtendedLifetime(destination) {} }
+        coordinator.publishIndexUpdate(.init(
+            kind: .reload, apply: { try coordinator.reloadPortableWindow() }, onFailure: { _ in }
+        ))
+        XCTAssertEqual(collection.items.count, 2, "no preparation hop when the ordering is cached")
+        XCTAssertTrue(library.preparedQueries.isEmpty)
+    }
+
+    func testMergeAfterIndexReplacementPreparesBeforeReadingLoadedPages() async throws {
+        let (coordinator, collection, library, destination) = makeCoordinator(count: 6, pageSize: 2)
+        defer { withExtendedLifetime(destination) {} }
+        library.committedCount = 4
+        library.newestFirst = true
+        try coordinator.reloadPortableWindow()
+        collection.appendPortableWindow(
+            assets: try library.browsingWindow(pageIndex: 1, query: .all).assets, pageIndex: 1)
+
+        library.replaceIndex()
+        library.committedCount = 6
+        coordinator.publishIndexUpdate(.init(
+            kind: .merge, apply: { try coordinator.mergeCommittedImports() }, onFailure: { _ in }
+        ))
+        XCTAssertEqual(library.requestedPages, [0, 1], "nothing was read before preparation")
+        await coordinator.waitForIndexUpdate()
+
+        XCTAssertEqual(library.unpreparedReads, 0)
+        XCTAssertEqual(collection.portableTotalCount, 6)
+        XCTAssertEqual(collection.items.count, 4)
+    }
+
+    func testIndexUpdatesDuringPreparationCoalesceAndAReloadSupersedesAMerge() async throws {
+        let (coordinator, collection, library, destination) = makeCoordinator(count: 6, pageSize: 4)
+        defer { withExtendedLifetime(destination) {} }
+        library.committedCount = 2
+        try coordinator.reloadPortableWindow()
+        let gate = PreparationGate()
+        library.orderingGate = { _ in await gate.wait() }
+        library.replaceIndex()
+        library.committedCount = 3
+
+        var applied: [String] = []
+        func merge() -> LibraryBrowsingCoordinator.IndexUpdate {
+            .init(kind: .merge, apply: { applied.append("merge") }, onFailure: { _ in })
+        }
+        coordinator.publishIndexUpdate(merge())
+        while await gate.waiterCount == 0 { await Task.yield() }
+        coordinator.publishIndexUpdate(merge())
+        coordinator.publishIndexUpdate(.init(
+            kind: .reload,
+            apply: { applied.append("reload"); try coordinator.reloadPortableWindow() },
+            onFailure: { _ in }
+        ))
+        coordinator.publishIndexUpdate(merge())
+        await gate.open()
+        await coordinator.waitForIndexUpdate()
+
+        XCTAssertEqual(applied.first, "merge", "the in-flight request keeps its place until superseded")
+        XCTAssertEqual(applied.count, 1, "later requests coalesced into the pending update")
+        XCTAssertEqual(library.preparedQueries.count, 1)
+        _ = collection
+    }
+
+    func testIndexUpdateIsDiscardedWhenTheQueryChangesDuringPreparation() async throws {
+        let (coordinator, _, library, destination) = makeCoordinator(count: 4, pageSize: 4)
+        try coordinator.reloadPortableWindow()
+        let gate = PreparationGate()
+        library.orderingGate = { _ in await gate.wait() }
+        library.replaceIndex()
+        var applied = 0
+        coordinator.publishIndexUpdate(.init(
+            kind: .reload, apply: { applied += 1 }, onFailure: { _ in }
+        ))
+        while await gate.waiterCount == 0 { await Task.yield() }
+        destination.portableQuery = LibraryQuery(searchText: "other")
+        await gate.open()
+        await coordinator.waitForIndexUpdate()
+
+        XCTAssertEqual(applied, 0, "the query-change path republishes this window")
+    }
+
+    func testMainActorKeepsRunningWhileAnIndexUpdateSortsLargeLibraryOffMain() async throws {
+        let (coordinator, collection, library, destination) = makeCoordinator(count: 4, pageSize: 4)
+        defer { withExtendedLifetime(destination) {} }
+        let byName = LibraryQuery(sort: .init(key: .displayName, direction: .descending))
+        destination.portableQuery = byName
+        let entries = (0..<30_000).map { index in
+            let assetID = PortablePhotoAssetID()
+            return LibraryIndexEntry(from: .init(
+                assetID: assetID,
+                recordPath: "Assets/" + PortableLibraryPackage.shard(for: assetID)
+                    + "/" + assetID.raw + "/asset.json",
+                summary: .init(rating: index % 6, displayName: "Frame \(index * 7919 % 30_000)")
+            ))
+        }
+        let index = try LibraryIndexProjection(libraryID: UUID(), entries: entries)
+        let inline = LibraryQueryController(index: index, pageSize: 4)
+        let start = ContinuousClock.now
+        _ = inline.orderedAssetIDs(query: byName)
+        let sortSeconds = start.duration(to: .now).seconds
+        XCTAssertGreaterThan(sortSeconds, 0.05, "the index is too small to show a stall")
+
+        try coordinator.reloadPortableWindow()
+        library.replaceIndex(with: LibraryQueryController(index: index, pageSize: 4))
+        var ticks = 0
+        var maxGap = 0.0
+        var last = ContinuousClock.now
+        let heartbeat = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(2))
+                let now = ContinuousClock.now
+                maxGap = max(maxGap, last.duration(to: now).seconds)
+                last = now
+                ticks += 1
+            }
+        }
+        last = .now
+        coordinator.publishIndexUpdate(.init(
+            kind: .reload, apply: { try coordinator.reloadPortableWindow() }, onFailure: { _ in }
+        ))
+        await coordinator.waitForIndexUpdate()
+        heartbeat.cancel()
+        await heartbeat.value
+
+        print("KRMA-1163 index update: inline sort \(sortSeconds)s, max main-actor gap \(maxGap)s, ticks \(ticks)")
+        XCTAssertEqual(library.unpreparedReads, 0)
+        XCTAssertGreaterThan(ticks, 5)
+        XCTAssertLessThan(maxGap, sortSeconds / 2,
+                          "the main actor was blocked for \(maxGap)s by a \(sortSeconds)s sort")
+        _ = collection
     }
 
     func testFacetCountsUseTheCapturedQuery() async {
@@ -508,7 +724,7 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
         XCTAssertEqual(collection.selectedItem?.displayName, "photo-2.jpg")
     }
 
-    func testOffWindowOpenFaultsItsPageAndMissingAssetDoesNotOpen() throws {
+    func testOffWindowOpenFaultsItsPageAndMissingAssetDoesNotOpen() async throws {
         let (coordinator, collection, library, destination) = makeCoordinator()
         try coordinator.reloadPortableWindow()
         let offWindowID = library.assets[3].source.portableIdentity.assetID
@@ -519,6 +735,7 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
         XCTAssertEqual(destination.opened.count, 1)
         XCTAssertEqual(destination.opened.first?.1, library.assets[3].id)
         coordinator.openPortableAsset(PortablePhotoAssetID())
+        await coordinator.waitForIndexUpdate()
         XCTAssertEqual(destination.opened.count, 1)
         XCTAssertEqual(destination.status.last, "The imported photo is not available in the package index.")
         XCTAssertEqual(library.rebuildCount, 1, "a miss rebuilds the disposable index exactly once")
@@ -931,5 +1148,11 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(5))
         }
         XCTFail("Timed out waiting for \(description)")
+    }
+}
+
+private extension Duration {
+    var seconds: Double {
+        Double(components.seconds) + Double(components.attoseconds) / 1e18
     }
 }

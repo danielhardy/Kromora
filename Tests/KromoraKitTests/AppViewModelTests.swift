@@ -384,7 +384,7 @@ final class AppViewModelTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.portablePackageMaintenance.failureLog, [])
     }
 
-    func testExpiredWriterLeaseOpensLibraryAfterTakeoverConfirmation() throws {
+    func testExpiredWriterLeaseOpensLibraryAfterTakeoverConfirmation() async throws {
         let packageURL = tempDirectory.appendingPathComponent("Takeover.kromoralibrary")
         let sourceURL = try Fixtures.writeJPEG(
             width: 16, height: 12, orientation: 1, named: "keep.jpg", in: tempDirectory
@@ -403,13 +403,14 @@ final class AppViewModelTests: TempDirectoryTestCase {
             leaseRecoveryConfirmer: ImmediatePortablePackageLeaseRecoveryConfirmer(allowBreak: true)
         )
 
+        await viewModel.libraryBrowsingCoordinator.waitForIndexUpdate()
         XCTAssertNil(viewModel.errorMessage)
         XCTAssertEqual(viewModel.collection.items.count, 1)
         XCTAssertEqual(viewModel.portableLibrary?.package.manifest.libraryID, libraryID)
         _ = stale
     }
 
-    func testExpiredWriterLeaseFromDeadProcessOpensWithoutPrompt() throws {
+    func testExpiredWriterLeaseFromDeadProcessOpensWithoutPrompt() async throws {
         let packageURL = tempDirectory.appendingPathComponent("DeadOwner.kromoralibrary")
         let sourceURL = try Fixtures.writeJPEG(
             width: 16, height: 12, orientation: 1, named: "keep.jpg", in: tempDirectory
@@ -429,6 +430,7 @@ final class AppViewModelTests: TempDirectoryTestCase {
                 allowBreak: false)
         )
 
+        await viewModel.libraryBrowsingCoordinator.waitForIndexUpdate()
         XCTAssertNil(viewModel.errorMessage)
         XCTAssertEqual(viewModel.collection.items.count, 1)
         XCTAssertEqual(
@@ -438,7 +440,7 @@ final class AppViewModelTests: TempDirectoryTestCase {
         _ = stale
     }
 
-    func testDeadLocalWriterWithUnexpiredLeaseOpensImmediately() throws {
+    func testDeadLocalWriterWithUnexpiredLeaseOpensImmediately() async throws {
         let packageURL = tempDirectory.appendingPathComponent("RecentlyKilled.kromoralibrary")
         let sourceURL = try Fixtures.writeJPEG(
             width: 16, height: 12, orientation: 1, named: "keep.jpg", in: tempDirectory
@@ -459,6 +461,7 @@ final class AppViewModelTests: TempDirectoryTestCase {
                 allowBreak: false)
         )
 
+        await viewModel.libraryBrowsingCoordinator.waitForIndexUpdate()
         XCTAssertNil(viewModel.errorMessage)
         XCTAssertEqual(viewModel.collection.items.count, 1)
         XCTAssertEqual(

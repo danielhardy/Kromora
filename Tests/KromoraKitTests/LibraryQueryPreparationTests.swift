@@ -62,6 +62,21 @@ final class LibraryQueryPreparationTests: TempDirectoryTestCase {
         XCTAssertEqual(page, fresh.page(at: 1, query: byName))
     }
 
+    func testReadinessFollowsThePreparedOrderingForLargeIndexesAndIsImmediateForSmallOnes() async throws {
+        let small = try controller(count: LibraryQueryController.inlineOrderingEntryLimit)
+        XCTAssertTrue(small.hasCachedOrdering(for: byName), "small indexes order inline")
+
+        let large = try controller(count: LibraryQueryController.inlineOrderingEntryLimit + 1)
+        XCTAssertFalse(large.hasCachedOrdering(for: byName))
+        _ = await large.prepareOrdering(query: byName)
+        XCTAssertTrue(large.hasCachedOrdering(for: byName))
+        XCTAssertFalse(large.hasCachedOrdering(for: byRating), "only the prepared query is cached")
+
+        // A replaced index is a new controller with a new, empty cache.
+        let replaced = LibraryQueryController(index: large.index, pageSize: large.pageSize)
+        XCTAssertFalse(replaced.hasCachedOrdering(for: byName))
+    }
+
     func testCancelledPreparationDoesNotEvictTheCachedOrdering() async throws {
         let controller = try controller(count: 400)
         _ = controller.page(at: 0, query: byName)

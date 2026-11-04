@@ -670,6 +670,11 @@ private final class OrderedEntriesCache: Sendable {
 
     var buildCount: Int { state.withLock { $0.buildCount } }
 
+    /// Whether `query`'s ordering is installed, so a synchronous read of it is a cache hit.
+    func isCached(_ query: LibraryQuery) -> Bool {
+        state.withLock { $0.current?.query == query }
+    }
+
     /// The cached ordering for `query`, or one built outside the lock. `shouldInstall` is asked
     /// after the build, so a background reader (the idle planner) or a cancelled preparation can
     /// decline and leave the ordering the foreground is paging in place. `isCached` reports
@@ -782,6 +787,17 @@ struct LibraryQueryController: Sendable {
             for: query, shouldInstall: { !Task.isCancelled },
             build: { buildOrderedEntries(query: query) }
         ).isCached
+    }
+
+    /// Entries below which filtering and sorting inline costs less than preparing off-main (a few
+    /// milliseconds), so small libraries publish synchronously with no task hop.
+    static let inlineOrderingEntryLimit = 256
+
+    /// Whether the synchronous `page`, `pageIndex`, and selection calls for `query` will return
+    /// without a noticeable filter or sort: the ordering is installed for this index generation, or
+    /// the index is small enough to order inline.
+    func hasCachedOrdering(for query: LibraryQuery) -> Bool {
+        index.count <= Self.inlineOrderingEntryLimit || orderCache.isCached(query)
     }
 
     /// How many times this index generation has installed a filtered and sorted ordering.

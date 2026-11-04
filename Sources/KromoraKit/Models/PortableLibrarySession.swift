@@ -883,6 +883,15 @@ final class PortableLibrarySession {
         }
     }
 
+    /// Whether reading `pageIndex` of `query` now is a cache hit: the ordering is installed for the
+    /// published index generation, or the launch snapshot serves the first page of the default
+    /// query. A new index generation starts with an empty cache, so this is false until
+    /// `prepareOrdering(query:)` has run for it.
+    func hasPreparedOrdering(for query: LibraryQuery, pageIndex: Int) -> Bool {
+        if pageIndex == 0, query == .all, startupFirstPage != nil { return true }
+        return queryController.hasCachedOrdering(for: query)
+    }
+
     /// The page holding `assetID` under `query`, or nil when the query excludes it.
     func pageIndex(of assetID: PortablePhotoAssetID, query: LibraryQuery = .all) -> Int? {
         queryController.pageIndex(of: assetID, query: query)
