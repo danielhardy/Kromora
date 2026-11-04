@@ -285,6 +285,19 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
         return (coordinator, collection, library, destination)
     }
 
+    private func replaceIndexWithSortingController(for library: FakeLibrary) throws {
+        let entries = library.assets.map { asset in
+            let assetID = asset.source.portableIdentity.assetID
+            return LibraryIndexEntry(from: .init(
+                assetID: assetID,
+                recordPath: "Assets/\(PortableLibraryPackage.shard(for: assetID))/\(assetID.raw)/asset.json",
+                summary: .init(displayName: asset.filename)
+            ))
+        }
+        let index = try LibraryIndexProjection(libraryID: library.libraryID, entries: entries)
+        library.replaceIndex(with: LibraryQueryController(index: index, pageSize: library.pageSize))
+    }
+
     func testMergeCommittedImportsInsertsInOrderAndKeepsSelectionAndCells() throws {
         let (coordinator, collection, library, destination) = makeCoordinator(count: 6, pageSize: 4)
         defer { withExtendedLifetime(destination) {} }
@@ -353,6 +366,28 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
         XCTAssertEqual(library.requestedPages, [0, 0])
         XCTAssertEqual(collection.portableTotalCount, 5)
         XCTAssertEqual(failures, 0)
+    }
+
+    func testPreparedReloadRepeatsWhenTheQueryChangesDuringPreparation() async throws {
+        let (coordinator, _, library, destination) = makeCoordinator(count: 300, pageSize: 10)
+        defer { withExtendedLifetime(destination) {} }
+        try coordinator.reloadPortableWindow()
+        try replaceIndexWithSortingController(for: library)
+
+        let gate = PreparationGate()
+        library.orderingGate = { _ in await gate.wait() }
+        let firstQuery = LibraryQuery(searchText: "photo-0")
+        let latestQuery = LibraryQuery(searchText: "photo-1")
+        destination.portableQuery = firstQuery
+
+        let reload = Task { try await coordinator.reloadPortableCollectionPrepared() }
+        while await gate.waiterCount == 0 { await Task.yield() }
+        destination.portableQuery = latestQuery
+        await gate.open()
+        try await reload.value
+
+        XCTAssertEqual(library.requestedQueries.last, latestQuery)
+        XCTAssertEqual(library.unpreparedReads, 0)
     }
 
     func testReadyOrderingPublishesTheIndexUpdateSynchronously() throws {
@@ -473,9 +508,9 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
             }
         }
         last = .now
-        coordinator.publishIndexUpdate(.init(
-            kind: .reload, apply: { try coordinator.reloadPortableWindow() }, onFailure: { _ in }
-        ))
+        coordinator.publishReloadedWindow(
+            apply: { try coordinator.reloadPortableWindow() }, onFailure: { _ in }
+        )
         await coordinator.waitForIndexUpdate()
         heartbeat.cancel()
         await heartbeat.value
@@ -486,6 +521,27 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
         XCTAssertLessThan(maxGap, sortSeconds / 2,
                           "the main actor was blocked for \(maxGap)s by a \(sortSeconds)s sort")
         _ = collection
+    }
+
+    func testOffWindowOpenRepreparesWhenTheQueryChangesDuringIndexPreparation() async throws {
+        let (coordinator, _, library, destination) = makeCoordinator(count: 300, pageSize: 2)
+        defer { withExtendedLifetime(destination) {} }
+        try coordinator.reloadPortableWindow()
+        try replaceIndexWithSortingController(for: library)
+
+        let gate = PreparationGate()
+        library.orderingGate = { _ in await gate.wait() }
+        let assetID = library.assets[10].source.portableIdentity.assetID
+        coordinator.openPortableAsset(assetID)
+        while await gate.waiterCount == 0 { await Task.yield() }
+
+        destination.portableQuery = LibraryQuery(searchText: "photo-10")
+        await gate.open()
+        await coordinator.waitForIndexUpdate()
+
+        XCTAssertEqual(library.unpreparedReads, 0)
+        XCTAssertEqual(library.requestedQueries.last, destination.portableQuery)
+        XCTAssertEqual(destination.opened.count, 1)
     }
 
     func testFacetCountsUseTheCapturedQuery() async {

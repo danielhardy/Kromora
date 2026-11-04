@@ -84,6 +84,20 @@ extension AppViewModel {
         logFrameLookupSummaries([.gridOriginal, .gridEdited, .filmstrip, .launchHint])
     }
 
+    /// The Photos bridge has a synchronous refresh callback, so queue its reload behind off-main
+    /// ordering preparation for the index generation committed by `finishImportBatch()`.
+    func publishPhotosImportCollectionReload() {
+        libraryBrowsingCoordinator.publishReloadedWindow(
+            apply: { [weak self] in try self?.reloadPortableWindow(pageIndex: 0) },
+            onFailure: { [weak self] error in
+                self?.presentError(
+                    "Kromora could not refresh the library after Photos import: "
+                        + error.localizedDescription
+                )
+            }
+        )
+    }
+
     func handlePortableIndexLoadingState(_ state: LibraryIndexLoadingState) {
         guard !isShuttingDown else { return }
         if let error = state.errorMessage {

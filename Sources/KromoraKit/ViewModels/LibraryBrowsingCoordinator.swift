@@ -196,12 +196,14 @@ final class LibraryBrowsingCoordinator {
     /// index generation's ordering is prepared off the main actor first.
     func reloadPortableCollectionPrepared() async throws {
         if let library, let destination {
-            let query = destination.portableQuery
-            if !library.hasPreparedOrdering(for: query, pageIndex: 0) {
+            while !Task.isCancelled {
+                let query = destination.portableQuery
+                if library.hasPreparedOrdering(for: query, pageIndex: 0) { break }
                 await library.prepareOrdering(query: query)
                 guard !Task.isCancelled else { return }
             }
         }
+        guard !Task.isCancelled else { return }
         try reloadPortableWindow(pageIndex: 0)
     }
 
@@ -230,6 +232,15 @@ final class LibraryBrowsingCoordinator {
             await self?.drainIndexUpdates()
             self?.indexUpdateTask = nil
         }
+    }
+
+    /// Schedule a reload whose synchronous work must wait for the destination query's ordering.
+    /// This is for synchronous import callbacks that cannot await preparation themselves.
+    func publishReloadedWindow(
+        apply: @escaping @MainActor () throws -> Void,
+        onFailure: @escaping @MainActor (Error) -> Void
+    ) {
+        publishIndexUpdate(.init(kind: .reload, apply: apply, onFailure: onFailure))
     }
 
     /// Folds assets committed by a running import into the window, preparing the new index
@@ -663,11 +674,7 @@ final class LibraryBrowsingCoordinator {
         collection.select(at: index, modifiers: modifiers)
     }
 
-    /// `ordered` is true on the retry that follows off-main ordering preparation, which proceeds
-    /// even if the ordering is not cached rather than preparing again.
-    func openPortableAsset(
-        _ assetID: PortablePhotoAssetID, allowIndexRebuild: Bool = true, ordered: Bool = false
-    ) {
+    func openPortableAsset(_ assetID: PortablePhotoAssetID, allowIndexRebuild: Bool = true) {
         guard let destination else { return }
         guard let library else {
             destination.setLibraryStatusMessage("The library package is not open.")
@@ -690,15 +697,26 @@ final class LibraryBrowsingCoordinator {
         }
 
         let query = destination.portableQuery
-        if !ordered, !library.hasPreparedOrdering(for: query, pageIndex: 0) {
+        if !library.hasPreparedOrdering(for: query, pageIndex: 0) {
             // The index was replaced since the window loaded: locate the asset against an
             // ordering prepared off the main actor rather than sorting here.
             assetOpenTask?.cancel()
+            let pendingIndexUpdate = indexUpdateTask
             assetOpenTask = Task { [weak self] in
-                await library.prepareOrdering(query: query)
-                guard let self, !Task.isCancelled else { return }
-                self.openPortableAsset(
-                    assetID, allowIndexRebuild: allowIndexRebuild, ordered: true)
+                // A synchronous import callback may already have queued the same generation's
+                // reload. Let it install the shared ordering before opening the asset.
+                await pendingIndexUpdate?.value
+                guard let self else { return }
+                while !Task.isCancelled {
+                    guard let currentQuery = self.destination?.portableQuery else { return }
+                    if !library.hasPreparedOrdering(for: currentQuery, pageIndex: 0) {
+                        await library.prepareOrdering(query: currentQuery)
+                        continue
+                    }
+                    guard self.destination?.portableQuery == currentQuery else { continue }
+                    self.openPortableAsset(assetID, allowIndexRebuild: allowIndexRebuild)
+                    return
+                }
             }
             return
         }
@@ -722,10 +740,19 @@ final class LibraryBrowsingCoordinator {
         if allowIndexRebuild, (try? library.rebuildIndex()) != nil {
             assetOpenTask?.cancel()
             assetOpenTask = Task { [weak self] in
-                await library.prepareOrdering(query: query)
-                guard let self, !Task.isCancelled else { return }
-                try? self.reloadPortableWindow(pageIndex: 0)
-                self.openPortableAsset(assetID, allowIndexRebuild: false, ordered: true)
+                guard let self else { return }
+                var queryToPrepare = query
+                while !Task.isCancelled {
+                    await library.prepareOrdering(query: queryToPrepare)
+                    guard let currentQuery = self.destination?.portableQuery else { return }
+                    guard currentQuery == queryToPrepare else {
+                        queryToPrepare = currentQuery
+                        continue
+                    }
+                    try? self.reloadPortableWindow(pageIndex: 0)
+                    self.openPortableAsset(assetID, allowIndexRebuild: false)
+                    return
+                }
             }
             return
         }

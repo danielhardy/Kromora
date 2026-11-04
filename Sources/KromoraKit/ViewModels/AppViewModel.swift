@@ -2893,10 +2893,9 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
     }
 
     func refreshPhotosImportCollection() throws {
-        // Commit the coalesced package membership delta before the presentation bridge snapshots
-        // the index generation.
         libraryImportCoordinator.finishImportBatch()
-        try reloadPortableCollection()
+        previewAdmissionCoordinator.cancelAdjacentPreviewPrefetch()
+        publishPhotosImportCollectionReload()
     }
 
     func openPhotosImportAsset(_ assetID: PortablePhotoAssetID) {
