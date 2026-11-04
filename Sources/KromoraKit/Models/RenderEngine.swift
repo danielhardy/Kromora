@@ -849,7 +849,7 @@ actor RenderEngine: RenderEngining {
     /// `buildImage` rather than rendering without the edit that kernel produces.
     private let kernelStatus: CIKernelLibraryStatus
     /// Turns the finished export graph into pixels. Injectable so tests can simulate a GPU
-    /// completion failure; production uses `ExportRasterizer.render`, which waits on the
+    /// completion failure; production uses `ExportRasterizer.live`, which waits on the
     /// render task and surfaces its error.
     private let exportRasterizer: ExportRasterizer
     private var activeRevisionedMaskSource: String?
