@@ -848,17 +848,23 @@ actor RenderEngine: RenderEngining {
     /// Kernel availability, validated once. A document that needs an unavailable kernel fails
     /// `buildImage` rather than rendering without the edit that kernel produces.
     private let kernelStatus: CIKernelLibraryStatus
+    /// Turns the finished export graph into pixels. Injectable so tests can simulate a GPU
+    /// completion failure; production uses `ExportRasterizer.render`, which waits on the
+    /// render task and surfaces its error.
+    private let exportRasterizer: ExportRasterizer
     private var activeRevisionedMaskSource: String?
 
     init(
         maskResolver: any LocalMaskResolving = DefaultLocalMaskResolver(),
         configuration: RenderCacheConfiguration = .default,
         semanticMaskPreviewCap: PixelDimensions? = SemanticMaskPreviewResolution.defaultCap,
-        kernelStatus: CIKernelLibraryStatus = .bundled
+        kernelStatus: CIKernelLibraryStatus = .bundled,
+        exportRasterizer: ExportRasterizer = .live
     ) {
         self.resources = RenderEngineResources(
             configuration: configuration, kernelStatus: kernelStatus)
         self.kernelStatus = kernelStatus
+        self.exportRasterizer = exportRasterizer
         self.localMaskResolver = maskResolver
         self.semanticMaskPreviewCap = semanticMaskPreviewCap
         Task { [weak self] in await self?.installMemoryPressureMonitor() }
@@ -878,11 +884,13 @@ actor RenderEngine: RenderEngining {
         maskResolver: any LocalMaskResolving = DefaultLocalMaskResolver(),
         configuration: RenderCacheConfiguration = .default,
         semanticMaskPreviewCap: PixelDimensions? = SemanticMaskPreviewResolution.defaultCap,
-        kernelStatus: CIKernelLibraryStatus = .bundled
+        kernelStatus: CIKernelLibraryStatus = .bundled,
+        exportRasterizer: ExportRasterizer = .live
     ) {
         self.resources = RenderEngineResources(
             context: context, configuration: configuration, kernelStatus: kernelStatus)
         self.kernelStatus = kernelStatus
+        self.exportRasterizer = exportRasterizer
         self.localMaskResolver = maskResolver
         self.semanticMaskPreviewCap = semanticMaskPreviewCap
         Task { [weak self] in await self?.installMemoryPressureMonitor() }
@@ -1288,6 +1296,10 @@ actor RenderEngine: RenderEngining {
     /// Encode a completed Core Image graph through Image I/O so source metadata can be supplied to
     /// the destination. Core Image's representation helpers do not expose the source property
     /// dictionaries, while `CGImageDestinationAddImage` writes them for all three export formats.
+    ///
+    /// The graph is rasterized *before* the destination exists: Image I/O creates its own
+    /// temporary sibling file when a URL destination is opened, so a failed GPU completion must
+    /// not get that far.
     private func encode(
         _ image: CIImage,
         format: ExportFormat,
@@ -1296,20 +1308,19 @@ actor RenderEngine: RenderEngining {
         quality: CGFloat,
         metadata: [CFString: Any]?
     ) throws -> Data {
+        let cgImage = try rasterize(image, representationFormat: representationFormat, colorSpace: colorSpace)
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(
             data, format.utType.identifier as CFString, 1, nil
         ) else {
             throw ImageError.exportFailed
         }
-        try finalize(
-            destination, image: image, format: format, representationFormat: representationFormat,
-            colorSpace: colorSpace, quality: quality, metadata: metadata
-        )
+        try finalize(destination, cgImage: cgImage, format: format, quality: quality, metadata: metadata)
         return data as Data
     }
 
-    /// Same encode, streamed to a file instead of an in-memory buffer.
+    /// Same encode, streamed to a file instead of an in-memory buffer. A failure removes whatever
+    /// was written at `url`.
     private func encode(
         _ image: CIImage,
         format: ExportFormat,
@@ -1319,34 +1330,35 @@ actor RenderEngine: RenderEngining {
         metadata: [CFString: Any]?,
         to url: URL
     ) throws {
+        let cgImage = try rasterize(image, representationFormat: representationFormat, colorSpace: colorSpace)
         guard let destination = CGImageDestinationCreateWithURL(
             url as CFURL, format.utType.identifier as CFString, 1, nil
         ) else {
             throw ImageError.exportFailed
         }
-        try finalize(
-            destination, image: image, format: format, representationFormat: representationFormat,
-            colorSpace: colorSpace, quality: quality, metadata: metadata
-        )
+        do {
+            try finalize(destination, cgImage: cgImage, format: format, quality: quality, metadata: metadata)
+        } catch {
+            try? FileManager.default.removeItem(at: url)
+            throw error
+        }
+    }
+
+    private func rasterize(
+        _ image: CIImage, representationFormat: CIFormat, colorSpace: CGColorSpace
+    ) throws -> CGImage {
+        try exportRasterizer(
+            image, context: context, rect: image.extent.integral,
+            format: representationFormat, colorSpace: colorSpace)
     }
 
     private func finalize(
         _ destination: CGImageDestination,
-        image: CIImage,
+        cgImage: CGImage,
         format: ExportFormat,
-        representationFormat: CIFormat,
-        colorSpace: CGColorSpace,
         quality: CGFloat,
         metadata: [CFString: Any]?
     ) throws {
-        guard let cgImage = context.createCGImage(
-            image,
-            from: image.extent.integral,
-            format: representationFormat,
-            colorSpace: colorSpace
-        ) else {
-            throw ImageError.exportFailed
-        }
         var imageProperties = metadata ?? [:]
         if format == .jpeg || format == .heif {
             imageProperties[kCGImageDestinationLossyCompressionQuality] = quality
