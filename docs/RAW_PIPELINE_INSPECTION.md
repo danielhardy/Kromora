@@ -133,3 +133,35 @@ RAW sources: the global Exposure slider is applied through `CIRAWFilter.exposure
 with a calibrated slider-to-decoder ratio. See
 [`ENGINEERING_GUIDE.md`](ENGINEERING_GUIDE.md#raw-exposure-routing). The statements above describe
 repository `b3be8d83`.
+
+## Follow-up: lens correction verified, no change (KRMA-1177)
+
+`RAWLensCorrectionTests` (optional lane) probes every RAW in `realworldtest/` through the render
+path. `DSC01104.ARW` is still not in the workspace, so the ILCE-7CR reference remains unmeasured.
+Measured on the four local Sony ARWs, all on decoder version 8 with the neutral document:
+
+| File | Frame | `isLensCorrectionSupported` | Initial → effective `isLensCorrectionEnabled` |
+| --- | --- | --- | --- |
+| `DSC00324.ARW` | 6000×4000 | true | true → true |
+| `DSC01019.ARW` | 9504×6336 | true | true → true |
+| `DSC01153.ARW` | 9504×6336 | true | true → true |
+| `DSC04513.ARW` | 7952×5304 | false | false → false |
+
+- **Apple's per-image default is already correct.** Where the decoder supports correction it is on
+  by default, and a neutral document leaves it on (`nil` renders identically to writing the default
+  explicitly). Where it is unsupported, the control is absent and a saved override is inert. No
+  default, capability gate or profile database was added.
+- **What the switch changes.** Toggling it on the three supported files leaves the full and preview
+  extents unchanged and shifts pixels (mean |Δ| of roughly 0.005–0.03 on a 0–1 scale), raises the
+  corner-to-centre luminance ratio (for example 0.929 → 0.937, 1.166 → 1.192) and moves the outer-ring
+  colour balance. That is consistent with peripheral-illumination and/or chromatic-aberration
+  handling, but the difference is not larger toward the edges (the central half differs at least as
+  much), so these metrics do not establish a geometric component. Treat the scope of the single
+  switch as undetermined; no separate CA or illumination control exists on `CIRAWFilter`.
+- **Preview/export parity.** Both go through `RAWDevelopSettings.apply(to:)` and
+  `CIRAWFilter.scaleFactor`; the scale is derived from the sensor `nativeSize`. For default, on and
+  off, the preview extent equals the full extent times the scale factor (within a pixel), and the
+  interactive session restores the decoder default when an override is cleared.
+- **Not compared.** Registered straight-line distortion and Lightroom's profile choice were not
+  measured; a visual difference from Lightroom cannot be attributed to lens correction from this
+  evidence.
