@@ -296,4 +296,3 @@ noise reduction on a RAW whose decoder supports it: it is applied through
 `CIRAWFilter.luminanceNoiseReductionAmount`, above the decoder's per-image default. Colour noise
 reduction and Sharpening stay RGB. See
 [`ENGINEERING_GUIDE.md`](ENGINEERING_GUIDE.md#raw-noise-reduction-routing).
-
