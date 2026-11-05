@@ -217,3 +217,74 @@ straight-edge or chart image was available; the four local files are ordinary sc
   whether its result matches Apple's, remains unmeasured. `DSC01104.ARW` is still absent. This
   criterion needs an owner action (see the KRMA-1181 blocker): either run the files through
   Lightroom/Camera Raw with Lens Profile Corrections off and on and export TIFFs, or accept the limit.
+
+## Follow-up: highlight headroom and tone controls evaluated, RGB retained (KRMA-1176)
+
+`RAWHighlightHeadroomBenchmark` (optional lane) develops the same 800-pixel frame of every RAW in
+`realworldtest/` under each decoder control and the RGB Light controls, and reads back float
+extended-linear values. The fixed region is the brightest 0.5% of pixels (by max channel) of the
+neutral decode; the same indices are compared for every variant. "Clip" is the fraction of region
+channels at or above 1 and is an output reference, not proof of sensor clipping. `relSpread` is the
+region's 5–95% luminance spread over its median, so a pure rescale scores the same as neutral. The
+"midtone-matched" column applies one global gain that returns the whole-frame median to the neutral
+median, separating tone appearance from channel content. macOS 27.2, decoder version 8, Apple
+Silicon, debug build.
+
+**Corpus limit.** Only four Sony ARWs are available (the earlier DNG fixtures are
+no longer in the workspace), and there is **no bracketed or otherwise clipped-channel ground truth**.
+Only `DSC01153` has a meaningfully clipped region (0.8% of region channels at or above 1),
+`DSC04513` has six clipped region pixels, and `DSC00324`/`DSC01019` have none. Conclusions about
+recovery are therefore limited to "no measurable effect on these files"; a camera-diverse corpus
+with bracketed references is still needed before claiming anything stronger.
+
+**Support and defaults (all four ARWs, identical).** Boost 1, boost shadow 0.9, EDR 0, gamut mapping
+on, highlight recovery supported and **on**, local tone map **not supported** (the gate is closed, so
+the control writes nothing), baseline exposure 0.3–0.4.
+
+| Control (DSC01153 region) | Clip | p99 | relSpread | Reading |
+| --- | ---: | ---: | ---: | --- |
+| Neutral | 0.008 | 1.008 | 0.330 | |
+| Highlight recovery off / on | 0.008 | 1.008 | 0.329 / 0.330 | **No measurable effect** on any of the four files, including the one with clipped pixels |
+| Local tone map 0 / 1 | — | — | — | Unsupported on these decoders; identical output |
+| Boost shadow 0.5 / 1.5 | 0.008 | 1.008 | 0.330 | Region identical; it moves only shadows (midtone-matched clip differs only because the median moves) |
+| EDR 1 / 2 | 0.235 / 0.582 | 1.37 / 1.67 | 0.475 / 0.608 | Values above 1 appear where neutral had a shoulder; midtones unchanged |
+| Boost 0.5 / 0 | 0.008 / 0.007 | 1.02 / 1.03 | 0.532 / 0.852 | Changes the whole base tone (median 0.084 → 0.068 / 0.053); highlights are expanded relative to it |
+| RGB Highlights −50 / −100 | 0.005 | 1.000 | 0.437 / 0.564 | Region relSpread grows with the throw; midtones barely move (median 0.083 / 0.081) |
+| RGB Whites −100 | 0.000 | 0.776 | 0.231 | Lowers the endpoint, compresses the region |
+| RGB Shadows +100 / Blacks −100 | 0.005 | 1.000 | 0.329 / 0.326 | Leave the highlight region unchanged |
+
+Reading the table honestly:
+
+- **Decoder processing versus scene-linear output.** None of the decoder controls returns an
+  unprocessed scene-linear image. Neutral already contains the boost-1 tone curve, gamut mapping and
+  the baseline exposure; EDR and boost change that curve rather than reveal sensor data.
+- **Tone appearance versus recovered detail.** EDR 1/2 and boost 0/0.5 increase region relSpread
+  because they reshape the highlight shoulder, and EDR pushes values above 1 (p99 1.37 / 1.67, from
+  1.008). That is more *extended-range* separation, not demonstrably more recovered channel detail:
+  the clipped fraction rises, nothing is brought back below 1 without a further gain that also dims
+  the midtones, and no bracket exists to say the extra spread is scene detail. Highlight recovery,
+  the one control whose name promises recovery, did nothing measurable on any file.
+- **RGB already serves the intent.** RGB Highlights −100 raises the same region's relSpread to 0.564
+  (from 0.330) with the median moved by 4%, and Whites −100 pulls the endpoint to 0.78. Their throw is
+  predictable, monotonic, local to the highlight region, and costs 4–7 ms; no decoder control moves
+  highlights without also moving the base tone (boost, EDR+gain) or doing nothing (recovery, local
+  tone map, shadow boost).
+- **Cost.** Every decoder variant re-outputs the RAW (about 200–400 ms per develop plus float
+  readback in this debug proxy, versus 4–7 ms for an RGB Light control). The engine-level
+  interactive numbers in [`TESTING.md`](TESTING.md#raw-exposure-routing-krma-1174) (p50 5–7 ms per
+  tick through the reused filter, with the developed source and prefix lost per tick) apply to any
+  decoder-routed slider; the RGB path keeps the cached prefix.
+
+**Decision: no new RAW routing.** Highlights, Shadows, Whites and Blacks (and Contrast) stay RGB for
+RAW and standard sources alike. No semantics are defensible: recovery is a boolean with no measured
+effect, local tone map is unsupported here, shadow boost does not touch highlights, and EDR/boost are
+base-tone changes, not signed highlight throws. Neutral rendering is unchanged by this ticket; the
+EDR 0 / boost 1 / recovery-on defaults stay as the decoder reports them.
+`RAWExposureRoutingTests.testToneSlidersStayRGBAndNeverRedevelopTheRAW` pins the decision so these
+sliders neither reach the decoder nor invalidate the developed source mid-drag.
+
+**Revisit when** a corpus with a bracketed or sensor-clipped reference and other camera makes is
+available, a camera reports local tone map support, or a file shows highlight recovery changing
+output. EDR with a compensating gain is the only candidate that increased region spread without
+changing the median; it would need a defined headroom-to-display mapping (and clamping behavior
+through `CIToneCurve` and Look LUT domains) and a user-facing semantics argument before shipping.

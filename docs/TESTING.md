@@ -1349,6 +1349,15 @@ corrections are cheap, and a second materialized prefix would add a cache tier a
 for no measured gain. The display-bound release capture was not run (it is not affected by this change
 and is release-qualification evidence only).
 
+### RAW highlight headroom evaluation (KRMA-1176)
+
+`RAWHighlightHeadroomBenchmark` (optional; `swift test --filter RAWHighlightHeadroomBenchmark`, about two
+minutes) prints decoder defaults and fixed-region highlight statistics for recovery, EDR, boost, shadow
+boost, local tone map and the RGB Light controls on every local RAW. Results and the decision to keep
+Highlights/Shadows/Whites/Blacks on RGB are in
+[`RAW_PIPELINE_INSPECTION.md`](RAW_PIPELINE_INSPECTION.md#follow-up-highlight-headroom-and-tone-controls-evaluated-rgb-retained-krma-1176).
+`RAWExposureRoutingTests.testToneSlidersStayRGBAndNeverRedevelopTheRAW` (fast) guards the routing.
+
 ### RAW exposure routing (KRMA-1174)
 
 Global Exposure on a RAW is applied by `CIRAWFilter.exposure` (see

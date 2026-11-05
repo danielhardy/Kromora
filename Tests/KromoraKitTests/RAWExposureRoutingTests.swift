@@ -97,6 +97,29 @@ final class RAWExposureRoutingTests: XCTestCase {
             "the RGB prefix no longer depends on an exposure the decoder applied")
     }
 
+    /// KRMA-1176: Highlights, Shadows, Whites, Blacks and Contrast deliberately stay RGB curves for a
+    /// RAW. Measured on four Sony ARWs, no decoder control (recovery, EDR, boost, shadow boost, local
+    /// tone map) is a defensible equivalent (`docs/RAW_PIPELINE_INSPECTION.md`), so these sliders
+    /// must neither reach the decoder nor invalidate the developed source while they are dragged.
+    func testToneSlidersStayRGBAndNeverRedevelopTheRAW() {
+        let base = EditDocument(rawDevelop: RAWDevelopSettings(boostAmount: 0.5))
+        for light in [
+            LightAdjustments(highlights: -80), LightAdjustments(shadows: 60),
+            LightAdjustments(whites: -40), LightAdjustments(blacks: 30),
+            LightAdjustments(contrast: 25),
+        ] {
+            var edited = base
+            edited.light = light
+            let routed = edited.routedForRendering(source: .raw)
+            XCTAssertEqual(routed, edited, "\(light) must not be rerouted for a RAW")
+            XCTAssertEqual(routed.rawDevelop, base.rawDevelop)
+            XCTAssertEqual(
+                RenderDocumentIdentity(routed).rawDevelop,
+                RenderDocumentIdentity(base.routedForRendering(source: .raw)).rawDevelop,
+                "an RGB tone slider must keep the developed-source key")
+        }
+    }
+
     func testStandardSourceExposureNeverInvalidatesTheDevelopedSource() {
         let a = EditDocument(light: LightAdjustments(exposure: 0.5))
         let b = EditDocument(light: LightAdjustments(exposure: 1.0))
