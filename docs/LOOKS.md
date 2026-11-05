@@ -18,14 +18,15 @@ thumbnails, Save as Look and export:
 2. **Core corrections.** Light (Exposure for a standard image, tone curve, curves, Whites, Blacks),
    then Color (vibrance, saturation, mixer, grading), then the ordered adjustment nodes (the
    standard-image white balance and any persisted exposure, highlight/shadow, colour-controls or
-   vibrance nodes) in array order. That is the relative order these stages already had; only the Look
-   moved, so Auto's white-balance node keeps its calibration. No node is skipped or deferred past the
-   Look.
+   vibrance nodes) in array order. RAW rendering excludes the post-render temperature/tint node
+   because its white balance is handled in the decoder. The remaining nodes precede the Look, so
+   Auto's standard-image white-balance node keeps its relative order.
 3. **The Look**, in its declared authoring space. Intensity is the same crossfade as before, now
    between the corrected image and its graded result. An unresolved Look renders as no Look.
-4. **Finishing.** Global Texture/Clarity/Dehaze, then Detail, then ordered local mask layers (local
-   exposure and white balance are RGB operations on the Look's output), then crop, post-crop vignette
-   and grain, then output conversion and optional output sharpening.
+4. **Finishing.** Global Texture/Clarity/Dehaze, then remaining RGB Detail (supported global RAW
+   Luminance NR was applied during develop), then ordered local mask layers. Local exposure and white
+   balance are RGB operations on the Look's output. Crop, post-crop vignette and grain follow. For
+   export, optional resizing and output sharpening precede output color conversion and encoding.
 
 The order replaces KRMA-1032's Look-first order (which let sliders adjust the Look's output). Saved
 documents still decode and nothing is discarded, but a document that combines a Look with non-neutral

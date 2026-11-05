@@ -82,9 +82,11 @@ cache invalidation version live with `RenderPipeline.buildGradedImage`/`buildCor
 contract and the measured LUT-domain clipping.
 
 Effects persist capture sharpening radius/amount/detail/masking and luminance/chroma noise reduction
-retention controls in the `detail` value. They run through the shared graded Core Image graph (after the Look, as global finishing);
-local mask layers can also scope sharpening, noise cleanup, and moiré softening. Export output
-sharpening is a separate delivery choice (screen, matte, or glossy, each low/standard/high) carried
+retention controls in the `detail` value. On a RAW with supported luminance noise reduction, the
+renderer routes global Luminance controls to the decoder before the Look; otherwise they stay in the
+shared RGB graph. Global colour noise reduction and sharpening run in the RGB graph after the Look.
+Local mask layers use RGB processing to scope sharpening, noise cleanup, and moiré softening.
+Export output sharpening is a separate delivery choice (screen, matte, or glossy, each low/standard/high) carried
 by `ExportOptions` and applied after sizing, so it does not change the edit document or preview.
 
 `RenderEngine` is an actor and the GPU/Core Image isolation boundary. `CIImage` and `CIContext` are

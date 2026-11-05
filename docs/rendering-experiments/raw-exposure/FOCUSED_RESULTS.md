@@ -1,5 +1,9 @@
 # Focused Sony RAW comparison
 
+**Historical experiment.** Its prototype recommendation predates the shipped RAW exposure and
+luminance noise-reduction routing. For current behavior see [RAW exposure routing](../../ENGINEERING_GUIDE.md#raw-exposure-routing)
+and [RAW noise-reduction routing](../../ENGINEERING_GUIDE.md#raw-noise-reduction-routing).
+
 4 November 2026, macOS 27.2. Follow-up to [the initial experiment](RESULTS.md). These are real, full-resolution crops from two local Sony RAWs, not 800-pixel decodes. The experiment leaves production behavior and documents untouched.
 
 ## Exposure and highlights

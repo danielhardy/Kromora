@@ -110,8 +110,9 @@ Hue-sector entries are written as saturation multiplier and hue shift. "–" mea
 - **Input color space.** Per ADR-KRMA-1115 the family is authored in Display P3 (`WorkingSpace.current`),
   stamped `KROMORA_AUTHORING_SPACE: displayP3`, and recorded in the manifest notes. Hue and saturation
   targets below are described qualitatively and are tuned in P3; do not relabel sRGB tables.
-- **Base-look ordering.** Because the Look runs before Exposure/Color sliders, the Looks do not
-  need to compensate for exposure; they should be exposure-neutral at middle gray.
+- **Look ordering.** Exposure and the other core Light/Color corrections precede the Look; global
+  spatial finishing and local masks follow it. Tune the cubes for corrected input and test how their
+  bounded domain handles bright or saturated corrections; see [`LOOKS.md`](LOOKS.md#render-order).
 - **Intensity.** The existing Look Intensity crossfade is the Weak/Strong control; no extra
   UI is needed.
 - **Grain** is a separate existing stage; do not bake it into cubes.

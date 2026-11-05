@@ -1,5 +1,10 @@
 # RAW exposure experiment: initial results
 
+**Historical results and recommendation.** This experiment predates the implemented RAW exposure
+routing and the corrections → Look → finishing order. Its recommendation below records the decision
+at the time, not current product behavior. See [the current render order](../../LOOKS.md#render-order)
+and [RAW exposure routing](../../ENGINEERING_GUIDE.md#raw-exposure-routing).
+
 Run on 4 November 2026, macOS 27.2, Apple Silicon. Primary fixtures: `realworldtest/DSC00324.ARW` (6000 × 4000) and `DSC01153.ARW` (9504 × 6336); the requested `DSC01104.ARW` was not available. Two DNGs were also tested as supplemental controls. The ARWs were decoded at an 800-pixel maximum dimension; this is an initial screen-scale test, not a full-resolution quality study. Original files are not included. JSON captures each setting and measurement; see [setup and limitations](README.md). The two supplemental DNG JSONs predate the addition of matched-display gains and have unnormalized contact sheets.
 
 ## Findings

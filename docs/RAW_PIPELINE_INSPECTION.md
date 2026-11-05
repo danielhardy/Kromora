@@ -1,5 +1,14 @@
 # RAW pipeline inspection
 
+**Historical inspection.** The executive summary, diagram, matrix, and recommendations through
+“Recommended sequence” describe repository `b3be8d83` on 4 November 2026, not the current pipeline.
+The follow-ups below record subsequent work. For the current contract, see
+[`LOOKS.md`](LOOKS.md#render-order) and [`ENGINEERING_GUIDE.md`](ENGINEERING_GUIDE.md#raw-exposure-routing):
+RAW global exposure and supported luminance noise reduction route through the decoder; global
+Light/Color corrections precede the Look; finishing and local masks follow it. The original proposal
+to preserve old rendered appearance through versioning was superseded by the owner's prerelease
+decision; existing edits can change appearance.
+
 Inspection of repository `b3be8d83`, 4 November 2026. This is a code and installed-SDK inspection, not a controlled image-quality comparison. No production code was changed. “Decoder stage” below means inside `CIRAWFilter` before its `outputImage` is consumed; Apple does not document the internal order of most operations or guarantee they run on the sensor mosaic.
 
 ## Executive summary

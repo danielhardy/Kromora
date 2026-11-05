@@ -45,9 +45,10 @@ For package ownership and data safety, including how to move or back up a librar
 
 ## Current capabilities
 
-- **RAW and still-image development:** Core Image RAW decoding with per-file decoder controls,
-  plus Light, Color, tone curves, HSL, color grading, effects, crop, rotation, and orientation-aware
-  edits. Decoder-dependent controls appear only when supported by the source.
+- **RAW and still-image development:** A unified editor for Light, Color, tone curves, HSL, color
+  grading, effects, crop, rotation, and orientation-aware edits. For RAW photos, global white balance
+  and exposure use Core Image's RAW decoder; global luminance noise reduction also uses it when
+  supported. Other adjustments use the shared RGB pipeline.
 - **Local work:** brush, erase, linear and radial gradients, semantic and range masks, compositing
   operations, and regional adjustments. Heal and Clone retouch are available for local defects;
   automatic dust detection is a suggestion tool and can miss defects. See
