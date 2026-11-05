@@ -120,4 +120,30 @@ final class EditDocumentStoreTests: TempDirectoryTestCase {
         XCTAssertTrue(result.found)
         XCTAssertEqual(result.document, document)
     }
+
+    func testRAWExposureSettingsRoundTripThroughPackageAndRouteOnce() async throws {
+        let (package, lease, assets) = try makePackage()
+        let reference = reference(for: assets[0])
+        let document = EditDocument(
+            rawDevelop: RAWDevelopSettings(exposure: 0.4),
+            light: LightAdjustments(exposure: 1))
+        let first = EditDocumentStore(package: package, lease: lease)
+        try await first.save(document, for: reference)
+        try lease.release()
+
+        let reopenedLease = try PortablePackageLease.acquire(at: package.rootURL)
+        defer { try? reopenedLease.release() }
+        let reopened = EditDocumentStore(package: package, lease: reopenedLease)
+        let result = await reopened.load(for: reference)
+
+        XCTAssertTrue(result.found)
+        XCTAssertEqual(result.document, document)
+        XCTAssertEqual(result.document.light.exposure, 1)
+        XCTAssertEqual(result.document.rawDevelop.exposure, 0.4)
+
+        let routed = result.document.routedForRendering(source: .raw)
+        XCTAssertEqual(routed.light.exposure, 0)
+        XCTAssertEqual(routed.rawDevelop.exposure ?? .nan, 1.15, accuracy: 1e-12)
+        XCTAssertEqual(result.document, document, "render routing must not mutate the stored revision")
+    }
 }
