@@ -1589,8 +1589,9 @@ Global Luminance NR on a RAW is applied by `CIRAWFilter.luminanceNoiseReductionA
 **Decoder defaults on the four local Sony ARWs** (per image; all report both NR controls and sharpness
 supported): luminance NR 0.7125 (DSC00324, ISO 2000), 0.0015, 0.0029, 0.6764; colour NR 0.5 on all;
 sharpness 0.8904, 1.0, 1.0, 0.8316, i.e. 0.11, 0, 0, 0.17 of headroom. That is why Sharpening stays
-RGB. Only Sony ARWs were available, so DNG and other makers' defaults and support are unmeasured; the
-routing reads them per file and falls back to RGB where unsupported.
+RGB. The routing reads support and defaults per file and falls back to RGB where unsupported. Three
+local DNGs were added in KRMA-1183; see "Additional camera families" below (they change the
+conclusion for DNG Luminance NR).
 
 **Matched comparison (2026-11-05, macOS 27.2, 1:1 centre 1500×1000 window of the full-resolution
 development, decoder at its defaults for everything else).** The RGB slider is bisected until its
@@ -1661,3 +1662,97 @@ the settled one. If drag latency proves objectionable, that is the follow-up.
 (and of the RGB path, which acts in output pixels) and the interactive and settled frames agree on mean
 brightness; the full-resolution export applies the same decoder amount at scale 1. Existing RAW edits
 with Luminance NR therefore render differently (`pixelEpoch` 41); no legacy path is kept.
+
+#### Additional camera families (KRMA-1183, 2026-11-05)
+
+Three local DNGs, all from one photographer's phones (no other maker's RAWs were available, so
+CR3/NEF/RAF/ORF/RW2 remain unmeasured): `20181011_181213` (Samsung SM-N960U1, ISO 100), `IMG_0206`
+(Apple iPhone 14 Pro, ISO 32) and `IMG_0695` (Apple iPhone 17 Pro, ISO 40). None is a high-ISO
+sample; none is a pure-noise-limited frame, so the noise numbers below describe fine-grain
+processing noise in flat tiles, not high-ISO sensor noise. Same harness, window, metrics and caveats
+as the Sony run (single 1500×1000 window, one flat tile, no perceptual study). The local files stay
+under `realworldtest/` and are not committed.
+
+**Decoder support and defaults** (`testPrintSharpnessHeadroom`; per image):
+
+| RAW | Luminance NR supported / default | Colour NR supported / default | Sharpening supported / default (headroom) | Routed | Stays RGB |
+| --- | --- | --- | --- | --- | --- |
+| 20181011_181213 | yes / 0.0000 | yes / 0.50 | yes / 0.5000 (0.50) | Luminance | Colour NR, Sharpening |
+| IMG_0206 | yes / 0.0000 | yes / 0.50 | yes / 1.0000 (0.00) | Luminance | Colour NR, Sharpening |
+| IMG_0695 | yes / 0.0000 | yes / 0.50 | yes / 1.0000 (0.00) | Luminance | Colour NR, Sharpening |
+
+All three DNGs report every control supported, so the **unsupported-decoder fallback could not be
+exercised on a real file**; it is covered by `RAWDetailRoutingTests` with synthetic capabilities
+(`testAnUnsupportedControlStaysRGBAndWritesNothing`, `testWithoutDecoderStateNoiseReductionStaysRGB`).
+Sharpening headroom is none on the two iPhone files, so keeping Sharpening in RGB is confirmed there;
+the Samsung file has 0.50, which would still be a half-range control with no radius or edge mask, so
+the earlier decision stands but is not strengthened. Colour NR: decoder 0.5 → 0.5/1.0 (slider 50/100)
+moves flat-patch chroma noise 0.00343 → 0.00342/0.00340, 0.00181 → 0.00165/0.00158 (-9%/-13%) and
+0.00035 → 0.00032/0.00034, against RGB at 100 reaching 0.00080, 0.00109 and 0.00018, so the decoder's
+upward range is small again and Colour NR stays RGB.
+
+**The DNG Luminance NR response is not monotonic** (`testPrintDecoderLuminanceResponseSweep`, which
+writes the decoder amount directly and also through the slider mapping; flat-tile luma noise / edge
+retention, overshoot is 0.00000 throughout):
+
+| decoder amount | 20181011_181213 | IMG_0206 | IMG_0695 |
+| ---: | --- | --- | --- |
+| neutral (unset = explicit 0) | 0.00510 / 1.000 | 0.01418 / 1.000 | 0.00169 / 1.000 |
+| 0.30 | 0.00239 / 1.000 | 0.01382 / 1.000 | 0.00145 / 1.000 |
+| 0.49 | 0.00099 / 1.000 | 0.01370 / 1.000 | 0.00135 / 1.000 |
+| **0.50** | **0.00731 / 1.000** | **0.01519 / 1.000** | **0.00211 / 1.000** |
+| 0.51 | 0.00163 / 0.848 | 0.00965 / 0.674 | 0.00129 / 0.796 |
+| 0.60 | 0.00196 / 0.866 | 0.01052 / 0.733 | 0.00138 / 0.841 |
+| 0.75 | 0.00216 / 0.891 | 0.01194 / 0.829 | 0.00155 / 0.912 |
+| 1.00 | 0.00153 / 0.939 | 0.01423 / 0.979 | 0.00184 / 1.021 |
+
+Reading: on all three DNGs, amounts below 0.5 reduce flat noise smoothly with no edge loss; **amount
+0.5 exactly is noisier than neutral** (+43%, +7%, +25%); above 0.5 the decoder switches to a regime
+that loses 15–33% of edge contrast at 0.51, and then gives *less* noise reduction and *more* edge
+retention as the amount rises to 1.0. The Sony files have no such step (e.g. DSC01019: 0.00124 at 0.50,
+0.00043 at 1.0, edge 0.985 → 0.967). Because the DNG default is 0, the slider mapping
+`amount = slider/100` passes straight through this: slider 50 asks for 0.5 (noisier than doing
+nothing), slider 60 reduces more than slider 100 on all three files, and above 50 every DNG loses
+edge contrast it would keep below it. The matched comparison against the RGB path (RGB slider bisected
+to the decoder's noise) shows the same shape: on 20181011, decoder 100 matches RGB 87 at edge
+0.939 vs 0.620; on IMG_0206, decoder 100 (0.01423) equals RGB 12 (edge 0.979 vs 1.034) and the
+decoder at 50 cannot be matched at all (RGB at 1 is already 0.01422); on IMG_0695, decoder 100 is
+no better than RGB 1. Edge retention is therefore not the problem at the extremes, but the decoder
+removes little noise from IMG_0206 and IMG_0695 anywhere in its range (best 3% and 20% below neutral
+below 0.5; on IMG_0206 32% at 0.51, with a 33% edge loss), where RGB at 100 reaches 0.00711 (-50%) and 0.00082
+(-51%) at a 37–52% edge loss.
+
+**Mapping decision.** No mapping change is made here. Every DNG tested shows the step, so a
+DNG-specific rule (leave Luminance NR in RGB for DNG, or cap the decoder amount below 0.5) looks
+warranted, but the choice is not clear from three files: capping at 0.49 is excellent on
+20181011 (-81%, no edge loss) and nearly a no-op on the two iPhone files, and the discriminator does
+not exist in `RAWCapabilities` (the decoder's support flag is true, so it cannot be expressed as
+"unsupported" without misreporting the decoder panel). Treat Luminance NR on DNG as a known
+limitation until that is decided; follow-up KRMA-1184.
+
+**Cost on the DNGs** (same harness as above, debug build, 1024 px box; DNGs are 12 MP so absolute
+numbers are not comparable to the 24–61 MP Sony files):
+
+| RAW | control | first | tick p50 / p95 | settled |
+| --- | --- | ---: | ---: | ---: |
+| 20181011_181213 | Luminance NR (decoder) | 282 ms | 9.3 / 10.1 ms | 10 ms |
+| 20181011_181213 | Colour NR (RGB) / Sharpening (RGB) / Exposure (decoder) | 87 / 87 / 112 ms | 2.9 / 2.7 / 4.1 ms | 5 / 3 / 4 ms |
+| IMG_0206 | Luminance NR (decoder) | 234 ms | 12.2 / 12.7 ms | 12 ms |
+| IMG_0206 | Colour NR (RGB) / Sharpening (RGB) / Exposure (decoder) | 163 / 162 / 205 ms | 3.0 / 2.7 / 4.6 ms | 4 / 3 / 5 ms |
+| IMG_0695 | Luminance NR (decoder) | 244 ms | 10.9 / 12.0 ms | 11 ms |
+| IMG_0695 | Colour NR (RGB) / Sharpening (RGB) / Exposure (decoder) | 198 / 196 / 237 ms | 3.1 / 2.7 / 4.2 ms | 4 / 3 / 4 ms |
+
+Decoder Luminance ticks stay under the 16.7 ms frame budget on all three DNGs (9–12 ms, about 3–4× an
+RGB tick, as on the Sony files). Each run used one `CIRAWFilter` and one property write per output
+(26 for 26); RGB controls write none. Since all three DNGs report every control supported, no write
+to an unsupported property is possible on them, and none was observed.
+
+**Verification on the DNGs.** With the DNGs as the local fixtures, `RAWDetailRoutingRenderTests` (which
+use the first two filename-sorted files, 20181011_181213 and IMG_0206) and `RAWDetailRoutingTests` pass
+unchanged: slider equals the spelled routed form, the decoder amount changes the frame, interactive and
+settled frames agree, encoded export matches the routed document, a noise tick re-develops while a
+revisit hits and Sharpening never re-develops, one interactive filter serves the ticks, and a settled
+render of another photo does not evict the session. Explicit `rawDevelop` amounts reach the decoder
+(the sweep writes them directly). That the tests pass does not address the response shape above: they
+assert routing is applied once and consistently, not that the decoder's response to the amount is
+monotonic.

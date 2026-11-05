@@ -366,6 +366,45 @@ final class RAWDetailRoutingBenchmark: XCTestCase {
         }
     }
 
+    // MARK: - 1b. Decoder response sweep (KRMA-1183)
+
+    /// Decoder-routed Luminance at a ladder of slider values, on the same anchor as the matched
+    /// comparison, plus the neutral frame and an explicit write of the decoder's own default (to
+    /// separate "the property was written" from "the amount moved").
+    func testPrintDecoderLuminanceResponseSweep() throws {
+        for (name, source) in try sources() {
+            let caps = try capabilities(source)
+            let neutral = read(try developed(source, .neutral))
+            let a = anchor(neutral)
+            func line(_ label: String, _ frame: Frame, amount: Double?) {
+                let m = metrics(frame, anchor: a)
+                print(
+                    "RAW-DETAIL-SWEEP", name, label,
+                    amount.map { String(format: "amount=%.4f", $0) } ?? "amount=unset",
+                    String(format: "noise=%.5f edge=%.3f overshoot=%.5f", m.lumaNoise, m.edgeRetention, m.overshoot))
+            }
+            line("neutral", neutral, amount: nil)
+            var explicitBase = RAWDevelopSettings()
+            explicitBase.luminanceNoiseReductionAmount = caps.luminanceNoiseReductionAmount
+            line("explicit-default", read(try developed(source, explicitBase)), amount: caps.luminanceNoiseReductionAmount)
+            // The decoder amount itself, bypassing the slider mapping, around the 0.5 region.
+            for amount in [0.3, 0.4, 0.45, 0.49, 0.5, 0.51, 0.55, 0.6, 0.75, 1.0] {
+                var explicit = RAWDevelopSettings()
+                explicit.luminanceNoiseReductionAmount = amount
+                line("decoder", read(try developed(source, explicit)), amount: amount)
+            }
+            for slider in [10.0, 20, 30, 40, 50, 60, 75, 100] {
+                let routed = EditDocument(
+                    effects: EffectsAdjustments(detail: DetailAdjustments(luminanceNoise: slider))
+                ).routedForRendering(source: .raw, decoder: caps)
+                line(
+                    String(format: "slider=%3.0f", slider),
+                    read(try developed(source, routed.rawDevelop)),
+                    amount: routed.rawDevelop.luminanceNoiseReductionAmount)
+            }
+        }
+    }
+
     // MARK: - 2. Sharpness headroom
 
     func testPrintSharpnessHeadroom() throws {
