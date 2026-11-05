@@ -1389,6 +1389,28 @@ The display-bound release capture was not run. Single run per file and control (
 agreed within about 0.5 ms on every p50); the first row measured in a process and some Highlights
 first frames include cold-start cost.
 
+### RAW colour headroom and Color controls (KRMA-1179)
+
+`RAWColorHeadroomBenchmark` (optional; `swift test --filter RAWColorHeadroomBenchmark`, about six minutes
+for eight RAWs, so run one file per process by pointing `KROMORA_RAW_FIXTURE_DIR` at a folder holding it)
+develops each local RAW with gamut mapping off and EDR 1/2 and prints extended-linear Display P3
+statistics: out-of-range channel fractions, a saturated-subject region and a grey reference region, and
+the same measurements after Saturation, Vibrance, mixer and grading edits with the Look off and with two
+starter Looks, plus extreme decoder white balance. `testPrintGamutOffOutOfGamutRegion` compares the pixels
+gamut mapping off leaves outside Display P3 with the gamut-mapped decode after one output transform. It asserts
+nothing. Results, the decision to keep the Color controls on RGB and the decoder at its defaults, and the
+limits are in
+[`RAW_PIPELINE_INSPECTION.md`](RAW_PIPELINE_INSPECTION.md#follow-up-raw-colour-headroom-and-the-color-controls-krma-1179).
+
+- `RAWColorRoutingTests` (fast): colour edits never reach the decoder settings or invalidate the
+  developed-source key, a stored gamut/EDR/white balance survives them, each effective decoder colour
+  setting has its own key, standard-image and masked colour are untouched, persistence and legacy
+  documents, and the capability facts.
+- `RAWColorRoutingRenderTests` (optional lane, needs a local RAW): real-`RenderEngine` interactive ticks
+  cost one decoder output, colour edits reuse the developed source while gamut/EDR re-develop, a stored
+  decoder setting plus a colour edit renders and caches coherently, interactive/settled agreement, and a
+  deterministic export of the same document.
+
 ### RAW exposure routing (KRMA-1174)
 
 Global Exposure on a RAW is applied by `CIRAWFilter.exposure` (see

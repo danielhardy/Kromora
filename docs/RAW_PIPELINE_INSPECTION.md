@@ -447,3 +447,135 @@ noise reduction on a RAW whose decoder supports it: it is applied through
 `CIRAWFilter.luminanceNoiseReductionAmount`, above the decoder's per-image default. Colour noise
 reduction and Sharpening stay RGB. See
 [`ENGINEERING_GUIDE.md`](ENGINEERING_GUIDE.md#raw-noise-reduction-routing).
+
+## Follow-up: RAW colour headroom and the Color controls (KRMA-1179)
+
+**Decision: no new routing and no change to untouched RAW rendering.** Global white balance stays
+decoder-based, exactly as before. Saturation, Vibrance, the HSL mixer and colour grading stay on
+developed RGB. Decoder gamut mapping and EDR stay at the decoder defaults (gamut mapping on, EDR 0); an
+explicit stored value is still honoured. `pixelEpoch` is unchanged (42). The evidence below is from
+`RAWColorHeadroomBenchmark` (optional lane; macOS 27.2, Apple Silicon, debug build, 800 px, the same
+eight local RAWs as KRMA-1176, one file per process). It compares renderings; it does not rank image
+quality. There is no bracketed or sensor-clipped reference: a channel outside 0…1 is an output
+reference, not evidence of what the sensor recorded, and nothing here claims to match Lightroom.
+
+### Control inventory
+
+| Control | Global RAW | Standard image | Local layers |
+| --- | --- | --- | --- |
+| Temperature / Tint (Color) | `CIRAWFilter.neutralTemperature` / `neutralTint` (`AppViewModel.setWhiteBalance`); as-shot / reset is `nil`, the file's own value, and any RGB white-balance node is removed | `CITemperatureAndTint` node, D65-pinned | RGB (`LocalAdjustments.temperature/tint`) |
+| Saturation | RGB: `CIColorControls` on developed extended-linear Display P3 | same | RGB |
+| Vibrance | RGB: `CIVibrance` | same | RGB |
+| HSL mixer, colour grading | RGB: `applyColorMixer`, `applyColorGrading` kernels | same | not available |
+| Gamut mapping, EDR | stored `RAWDevelopSettings` (Develop UI hidden); `nil` = decoder default | n/a | n/a |
+
+`CIRAWFilter` (macOS 26+ SDK) exposes white balance, gamut mapping, EDR amount, boost, highlight
+recovery, local tone map and the noise/detail controls. It has no saturation, vibrance, hue-selective or
+colour-grading control, so those four have no decoder equivalent to route to and remain RGB. Gamut
+mapping and EDR have no `is*Supported` flag, so they need no per-camera gate; highlight recovery, local
+tone map, noise and lens correction keep theirs.
+
+**Decoder versions.** Every local file reports decoder version 8 as its default (`8.dng` for the DNGs),
+with gamut mapping on, EDR 0, boost 1 and recovery on. The versions each file lists as supported differ:
+`DSC00324` 6–9, `DSC01019`/`DSC01104`/`DSC01153` 7–8, `DSC04513` 7–9, and all three DNGs 6–9. Kromora
+never selects a decoder version: the document has no version field, so the effective version is whatever
+the OS chooses (8 here) and the identity digest covers `RAWDevelopSettings` only. A version being
+*listed* is not evidence that it was *used*, and no comparison across versions was made.
+
+### Decoder variants at fixed exposure, white balance, recovery, boost and lens correction
+
+Only gamut mapping and EDR were varied. Float readback is extended-linear Display P3, before any
+delivery conversion. The saturated region is the most chromatic 0.5% of pixels of the neutral decode
+(channel ≥ 0.25; 610 pixels on `DSC04513`); variants are compared at the same indices after one global
+gain returns each variant's whole-frame median luminance to the neutral's. "Rails" is the share of those
+channels that land on 0 or 255 after one identical output transform (clamp, sRGB-encode, 8 bit). "Hue Δ"
+is an HSV-style hue of the linear triple; only differences are read.
+
+| File | gamut off: frame pixels with a channel < 0 | gamut off: region hue Δ / chroma Δ | EDR 1 / 2: frame pixels above 1 | EDR 1 / 2: region rails (neutral) |
+| --- | ---: | --- | ---: | --- |
+| `DSC00324.ARW` | 0.00% | 0.00° / 0 | 0 / 0 | 0 / 0 (0) |
+| `DSC01019.ARW` | 0.00% | 0.00° / 0 | 0 / 0 | 0 / 0 (0) |
+| `DSC01104.ARW` | 3.7% | 0.00° / 0 | 5.3% / 9.4% | 0 / 0 (0) |
+| `DSC01153.ARW` | 1.4% | 0.02° / +0.004 | 0.14% / 0.45% | 0 / 0 (0) |
+| `DSC04513.ARW` | 21.0% | 0.00° / +0.006 | 0 / 0.01% | 0.007 / 0.015 (0.002) |
+| Samsung DNG | 6.4% | 0.09° / 0 | 8.2% / 9.8% | 0.024 / 0.040 (0.004) |
+| iPhone 14 Pro | 0.00% | 0.98° / 0 | 1.4% / 0.9% | 0.109 / 0.197 (0) |
+| iPhone 17 Pro | 0.00% | 0.03° / 0 | 10.8% / 23.8% | 0 / 0 (0) |
+
+- **Gamut mapping off** only adds channels slightly below zero: the most negative value is −0.020
+  (Samsung), −0.013 (`DSC01104`), −0.006 (`DSC01153`), −0.002 or less elsewhere, so these are
+  near-black pixels. After the identical output transform, the pixels that leave Display P3 differ from
+  the gamut-mapped decode by a mean of 1.8–2.5 of 255 (largest single difference 5 / 10 / 18 on
+  `DSC04513` / `DSC01153` / `DSC01104`; one Samsung pixel differs by 214). Per-pixel hue angle there is
+  not meaningful at that brightness. Saturated bright subjects are unchanged (hue Δ ≤ 0.1° except 0.98°
+  on the iPhone 14 Pro, chroma ≤ +0.006). A Saturation −50 or all-hue mixer −60 pull-in leaves the
+  delivered difference at 1.6–3.2 of 255. Nothing visible at delivery is demonstrably retained.
+- **EDR** keeps the midtone brightness (it lengthens the shoulder) and puts values above 1 in the frame
+  (up to 24% of the iPhone 17 Pro frame at EDR 2) that delivery clamps. On the Samsung, `DSC04513` and
+  iPhone 14 Pro it also moves part of the saturated region onto the rails (iPhone 14 Pro 0 → 0.109 /
+  0.197) and shifts hue by up to 2.8°. Without a headroom-to-display mapping, which does not exist here,
+  the added range cannot be shown. This repeats KRMA-1176: a base-tone change, not recovered detail.
+- **Neutral reference.** Grey-region cast `|R−G|/G` is unchanged by gamut mapping (within 0.0003) and
+  moves by at most +0.004 at EDR 2 on the Sony files (`DSC01153` 0.0705 → 0.0739, `DSC01104` 0.0535 →
+  0.0578) and +0.0024 on the iPhone 14 Pro. Neither setting tints greys.
+- **Extreme decoder white balance (the existing RAW path).** With gamut mapping on, no file has a
+  negative channel in the frame at 2500 K, 12000 K or tint +120, and at most 1.8% of the frame is above 1
+  (`DSC01104` at 2500 K; Samsung 0.4%). With it **off**: at 2500 K, 2.7–71.5% of the frame goes
+  negative on six of eight files (`DSC01153` 71.5%, `DSC01104` 29.5%, `DSC04513` 25.4%) and 78% / 36% of
+  the two ProRAW frames goes above 1; at 12000 K up to 29% negative (`DSC04513`) and 41% above 1 on
+  the iPhone 14 Pro; at tint +120 up to 18% negative. On `DSC01153` at 2500 K the saturated region's
+  rails rise from 0.012 to 0.283. The default is protective for large white-balance moves, which is
+  where the setting matters, and is why it should not be turned off globally. The white-balance move's
+  own hue shift (0.6°–177°) is the intended effect and is identical with gamut mapping on or off.
+
+### Downstream Color controls across the decoder variants
+
+Saturation +50/+100, Vibrance +50/+100, Red-mixer saturation +60 and a highlights grading wheel, through
+the production `RenderPipeline.applyColor`, on neutral, gamut-off and EDR 1 developments, with no Look
+and with the `vivid-slide` and `cine-flat` starter Looks. Hue shift and rails are measured against the
+same variant with the same Look and no colour edit.
+
+- **The decoder variant barely changes what the controls do.** Saturated-region rails for the same edit
+  and Look agree to within 0.021 across neutral, gamut-off and EDR 1 on seven of eight files; the
+  exception is the iPhone 14 Pro (Saturation +100, no Look: 0.423 neutral, 0.340 gamut off, 0.470 EDR 1;
+  up to 0.09 apart over all edits). Choosing a different decoder configuration would therefore not make
+  Saturation, Vibrance, mixer or grading behave materially better.
+- **Saturation is the aggressive one, and not because of RAW.** It multiplies chroma in extended-linear
+  Display P3, so with no Look at +100 the share of the saturated region's channels that clamp at delivery
+  is 0.333 (`DSC00324`, `IMG_0695`), 0.382 (`DSC01153`), 0.423 (iPhone 14 Pro), 0.483 (Samsung) and 0.667
+  (`DSC01104`), against 0.011 and 0.041 on `DSC01019` and `DSC04513`. At +50 it is still 0.667, 0.404 and
+  0.333 on `DSC01104`, the Samsung and `IMG_0695`, and ≤ 0.09 elsewhere. Hue is preserved without a Look
+  (0.00°). Vibrance +100 stays at or below 0.014 on every file except the Samsung (0.098): it protects
+  the saturated region as designed. Standard images run the same chain, so this is a property of the
+  Saturation stage, not a RAW-vs-JPEG difference.
+- **With a Look**, the cube domain bounds the out-of-gamut channels (frame negatives are 0 in every
+  Look case) and Saturation shifts hue by 0.1°–13.8° under `vivid-slide` (largest: +100 on the iPhone 14
+  Pro, 13.8°; `DSC00324` 9.6°) and 0.3°–5.4° under `cine-flat`. Under `vivid-slide` the saturated
+  region's rails are 0.33–0.67 for Saturation on `DSC01104`, `IMG_0695`, `DSC01153` and the Samsung. That
+  is the Look's nonlinear response to amplified colour; it is the same for every decoder variant and is
+  not changed here.
+- **Non-RAW consistency.** The same `applyColor` chain, in the same order, runs for RAW and standard
+  sources, and routing never changes `color` (`RAWColorRoutingTests`). The local corpus has no RAW+JPEG
+  pair of one scene, so consistency is established structurally and not by pixels.
+
+### Why nothing was routed
+
+1. No decoder control has saturation, vibrance, hue-selective or colour-grading semantics.
+2. The two decoder controls that touch colour, gamut mapping and EDR, did not preserve measurable colour
+   at delivery: gamut mapping off differs only in near-black out-of-gamut pixels and degrades extreme
+   white balance; EDR adds range that the output clamps without changing midtone colour.
+3. Neither changes how the Color controls behave downstream beyond one file.
+4. Applying a decoder operation and an RGB operation for one slider would stack them, and no number here
+   justifies that.
+
+### Limits and unresolved
+
+- Debug build, one run per file, 800 px, eight local files, no bracketed ground truth, no cross-version
+  decoder comparison; `RAWColorHeadroomBenchmark` prints numbers and asserts none.
+- Saturation's clipping of saturated regions at +50/+100 (above) is a candidate for a separate ticket (a
+  gamut-aware or luminance-preserving saturation, evaluated on standard images too). It was not changed
+  because it applies to every source and the comparison does not tie it to the decoder.
+- No decoder-stage slider was added, so there is no new interactive cost to measure. Colour ticks are RGB
+  work and cost what the KRMA-1182 RGB ticks cost (p50 3–4 ms, no decoder output request after the first
+  frame; `RAWColorRoutingRenderTests.testInteractiveColorTicksNeverAskTheDecoderAgain` pins the request
+  count).

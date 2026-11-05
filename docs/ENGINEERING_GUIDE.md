@@ -211,6 +211,19 @@ no-op.
 - `pixelEpoch` is 41 for this change (RAW frames rendered with RGB Luminance NR are stale) and 42 after
   the ProRAW exposure calibration (KRMA-1180).
 
+## RAW colour routing
+
+Global white balance is the only Color control a RAW renders in the decoder (`neutralTemperature` /
+`neutralTint`; as-shot or reset is `nil`). Saturation, Vibrance, the HSL mixer and colour grading stay
+RGB for every source: `CIRAWFilter` has no equivalent, and comparing gamut mapping and EDR against the
+defaults (KRMA-1179, [`RAW_PIPELINE_INSPECTION.md`](RAW_PIPELINE_INSPECTION.md#follow-up-raw-colour-headroom-and-the-color-controls-krma-1179))
+showed no measurable colour retained at delivery. Gamut mapping stays at the decoder default because
+turning it off breaks large white-balance moves; EDR stays 0 because its extra range is clamped at
+output. Explicit stored values are still applied, and every effective decoder setting is part of the
+developed-source key, so a colour slider never re-develops the RAW and a gamut or EDR change always
+does. Kromora never selects a decoder version. No render path changed, so `pixelEpoch` is unchanged.
+Revisit when a headroom-to-display mapping or a bracketed reference exists.
+
 ## Auto and photo analysis
 
 `PhotoAnalysisCoordinator` owns Vision-backed analysis, semantic-mask generation, caching, and
