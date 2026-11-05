@@ -1,0 +1,24 @@
+{
+  "cachedRGBPreviewSeconds" : [
+    0.0078049898147583008,
+    0.00093495845794677734,
+    0.0012670755386352539,
+    0.00094902515411376953,
+    0.00091898441314697266
+  ],
+  "firstPreviewConstructAndRenderSeconds" : 0.14017999172210693,
+  "firstPreviewRenderSeconds" : 0.065832972526550293,
+  "freshRAWPreviewSeconds" : [
+    0.10231900215148926,
+    0.10310006141662598,
+    0.10565197467803955,
+    0.11322200298309326,
+    0.10337400436401367
+  ],
+  "fullRawMinus1ConstructAndRenderSeconds" : 0.25289702415466309,
+  "fullRawMinus1RenderSeconds" : 0.19429397583007812,
+  "limitations" : "Independent Core Image proxy, no app cache, UI scheduling or drawable; timings include CPU float readback, no GPU\/CPU utilization sampling.",
+  "peakRSSBytes" : 1295679488,
+  "scale" : 0.13333334028720856,
+  "source" : "\/Users\/dhardy\/Dev\/Kromora\/realworldtest\/DSC00324.ARW"
+}

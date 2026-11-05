@@ -1,0 +1,154 @@
+{
+  "match" : "global preview median at -2 EV; A\/EDR variant multiplied to match B\/EDR0; visual output common +2 EV",
+  "regions" : [
+    {
+      "comparison" : {
+
+      },
+      "count" : 1449616,
+      "decoderVersion" : "8",
+      "gamutMapping" : true,
+      "highlightRecovery" : true,
+      "lumaStdDev" : 0.061964715913454912,
+      "meanBlue" : 0.066587694164736783,
+      "meanLuma" : 0.032480467355582521,
+      "meanNeighborAbsDifference" : 0.0017061504098902654,
+      "meanRed" : 0.027670863121747751,
+      "mode" : "raw",
+      "normalizationGain" : 1,
+      "pixelsAnyChannelAtLeast1" : 0,
+      "rect" : [
+        3231,
+        5591,
+        1204,
+        1204
+      ],
+      "region" : "white_flag"
+    },
+    {
+      "comparison" : {
+
+      },
+      "count" : 1449616,
+      "decoderVersion" : "8",
+      "gamutMapping" : true,
+      "highlightRecovery" : true,
+      "lumaStdDev" : 0.0089200242096782196,
+      "meanBlue" : 0.0048076358027121773,
+      "meanLuma" : 0.01018802850434028,
+      "meanNeighborAbsDifference" : 0.001042661926252908,
+      "meanRed" : 0.0084403543615096197,
+      "mode" : "raw",
+      "normalizationGain" : 1,
+      "pixelsAnyChannelAtLeast1" : 0,
+      "rect" : [
+        1077,
+        886,
+        1204,
+        1204
+      ],
+      "region" : "shadow_grass"
+    },
+    {
+      "comparison" : {
+        "maxRGBDifference" : 0.41727013885974884,
+        "rmsRGBDifference" : 0.04191711933386736
+      },
+      "count" : 1449616,
+      "decoderVersion" : "8",
+      "gamutMapping" : true,
+      "highlightRecovery" : true,
+      "lumaStdDev" : 0.024421820382666413,
+      "meanBlue" : 0.052861093471921541,
+      "meanLuma" : 0.024691453036853727,
+      "meanNeighborAbsDifference" : 0.00096428972209184672,
+      "meanRed" : 0.018779423831372065,
+      "mode" : "rgb",
+      "normalizationGain" : 0.6282044380695414,
+      "pixelsAnyChannelAtLeast1" : 0,
+      "rect" : [
+        3231,
+        5591,
+        1204,
+        1204
+      ],
+      "region" : "white_flag"
+    },
+    {
+      "comparison" : {
+        "maxRGBDifference" : 0.10474570840597153,
+        "rmsRGBDifference" : 0.0019902888020943868
+      },
+      "count" : 1449616,
+      "decoderVersion" : "8",
+      "gamutMapping" : true,
+      "highlightRecovery" : true,
+      "lumaStdDev" : 0.0084711554709323133,
+      "meanBlue" : 0.0042601652015366222,
+      "meanLuma" : 0.010142898818482324,
+      "meanNeighborAbsDifference" : 0.001092520478799862,
+      "meanRed" : 0.0082725077052693274,
+      "mode" : "rgb",
+      "normalizationGain" : 0.6282044380695414,
+      "pixelsAnyChannelAtLeast1" : 0,
+      "rect" : [
+        1077,
+        886,
+        1204,
+        1204
+      ],
+      "region" : "shadow_grass"
+    },
+    {
+      "comparison" : {
+        "maxRGBDifference" : 0.3597436249256134,
+        "rmsRGBDifference" : 0.039262179469567844
+      },
+      "count" : 1449616,
+      "decoderVersion" : "8",
+      "gamutMapping" : true,
+      "highlightRecovery" : true,
+      "lumaStdDev" : 0.026362682613929746,
+      "meanBlue" : 0.054513722029274174,
+      "meanLuma" : 0.025247430227549422,
+      "meanNeighborAbsDifference" : 0.0010415379141241925,
+      "meanRed" : 0.019037880026415082,
+      "mode" : "rgb_edr1",
+      "normalizationGain" : 0.62717833884428598,
+      "pixelsAnyChannelAtLeast1" : 0,
+      "rect" : [
+        3231,
+        5591,
+        1204,
+        1204
+      ],
+      "region" : "white_flag"
+    },
+    {
+      "comparison" : {
+        "maxRGBDifference" : 0.10297856479883194,
+        "rmsRGBDifference" : 0.0019732096410518766
+      },
+      "count" : 1449616,
+      "decoderVersion" : "8",
+      "gamutMapping" : true,
+      "highlightRecovery" : true,
+      "lumaStdDev" : 0.0084652430368237878,
+      "meanBlue" : 0.0042542029794317713,
+      "meanLuma" : 0.010127321678865271,
+      "meanNeighborAbsDifference" : 0.0010909624620539728,
+      "meanRed" : 0.0082600586204772865,
+      "mode" : "rgb_edr1",
+      "normalizationGain" : 0.62717833884428598,
+      "pixelsAnyChannelAtLeast1" : 0,
+      "rect" : [
+        1077,
+        886,
+        1204,
+        1204
+      ],
+      "region" : "shadow_grass"
+    }
+  ],
+  "source" : "\/Users\/dhardy\/Dev\/Kromora\/realworldtest\/DSC01153.ARW"
+}
