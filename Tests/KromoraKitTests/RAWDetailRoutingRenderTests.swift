@@ -124,6 +124,19 @@ final class RAWDetailRoutingRenderTests: TempDirectoryTestCase {
             "export must route noise reduction exactly as preview does")
     }
 
+    func testExportPixelsMatchTheRoutedPreview() async throws {
+        for source in try rawSources() {
+            let engine = RenderEngine()
+            let stored = document(luminance: 60, colour: 40)
+            let preview = try await bytes(engine, source, stored)
+            let exported = try await engine.encode(
+                source: source, document: stored, lut: nil, scale: .preview(maxSize: box),
+                format: .png, quality: 1, space: .current)
+            let exportedPixels = try Pixels.bytes(of: try Pixels.decode(exported))
+            assertPixelsEqual(preview, exportedPixels, "preview and export must use the same routed Detail settings")
+        }
+    }
+
     /// Moving a noise slider re-develops (it is a decoder input); revisiting a value reuses the
     /// developed source; moving Sharpening — an RGB control — never re-develops.
     func testNoiseTicksRedevelopRevisitsHitAndSharpeningNeverRedevelops() async throws {
