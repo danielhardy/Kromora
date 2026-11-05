@@ -1539,6 +1539,8 @@ actor RenderEngine: RenderEngining {
         // Everything in this plan is value state. It is intentionally prepared before entering
         // the decoder/graph section so a future concurrent build worker can do this work without
         // borrowing the actor-owned Core Image resources.
+        // RAW routes global Exposure into the decoder; route first so every key below sees it.
+        let document = document.routedForRendering(source: source.kind)
         try kernelStatus.require(RenderKernelRequirements.names(for: document))
         let sourceFingerprint = RenderSourceFingerprint(source)
         let identity = documentIdentity(for: document, source: sourceFingerprint)

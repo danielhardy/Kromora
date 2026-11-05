@@ -1309,3 +1309,52 @@ Sony figures match KRMA-1114's 0%; the iPhone maximum differs from KRMA-1114's 4
 percentage points, within a stated 0.1-point tolerance. This measures the edited, tone-mapped,
 512 px preview sample, while KRMA-1114 used a one-off decode, so small differences are expected.
 The HEIC fixture is not a RAW extension, so this lane does not cover it.
+
+### RAW exposure routing (KRMA-1174)
+
+Global Exposure on a RAW is applied by `CIRAWFilter.exposure` (see
+[`ENGINEERING_GUIDE.md`](ENGINEERING_GUIDE.md#raw-exposure-routing)). Coverage:
+
+- `RAWExposureRoutingTests` (fast): the routing rule, combination with an existing explicit decoder
+  exposure, identity/cache-key consequences, Codable reopen, reset/undo, copy/paste, comparison.
+- `RAWExposureRoutingRenderTests` (serial; RAW methods optional): real `RenderEngine` equivalence of
+  the slider and the decoder spelling (applied once), exposure-before-Look, interactive vs settled
+  brightness, histogram and encoded export parity, developed-source invalidation/revisit hits, one
+  interactive filter across ticks, and the unchanged standard-image RGB path.
+- `RAWExposureCalibrationBenchmark` and `RAWExposureRoutingBenchmark` (optional) print the
+  calibration table and the cost comparison; run them with
+  `swift test --filter RAWExposureCalibrationBenchmark` (about five minutes) and
+  `swift test --filter RAWExposureRoutingBenchmark`.
+
+**Measured 2026-11-04 (macOS 27.2, Apple Silicon, debug test build, window-independent
+`RenderEngine`, 1024 px box, 24 interactive exposure ticks then one new-value settled `.preview`).**
+RGB is the previous path (an RGB exposure node on the developed source); decoder is the new path.
+
+| RAW | path | first | tick p50 / p95 | settled (new value) | footprint |
+| --- | --- | ---: | ---: | ---: | ---: |
+| DSC00324 | RGB | 373 ms | 3.1 / 3.4 ms | 4 ms | 612 MB |
+| DSC00324 | decoder | 177 ms | 5.1 / 5.5 ms | 5 ms | 594 MB |
+| DSC01019 | RGB | 275 ms | 4.2 / 5.0 ms | 4 ms | 1063 MB |
+| DSC01019 | decoder | 271 ms | 6.8 / 7.1 ms | 7 ms | 1041 MB |
+| DSC01153 | RGB | 277 ms | 4.3 / 5.5 ms | 5 ms | 1081 MB |
+| DSC01153 | decoder | 264 ms | 6.8 / 7.3 ms | 7 ms | 1049 MB |
+| DSC04513 | RGB | 270 ms | 3.1 / 3.6 ms | 3 ms | 1007 MB |
+| DSC04513 | decoder | 226 ms | 4.9 / 5.5 ms | 5 ms | 980 MB |
+
+Reading: the interactive session reuses one `CIRAWFilter` (1 construction, 26 decoder outputs for 26
+requests, no processing-prefix materializations), so a decoder tick costs roughly 2–3 ms more than an
+RGB tick and stays far under the 16.7 ms frame budget; first-frame cost is not worse and memory is
+equal within noise. The 102–113 ms cold-RAW figure from the standalone proxy came from a fresh filter
+per tick and CPU readback and does not describe the app. Numbers are single runs per file on a debug
+build, with no GPU-utilization trace; the footprint is process `phys_footprint`, shared by every
+case in a run. No material regression was found, so no mitigation was added.
+
+**Calibration table** (decoder exposure whose whole-frame median luminance matches RGB exposure at
+the slider EV, 800 px, extended-linear sRGB luminance): −4→−2.98…−3.48, −3→−2.23…−2.54,
+−2→−1.48…−1.64, −1→−0.73…−0.80, +1→+0.71…+1.12, +2→+1.45…+1.66 (unreachable on DSC00324, median 0.31),
++3→+2.16…+2.85, +4→+2.97…+3.85 across DSC00324, DSC01019, DSC01153 and DSC04513. The shipped 0.75
+sits at the lower edge for positive moves on dim files and at the center for negative ones. Per-camera
+differences are therefore up to roughly ±0.15 EV at matched medians, and highlight-heavy scenes brighten
+less than RGB at positive EV by design. Color and channel detail were not graded here; the earlier
+experiment's caveat (different tone, not proven recovery) stands. Only Sony ARWs were available; the
+DNG controls in the earlier experiment showed identical A/B output and were not re-run.

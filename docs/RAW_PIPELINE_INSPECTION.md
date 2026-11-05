@@ -125,3 +125,11 @@ All prototypes should be temporary, feature-gated, and preserve the unified UI, 
 2. Establish controlled base-render and highlight measurements, then run the exposure/headroom prototype. Separately evaluate NR/sharpening on high-ISO fixtures.
 3. Only if results justify it, design a versioned, format-aware mapping behind the existing controls. Decide whether RAW exposure replaces RGB exposure for **new-version** global edits or is a calibrated split; never blindly apply both. Keep masks in the shared RGB graph, preserve current saved settings and neutral behavior, and test preview/export parity and latency. Favor caching, scaled interactive development, coalescing and settled refinement using existing engine mechanisms, but expect RAW changes to invalidate developed-source and downstream prefixes.
 4. Define decoder-version and camera-dependent defaults policy, migration and regression fixtures before shipping. Validate slider intent across RAW and rendered formats perceptually rather than promising identical numerical output. No separate Develop panel or broad rewrite is required by these findings.
+
+## Follow-up: global exposure routed to the decoder (KRMA-1174)
+
+The inspection's “Light exposure runs on developed RGB after the Look” finding no longer holds for
+RAW sources: the global Exposure slider is applied through `CIRAWFilter.exposure`, before the Look,
+with a calibrated slider-to-decoder ratio. See
+[`ENGINEERING_GUIDE.md`](ENGINEERING_GUIDE.md#raw-exposure-routing). The statements above describe
+repository `b3be8d83`.

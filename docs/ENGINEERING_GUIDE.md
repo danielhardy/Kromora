@@ -122,6 +122,43 @@ mean all channels are 0, and per-channel totals count values at 255. The canvas 
 presentation-only and can be toggled from the Info histogram. Exposure remains available in the
 Light inspector alongside the other global tone controls.
 
+## RAW exposure routing
+
+The Light **Exposure** slider is one control for every source, but it is rendered by the source's
+own natural stage (KRMA-1174). A standard image applies it as `CIExposureAdjust` on developed RGB.
+A RAW hands it to `CIRAWFilter.exposure`, so it runs inside the decoder, before the Look and before
+every RGB stage, and ahead of the decoder's tone curve and highlight handling.
+
+- **Where.** `EditDocument.routedForRendering(source:)` (`RAWExposureRouting.swift`) derives the
+  document the renderer builds from: `light.exposure` is folded into `rawDevelop.exposure` and zeroed.
+  `RenderEngine.buildImage` and `RenderPipeline.buildImage` route first, so the identity digests,
+  developed-source key, processing prefix, preview/export, histogram, Look candidates and the
+  interactive RAW session all see one document. The *stored* document is never rewritten, so the
+  package format, undo, copy/paste, Reset and comparison baselines are untouched.
+- **Existing values.** A nonzero `rawDevelop.exposure` (written while the Develop tab was reachable)
+  is kept and *added* to the calibrated slider value as one decoder exposure; the same decoder
+  exposure spelled either way shares one cache entry. Nothing is applied twice, and there is no
+  legacy-rendering path: existing RAW edits that carry Exposure simply re-render through the
+  decoder (`pixelEpoch` 40).
+- **Calibration.** Decoder stops are not RGB stops, because the decoder tone curve follows exposure.
+  `RAWExposureRouting.decoderStopsPerSliderStop` is 0.75. `RAWExposureCalibrationBenchmark` found,
+  on four Sony ARWs, the decoder exposure whose whole-frame median luminance equals RGB exposure at
+  −4…−1 EV to be 0.74–0.82 of the slider (−1→−0.73…−0.80, −4→−2.98…−3.48), and 0.71–0.83 for +1 and
+  +2 EV on the dimmer files. On a bright scene (median 0.31) +2 EV cannot be matched at all: the
+  decoder saturates where RGB EV keeps multiplying. That roll-off is the intended difference, not a
+  bug; the slider promises matched *midtones* for ordinary moves, **not equal pixels**, and a RAW and
+  a JPEG of one scene will not respond identically.
+- **What is not claimed.** The experiments in `docs/rendering-experiments/raw-exposure/` show a
+  different tone response and stronger tonal separation in a bright flag crop. They do not prove
+  recovered sensor highlights, and two DNG fixtures behaved identically under both paths. Treat the
+  decoder path as a tone-response choice, with per-camera variation, not as a recovery feature.
+- **Still RGB.** Standard images, local-mask exposure, ordered `.exposure` adjustment nodes, and the
+  Save-as-Look LUT export (a LUT cannot carry decoder work).
+- **Cost.** Each exposure tick is a decoder re-output instead of an RGB multiply. The interactive RAW
+  session reuses its filter (one construction, one property write per tick), but the developed source
+  and processing prefix no longer survive a tick. Measured numbers are in
+  [`TESTING.md`](TESTING.md#raw-exposure-routing-krma-1174).
+
 ## Auto and photo analysis
 
 `PhotoAnalysisCoordinator` owns Vision-backed analysis, semantic-mask generation, caching, and

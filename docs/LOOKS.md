@@ -13,7 +13,8 @@ geometry), and Light, Color, Effects, Detail, and ordered adjustments then adjus
 result, followed by local masks, crop, vignette, and grain. Dragging Exposure after picking a Look
 therefore moves the Look's output instead of feeding a fixed transform. Intensity is the same
 crossfade between the Look's input and graded output, now computed at the head of the chain.
-Documents saved before this order change render differently when they combine a Look with
+On a RAW, the global Exposure slider is the exception: it is applied by the decoder, so it lands
+*before* the Look (see [`ENGINEERING_GUIDE.md`](ENGINEERING_GUIDE.md#raw-exposure-routing)). Documents saved before this order change render differently when they combine a Look with
 non-neutral sliders; the stored document is unchanged. Save as Look samples the same order.
 
 ## File support

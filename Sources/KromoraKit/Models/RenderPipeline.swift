@@ -71,7 +71,9 @@ enum RenderPipeline {
     /// refined against the corrected geometry.
     /// v39 samples the tone-curve lookup from its own 256×1 extent. Settled crops that missed that
     /// texture rendered black and must be refined against the corrected region.
-    static let pixelEpoch = 39
+    /// v40 routes global Exposure through `CIRAWFilter.exposure` for RAW sources
+    /// (`RAWExposureRouting`), so RAW frames and caches rendered with RGB exposure are stale.
+    static let pixelEpoch = 40
 
     /// Build the graph for `document` over `source`.
     ///
@@ -102,6 +104,7 @@ enum RenderPipeline {
         lutCache: LUTFilterCache? = nil,
         sourceROI: CGRect? = nil
     ) -> CIImage? {
+        let document = document.routedForRendering(source: source.kind)
         guard
             let developed = developedSource(
                 source, rawDevelop: document.rawDevelop, scale: scale, rotation: document.rotation
