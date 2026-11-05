@@ -20,17 +20,15 @@ final class LookLUTExportTests: TempDirectoryTestCase {
         XCTAssertTrue(matrix.omissionMessage?.contains("will be omitted") == true)
     }
 
-    func testSupportMatrixListsTheLookBeforeTheSlidersItIsAdjustedBy() {
+    func testSupportMatrixListsTheCorrectionsBeforeTheLook() {
         let document = EditDocument(
             light: LightAdjustments(exposure: 0.5),
+            color: ColorAdjustments(saturation: 20),
             adjustments: [.vibrance(amount: 0.4)],
             lut: LUTSettings(lutID: LUTID(raw: "base"), intensity: 1)
         )
         let ids = LUTSupportMatrix.make(for: document).entries.map(\.id)
-        let look = ids.firstIndex(of: "look")
-        XCTAssertNotNil(look)
-        XCTAssertLessThan(look ?? .max, ids.firstIndex(of: "light") ?? 0)
-        XCTAssertLessThan(look ?? .max, ids.firstIndex(of: "adjustment-0") ?? 0)
+        XCTAssertEqual(ids, ["light", "color", "adjustment-0", "look"])
     }
 
     func testLookPlusSlidersConversionVerifiesWithinTolerance() throws {

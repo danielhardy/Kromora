@@ -8,8 +8,8 @@ import CoreGraphics
 /// how deterministic grain is seeded. The cache object remains actor-confined by the caller.
 enum RenderStageFacade {
     /// Apply the post-prefix stages in the product's canonical order: crop, post-crop vignette,
-    /// and deterministic grain. The Look is already inside the graded prefix (it is the base look
-    /// the sliders adjust).
+    /// and deterministic grain. The corrections, the Look, and global Effects/Detail are already inside
+    /// the graded prefix, and ordered local layers have been applied to it.
     static func buildFinalStages(
         graded image: CIImage,
         document: EditDocument,

@@ -76,8 +76,9 @@ struct DevelopedSourceCacheKey: Hashable, Sendable {
 }
 
 /// The materialized prefix can stop either before local adjustments or immediately after them.
-/// Both include the Look (the base look at the head of the chain), so its identity and intensity
-/// are part of `upstreamHash`; crop, vignette, and grain sit downstream and are not.
+/// Both span corrections → Look → global finishing, so the correction values and the Look's
+/// identity and intensity are all part of `upstreamHash`; crop, vignette, and grain sit downstream
+/// and are not.
 enum ProcessingPrefixStage: String, Hashable, Sendable {
     case graded
     case postLocal

@@ -68,15 +68,21 @@ including the master, per-channel, and parametric curves.
 
 `RenderPipeline` builds one lazy Core Image graph. `RenderEngine` evaluates that graph at the
 requested quality and output size; preview and export do not maintain separate edit logic. The
-pipeline handles source decoding/develop, orientation and rotation, the Look, global Light and
-Color, detail effects, ordered adjustments, ordered local adjustments, crop, and post-crop
-composition effects. The Look is a base look: the sliders adjust its output rather than being
-re-graded by it. The Look and sliders form the graded prefix that the engine may materialize, so
-Look identity and intensity are part of the prefix cache identity. The exact order and cache invalidation version live with
-`RenderPipeline`; do not copy that volatile list into another document.
+pipeline handles source decoding/develop, orientation and rotation, the core global corrections
+(Light, then Color, then the ordered adjustment nodes), the Look, global Effects and Detail, ordered local
+adjustments, crop, and post-crop composition effects (KRMA-1178). The Look is a distinct creative
+grade over the corrected photo, not a base the sliders adjust; RAW white balance and Exposure are
+applied by the decoder and not again in the corrections. Corrections, the Look and global finishing
+form the one graded prefix that the engine may materialize, so correction values and Look identity
+and intensity are all part of the prefix cache identity, and an RGB-only change (a Look, an
+intensity, a slider, an effect) never re-decodes a RAW because the developed source is keyed apart.
+Local layers, crop, vignette and grain sit outside the prefix and reuse it. The exact order and
+cache invalidation version live with `RenderPipeline.buildGradedImage`/`buildCorrectedImage` and
+`pixelEpoch`; do not copy that volatile list into another document. `docs/LOOKS.md` records the
+contract and the measured LUT-domain clipping.
 
 Effects persist capture sharpening radius/amount/detail/masking and luminance/chroma noise reduction
-retention controls in the `detail` value. They run through the shared graded Core Image graph (after the Look);
+retention controls in the `detail` value. They run through the shared graded Core Image graph (after the Look, as global finishing);
 local mask layers can also scope sharpening, noise cleanup, and moiré softening. Export output
 sharpening is a separate delivery choice (screen, matte, or glossy, each low/standard/high) carried
 by `ExportOptions` and applied after sizing, so it does not change the edit document or preview.
@@ -126,7 +132,7 @@ Light inspector alongside the other global tone controls.
 
 The Light **Exposure** slider is one control for every source, but it is rendered by the source's
 own natural stage (KRMA-1174). A standard image applies it as `CIExposureAdjust` on developed RGB.
-A RAW hands it to `CIRAWFilter.exposure`, so it runs inside the decoder, before the Look and before
+A RAW hands it to `CIRAWFilter.exposure`, so it runs inside the decoder, before the corrections and the Look and before
 every RGB stage, and ahead of the decoder's tone curve and highlight handling.
 
 - **Where.** `EditDocument.routedForRendering(source:)` (`RAWExposureRouting.swift`) derives the

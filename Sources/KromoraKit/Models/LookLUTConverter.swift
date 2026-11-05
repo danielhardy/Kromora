@@ -45,13 +45,6 @@ struct LUTSupportMatrix: Codable, Equatable, Sendable {
                 explanation: "RAW decoding and camera/source settings are not part of a global RGB LUT."
             ))
         }
-        if !document.lut.isIdentity {
-            entries.append(Entry(
-                id: "look", name: "Existing Look", disposition: .included,
-                explanation: "The resolved existing 3D Look is the base look: it is sampled first, and the stages below adjust it."
-            ))
-        }
-
         if !document.light.isIdentity {
             entries.append(Entry(
                 id: "light", name: "Light and tone", disposition: .included,
@@ -62,6 +55,18 @@ struct LUTSupportMatrix: Codable, Equatable, Sendable {
             entries.append(Entry(
                 id: "color", name: "Color", disposition: .included,
                 explanation: "Verified global color, mixer, and grading stages are sampled into the LUT."
+            ))
+        }
+        for (index, node) in document.adjustments.enumerated() where !node.isIdentity {
+            entries.append(Entry(
+                id: "adjustment-\(index)", name: "Adjustment \(index + 1): \(node.displayName)", disposition: .included,
+                explanation: "Verified per-pixel adjustment stage; order is preserved."
+            ))
+        }
+        if !document.lut.isIdentity {
+            entries.append(Entry(
+                id: "look", name: "Existing Look", disposition: .included,
+                explanation: "The resolved existing 3D Look is a creative grade over the corrected image: it is sampled after the corrections above and before the spatial finishing stages, which are omitted."
             ))
         }
         if document.effects.texture != 0 || document.effects.clarity != 0 || document.effects.dehaze != 0 {
@@ -86,13 +91,6 @@ struct LUTSupportMatrix: Codable, Equatable, Sendable {
             entries.append(Entry(
                 id: "crop", name: "Crop and rotation", disposition: .omitted,
                 explanation: "Framing and rotation change composition rather than RGB values."
-            ))
-        }
-
-        for (index, node) in document.adjustments.enumerated() where !node.isIdentity {
-            entries.append(Entry(
-                id: "adjustment-\(index)", name: "Adjustment \(index + 1): \(node.displayName)", disposition: .included,
-                explanation: "Verified per-pixel adjustment stage; order is preserved."
             ))
         }
 
@@ -239,7 +237,8 @@ enum LookLUTConverter {
     ) throws -> LookLUTConversion {
 
         // RAW decoding, framing, and every spatial effect are intentionally neutralized. The
-        // remaining graph is made only of verified per-pixel stages and keeps their original order.
+        // remaining graph is made only of verified per-pixel stages and keeps the pipeline order:
+        // Light, Color, ordered nodes, then the Look.
         let sampledDocument = EditDocument(
             version: document.version,
             rawDevelop: .neutral,

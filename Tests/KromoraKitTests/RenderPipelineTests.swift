@@ -900,31 +900,201 @@ final class RenderPipelineTests: TempDirectoryTestCase {
         return CubeLUT(cube: cube, size: size, name: "curved")
     }
 
-    /// The Look is the base look: the render equals `sliders(Look(developed))` and measurably
-    /// differs from the previous `Look(sliders(developed))`.
-    func testLookIsAppliedBeforeTheSliders() throws {
+    /// The Look is a creative grade over the corrected photo: the render equals
+    /// `finishing(Look(corrections(developed)))` and measurably differs from the previous
+    /// `corrections(Look(developed))`.
+    func testLookIsAppliedAfterTheCorrections() throws {
         let lut = curvedLUT()
         let settings = LUTSettings(lutID: lut.lutID, intensity: 1)
-        let sliders = EditDocument(
+        let corrections = EditDocument(
             light: LightAdjustments(exposure: 0.8, contrast: 25),
+            color: ColorAdjustments(vibrance: 30, saturation: 20),
             adjustments: [.vibrance(amount: 0.3)]
         )
-        var combined = sliders
+        var combined = corrections
         combined.lut = settings
 
         let developed = try decodedSource()
         let cubeFilter = lut.makeFilter()
-        let looked = try XCTUnwrap(lut.apply(to: developed, intensity: 1, using: cubeFilter))
-        let expected = RenderPipeline.buildGradedImage(developed: looked, document: sliders, lut: nil)
-        let oldOrder = try XCTUnwrap(lut.apply(
-            to: RenderPipeline.buildGradedImage(developed: developed, document: sliders, lut: nil),
-            intensity: 1, using: cubeFilter))
+        let corrected = RenderPipeline.buildGradedImage(
+            developed: developed, document: corrections, lut: nil)
+        let expected = try XCTUnwrap(lut.apply(to: corrected, intensity: 1, using: cubeFilter))
+        let oldOrder = RenderPipeline.buildGradedImage(
+            developed: try XCTUnwrap(lut.apply(to: developed, intensity: 1, using: cubeFilter)),
+            document: corrections, lut: nil)
 
         let rendered = try Pixels.bytes(of: try build(combined, lut: lut))
         assertPixelsEqual(rendered, try Pixels.bytes(of: expected),
-                          "sliders must adjust the Look's output: sliders(Look(developed))")
+                          "the Look must grade the corrected image: Look(corrections(developed))")
         assertPixelsDiffer(rendered, try Pixels.bytes(of: oldOrder), byAtLeast: 4,
-                           "the previous Look(sliders(developed)) order must no longer be rendered")
+                           "the previous corrections(Look(developed)) order must no longer be rendered")
+    }
+
+    /// Ordered persisted nodes (standard-image white balance, exposure) are core corrections, so they
+    /// land before the Look rather than after it and are never skipped.
+    func testOrderedNodesPrecedeTheLookAndAreNotDropped() throws {
+        let lut = curvedLUT()
+        let nodes: [AdjustmentNode] = [
+            .temperatureTint(temp: 5200, tint: 12), .exposure(ev: 0.6),
+        ]
+        let document = EditDocument(
+            adjustments: nodes, lut: LUTSettings(lutID: lut.lutID, intensity: 1))
+        let developed = try decodedSource()
+        let cubeFilter = lut.makeFilter()
+
+        let nodesThenLook = try XCTUnwrap(lut.apply(
+            to: RenderPipeline.applyAdjustments(nodes, to: developed),
+            intensity: 1, using: cubeFilter))
+        let lookThenNodes = RenderPipeline.applyAdjustments(
+            nodes, to: try XCTUnwrap(lut.apply(to: developed, intensity: 1, using: cubeFilter)))
+
+        let rendered = try Pixels.bytes(of: try build(document, lut: lut))
+        assertPixelsEqual(rendered, try Pixels.bytes(of: nodesThenLook), "nodes feed the Look")
+        assertPixelsDiffer(rendered, try Pixels.bytes(of: lookThenNodes), byAtLeast: 4,
+                           "nodes must not run after the Look")
+        assertPixelsDiffer(
+            rendered, try Pixels.bytes(of: try build(EditDocument(lut: document.lut), lut: lut)),
+            byAtLeast: 4, "the nodes must still affect the picture")
+    }
+
+    /// Light runs before Color, and the ordered nodes follow both. The fixed sub-order is part of the
+    /// contract: it is the order these stages had before the Look moved.
+    func testCorrectionSubOrderIsLightThenColorThenNodes() throws {
+        let document = EditDocument(
+            light: LightAdjustments(exposure: 0.5, contrast: 30),
+            color: ColorAdjustments(vibrance: 40, saturation: 30),
+            adjustments: [.temperatureTint(temp: 5000, tint: -8)]
+        )
+        let developed = try decodedSource()
+        let manual = RenderPipeline.applyAdjustments(
+            document.adjustments,
+            to: RenderPipeline.applyColor(
+                document.color, to: RenderPipeline.applyLight(document.light, to: developed)))
+        assertPixelsEqual(
+            try Pixels.bytes(of: RenderPipeline.buildCorrectedImage(developed: developed, document: document)),
+            try Pixels.bytes(of: manual), "corrections run Light, Color, then the ordered nodes")
+    }
+
+    /// Intensity blends between the *corrected* image and the graded result: 0 is corrections only,
+    /// 1 is the full Look over them, and an intermediate value is the same crossfade between them.
+    func testIntensityBlendsFromTheCorrectedImage() throws {
+        let lut = curvedLUT()
+        let corrections = EditDocument(
+            light: LightAdjustments(exposure: 0.6, contrast: 20), color: ColorAdjustments(saturation: 25))
+        let developed = try decodedSource()
+        let corrected = RenderPipeline.buildCorrectedImage(developed: developed, document: corrections)
+        for intensity in [0.0, 0.35, 1.0] {
+            var document = corrections
+            document.lut = LUTSettings(lutID: lut.lutID, intensity: intensity)
+            let expected = intensity == 0
+                ? corrected
+                : try XCTUnwrap(lut.apply(to: corrected, intensity: intensity, using: lut.makeFilter()))
+            assertPixelsEqual(
+                try Pixels.bytes(of: try build(document, lut: lut)), try Pixels.bytes(of: expected),
+                "intensity \(intensity) must blend from the corrected image")
+        }
+    }
+
+    /// An unresolved Look (set ID, no table) renders the corrections and finishing, never blank.
+    func testUnresolvedLookRendersCorrectionsAndFinishing() throws {
+        var document = EditDocument(
+            light: LightAdjustments(exposure: 0.5), effects: EffectsAdjustments(texture: 30))
+        let without = try Pixels.bytes(of: try build(document))
+        document.lut = LUTSettings(lutID: LUTID(raw: "missing"), intensity: 1)
+        assertPixelsEqual(try Pixels.bytes(of: try build(document, lut: nil)), without,
+                          "an unresolved Look must render as no Look")
+    }
+
+    /// Spatial Effects and Detail finish the Look's output; they are not re-graded by it.
+    func testSpatialEffectsAndDetailFollowTheLook() throws {
+        let lut = curvedLUT()
+        var document = EditDocument(
+            light: LightAdjustments(exposure: 0.3),
+            effects: EffectsAdjustments(
+                texture: 60, clarity: 40, detail: DetailAdjustments(sharpeningAmount: 50)),
+            lut: LUTSettings(lutID: lut.lutID, intensity: 1))
+        document.effects.vignette = .neutral
+        // A fine checkerboard: the smooth gradient fixture gives the spatial stages almost nothing
+        // to act on, which would let a wrong order hide inside rounding.
+        let checker = CIFilter.checkerboardGenerator()
+        checker.color0 = CIColor(red: 0.15, green: 0.2, blue: 0.3)
+        checker.color1 = CIColor(red: 0.8, green: 0.7, blue: 0.5)
+        checker.width = 3
+        let developed = try XCTUnwrap(checker.outputImage).cropped(to: CGRect(x: 0, y: 0, width: 96, height: 64))
+        let corrected = RenderPipeline.buildCorrectedImage(developed: developed, document: document)
+        let looked = try XCTUnwrap(lut.apply(to: corrected, intensity: 1, using: lut.makeFilter()))
+        let finished = RenderPipeline.applyDetailControls(
+            document.effects.detail,
+            to: RenderPipeline.applySpatialEffects(document.effects, to: looked),
+            referenceExtent: developed.extent)
+        let finishedThenLook = try XCTUnwrap(lut.apply(
+            to: RenderPipeline.applyDetailControls(
+                document.effects.detail,
+                to: RenderPipeline.applySpatialEffects(document.effects, to: corrected),
+                referenceExtent: developed.extent),
+            intensity: 1, using: lut.makeFilter()))
+
+        let rendered = try Pixels.bytes(of: RenderPipeline.buildImage(
+            developed: developed, document: document, lut: lut))
+        assertPixelsEqual(rendered, try Pixels.bytes(of: finished),
+                          "finishing is Detail(Effects(Look(corrections)))")
+        assertPixelsDiffer(rendered, try Pixels.bytes(of: finishedThenLook), byAtLeast: 3,
+                           "Texture/Clarity/Detail must not run before the Look")
+    }
+
+    /// The full sequence: corrections → Look → spatial Effects → Detail → ordered local layers →
+    /// crop → vignette → grain, with local Exposure acting on the Look's output.
+    func testFullSequenceLocalThenCropThenVignetteThenGrain() throws {
+        let lut = curvedLUT()
+        let crop = CropAdjustments(normalizedRect: CGRect(x: 0.1, y: 0.1, width: 0.7, height: 0.7))
+        var document = EditDocument(
+            light: LightAdjustments(exposure: 0.2),
+            effects: EffectsAdjustments(
+                texture: 20, vignette: VignetteAdjustments(amount: -40), grain: GrainAdjustments(amount: 30)),
+            crop: crop, lut: LUTSettings(lutID: lut.lutID, intensity: 1))
+        var localValues = LocalAdjustments.neutral
+        localValues.exposure = 1.2
+        let layer = LocalAdjustmentLayer(
+            components: [MaskComponent(source: .linear(LinearGradientDefinition()))],
+            adjustments: localValues)
+        XCTAssertTrue(layer.hasVisibleLook)
+        document.localAdjustments = [layer]
+        let developed = try decodedSource()
+        let mask = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 0.7)).cropped(to: developed.extent)
+
+        let graded = RenderPipeline.buildGradedImage(developed: developed, document: document, lut: lut)
+        let local = RenderPipeline.applyLocalAdjustments(
+            document.localAdjustments, masks: [layer.id: mask], to: graded)
+        let output = RenderStageFacade.buildFinalStages(
+            graded: local, document: document, grainSeed: 7)
+
+        // Manual chain, spelled stage by stage.
+        let cropped = RenderPipeline.applyCrop(document.crop, to: local)
+        let vignetted = RenderPipeline.applyVignette(
+            document.effects.vignette, to: cropped, frameExtent: cropped.extent)
+        let manual = RenderPipeline.applyGrain(
+            document.effects.grain, to: vignetted, seed: 7, frameExtent: cropped.extent)
+        assertPixelsEqual(try Pixels.bytes(of: output), try Pixels.bytes(of: manual),
+                          "local → crop → vignette → grain")
+        assertPixelsDiffer(
+            try Pixels.bytes(of: output),
+            try Pixels.bytes(of: RenderStageFacade.buildFinalStages(
+                graded: graded, document: document, grainSeed: 7)),
+            byAtLeast: 4, "precondition: the local layer must change the frame")
+
+        // Local exposure is an RGB operation on the Look's output, not an input to it: a curved
+        // Look distinguishes `local(Look(c))` from `Look(local(c))`.
+        let corrected = RenderPipeline.buildCorrectedImage(developed: developed, document: document)
+        let localAfterLook = RenderPipeline.applyLocalAdjustments(
+            document.localAdjustments, masks: [layer.id: mask],
+            to: try XCTUnwrap(lut.apply(to: corrected, intensity: 1, using: lut.makeFilter())))
+        let localBeforeLook = try XCTUnwrap(lut.apply(
+            to: RenderPipeline.applyLocalAdjustments(
+                document.localAdjustments, masks: [layer.id: mask], to: corrected),
+            intensity: 1, using: lut.makeFilter()))
+        assertPixelsDiffer(
+            try Pixels.bytes(of: localAfterLook), try Pixels.bytes(of: localBeforeLook), byAtLeast: 4,
+            "precondition: the curved Look distinguishes local-before from local-after")
     }
 
     /// With nothing on the other side of the Look, the order is irrelevant, so a Look-only document

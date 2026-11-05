@@ -71,8 +71,8 @@ protocol RenderEngining: EditedThumbnailRendering, Sendable {
     /// seam; `RenderEngine` overrides it to rasterize directly without encoded bytes.
     func makeThumbnailCGImage(_ request: RenderRequest) async -> sending CGImage?
 
-    /// Produce one Look-browser candidate. Candidates render in the canvas order (Look, then
-    /// sliders) and share at most the developed source.
+    /// Produce one Look-browser candidate. Candidates render in the canvas order (corrections, the
+    /// candidate Look, then finishing) and share at most the developed source.
     func makeLookPreviewCGImage(_ request: LookPreviewRequest) async -> sending CGImage?
 
     /// Produce the presentation-only resolved alpha overlay for the masking workspace. This is a
@@ -2555,7 +2555,8 @@ actor RenderEngine: RenderEngining {
         return completed?.image ?? localAdjusted
     }
 
-    /// The Look heads the prefix, so its settings and cube content are part of its identity.
+    /// The prefix is corrections → Look → global finishing, so the correction values, the Look's
+    /// settings and its cube content are all part of its identity.
     /// Retouch is already composited into the developed image this cache stores, so the identity's
     /// prefix document includes it; leaving it out reused the pre-spot bitmap.
     private func prefixUpstreamHash(

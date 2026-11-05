@@ -60,9 +60,7 @@ enum RenderPipeline {
     /// noise reduction independent filter passes; the previous max-based mapping made them aliases.
     /// v35 widens HSL mixer hue endpoints from ±30° to ±60° so channel Hue travel matches a
     /// more visible photographic shift (tracks share ``ColorMixerChannel.hueEndpointDegrees``).
-    /// v36 moves the Look (LUT) to the head of the adjustment chain: it is now a base look that
-    /// Light, Color, Effects, Detail, and ordered adjustments adjust, rather than a final grade
-    /// applied over their output.
+    /// v36 moved the Look (LUT) to the head of the adjustment chain (superseded by v41).
     /// v37 is the Display P3 release (KRMA-1121): the engine evaluates the graph in extended linear
     /// Display P3 and every raster and export is encoded in Display P3, so frames and caches written
     /// by an sRGB-era build are stale.
@@ -73,7 +71,10 @@ enum RenderPipeline {
     /// texture rendered black and must be refined against the corrected region.
     /// v40 routes global Exposure through `CIRAWFilter.exposure` for RAW sources
     /// (`RAWExposureRouting`), so RAW frames and caches rendered with RGB exposure are stale.
-    static let pixelEpoch = 40
+    /// v41 (KRMA-1178) moves the Look after the core corrections: ordered nodes, Light, and Color
+    /// now run before it, and spatial Effects and Detail after it (v36's Look-first order is
+    /// superseded). Any document combining a Look with non-neutral sliders renders different pixels.
+    static let pixelEpoch = 41
 
     /// Build the graph for `document` over `source`.
     ///
@@ -165,8 +166,8 @@ enum RenderPipeline {
             ))
     }
 
-    /// The graph from an **already-developed** source onwards — Look, global adjustments, local
-    /// adjustments, then post-crop composition effects.
+    /// The graph from an **already-developed** source onwards — global corrections, the Look,
+    /// global finishing, local adjustments, then post-crop composition effects.
     ///
     /// Split out so a caller that already holds the developed image can skip the source stage.
     /// `RenderEngine` does exactly that, and it is not a micro-optimization: Core Image caches decoded
@@ -239,10 +240,19 @@ enum RenderPipeline {
             frameExtent: frame)
     }
 
-    /// Build the one intentionally materializable expensive prefix: the Look applied to the
-    /// developed source, then the sliders that adjust it. Keeping it as one graph preserves Core
-    /// Image fusion within the prefix while allowing a caller to complete it once and reuse the
-    /// result when local layers/crop/vignette/grain change.
+    /// Build the one intentionally materializable expensive prefix, in the product's canonical
+    /// order (KRMA-1178): **corrections → Look → global finishing**. Keeping it as one graph
+    /// preserves Core Image fusion within the prefix while allowing a caller to complete it once
+    /// and reuse the result when local layers/crop/vignette/grain change.
+    ///
+    /// 1. Core global corrections (`buildCorrectedImage`): Light, then Color (vibrance, saturation,
+    ///    mixer, grading), then the ordered adjustment nodes (standard-image white balance and any
+    ///    exposure/highlight-shadow/colour/vibrance nodes). RAW white balance and exposure were
+    ///    already applied by the decoder and are not applied again here.
+    /// 2. The Look, a distinct creative grade over that corrected image, in its declared
+    ///    authoring space. Intensity crossfades between the corrected image and the graded result.
+    /// 3. Global spatial Effects (Texture, Clarity, Dehaze), then Detail. Local layers, crop,
+    ///    vignette, and grain follow outside the prefix.
     static func buildGradedImage(
         developed: CIImage,
         document: EditDocument,
@@ -253,26 +263,44 @@ enum RenderPipeline {
         includePostRenderWhiteBalance: Bool = true,
         spatialReferenceExtent: CGRect? = nil
     ) -> CIImage {
-        // The Look is the base look: every slider below adjusts its output.
-        let looked = applyLUT(document.lut, lut: lut, to: developed, cache: lutCache)
-        let lightAdjusted = applyLight(document.light, to: looked, cache: toneCurveCache)
-        let colorAdjusted = applyColor(document.color, to: lightAdjusted)
+        let corrected = buildCorrectedImage(
+            developed: developed, document: document, toneCurveCache: toneCurveCache,
+            includePostRenderWhiteBalance: includePostRenderWhiteBalance
+        )
+        let looked = applyLUT(document.lut, lut: lut, to: corrected, cache: lutCache)
         // Vignette is deliberately held until after crop because it is a final composition effect
         // and its mask must describe the post-crop frame.
         let effectsAdjusted = applySpatialEffects(
-            document.effects, to: colorAdjusted, spatialReferenceExtent: spatialReferenceExtent
+            document.effects, to: looked, spatialReferenceExtent: spatialReferenceExtent
         )
-        let detailAdjusted = applyDetailControls(
+        return applyDetailControls(
             document.effects.detail, to: effectsAdjusted,
             referenceExtent: spatialReferenceExtent ?? developed.extent)
+    }
+
+    /// The core global photographic corrections that precede the Look.
+    ///
+    /// Light runs its fixed sub-order, Color its own (see `applyLight` and `applyColor`), and the
+    /// ordered nodes (the persisted standard-image white balance and any other node) follow in array
+    /// order. That is the relative order these stages already had; only the Look moved, so the
+    /// corrections keep their calibration (Auto's white-balance node is tuned against it). No node is
+    /// dropped or deferred past the Look.
+    static func buildCorrectedImage(
+        developed: CIImage,
+        document: EditDocument,
+        toneCurveCache: ToneCurveFilterCache? = nil,
+        includePostRenderWhiteBalance: Bool = true
+    ) -> CIImage {
         let adjustmentNodes =
             includePostRenderWhiteBalance
             ? document.adjustments
             : document.adjustments.filter { $0.slot != .temperatureTint }
-        return applyAdjustments(adjustmentNodes, to: detailAdjusted)
+        let lightAdjusted = applyLight(document.light, to: developed, cache: toneCurveCache)
+        let colorAdjusted = applyColor(document.color, to: lightAdjusted)
+        return applyAdjustments(adjustmentNodes, to: colorAdjusted)
     }
 
-    /// Apply ordered local layers after all global work (the Look and the sliders). `masks` contains
+    /// Apply ordered local layers after all global work (corrections, the Look, and finishing). `masks` contains
     /// renderer-owned, already-composited soft alpha images; keeping resolution and Core Image
     /// types out of `LocalMaskResolving` makes this function usable for both preview and export.
     /// Each adjusted variant is derived from the layer's input, then blended back over that exact
@@ -930,7 +958,8 @@ enum RenderPipeline {
 
     // MARK: - Adjustments
 
-    /// Apply the photographer-facing Light model before the inherited adjustment array.
+    /// Apply the photographer-facing Light model first among the core corrections, before Color, the
+    /// ordered adjustment nodes, and the Look.
     ///
     /// Exposure remains a native EV operation. The other Light controls share one five-point tone
     /// curve so their weights are tonal rather than spatial: contrast changes separation around the
@@ -1014,7 +1043,7 @@ enum RenderPipeline {
 
     // MARK: - Color
 
-    /// Apply global colour controls after Light and before the legacy ordered adjustment array.
+    /// Apply global colour controls after Light and before the ordered nodes and the Look.
     ///
     /// Core Image owns the per-pixel work for both controls. Vibrance runs first so it can protect
     /// already-colourful pixels before the final global saturation multiplier is applied. At the
@@ -1026,7 +1055,7 @@ enum RenderPipeline {
     /// performed by the caller with the request's `WorkingSpace`, so preview and export use the
     /// same gamut boundary. Values are finite and clamped by `ColorAdjustments` before reaching
     /// this stage. The fixed order is global vibrance, global saturation, HSL mixer, and three-way
-    /// grading; ordered effects and the LUT remain downstream in `buildImage`.
+    /// grading; the Look and the spatial finishing stages follow in `buildGradedImage`.
     static func applyColor(_ color: ColorAdjustments, to image: CIImage) -> CIImage {
         guard !color.isIdentity else { return image }
         var result = image

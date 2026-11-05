@@ -269,9 +269,10 @@ struct RenderRequest: Sendable, Equatable {
 
 /// A bounded Look-browser request.
 ///
-/// The browser normally changes only `candidateDocument.lut`. The Look is the base of the slider
-/// chain, so a candidate shares only the developed source with the base document; its graded
-/// prefix is built per candidate and matches what the canvas would show if that Look were chosen.
+/// The browser normally changes only `candidateDocument.lut`. The Look follows the core corrections
+/// and precedes finishing, so a candidate shares only the developed source with the base document;
+/// its graded prefix is built per candidate and matches what the canvas would show if that Look
+/// were chosen.
 struct LookPreviewRequest: Sendable, Equatable {
     let source: ImageSource
     let baseDocument: EditDocument

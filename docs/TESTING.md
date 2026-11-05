@@ -1310,6 +1310,45 @@ percentage points, within a stated 0.1-point tolerance. This measures the edited
 512 px preview sample, while KRMA-1114 used a one-off decode, so small differences are expected.
 The HEIC fixture is not a RAW extension, so this lane does not cover it.
 
+### Look after corrections (KRMA-1178)
+
+The Look sits after the core corrections and before global finishing (see
+[`LOOKS.md`](LOOKS.md#render-order)). Coverage:
+
+- `RenderPipelineTests` (serial): pixel proofs with non-linear cubes and non-neutral tone/colour/nodes
+  that distinguish `Look(corrections(x))` from the old order; nodes precede the Look and are not
+  dropped; the Light → Color → nodes sub-order; intensity 0/intermediate/1 blends from the corrected
+  image; an unresolved Look renders as no Look; Texture/Clarity/Detail follow the Look; and the full
+  local → crop → vignette → grain sequence with local exposure acting on the Look's output.
+- `LookAfterCorrectionsEngineTests` (serial; the RAW method is optional): the real engine evaluates
+  that graph at full scale; the processing prefix misses on a Look change and on a correction change
+  and hits on a revisit; vignette/grain edits reuse it; a Look candidate equals the canvas with that
+  Look chosen and shares the developed source; Save as Look samples corrections then Look; RGB-only
+  changes do not re-decode a RAW.
+- `LookLUTExportTests`: the support matrix lists corrections before the Look.
+- `LookOrderMeasurementBenchmark` (optional) prints the LUT-domain clipping table in `LOOKS.md` and the
+  interaction costs below: `swift test --filter LookOrderMeasurementBenchmark`.
+
+**Measured 2026-11-04 (macOS 27.2, Apple Silicon, debug test build, window-independent
+`RenderEngine`, 1024 px box, median of 12 warm `.preview` renders after one priming render).** No RAW
+decoder output was requested during any of these RGB-only interactions.
+
+| Interaction | RAW DSC00324 | JPEG DSC00366 |
+| --- | ---: | ---: |
+| Look intensity tick | 3.1 ms | 3.6 ms |
+| Look switch (A/B) | 1.9 ms | 1.9 ms |
+| Saturation tick (a pre-Look correction) | 3.5 ms | 3.4 ms |
+| Clarity tick (spatial effect) | 4.0 ms | 3.9 ms |
+| Grain tick (outside the prefix) | 2.3 ms | 2.1 ms |
+
+The graded prefix is still one materialized image, so a correction, Look or intensity tick rebuilds the
+whole prefix (as it did when the Look headed the chain); a grain/vignette/local tick reuses it. The
+Look-browser candidates share only the developed source. A separate shared "corrections only" prefix
+across candidates was considered and not built: candidates render at thumbnail size, where the
+corrections are cheap, and a second materialized prefix would add a cache tier and invalidation rule
+for no measured gain. The display-bound release capture was not run (it is not affected by this change
+and is release-qualification evidence only).
+
 ### RAW exposure routing (KRMA-1174)
 
 Global Exposure on a RAW is applied by `CIRAWFilter.exposure` (see

@@ -18,7 +18,7 @@ the combination of:
 4. a **shadow/highlight tint** (split tone) in some simulations.
 
 All four are static functions of one RGB triple, so a single 3D LUT can carry them. That fits
-Kromora's Look pipeline (`CIColorCubeWithColorSpace`, base look before sliders). Spatial effects
+Kromora's Look pipeline (`CIColorCubeWithColorSpace`, applied after the core corrections, before finishing). Spatial effects
 (grain, Clarity) are out of scope for a cube.
 
 ## Sources and confidence

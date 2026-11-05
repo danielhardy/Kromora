@@ -8,14 +8,60 @@ and `RenderPipeline`; this document records the supported interchange contract.
 
 ## Render order
 
-A Look is a **base look**. It is applied to the developed source (after RAW develop, retouch, and
-geometry), and Light, Color, Effects, Detail, and ordered adjustments then adjust the graded
-result, followed by local masks, crop, vignette, and grain. Dragging Exposure after picking a Look
-therefore moves the Look's output instead of feeding a fixed transform. Intensity is the same
-crossfade between the Look's input and graded output, now computed at the head of the chain.
-On a RAW, the global Exposure slider is the exception: it is applied by the decoder, so it lands
-*before* the Look (see [`ENGINEERING_GUIDE.md`](ENGINEERING_GUIDE.md#raw-exposure-routing)). Documents saved before this order change render differently when they combine a Look with
-non-neutral sliders; the stored document is unchanged. Save as Look samples the same order.
+A Look is a distinct creative grade over the **corrected** photo (KRMA-1178). The order is the same
+for RAW and standard images and for preview, comparison, histogram, Look-browser candidates,
+thumbnails, Save as Look and export:
+
+1. **Develop.** The source is developed and oriented. On a RAW, global white balance and Exposure are
+   applied by the decoder here (see [`ENGINEERING_GUIDE.md`](ENGINEERING_GUIDE.md#raw-exposure-routing)),
+   and are never applied a second time below. Retouch and geometry stay at their source stages.
+2. **Core corrections.** Light (Exposure for a standard image, tone curve, curves, Whites, Blacks),
+   then Color (vibrance, saturation, mixer, grading), then the ordered adjustment nodes (the
+   standard-image white balance and any persisted exposure, highlight/shadow, colour-controls or
+   vibrance nodes) in array order. That is the relative order these stages already had; only the Look
+   moved, so Auto's white-balance node keeps its calibration. No node is skipped or deferred past the
+   Look.
+3. **The Look**, in its declared authoring space. Intensity is the same crossfade as before, now
+   between the corrected image and its graded result. An unresolved Look renders as no Look.
+4. **Finishing.** Global Texture/Clarity/Dehaze, then Detail, then ordered local mask layers (local
+   exposure and white balance are RGB operations on the Look's output), then crop, post-crop vignette
+   and grain, then output conversion and optional output sharpening.
+
+The order replaces KRMA-1032's Look-first order (which let sliders adjust the Look's output). Saved
+documents still decode and nothing is discarded, but a document that combines a Look with non-neutral
+sliders renders different pixels from earlier builds (`RenderPipeline.pixelEpoch` 41); there is no
+legacy rendering path. A Look-only or slider-only document is unchanged. A LUT is never converted to
+slider values.
+
+This aligns where the Look sits across formats; it does not promise identical RAW and JPEG pixels or
+identical numeric exposure response, since the decoder applies its own tone curve and highlight
+shoulder to a RAW and a JPEG arrives already tone-mapped.
+
+### Measured: LUT-domain clipping and slider response
+
+A Look is a bounded `[0, 1]` table. Corrections now feed that table, so a strong push on a bright or
+saturated scene can leave the domain before the Look sees it, and the table clamps. Measured by
+`LookOrderMeasurementBenchmark` (optional lane; 2026-11-04, macOS 27.2, Apple Silicon, 1024 px
+preview, a strongly non-linear 17³ S-curve/saturation-boost cube, Display P3). "Clipped" is the share
+of pixels with any corrected channel above 1 or below 0 in P3 *before* the Look; "order Δ" is the
+mean absolute 8-bit difference between the new `Look(corrections)` and the old `corrections(Look)`.
+
+| Source | Corrections | Clipped >1 | Clipped <0 | Order Δ |
+| --- | --- | ---: | ---: | ---: |
+| RAW DSC00324 | +1 EV (decoder) | 0.00% | 0.00% | 0.00 |
+| RAW DSC00324 | +60 saturation | 0.00% | 0.02% | 3.27 |
+| RAW DSC00324 | +1 EV, +60 sat, +30 contrast | 0.03% | 0.05% | 4.47 |
+| JPEG DSC00366 | +1 EV (RGB) | 0.03% | 0.00% | 12.33 |
+| JPEG DSC00366 | +60 saturation | 0.00% | 3.78% | 2.72 |
+| JPEG DSC00366 | +1 EV, +60 sat, +30 contrast | 0.01% | 10.57% | 7.42 |
+
+Reading it: RAW exposure is unaffected by the move (it was already ahead of the Look), so only the
+RGB controls change. On the saturated JPEG a strong saturation push leaves 4–11% of pixels out of
+gamut before the Look; the cube clamps them, which is expected behaviour of a bounded table and not an
+ordering defect. The extended values are not preserved through the LUT, and neither order is
+universally better: the new order trades "sliders can retouch the Look's output" for "sliders stay
+predictable regardless of the Look". The numbers are different scenes (the RAW is a bright scene, the
+JPEG a darker one), so compare each source's order Δ against its own rows, not against each other.
 
 ## File support
 
@@ -191,6 +237,21 @@ with it. Looks saved by a prerelease sRGB build keep their `sRGB` stamp (or none
 and are still interpreted as sRGB Looks; they are not rewritten. Prerelease libraries and edits may
 be reset instead of migrated (see the engineering guide); source originals and imported files are
 not deleted by this policy.
+
+**Order.** Save as Look evaluates the same graph the canvas renders, so the saved cube is
+`Look(corrections(x))`: the support matrix lists Light, Color, ordered nodes and then the existing Look
+as included stages, and the spatial finishing stages (Texture/Clarity/Dehaze, Detail, vignette, grain,
+crop) and RAW develop as omitted. The cube is sampled on the [0, 1] lattice, so corrected values beyond
+that domain clamp as they do on the canvas; very strong pushes therefore reproduce with the same
+clipping shown above and can fail the verifier at 33³ (it retries at 65³, then reports an approximate
+result for confirmation). `LookAfterCorrectionsEngineTests` pins that a saved cube applied alone
+matches the canvas within 6/255 for moderate corrections and is not the old Look-first order.
+
+**Derive baseline.** Derive fits a cube from a *neutral* RAW render to the camera JPG, so its baseline
+is the Look's input when no corrections are applied. Under the corrected-input order that assumption
+holds exactly when the document's core corrections are neutral; with corrections, the derived Look
+grades the corrected photo like any other Look (which is the intended creative role). Derive itself
+is unchanged: it never renders through the editor's Look/correction stages.
 
 ## Save and derive
 

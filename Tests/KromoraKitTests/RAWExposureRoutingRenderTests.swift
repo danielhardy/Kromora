@@ -65,7 +65,8 @@ final class RAWExposureRoutingRenderTests: TempDirectoryTestCase {
         assertPixelsEqual(combined, spelled, "0.5 + 0.75 decoder stops is one 1.25-stop exposure")
     }
 
-    /// Decoder exposure sits ahead of the Look; RGB exposure sits after it. They must not render alike.
+    /// Decoder exposure and RGB exposure both precede the Look now, but they are different operations
+    /// (the decoder applies its tone curve after exposure) and must not render alike.
     func testRAWExposureIsAppliedBeforeTheLook() async throws {
         let source = try XCTUnwrap(rawSources().first)
         let engine = RenderEngine()
@@ -78,11 +79,11 @@ final class RAWExposureRoutingRenderTests: TempDirectoryTestCase {
             engine, source,
             EditDocument(
                 rawDevelop: RAWDevelopSettings(exposure: 0.75), lut: document.lut), lut: lut)
-        let lookThenRGB = try await bytes(
+        let rgbThenLook = try await bytes(
             engine, source,
             EditDocument(adjustments: [.exposure(ev: 1)], lut: document.lut), lut: lut)
         assertPixelsEqual(routed, decoderThenLook, "exposure must precede the Look")
-        assertPixelsDiffer(routed, lookThenRGB, "decoder-then-Look is not Look-then-RGB-EV")
+        assertPixelsDiffer(routed, rgbThenLook, "decoder-then-Look is not RGB-EV-then-Look")
     }
 
     func testInteractiveAndSettledFramesAgreeOnBrightness() async throws {
