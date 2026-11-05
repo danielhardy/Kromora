@@ -1569,6 +1569,36 @@ engine, against export renders that take seconds. The "first" column above inclu
 material regression on the DNGs (a −150 ms to +40 ms spread is run-order warm-up noise). The display-bound
 capture was not run. `pixelEpoch` is 42 because ProRAW frames and caches rendered at 0.75 are stale.
 
+**Counterpoint verification (2026-11-05).** A repeat of `RAWExposureCalibrationBenchmark` on
+`20181011_181213.dng`, `IMG_0206.DNG`, `IMG_0695.DNG` and bright-scene `DSC00324.ARW` agreed with the
+table above: the Samsung ratios are 0.73–0.83 through +1 EV and 0.99 at +2 EV before the shoulder;
+both ProRAW files remain 1.00 from −5 to +5; the bright Sony rises from 0.80 at −1 to 1.12 at +1
+and cannot match RGB's median from +2. I also viewed matched 384 px decoder/RGB pairs at −2, −1, +1
+and +2 EV with the Look off and on. ProRAW frames visually coincide. The Samsung's negative-stop
+decoder frames are visibly more saturated, and the bright Sony decoder retains highlight gradation
+that RGB exposure clips. I saw no unexpected hue shift or loss of visible subject detail. These tone
+differences do not establish recovered sensor detail.
+
+A repeat of `RAWExposureRoutingBenchmark` on the three DNGs produced the following single-run
+debug-build values. Counters are filter constructions / RAW output requests / processing-prefix
+materializations; interactive decoder routing uses one filter and one RAW output per exposure tick,
+while RGB exposure reuses one RAW output and materializes the prefix for each tick.
+
+| RAW | path | first | tick p50 / p95 | settled | footprint | filters / RAW outputs / prefixes |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Samsung DNG | RGB | 132 ms | 2.6 / 2.8 ms | 3 ms | 377 MB | 1 / 1 / 26 |
+| Samsung DNG | decoder | 109 ms | 4.1 / 5.0 ms | 4 ms | 378 MB | 1 / 26 / 0 |
+| IMG_0206 ProRAW | RGB | 186 ms | 2.6 / 2.7 ms | 3 ms | 313 MB | 1 / 1 / 26 |
+| IMG_0206 ProRAW | decoder | 206 ms | 4.5 / 4.6 ms | 5 ms | 285 MB | 1 / 26 / 0 |
+| IMG_0695 ProRAW | RGB | 193 ms | 2.5 / 2.7 ms | 3 ms | 331 MB | 1 / 1 / 26 |
+| IMG_0695 ProRAW | decoder | 239 ms | 4.1 / 4.2 ms | 4 ms | 305 MB | 1 / 26 / 0 |
+
+This repeat shows the same small per-tick decoder cost and similar footprint; first-frame timings
+vary with run order and warm-up, so the two single runs are not averaged. Family-state reads were
+28.3 ms (Samsung), 46.0 ms (`IMG_0206`) and 41.5 ms (`IMG_0695`) at p50 over five reads. The
+`developedSource` hit/miss counters were 0/0 in these interactive measurements; render tests separately
+assert settled cache reuse and reuse after exposure ticks.
+
 ### RAW noise-reduction routing (KRMA-1175)
 
 Global Luminance NR on a RAW is applied by `CIRAWFilter.luminanceNoiseReductionAmount` (see
