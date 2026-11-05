@@ -114,17 +114,22 @@ final class RAWColorRoutingRenderTests: XCTestCase {
             let document = EditDocument(
                 rawDevelop: RAWDevelopSettings(gamutMappingEnabled: false),
                 color: ColorAdjustments(vibrance: 40, saturation: 30))
-            let first = try await engine.encode(
+            let preview = try await bytes(engine, source, document)
+            let exported = try await engine.encode(
                 source: source, document: document, lut: nil, scale: scale, format: .png, quality: 1, space: .current)
-            let second = try await RenderEngine().encode(
+            let exportedPixels = try Pixels.bytes(of: try Pixels.decode(exported))
+            assertPixelsEqual(preview, exportedPixels, "preview and export use the same color document")
+
+            let repeatedExport = try await RenderEngine().encode(
                 source: source, document: document, lut: nil, scale: scale, format: .png, quality: 1, space: .current)
             assertPixelsEqual(
-                try Pixels.bytes(of: try Pixels.decode(first)),
-                try Pixels.bytes(of: try Pixels.decode(second)), "export is deterministic for the colour document")
+                exportedPixels,
+                try Pixels.bytes(of: try Pixels.decode(repeatedExport)),
+                "export is deterministic for the colour document")
             let neutral = try await engine.encode(
                 source: source, document: EditDocument(), lut: nil, scale: scale, format: .png, quality: 1, space: .current)
             assertPixelsDiffer(
-                try Pixels.bytes(of: try Pixels.decode(first)),
+                exportedPixels,
                 try Pixels.bytes(of: try Pixels.decode(neutral)), "precondition: the edit changes the export")
         }
     }
