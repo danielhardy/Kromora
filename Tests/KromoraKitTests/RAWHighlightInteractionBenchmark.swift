@@ -36,12 +36,16 @@ final class RAWHighlightInteractionBenchmark: XCTestCase {
         return sorted[min(sorted.count - 1, Int((Double(sorted.count - 1) * p).rounded()))]
     }
 
-    private func milliseconds(_ body: () async -> Void) async -> Double {
+    private func measure<Value>(
+        _ body: () async -> Value
+    ) async -> (value: Value, milliseconds: Double) {
         let clock = ContinuousClock()
         let start = clock.now
-        await body()
+        let value = await body()
         let d = clock.now - start
-        return Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15
+        let elapsedMilliseconds =
+            Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15
+        return (value, elapsedMilliseconds)
     }
 
     private struct Run {
@@ -71,7 +75,9 @@ final class RAWHighlightInteractionBenchmark: XCTestCase {
                 targetSize: box, quality: quality)
         }
         var result = Run()
-        result.first = await milliseconds { _ = await engine.makeCGImage(request(10, .interactive)) }
+        let first = await measure { await engine.makeCGImage(request(10, .interactive)) }
+        XCTAssertNotNil(first.value, "The first interactive frame must render for \(control.name)")
+        result.first = first.milliseconds
         let workFirst = await engine.workStatistics()
         let cacheFirst = await engine.cacheStatistics()
         result.firstOutputRequests = workFirst.rawOutputRequests
@@ -79,14 +85,17 @@ final class RAWHighlightInteractionBenchmark: XCTestCase {
         result.firstDevelopMisses = cacheFirst.developedSource.misses
         // Amounts walk 12...(12 + 2.1 * n) so no two ticks (or tick and settled value) repeat.
         for i in 1...warmupTicks {
-            _ = await engine.makeCGImage(request(10 + Double(i) * 2.1, .interactive))
+            let warmup = await engine.makeCGImage(request(10 + Double(i) * 2.1, .interactive))
+            XCTAssertNotNil(warmup, "Warm-up tick \(i) must render for \(control.name)")
         }
         let work0 = await engine.workStatistics()
         let cache0 = await engine.cacheStatistics()
         var samples: [Double] = []
         for i in 1...measuredTicks {
             let amount = 10 + Double(warmupTicks + i) * 2.1
-            samples.append(await milliseconds { _ = await engine.makeCGImage(request(amount, .interactive)) })
+            let tick = await measure { await engine.makeCGImage(request(amount, .interactive)) }
+            XCTAssertNotNil(tick.value, "Measured tick \(i) must render for \(control.name)")
+            samples.append(tick.milliseconds)
         }
         let work1 = await engine.workStatistics()
         let cache1 = await engine.cacheStatistics()
@@ -101,14 +110,19 @@ final class RAWHighlightInteractionBenchmark: XCTestCase {
             work1.processingPrefixMaterializations - work0.processingPrefixMaterializations
 
         // A value no tick rendered, so the settled frame cannot ride on an interactive output.
-        result.settled = await milliseconds { _ = await engine.makeCGImage(request(97.3, .preview)) }
+        let settled = await measure { await engine.makeCGImage(request(97.3, .preview)) }
+        XCTAssertNotNil(settled.value, "The settled frame must render for \(control.name)")
+        result.settled = settled.milliseconds
         let work2 = await engine.workStatistics()
         let cache2 = await engine.cacheStatistics()
         result.settledOutputRequests = work2.rawOutputRequests - work1.rawOutputRequests
         result.settledDevelopMisses = cache2.developedSource.misses - cache1.developedSource.misses
-        result.settledRevisit = await milliseconds {
-            _ = await engine.makeCGImage(request(97.3, .preview))
+        let settledRevisit = await measure {
+            await engine.makeCGImage(request(97.3, .preview))
         }
+        XCTAssertNotNil(
+            settledRevisit.value, "The settled frame revisit must render for \(control.name)")
+        result.settledRevisit = settledRevisit.milliseconds
         return result
     }
 
