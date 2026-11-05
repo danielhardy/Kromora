@@ -9,7 +9,7 @@ Inspection of repository `b3be8d83`, 4 November 2026. This is a code and install
 3. **Yes, the unified Light exposure and tonal controls run on developed RGB**, after the Look. RAW exposure and decoder tone controls still exist in the model but their Develop UI is hidden. Local white balance and all local adjustments also run on RGB.
 4. **Some information has necessarily been transformed before those controls:** demosaicing, decoder tone curve (default boost 1), default gamut mapping, and potentially other camera-specific processing. The SDK says EDR defaults to 0, so extended output is not requested by a neutral edit. The source does not establish exactly what is clipped or recoverable for any given image. Extended-linear floating-point evaluation is not proof of untouched scene-linear sensor data.
 5. **Selection is implicit.** The installed `CIRAWFilter.h` explicitly says a freshly initialized filter defaults to the newest decoder available for the image type; Kromora never sets `decoderVersion`. Thus it uses Apple's declared default, not a verified particular version for every file or OS. Version 9/9DNG is declared macOS 27+, and cannot be assumed on the macOS 26 deployment floor. Probe the actual image and runtime.
-6. **Sony lens correction is unknown.** Kromora leaves the per-image default alone unless a saved override exists; the SDK says support and default vary by image. The specified `DSC01104.ARW` was not found in the workspace. There is no evidence here that Apple recognizes its embedded profile or that correction is on.
+6. **Sony lens correction is unknown.** Kromora leaves the per-image default alone unless a saved override exists; the SDK says support and default vary by image. The specified `DSC01104.ARW` was not found in the workspace when this was written; it has since been measured (KRMA-1181 below), and Apple's correction does change its geometry.
 7. **A hybrid can help, but is already partly present.** Decoder white balance and persistent RAW settings coexist with the shared RGB graph. Exposure/highlight and detail prototypes are plausible, not established improvements. Any remapping needs a processing version to preserve old edits and a latency budget.
 8. **Three best experiments:** (1) inspect the exact Sony file and compare decoder lens correction on/off, (2) compare default base rendering and controlled boost/EDR/highlight/exposure variants using float measurements, (3) compare decoder and RGB noise/sharpening on high-ISO files and measure interactive cost. These isolate geometry, tonal headroom, and detail respectively.
 
@@ -182,6 +182,7 @@ straight-edge or chart image was available; the four local files are ordinary sc
 | `DSC00324.ARW` (ILCE-7M2) | Sony E 150-500mm, 500 mm | 74/77 | 0.2–0.4: −2 px; 0.4–0.6: +11 px (+0.5 %); 0.6–0.8: +19 px (+0.7 %); 0.8–1.0: 0 px |
 | `DSC01019.ARW` (ILCE-7CR) | FE 24-105mm F4, 105 mm | 38/77 | 0.6–0.8: −43 px (−1.0 %); 0.8–1.0: −44 px (−0.9 %); inner bands unreliable |
 | `DSC01153.ARW` (ILCE-7CR) | FE 24-105mm F4, 24 mm | 43/77 | 0.2–0.4: +7 px; 0.4–0.6: −3 px; 0.6–0.8: −9 px (n=5); 0.8–1.0: none registered |
+| `DSC01104.ARW` (ILCE-7CR) | FE 24-105mm F4, 49 mm | 39/77 | 0.2–0.4: −4 px (−0.3 %); 0.4–0.6: +29 px (+0.8 %); 0.6–0.8: +53 px (+1.3 %); 0.8–1.0: +40 px (+0.8 %) |
 | `DSC04513.ARW` (ILCE-7RM3A) | FE 24mm F1.4, 24 mm | not supported | not applicable |
 
 (Positive = the corrected render pushes scene content away from the optical centre.)
@@ -196,6 +197,19 @@ straight-edge or chart image was available; the four local files are ordinary sc
   produce show that part of the per-band numbers are registration noise. Their per-patch traces (printed by the test) show
   large, smooth, high-NCC displacement fields, so the conclusion that geometry changes holds, but the
   profile magnitude per lens is not established here and should not be quoted.
+- **`DSC01104.ARW` (the ILCE-7CR reference) is now measured** (run alone, 130 s in a debug build,
+  full 9504×6336 extent identical enabled and disabled). It gives the cleanest per-patch field of the
+  four: the centre patch is stationary (+0.15, +0.85 px, NCC 0.94), the shift grows smoothly with
+  radius in the same direction on every side of the frame (the corrected render pushes content
+  outward), and the high-NCC patches along the horizontal and vertical axes are purely radial. That
+  is a radial distortion-correction signature. Two caveats: many mid-radius patches (about 0.5–0.8 of
+  the half-extent) are pinned at the ±96 px search limit and discarded, so the true displacement
+  there exceeds the banded medians above and the peak magnitude is under-measured, and the
+  −50 px tangential median in the 0.4–0.6 band comes from n=6 surviving patches and is registration
+  noise, not a real tangential component. The sign (outward at 49 mm) differs from `DSC01019` at
+  105 mm (inward), so the per-focal-length profile is not constant across this lens. Lateral CA is
+  again not distinguishable: R−G and B−G shifts stay below 0.8 px and do not differ consistently
+  between enabled and disabled.
 - **Chromatic aberration is not separately evidenced.** Radial R−G and B−G shifts inside each render
   are mostly below about 0.5 px (one 24 mm band reaches −0.74 px, n=5), with no consistent difference
   between enabled and disabled, so these scenes show no reliable lateral-CA change.
@@ -214,9 +228,12 @@ straight-edge or chart image was available; the four local files are ordinary sc
 - **Adobe: not done.** Lightroom or Camera Raw was not run on these files: Photoshop 2026 was still at
   first-run setup (per the KRMA-1177 verification), Lightroom is cloud-based, and no scripted local workflow was available. Whether
   Lightroom applies its profile, Sony's embedded distortion data, both, or neither for these ARWs, and
-  whether its result matches Apple's, remains unmeasured. `DSC01104.ARW` is still absent. This
-  criterion needs an owner action (see the KRMA-1181 blocker): either run the files through
-  Lightroom/Camera Raw with Lens Profile Corrections off and on and export TIFFs, or accept the limit.
+  whether its result matches Apple's, remains unmeasured, including for `DSC01104.ARW` (now
+  available; Adobe has a local LCP for its 24-105 F4 G lens). **Owner decision (2026-11-05): the
+  Adobe comparison is accepted as out of scope.** It is not
+  measured, and nothing above claims agreement or disagreement with Adobe's profile choice, metadata
+  interpretation or numeric correction. The Kromora conclusion does not depend on it: Apple's decoder
+  default is applied as-is and no policy defect was found.
 
 ## Follow-up: highlight headroom and tone controls evaluated, RGB retained (KRMA-1176)
 
@@ -230,12 +247,14 @@ region's 5–95% luminance spread over its median, so a pure rescale scores the 
 median, separating tone appearance from channel content. macOS 27.2, decoder version 8, Apple
 Silicon, debug build.
 
-**Corpus limit.** Only four Sony ARWs are available (the earlier DNG fixtures are
-no longer in the workspace), and there is **no bracketed or otherwise clipped-channel ground truth**.
-Only `DSC01153` has a meaningfully clipped region (0.8% of region channels at or above 1),
-`DSC04513` has six clipped region pixels, and `DSC00324`/`DSC01019` have none. Conclusions about
-recovery are therefore limited to "no measurable effect on these files"; a camera-diverse corpus
-with bracketed references is still needed before claiming anything stronger.
+**Corpus.** Four Sony ARWs plus three non-Sony DNGs added from the author's own library: an iPhone 14
+Pro ProRAW (`IMG_0206.DNG`), an iPhone 17 Pro ProRAW (`IMG_0695.DNG`) and a Samsung SM-N960U1 DNG
+(`20181011_181213.dng`). There is **no bracketed or otherwise clipped-channel ground truth** for any of
+them. Among the Sony files only `DSC01153` has a meaningfully clipped region (0.8% of region channels
+at or above 1), `DSC04513` has six clipped region pixels, and `DSC00324`/`DSC01019` have none. The
+Sony tables below are the primary evidence; the non-Sony results are in their own subsection.
+Conclusions about recovery are limited to what these seven files show; bracketed references are still
+needed before claiming anything stronger.
 
 **Support and defaults (all four ARWs, identical).** Boost 1, boost shadow 0.9, EDR 0, gamut mapping
 on, highlight recovery supported and **on**, local tone map **not supported** (the gate is closed, so
@@ -266,28 +285,144 @@ Reading the table honestly:
   the one control whose name promises recovery, did nothing measurable on any file.
 - **RGB already serves the intent.** RGB Highlights −100 raises the same region's relSpread to 0.564
   (from 0.330) with the median moved by 4%, and Whites −100 pulls the endpoint to 0.78. Their throw is
-  predictable, monotonic, local to the highlight region, and costs 4–7 ms; no decoder control moves
+  predictable, monotonic and local to the highlight region, and its interactive cost is 3–4 ms per tick
+  (app-level latency, see the KRMA-1182 follow-up below; the 4–7 ms first quoted here was a single-pass
+  characterization timing); no decoder control moves
   highlights without also moving the base tone (boost, EDR+gain) or doing nothing (recovery, local
   tone map, shadow boost).
 - **Cost.** Every decoder variant re-outputs the RAW (about 200–400 ms per develop plus float
-  readback in this debug proxy, versus 4–7 ms for an RGB Light control). The engine-level
-  interactive numbers in [`TESTING.md`](TESTING.md#raw-exposure-routing-krma-1174) (p50 5–7 ms per
-  tick through the reused filter, with the developed source and prefix lost per tick) apply to any
-  decoder-routed slider; the RGB path keeps the cached prefix.
+  readback in this debug proxy). That figure and the "4–7 ms" for an RGB Light control are
+  **single-pass characterization timings**, not interaction latency; the engine-level interactive
+  numbers are in the KRMA-1182 follow-up below (RGB tick p50 2.9–4.1 ms, decoder-routed Exposure tick
+  p50 4.5–6.3 ms through one reused filter).
+
+### Non-Sony DNGs (Apple ProRAW and Samsung)
+
+Same harness, macOS 27.2, decoder `8.dng`, 600×800 frame, fixed region = brightest 0.5% of the neutral
+decode (2,400 pixels). Support and defaults differ from the Sony files:
+
+| File | Recovery (default) | Local tone map (default) | Baseline exposure | Region clip, neutral |
+| --- | --- | --- | ---: | ---: |
+| `IMG_0206` (iPhone 14 Pro) | supported, on | **supported, 1** | −0.29 | 0.035 |
+| `IMG_0695` (iPhone 17 Pro) | supported, on | **supported, 1** | 3.82 | 0.020 |
+| `20181011_181213` (Samsung) | supported, on | unsupported | 0.0 | 0.333 (every region pixel has one channel at or above 1) |
+
+Boost 1, boost shadow 0.9, EDR 0 and gamut mapping on for all three.
+
+| Control | `IMG_0206` clip / relSpread | `IMG_0695` clip / relSpread | Samsung clip / relSpread |
+| --- | --- | --- | --- |
+| Neutral | 0.035 / 0.202 | 0.020 / 0.380 | 0.333 / 0.200 |
+| Recovery off (on = neutral) | **0.052 / 0.191** | 0.020 / 0.380 | 0.333 / 0.200 |
+| Local tone map 0 (1 = neutral) | 0.000 / 0.357, median 0.375 → 0.117 | 0.310 / 0.464, median 0.280 → 0.141 | unsupported, identical |
+| Boost shadow 0.5 / 1.5 | identical | identical | identical |
+| EDR 1 / 2 | 0.477 / 0.482, p99 1.69 / 1.97 | 0.655 / 0.945, p99 2.48 / 6.10 | 0.333, p99 1.67 / 2.05 |
+| RGB Highlights −100 | 0.035 / 0.277 | 0.020 / 0.411 | 0.333 / 0.203 |
+| RGB Whites −100 | 0.000 / 0.142 | 0.000 / 0.255 | 0.000 / 0.241 |
+
+- **Highlight recovery has a measurable effect on one file.** On the iPhone 14 Pro, turning it off
+  raises the region clip fraction from 0.035 to 0.052 and lowers relSpread from 0.202 to 0.191; the
+  median does not move. It is on by default, so the neutral render already includes it. It remains a
+  boolean, not a signed slider, and it did nothing on the iPhone 17 Pro, the Samsung or any Sony file.
+- **Local tone map is a default-on global tone operator, not a highlight control.** Setting it to 0 on
+  the ProRAW files cuts the median by 50–69% (and, on `IMG_0695`, raises region clip to 0.31). It
+  has no defensible mapping to Highlights/Whites.
+- **EDR gives real extended range on ProRAW** (p99 up to 6.1 on `IMG_0695`), but it also moves the
+  median (−10 to −30%) there, so unlike the Sony result it is not a median-neutral candidate.
+- **The Samsung region is saturated at the output reference.** All 2,400 region pixels have one channel
+  at or above 1, so it is a poor recovery probe: no decoder control changes it, only RGB Whites does.
+- **Cost.** 160–200 ms per decoder variant against 5–8 ms for cached RGB controls, as one-shot
+  characterization timings. The 54–145 ms figures on a first RGB Highlights tick are the cold develop,
+  not the slider; the warm `RenderEngine` ticks on these DNGs are in the KRMA-1182 follow-up below.
+
+These results do not change the decision below; they add two documented behaviours (recovery matters
+on some ProRAW, local tone map is supported and on by default on Apple DNGs) that the existing
+defaults already respect.
 
 **Decision: no new RAW routing.** Highlights, Shadows, Whites and Blacks (and Contrast) stay RGB for
-RAW and standard sources alike. No semantics are defensible: recovery is a boolean with no measured
-effect, local tone map is unsupported here, shadow boost does not touch highlights, and EDR/boost are
-base-tone changes, not signed highlight throws. Neutral rendering is unchanged by this ticket; the
+RAW and standard sources alike. No semantics are defensible: recovery is a boolean (measurable on one
+of seven files, and already on by default), local tone map is a global on/off tone operator where
+supported (and unsupported on the Sony and Samsung files), shadow boost does not touch highlights, and
+EDR/boost are base-tone changes, not signed highlight throws. Neutral rendering is unchanged by this ticket; the
 EDR 0 / boost 1 / recovery-on defaults stay as the decoder reports them.
 `RAWExposureRoutingTests.testToneSlidersStayRGBAndNeverRedevelopTheRAW` pins the decision so these
 sliders neither reach the decoder nor invalidate the developed source mid-drag.
 
-**Revisit when** a corpus with a bracketed or sensor-clipped reference and other camera makes is
-available, a camera reports local tone map support, or a file shows highlight recovery changing
-output. EDR with a compensating gain is the only candidate that increased region spread without
-changing the median; it would need a defined headroom-to-display mapping (and clamping behavior
+**Revisit when** a bracketed or sensor-clipped reference is available, or a larger camera corpus (more
+makes, ProRAW and Bayer, high-contrast scenes) shows highlight recovery or another decoder control
+changing output beyond what is recorded here. On the Sony files EDR with a compensating gain was the only
+candidate that increased region spread without changing the median; on ProRAW it also moves the median.
+It would need a defined headroom-to-display mapping (and clamping behavior
 through `CIToneCurve` and Look LUT domains) and a user-facing semantics argument before shipping.
+
+## Follow-up: app-level latency of the RGB highlight controls (KRMA-1182)
+
+`RAWHighlightHeadroomBenchmark` times one develop-plus-readback per control. That is a
+characterization of the work, not of interaction: it includes a cold develop, a float CPU readback and
+no warmed cache, and its RGB timings ranged from 4 ms to 302 ms between runs. KRMA-1182 measures what
+the app does instead, through the production `RenderEngine` and no window
+(`RAWHighlightInteractionBenchmark`, 1024 px box, debug build, macOS 27.2, Apple Silicon): one fresh
+engine per file and control, a first `.interactive` frame, 4 discarded warm-up ticks, 40 measured
+`.interactive` ticks (a distinct value each), then a `.preview` settled frame at a value no tick used
+and a repeat of it. Counters are read from `workStatistics()` and `cacheStatistics()` and differenced
+over the phase. Exposure, which is decoder-routed (KRMA-1174), is the reference row. Measurement only:
+no routing or product code changed.
+
+Per file, across Highlights, Shadows, Whites, Blacks and Contrast (five controls, one run each; a
+second full run agreed within about 0.5 ms on every p50):
+
+| RAW | first frame | RGB tick p50 | RGB tick p95 | settled (new value / repeat) | Exposure tick p50 / p95 (decoder) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `20181011_181213.dng` (Samsung) | 87–92 ms | 3.0–3.1 ms | 3.1–3.9 ms | 3–4 / 2–3 ms | 4.5 / 4.6 ms |
+| `DSC00324.ARW` | 172–212 ms | 2.9–3.5 ms | 3.1–3.8 ms | 3 / 2 ms | 4.8 / 5.3 ms |
+| `DSC01019.ARW` | 259–338 ms | 4.0–4.1 ms | 4.1–4.8 ms | 4 / 2 ms | 6.3 / 6.9 ms |
+| `DSC01104.ARW` | 260–270 ms | 2.9–3.0 ms | 3.0–3.2 ms | 3 / 2 ms | 4.9 / 5.3 ms |
+| `DSC01153.ARW` | 260–267 ms | 3.9–4.0 ms | 4.0–4.5 ms | 4 / 2 ms | 6.1 / 6.7 ms |
+| `DSC04513.ARW` | 222–234 ms | 2.9–3.0 ms | 3.0–3.4 ms | 3–4 / 2 ms | 4.8 / 5.0 ms |
+| `IMG_0206.DNG` (iPhone 14 Pro) | 163–187 ms | 3.0–3.1 ms | 3.2–3.3 ms | 3 / 2 ms | 4.8 / 5.6 ms |
+| `IMG_0695.DNG` (iPhone 17 Pro) | 194–202 ms | 3.0–3.1 ms | 3.1–3.4 ms | 3 / 2 ms | 4.5 / 5.0 ms |
+
+Counters (identical for all eight files and all five RGB controls):
+
+| Phase | Decoder output requests | Filter constructions | Developed-source cache | Processing prefix |
+| --- | ---: | ---: | --- | ---: |
+| First interactive frame | 1 | 1 | 0 misses (the interactive session does not use the cache) | — |
+| 40 RGB ticks | **0** | 0 | 0 hits / 0 misses | 39 materializations |
+| Settled frame after RGB ticks | **0** | 0 | 0 misses | — |
+| 40 Exposure (decoder) ticks | 40 | 0 | 0 hits / 0 misses | 0 |
+
+Reading:
+
+- **No RGB highlight control re-develops the RAW.** After the first frame the decoder is never asked
+  for output during Highlights, Shadows, Whites, Blacks or Contrast ticks or on the settled frame; the
+  one interactive `CIRAWFilter` is built once and the completed decoder output is reused. Every RGB tick
+  instead rebuilds the processing prefix (39 materializations for 40 ticks) and still costs 3–4 ms.
+  The earlier "cold develop" figures belong to the first frame, not the slider.
+- **Warm RGB ticks are 2.9–4.1 ms (p50) and at most 4.8 ms (p95)**, a quarter of the 16.7 ms frame
+  budget, and the five controls are indistinguishable on a file (spread ≤ 0.6 ms). The file, not the
+  control, sets the level: `DSC01019` and `DSC01153` sit at about 4 ms and the others at about 3 ms
+  (not explained by camera or resolution, since `DSC01104` shares a body with `DSC01153`).
+- **A decoder-routed control costs more per tick, not less**: Exposure ticks are 4.5–6.3 ms (p50)
+  because each one asks the retained filter for a new output (40 output requests for 40 ticks), about
+  1.3–2.3 ms more than the RGB ticks on the same file. The decoder spelling is not slow but is
+  not cheaper either, consistent with the KRMA-1174 table.
+- **The standalone timings do not estimate warm interaction.** The one-shot RGB figures of 4–7 ms were
+  coincidentally near the warm value, but the same harness also produced 54–302 ms for the first RGB
+  Highlights call because that call pays for the develop. Quote the table above, not those figures,
+  for interactive cost. The comparison of "RGB costs 4–7 ms versus 200–400 ms for decoder variants"
+  therefore overstates the case for RGB: the like-for-like warm comparison is about 3–4 ms (RGB) versus
+  4.5–6.3 ms (decoder-routed Exposure), a difference that is real but small.
+- **Cold outliers.** The first row measured in a process (Highlights on the Samsung DNG, 265 ms
+  against about 90 ms for the other controls on that file) and the Highlights row of several files
+  carry process-level and shader first-use cost in their first frame; `DSC01019` Highlights reached
+  338 ms in one run. They are first-frame numbers and are not repeated by later controls on the file.
+- **Not measured.** Decoder-routed Highlights/Shadows/Whites/Blacks/Contrast do not exist (the
+  decision above keeps them on RGB), so there is no decoder tick to compare for those controls; the
+  Exposure row is the nearest proxy. The 1024 px interactive box is the only size measured, and this is
+  a single debug-build run per file and control.
+
+This does not change the KRMA-1176 decision, which rests on semantics (no decoder control has a signed,
+highlight-local meaning). It removes latency as an argument in either direction, and any future
+routing decision belongs in its own issue with semantic and visual evidence.
 
 ## Follow-up: Luminance noise reduction routed to the decoder (KRMA-1175)
 

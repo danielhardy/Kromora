@@ -1353,10 +1353,41 @@ and is release-qualification evidence only).
 
 `RAWHighlightHeadroomBenchmark` (optional; `swift test --filter RAWHighlightHeadroomBenchmark`, about two
 minutes) prints decoder defaults and fixed-region highlight statistics for recovery, EDR, boost, shadow
-boost, local tone map and the RGB Light controls on every local RAW. Results and the decision to keep
+boost, local tone map and the RGB Light controls on every local RAW (four Sony ARWs plus an iPhone 14 Pro
+ProRAW, an iPhone 17 Pro ProRAW and a Samsung DNG; point `KROMORA_RAW_FIXTURE_DIR` at a folder of just
+the DNGs to run those in about 100 s). Results and the decision to keep
 Highlights/Shadows/Whites/Blacks on RGB are in
 [`RAW_PIPELINE_INSPECTION.md`](RAW_PIPELINE_INSPECTION.md#follow-up-highlight-headroom-and-tone-controls-evaluated-rgb-retained-krma-1176).
 `RAWExposureRoutingTests.testToneSlidersStayRGBAndNeverRedevelopTheRAW` (fast) guards the routing.
+
+`RAWHighlightHeadroomBenchmark` timings are **single-pass characterization**: one develop and a CPU
+float readback per variant, with no warmed caches. They are not interaction latency (its RGB timings
+ranged from 4 to 302 ms between runs).
+
+#### RAW highlight-control interaction latency (KRMA-1182)
+
+`RAWHighlightInteractionBenchmark` (optional; `swift test --filter RAWHighlightInteractionBenchmark`,
+about 20 s for the eight local RAWs) is the app-level measurement: a fresh `RenderEngine` per file and
+control, a 1024 px box, one first `.interactive` frame, 4 discarded warm-up ticks, 40 measured
+`.interactive` ticks, then a `.preview` settled frame at a new value and its repeat, with decoder output
+requests, filter constructions, developed-source hits/misses and processing-prefix materializations
+read from `workStatistics()` / `cacheStatistics()`. It covers Highlights, Shadows, Whites, Blacks and
+Contrast, plus decoder-routed Exposure as a reference, and asserts nothing about wall-clock time.
+
+**Measured 2026-11-05 (macOS 27.2, Apple Silicon, debug test build, window-independent; four Sony ARWs,
+two ProRAW DNGs and a Samsung DNG).** Warm RGB tick p50 2.9–4.1 ms and p95 3.0–4.8 ms (about 3 ms on
+five files, about 4 ms on `DSC01019` and `DSC01153`; the five controls differ by at most 0.6 ms on a
+file); first frame 87–338 ms; settled new-value frame 3–4 ms, repeat 2–3 ms; decoder-routed Exposure
+tick p50 4.5–6.3 ms, p95 4.6–6.9 ms. Counters: the first frame makes 1 decoder output request and 1
+filter construction; the 40 RGB ticks and the settled frame make **0** decoder output requests, 0
+constructions and no developed-source cache traffic (the interactive session does not use that cache),
+and materialize the processing prefix 39 times; the 40 Exposure ticks make 40 output requests and no
+prefix materialization. So no RGB highlight control re-develops the RAW and none costs more than about
+5 ms warm. Per-file ranges and the reading are in
+[`RAW_PIPELINE_INSPECTION.md`](RAW_PIPELINE_INSPECTION.md#follow-up-app-level-latency-of-the-rgb-highlight-controls-krma-1182).
+The display-bound release capture was not run. Single run per file and control (a second full run
+agreed within about 0.5 ms on every p50); the first row measured in a process and some Highlights
+first frames include cold-start cost.
 
 ### RAW exposure routing (KRMA-1174)
 
