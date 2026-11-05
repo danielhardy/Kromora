@@ -269,6 +269,13 @@ removed output clipping and lowered p99 from 0.996 to 0.774. After matching the 
 the Highlights −100 clip fraction was 0.128, versus 0.002 for neutral, showing that the apparent
 clip reduction depends on the tone match.
 
+**Visual spot-check.** At 800 px in the same 8-bit sRGB output, recovery off/on was not readily
+distinguishable on either `DSC01153` or `IMG_0206`. RGB Highlights −100 visibly changed the bright
+sky, flags and water while keeping the broad midtone appearance close; EDR 1 changed tone but showed
+no additional flag detail at this size. On `IMG_0206`, local tone map 0 darkened most of the frame,
+consistent with a global tone operator rather than a highlight-slider equivalent. These are output
+appearance observations only; there is still no bracketed reference for recovered sensor detail.
+
 | Control (DSC01153 region) | Clip | p99 | relSpread | Reading |
 | --- | ---: | ---: | ---: | --- |
 | Neutral | 0.008 | 1.008 | 0.330 | |
