@@ -6,8 +6,8 @@ import XCTest
 /// Opt-in characterization behind the KRMA-1176 decision on RAW highlight/headroom routing. For each
 /// local RAW it develops the same 800-pixel frame under decoder variants (highlight recovery, EDR,
 /// boost, shadow boost, local tone map) and under the existing RGB Light controls, and prints
-/// objective numbers for a **fixed region**: the pixels whose neutral decode has a channel at or
-/// above 0.98. It reports the neutral support flags and defaults, a decode time per variant, and a
+/// objective numbers for a **fixed region**: the brightest 0.5% of pixels by maximum channel in the
+/// neutral decode. It reports the neutral support flags and defaults, a decode time per variant, and a
 /// midtone-matched view (one global gain brings each variant's whole-frame median to the neutral's)
 /// so tone appearance is separated from channel detail.
 ///

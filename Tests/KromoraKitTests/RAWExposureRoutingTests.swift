@@ -173,9 +173,9 @@ final class RAWExposureRoutingTests: XCTestCase {
     }
 
     /// KRMA-1176: Highlights, Shadows, Whites, Blacks and Contrast deliberately stay RGB curves for a
-    /// RAW. Measured on four Sony ARWs, no decoder control (recovery, EDR, boost, shadow boost, local
-    /// tone map) is a defensible equivalent (`docs/RAW_PIPELINE_INSPECTION.md`), so these sliders
-    /// must neither reach the decoder nor invalidate the developed source while they are dragged.
+    /// RAW. Across five Sony ARWs, two Apple ProRAW DNGs and one Samsung DNG, no decoder control has
+    /// defensible signed-slider semantics (`docs/RAW_PIPELINE_INSPECTION.md`), so these sliders must
+    /// neither reach the decoder nor invalidate the developed source while they are dragged.
     func testToneSlidersStayRGBAndNeverRedevelopTheRAW() {
         let base = EditDocument(rawDevelop: RAWDevelopSettings(boostAmount: 0.5))
         for light in [

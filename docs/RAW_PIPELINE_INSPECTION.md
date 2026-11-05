@@ -247,23 +247,32 @@ region's 5–95% luminance spread over its median, so a pure rescale scores the 
 median, separating tone appearance from channel content. macOS 27.2, decoder version 8, Apple
 Silicon, debug build.
 
-**Corpus.** Four Sony ARWs plus three non-Sony DNGs added from the author's own library: an iPhone 14
+**Corpus.** Five Sony ARWs plus three non-Sony DNGs added from the author's own library: an iPhone 14
 Pro ProRAW (`IMG_0206.DNG`), an iPhone 17 Pro ProRAW (`IMG_0695.DNG`) and a Samsung SM-N960U1 DNG
 (`20181011_181213.dng`). There is **no bracketed or otherwise clipped-channel ground truth** for any of
-them. Among the Sony files only `DSC01153` has a meaningfully clipped region (0.8% of region channels
-at or above 1), `DSC04513` has six clipped region pixels, and `DSC00324`/`DSC01019` have none. The
+them. Among the Sony files, `DSC01153` has the largest clipped region (0.8% of region channels at or
+above 1), `DSC01104` has 12 clipped region pixels (0.2% of region channels), `DSC04513` has six
+clipped region pixels, and `DSC00324`/`DSC01019` have none. The
 Sony tables below are the primary evidence; the non-Sony results are in their own subsection.
-Conclusions about recovery are limited to what these seven files show; bracketed references are still
+Conclusions about recovery are limited to what these eight files show; bracketed references are still
 needed before claiming anything stronger.
 
-**Support and defaults (all four ARWs, identical).** Boost 1, boost shadow 0.9, EDR 0, gamut mapping
+**Support and defaults (all five ARWs, identical).** Boost 1, boost shadow 0.9, EDR 0, gamut mapping
 on, highlight recovery supported and **on**, local tone map **not supported** (the gate is closed, so
 the control writes nothing), baseline exposure 0.3–0.4.
+
+On `DSC01104.ARW` (ILCE-7CR; 2,136-pixel fixed region), recovery off/on remained at 0.002 clip and
+0.058 relSpread, and local tone map was unsupported. EDR 1/2 changed clip to 0.381/0.831 and
+relSpread to 0.101/0.127 while the median stayed 0.079; boost 0.5/0 moved the median to
+0.064/0.051. RGB Highlights −100 moved the median to 0.075 and relSpread to 0.113; Whites −100
+removed output clipping and lowered p99 from 0.996 to 0.774. After matching the whole-frame median,
+the Highlights −100 clip fraction was 0.128, versus 0.002 for neutral, showing that the apparent
+clip reduction depends on the tone match.
 
 | Control (DSC01153 region) | Clip | p99 | relSpread | Reading |
 | --- | ---: | ---: | ---: | --- |
 | Neutral | 0.008 | 1.008 | 0.330 | |
-| Highlight recovery off / on | 0.008 | 1.008 | 0.329 / 0.330 | **No measurable effect** on any of the four files, including the one with clipped pixels |
+| Highlight recovery off / on | 0.008 | 1.008 | 0.329 / 0.330 | **No measurable effect** on any of the five files, including the files with clipped pixels |
 | Local tone map 0 / 1 | — | — | — | Unsupported on these decoders; identical output |
 | Boost shadow 0.5 / 1.5 | 0.008 | 1.008 | 0.330 | Region identical; it moves only shadows (midtone-matched clip differs only because the median moves) |
 | EDR 1 / 2 | 0.235 / 0.582 | 1.37 / 1.67 | 0.475 / 0.608 | Values above 1 appear where neutral had a shoulder; midtones unchanged |
@@ -340,7 +349,7 @@ defaults already respect.
 
 **Decision: no new RAW routing.** Highlights, Shadows, Whites and Blacks (and Contrast) stay RGB for
 RAW and standard sources alike. No semantics are defensible: recovery is a boolean (measurable on one
-of seven files, and already on by default), local tone map is a global on/off tone operator where
+of eight files, and already on by default), local tone map is a global on/off tone operator where
 supported (and unsupported on the Sony and Samsung files), shadow boost does not touch highlights, and
 EDR/boost are base-tone changes, not signed highlight throws. Neutral rendering is unchanged by this ticket; the
 EDR 0 / boost 1 / recovery-on defaults stay as the decoder reports them.

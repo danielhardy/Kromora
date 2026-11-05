@@ -1351,9 +1351,9 @@ and is release-qualification evidence only).
 
 ### RAW highlight headroom evaluation (KRMA-1176)
 
-`RAWHighlightHeadroomBenchmark` (optional; `swift test --filter RAWHighlightHeadroomBenchmark`, about two
+`RAWHighlightHeadroomBenchmark` (optional; `swift test --filter RAWHighlightHeadroomBenchmark`, about four
 minutes) prints decoder defaults and fixed-region highlight statistics for recovery, EDR, boost, shadow
-boost, local tone map and the RGB Light controls on every local RAW (four Sony ARWs plus an iPhone 14 Pro
+boost, local tone map and the RGB Light controls on every local RAW (five Sony ARWs plus an iPhone 14 Pro
 ProRAW, an iPhone 17 Pro ProRAW and a Samsung DNG; point `KROMORA_RAW_FIXTURE_DIR` at a folder of just
 the DNGs to run those in about 100 s). Results and the decision to keep
 Highlights/Shadows/Whites/Blacks on RGB are in
@@ -1374,7 +1374,7 @@ requests, filter constructions, developed-source hits/misses and processing-pref
 read from `workStatistics()` / `cacheStatistics()`. It covers Highlights, Shadows, Whites, Blacks and
 Contrast, plus decoder-routed Exposure as a reference, and asserts nothing about wall-clock time.
 
-**Measured 2026-11-05 (macOS 27.2, Apple Silicon, debug test build, window-independent; four Sony ARWs,
+**Measured 2026-11-05 (macOS 27.2, Apple Silicon, debug test build, window-independent; five Sony ARWs,
 two ProRAW DNGs and a Samsung DNG).** Warm RGB tick p50 2.9–4.1 ms and p95 3.0–4.8 ms (about 3 ms on
 five files, about 4 ms on `DSC01019` and `DSC01153`; the five controls differ by at most 0.6 ms on a
 file); first frame 87–338 ms; settled new-value frame 3–4 ms, repeat 2–3 ms; decoder-routed Exposure
