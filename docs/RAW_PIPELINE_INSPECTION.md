@@ -154,14 +154,66 @@ Measured on the four local Sony ARWs, all on decoder version 8 with the neutral 
 - **What the switch changes.** Toggling it on the three supported files leaves the full and preview
   extents unchanged and shifts pixels (mean |Δ| of roughly 0.005–0.03 on a 0–1 scale), raises the
   corner-to-centre luminance ratio (for example 0.929 → 0.937, 1.166 → 1.192) and moves the outer-ring
-  colour balance. That is consistent with peripheral-illumination and/or chromatic-aberration
-  handling, but the difference is not larger toward the edges (the central half differs at least as
-  much), so these metrics do not establish a geometric component. Treat the scope of the single
-  switch as undetermined; no separate CA or illumination control exists on `CIRAWFilter`.
+  colour balance. Those preview-scale statistics alone do not show geometry; the full-resolution
+  registration below (KRMA-1181) supersedes the earlier "undetermined" reading.
 - **Preview/export parity.** Both go through `RAWDevelopSettings.apply(to:)` and
   `CIRAWFilter.scaleFactor`; the scale is derived from the sensor `nativeSize`. For default, on and
   off, the preview extent equals the full extent times the scale factor (within a pixel), and the
   interactive session restores the decoder default when an override is cleared.
-- **Not compared.** Registered straight-line distortion and Lightroom's profile choice were not
-  measured; a visual difference from Lightroom cannot be attributed to lens correction from this
-  evidence.
+- **Not compared in KRMA-1177.** Registered straight-line distortion and Lightroom's profile choice;
+  see KRMA-1181 below.
+
+## Follow-up: full-resolution registration and Adobe profiles (KRMA-1181)
+
+**Method.** `RAWLensCorrectionTests/testFullResolutionRegistrationOfEnabledAgainstDisabled`
+(optional lane, about 6.5 minutes in a debug build) renders each supported ARW at full resolution
+with only `isLensCorrectionEnabled` toggled (decoder v8, neutral document otherwise) and registers
+the two renders on an 11×7 grid of patches spanning 96 % of each half-extent. Patches are matched by
+normalised cross-correlation on a 4× downsample with parabolic sub-pixel refinement (search ±96 px at
+full resolution); matches with NCC ≤ 0.9 or pinned at the search limit are discarded. Registering the
+same scene content patch by patch measures the displacement directly, so no calibration target or line
+fit is needed; a full-resolution refinement was tried and dropped because a distortion correction's
+local magnification (a few percent) deforms the match window. R and B are also registered against G
+inside each render to separate lateral chromatic aberration from geometry. No dedicated
+straight-edge or chart image was available; the four local files are ordinary scenes.
+
+| File | Lens, focal length | Patches registered | Median outward displacement of the corrected render, by radius band (fraction of half-diagonal) |
+| --- | --- | --- | --- |
+| `DSC00324.ARW` (ILCE-7M2) | Sony E 150-500mm, 500 mm | 74/77 | 0.2–0.4: −2 px; 0.4–0.6: +11 px (+0.5 %); 0.6–0.8: +19 px (+0.7 %); 0.8–1.0: 0 px |
+| `DSC01019.ARW` (ILCE-7CR) | FE 24-105mm F4, 105 mm | 38/77 | 0.6–0.8: −43 px (−1.0 %); 0.8–1.0: −44 px (−0.9 %); inner bands unreliable |
+| `DSC01153.ARW` (ILCE-7CR) | FE 24-105mm F4, 24 mm | 43/77 | 0.2–0.4: +7 px; 0.4–0.6: −3 px; 0.6–0.8: −9 px (n=5); 0.8–1.0: none registered |
+| `DSC04513.ARW` (ILCE-7RM3A) | FE 24mm F1.4, 24 mm | not supported | not applicable |
+
+(Positive = the corrected render pushes scene content away from the optical centre.)
+
+- **Geometry is part of the switch.** Corrected and uncorrected renders share an identical extent but
+  the same scene points sit tens of full-resolution pixels apart (up to roughly 1 % of the radius), so
+  unchanged extents do not rule out geometric remapping, and the earlier "geometric component not
+  established" reading is withdrawn. `DSC00324` gives a clean signature: about zero near the centre,
+  growing smoothly with radius, tangential component near zero (a radial distortion correction). The
+  other two files do not give a clean radial profile: texture-poor or repetitive regions, patches
+  pinned at the search limit, and a few non-zero centre shifts that a distortion correction cannot
+  produce show that part of the per-band numbers are registration noise. Their per-patch traces (printed by the test) show
+  large, smooth, high-NCC displacement fields, so the conclusion that geometry changes holds, but the
+  profile magnitude per lens is not established here and should not be quoted.
+- **Chromatic aberration is not separately evidenced.** Radial R−G and B−G shifts inside each render
+  are mostly below about 0.5 px (one 24 mm band reaches −0.74 px, n=5), with no consistent difference
+  between enabled and disabled, so these scenes show no reliable lateral-CA change.
+- **No Kromora policy defect.** The default is Apple's per-image setting and it is enabled wherever the
+  decoder supports it, so geometric correction is already applied to the renders Kromora produces. A
+  neutral document therefore matches what the decoder does on its own; nothing here is attributable to
+  Kromora policy, and no product change was made.
+- **Adobe: what could be recorded locally.** Camera Raw defaults on this machine
+  (`~/Library/Application Support/Adobe/CameraRaw/Defaults`) are stock (`RawDefaults = Adobe`, no
+  custom lens-profile default; `LensProfileDefaults` is empty). Adobe's installed profile library
+  (`/Library/Application Support/Adobe/CameraRaw/LensProfiles/1.0/Sony`) contains
+  `SONY (Sony FE 24-105mm F4 G OSS) - RAW.lcp` (distortion parameters at 24, 35, 50, 70 and 105 mm) and
+  `SONY (Sony FE 24mm F1.4 GM) - RAW.lcp`, but no Sony E 150-500mm profile. Adobe's profiles are
+  therefore available for `DSC01019`, `DSC01153` and `DSC04513`, not `DSC00324`. The parameter
+  normalisation was not verified, so no numeric comparison with Apple's displacement is claimed.
+- **Adobe: not done.** Lightroom or Camera Raw was not run on these files: Photoshop 2026 was still at
+  first-run setup (per the KRMA-1177 verification), Lightroom is cloud-based, and no scripted local workflow was available. Whether
+  Lightroom applies its profile, Sony's embedded distortion data, both, or neither for these ARWs, and
+  whether its result matches Apple's, remains unmeasured. `DSC01104.ARW` is still absent. This
+  criterion needs an owner action (see the KRMA-1181 blocker): either run the files through
+  Lightroom/Camera Raw with Lens Profile Corrections off and on and export TIFFs, or accept the limit.

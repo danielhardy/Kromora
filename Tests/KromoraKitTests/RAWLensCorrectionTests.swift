@@ -166,6 +166,204 @@ final class RAWLensCorrectionTests: XCTestCase {
         }
     }
 
+    // MARK: - Full-resolution registration (KRMA-1181)
+
+    /// Luma (or one colour channel) of a `size` square patch of `image` at `origin`, full resolution.
+    private func patch(_ image: CIImage, origin: CGPoint, size: Int, channel: Int?) throws -> [Float] {
+        var buffer = [Float](repeating: 0, count: size * size * 4)
+        let space = try XCTUnwrap(CGColorSpace(name: CGColorSpace.extendedLinearSRGB))
+        buffer.withUnsafeMutableBytes {
+            Pixels.context.render(
+                image, toBitmap: $0.baseAddress!, rowBytes: size * 16,
+                bounds: CGRect(x: origin.x, y: origin.y, width: CGFloat(size), height: CGFloat(size)),
+                format: .RGBAf, colorSpace: space)
+        }
+        return (0..<size * size).map { i in
+            let r = buffer[i * 4], g = buffer[i * 4 + 1], b = buffer[i * 4 + 2]
+            switch channel {
+            case 0: return r
+            case 1: return g
+            case 2: return b
+            default: return 0.2126 * r + 0.7152 * g + 0.0722 * b
+            }
+        }
+    }
+
+    /// 4× box downsample of a square patch, for the coarse registration pass.
+    private func downsampled(_ p: [Float], size: Int) -> [Float] {
+        let n = size / 4
+        var out = [Float](repeating: 0, count: n * n)
+        for y in 0..<n {
+            for x in 0..<n {
+                var sum: Float = 0
+                for dy in 0..<4 { for dx in 0..<4 { sum += p[(y * 4 + dy) * size + x * 4 + dx] } }
+                out[y * n + x] = sum / 16
+            }
+        }
+        return out
+    }
+
+    /// Sub-pixel shift (dx, dy) of `moving` relative to `reference`, found by maximising normalised
+    /// cross-correlation of the central window over integer shifts within ±`range`, then a parabolic
+    /// refinement. Returns nil for a textureless patch or a weak correlation peak.
+    private func registrationShift(
+        reference: [Float], moving: [Float], size: Int, window: Int, range: Int, minScore: Double = 0.8
+    ) -> (dx: Double, dy: Double, score: Double)? {
+        let lo = (size - window) / 2
+        func score(_ sx: Int, _ sy: Int) -> Double {
+            var sa = 0.0, sb = 0.0, saa = 0.0, sbb = 0.0, sab = 0.0
+            for y in 0..<window {
+                for x in 0..<window {
+                    let a = Double(reference[(lo + y) * size + lo + x])
+                    let b = Double(moving[(lo + y + sy) * size + lo + x + sx])
+                    sa += a; sb += b; saa += a * a; sbb += b * b; sab += a * b
+                }
+            }
+            let n = Double(window * window)
+            let va = saa - sa * sa / n, vb = sbb - sb * sb / n
+            guard va > 1e-6, vb > 1e-6 else { return -1 }
+            return (sab - sa * sb / n) / (va * vb).squareRoot()
+        }
+        var best = (sx: 0, sy: 0, s: -2.0)
+        var grid = [[Double]](repeating: [Double](repeating: -2, count: 2 * range + 1), count: 2 * range + 1)
+        for sy in -range...range {
+            for sx in -range...range {
+                let s = score(sx, sy)
+                grid[sy + range][sx + range] = s
+                if s > best.s { best = (sx, sy, s) }
+            }
+        }
+        guard best.s > minScore else { return nil }
+        func refine(_ m: Double, _ c: Double, _ p: Double) -> Double {
+            let d = m - 2 * c + p
+            return abs(d) < 1e-12 ? 0 : 0.5 * (m - p) / d
+        }
+        var fx = 0.0, fy = 0.0
+        if abs(best.sx) < range, abs(best.sy) < range {
+            let c = best.s
+            fx = refine(grid[best.sy + range][best.sx - 1 + range], c, grid[best.sy + range][best.sx + 1 + range])
+            fy = refine(grid[best.sy - 1 + range][best.sx + range], c, grid[best.sy + 1 + range][best.sx + range])
+        }
+        return (Double(best.sx) + fx, Double(best.sy) + fy, best.s)
+    }
+
+    /// KRMA-1181: dense full-resolution registration of the lens-correction-on render against the
+    /// off render. Geometric remapping (distortion) appears as a displacement field that grows with
+    /// radius; a pure illumination change registers at ~0 everywhere. The same scene content serves as
+    /// the "straight edges": every patch is registered directly, which measures the displacement
+    /// without fitting lines or needing a calibration target.
+    ///
+    /// Patches are matched on a 4× box downsample (quarter-resolution NCC with parabolic sub-pixel
+    /// refinement, ±96 full-resolution px). A full-resolution refinement was tried and dropped: the
+    /// local magnification of a distortion correction (a few percent) deforms the window enough to
+    /// break an exact match, while the coarse estimate is already accurate to a couple of pixels
+    /// against displacements of tens of pixels. Matches with NCC ≤ 0.9, or pinned at the search
+    /// limit, are discarded. R and B are also registered against G inside each render so the change
+    /// in lateral chromatic aberration is reported separately from geometry.
+    func testFullResolutionRegistrationOfEnabledAgainstDisabled() throws {
+        let coarseSize = 640, coarseWindow = 256, coarseRange = 24
+        let caSize = 160, caWindow = 64, caRange = 6
+        for (url, source) in try sources() {
+            let info = try probe(url)
+            guard info.supported else {
+                print("=== \(info.name): lens correction unsupported; nothing to register ===")
+                continue
+            }
+            let on = try develop(source, lens: true, scale: .full)
+            let off = try develop(source, lens: false, scale: .full)
+            XCTAssertEqual(on.extent, off.extent, info.name)
+            let e = on.extent
+            let offAligned = off.transformed(
+                by: CGAffineTransform(translationX: e.midX - off.extent.midX, y: e.midY - off.extent.midY))
+            let halfDiagonal = (e.width * e.width / 4 + e.height * e.height / 4).squareRoot()
+
+            struct Sample {
+                var radius: Double
+                /// Where the corrected render puts a scene point, relative to the uncorrected render,
+                /// along the outward radial direction (px, positive = pushed outward).
+                var outward: Double
+                var tangential: Double
+                var caRG: (on: Double, off: Double)?
+                var caBG: (on: Double, off: Double)?
+            }
+            var samples: [Sample] = []
+            var trace = ""
+            let columns = 11, rows = 7
+            for j in 0..<rows {
+                for i in 0..<columns {
+                    // Patch centres reach 96 % of each half-extent so the corners are measured.
+                    let u = (Double(i) / Double(columns - 1) * 2 - 1) * 0.96
+                    let v = (Double(j) / Double(rows - 1) * 2 - 1) * 0.96
+                    let px = u * e.width / 2, py = v * e.height / 2
+                    let norm = (px * px + py * py).squareRoot()
+                    let rx = norm > 0 ? px / norm : 0, ry = norm > 0 ? py / norm : 0
+                    func origin(_ size: Int) -> CGPoint {
+                        CGPoint(x: (e.midX + px - Double(size) / 2).rounded(), y: (e.midY + py - Double(size) / 2).rounded())
+                    }
+                    let o = origin(coarseSize)
+                    let ref = downsampled(try patch(on, origin: o, size: coarseSize, channel: nil), size: coarseSize)
+                    let mov = downsampled(try patch(offAligned, origin: o, size: coarseSize, channel: nil), size: coarseSize)
+                    guard let c = registrationShift(
+                        reference: ref, moving: mov, size: coarseSize / 4, window: coarseWindow / 4,
+                        range: coarseRange, minScore: -1)
+                    else { continue }
+                    let dx = c.dx * 4, dy = c.dy * 4
+                    let pinned = abs(c.dx) >= Double(coarseRange) - 0.5 || abs(c.dy) >= Double(coarseRange) - 0.5
+                    trace += String(
+                        format: "  u %+.2f v %+.2f shift dx %+.2f dy %+.2f ncc %.3f%@\n", u, v, dx, dy, c.score,
+                        c.score <= 0.9 || pinned ? " (discarded)" : "")
+                    guard c.score > 0.9, !pinned else { continue }
+
+                    // `off` content sits at on's position plus (dx, dy); the corrected render therefore
+                    // moves the scene by −(dx, dy). Positive `outward` = pushed away from the centre.
+                    let oc = origin(caSize)
+                    func channelShift(_ image: CIImage, _ channel: Int) throws -> Double? {
+                        let g = try patch(image, origin: oc, size: caSize, channel: 1)
+                        let m = try patch(image, origin: oc, size: caSize, channel: channel)
+                        guard let r = registrationShift(
+                            reference: g, moving: m, size: caSize, window: caWindow, range: caRange)
+                        else { return nil }
+                        return r.dx * rx + r.dy * ry
+                    }
+                    func pair(_ channel: Int) throws -> (on: Double, off: Double)? {
+                        guard let a = try channelShift(on, channel), let b = try channelShift(offAligned, channel)
+                        else { return nil }
+                        return (a, b)
+                    }
+                    samples.append(Sample(
+                        radius: norm / halfDiagonal, outward: -(dx * rx + dy * ry),
+                        tangential: -(-dx * ry + dy * rx), caRG: try pair(0), caBG: try pair(2)))
+                }
+            }
+
+            var report = "\n=== \(info.name) full \(Int(e.width))x\(Int(e.height)); \(samples.count)/\(columns * rows) patches registered ===\n"
+            let bands: [(String, ClosedRange<Double>)] = [
+                ("0.0-0.2", 0...0.2), ("0.2-0.4", 0.2...0.4), ("0.4-0.6", 0.4...0.6),
+                ("0.6-0.8", 0.6...0.8), ("0.8-1.0", 0.8...1.0)
+            ]
+            for (name, band) in bands {
+                let inBand = samples.filter { band.contains($0.radius) }
+                guard !inBand.isEmpty else { report += "r \(name): no registered patches\n"; continue }
+                // Medians: a mismatched patch (flat sky, repeated texture) must not drag a band.
+                func median(_ v: [Double]) -> Double {
+                    let sorted = v.sorted()
+                    return v.isEmpty ? .nan : sorted[sorted.count / 2]
+                }
+                let outward = median(inBand.map(\.outward))
+                let tangential = median(inBand.map(\.tangential))
+                let relative = median(inBand.map { $0.outward / max($0.radius * halfDiagonal, 1) }) * 100
+                let rg = inBand.compactMap(\.caRG), bg = inBand.compactMap(\.caBG)
+                func mean(_ v: [Double]) -> Double { v.isEmpty ? .nan : v.reduce(0, +) / Double(v.count) }
+                report += String(
+                    format: "r %@ n=%d: median outward %+.2f px (%+.2f %% of radius), tangential %+.2f px; radial R-G on %+.3f off %+.3f, B-G on %+.3f off %+.3f (n=%d)\n",
+                    name, inBand.count, outward, relative, tangential,
+                    mean(rg.map(\.on)), mean(rg.map(\.off)), mean(bg.map(\.on)), mean(bg.map(\.off)), rg.count)
+            }
+            print(report + "per-patch trace (u, v = fraction of half-extent; shift = off relative to on, px):\n" + trace)
+            XCTAssertFalse(samples.isEmpty, "\(info.name): no patch had enough texture to register")
+        }
+    }
+
     // MARK: - Policy (optional lane: needs a real decoder)
 
     /// A document that leaves the lens switch unset renders exactly like one that spells out Apple's
