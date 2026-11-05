@@ -105,7 +105,12 @@ enum RenderPipeline {
         lutCache: LUTFilterCache? = nil,
         sourceROI: CGRect? = nil
     ) -> CIImage? {
-        let document = document.routedForRendering(source: source.kind)
+        let document = document.routedForRendering(
+            source: source.kind,
+            decoder: source.kind == .raw && RAWDetailRouting.needsDecoderState(document)
+                ? rawFilter(for: source.backing).map(
+                    RenderEngine.InteractiveRAWFilterSession.captureCapabilities)
+                : nil)
         guard
             let developed = developedSource(
                 source, rawDevelop: document.rawDevelop, scale: scale, rotation: document.rotation

@@ -775,6 +775,10 @@ actor RenderEngine: RenderEngining {
     /// Not `private`: `RenderEngine+RAWCapabilities.swift` owns the session accessor in its own
     /// file, and `private` is file-scoped rather than type-scoped (KRMA-530).
     var interactiveRAWSession: InteractiveRAWFilterSession?
+    /// Decoder support flags and defaults for sources whose noise reduction is routed (KRMA-1175),
+    /// read from a throwaway filter so export or a neighbouring photo never evicts the single
+    /// interactive session. Small and cleared with the source caches.
+    var routingStateCache: [String: RAWCapabilities] = [:]
     /// Bounded render/mask supersession bookkeeping. See `RenderEngine.RevisionLedger` for why this
     /// is a separate value type rather than plain dictionaries on the actor.
     private var revisionLedger = RevisionLedger()
@@ -1539,8 +1543,9 @@ actor RenderEngine: RenderEngining {
         // Everything in this plan is value state. It is intentionally prepared before entering
         // the decoder/graph section so a future concurrent build worker can do this work without
         // borrowing the actor-owned Core Image resources.
-        // RAW routes global Exposure into the decoder; route first so every key below sees it.
-        let document = document.routedForRendering(source: source.kind)
+        // RAW routes global Exposure and supported noise reduction into the decoder; route first so
+        // every key below sees it.
+        let document = routedForRendering(document, source: source)
         try kernelStatus.require(RenderKernelRequirements.names(for: document))
         let sourceFingerprint = RenderSourceFingerprint(source)
         let identity = documentIdentity(for: document, source: sourceFingerprint)
@@ -2707,6 +2712,7 @@ actor RenderEngine: RenderEngining {
         localMaskCache.removeAll()
         localMaskRenderer.removeAllCachedBrushStrokes()
         interactiveRAWSession = nil
+        routingStateCache.removeAll()
         toneCurveCache.removeAll()
         toneCurveSource = nil
         toneCurveSpace = nil
@@ -2766,7 +2772,7 @@ actor RenderEngine: RenderEngining {
             capturedCapabilities
         }
 
-        private static func captureCapabilities(_ filter: CIRAWFilter) -> RAWCapabilities {
+        static func captureCapabilities(_ filter: CIRAWFilter) -> RAWCapabilities {
             return RAWCapabilities(
                 isSharpnessSupported: filter.isSharpnessSupported,
                 isContrastSupported: filter.isContrastSupported,

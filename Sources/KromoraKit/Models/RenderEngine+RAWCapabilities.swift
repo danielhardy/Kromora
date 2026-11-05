@@ -97,4 +97,29 @@ extension RenderEngine {
         }
         return interactiveRAWSession
     }
+
+    /// `document` as the renderer builds from it: global Exposure and, when the file's decoder
+    /// supports it, Luminance noise reduction folded into the decoder (`RAWDetailRouting`).
+    /// The decoder state is read only when Luminance noise reduction is active, from the live interactive
+    /// session when it is the same file, otherwise once per file from a throwaway filter.
+    func routedForRendering(_ document: EditDocument, source: ImageSource) -> EditDocument {
+        guard source.kind == .raw, RAWDetailRouting.needsDecoderState(document) else {
+            return document.routedForRendering(source: source.kind)
+        }
+        let fingerprint = source.decoderFingerprint
+        let state: RAWCapabilities?
+        if let session = interactiveRAWSession, session.fingerprint == fingerprint {
+            state = session.capabilities()
+        } else if let cached = routingStateCache[fingerprint] {
+            state = cached
+        } else {
+            state = RenderPipeline.rawFilter(for: source.backing)
+                .map(InteractiveRAWFilterSession.captureCapabilities)
+            if let state {
+                if routingStateCache.count >= 16 { routingStateCache.removeAll() }
+                routingStateCache[fingerprint] = state
+            }
+        }
+        return document.routedForRendering(source: source.kind, decoder: state)
+    }
 }

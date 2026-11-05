@@ -46,14 +46,23 @@ enum RAWExposureRouting {
 extension EditDocument {
     /// The document the renderer builds from for `source`.
     ///
-    /// For a RAW, global Exposure moves into `rawDevelop.exposure`; for a standard image the
-    /// document is returned unchanged.
-    func routedForRendering(source kind: ImageSource.Kind) -> EditDocument {
-        guard kind == .raw, light.exposure != 0 else { return self }
+    /// For a RAW, global Exposure moves into `rawDevelop.exposure`, and, given the file's decoder
+    /// state, global Luminance noise reduction moves into the decoder when it supports
+    /// it (`RAWDetailRouting`). `decoder` is only needed for the latter; without it noise reduction
+    /// stays in RGB. A standard image is returned unchanged.
+    func routedForRendering(
+        source kind: ImageSource.Kind, decoder: RAWCapabilities? = nil
+    ) -> EditDocument {
+        guard kind == .raw else { return self }
         var routed = self
-        routed.rawDevelop.exposure = RAWExposureRouting.combinedDecoderExposure(
-            explicit: rawDevelop.exposure, sliderEV: light.exposure)
-        routed.light.exposure = 0
+        if light.exposure != 0 {
+            routed.rawDevelop.exposure = RAWExposureRouting.combinedDecoderExposure(
+                explicit: rawDevelop.exposure, sliderEV: light.exposure)
+            routed.light.exposure = 0
+        }
+        if let decoder, RAWDetailRouting.needsDecoderState(self) {
+            routed = routed.routingNoiseReduction(decoder: decoder)
+        }
         return routed
     }
 }

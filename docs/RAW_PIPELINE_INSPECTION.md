@@ -288,3 +288,12 @@ available, a camera reports local tone map support, or a file shows highlight re
 output. EDR with a compensating gain is the only candidate that increased region spread without
 changing the median; it would need a defined headroom-to-display mapping (and clamping behavior
 through `CIToneCurve` and Look LUT domains) and a user-facing semantics argument before shipping.
+
+## Follow-up: Luminance noise reduction routed to the decoder (KRMA-1175)
+
+The inspection's note that Detail controls run on developed RGB no longer holds for global Luminance
+noise reduction on a RAW whose decoder supports it: it is applied through
+`CIRAWFilter.luminanceNoiseReductionAmount`, above the decoder's per-image default. Colour noise
+reduction and Sharpening stay RGB. See
+[`ENGINEERING_GUIDE.md`](ENGINEERING_GUIDE.md#raw-noise-reduction-routing).
+

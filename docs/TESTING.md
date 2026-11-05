@@ -1409,3 +1409,96 @@ RGB at positive EV by design. Color and channel detail were not graded here; the
 caveat (different tone, not proven recovery) stands. Only Sony ARWs were available. In the two earlier
 DNG controls, RAW and RGB exposure outputs matched at equal EV; those DNGs were not re-run with the
 shipped 0.75 mapping, so its DNG calibration remains unverified.
+
+### RAW noise-reduction routing (KRMA-1175)
+
+Global Luminance NR on a RAW is applied by `CIRAWFilter.luminanceNoiseReductionAmount` (see
+[`ENGINEERING_GUIDE.md`](ENGINEERING_GUIDE.md#raw-noise-reduction-routing)). Coverage:
+
+- `RAWDetailRoutingTests` (fast): mapping bounds and monotonicity, per-control routing (Luminance only),
+  explicit-amount base, unsupported/standard/no-decoder-state stay RGB, sharpening and local layers
+  untouched, idempotence, cache-key consequences (a Luminance/Detail tick re-develops, a Sharpening
+  tick does not), reopen, reset, undo and per-destination defaults for paste.
+- `RAWDetailRoutingRenderTests` (serial; RAW methods optional): real `RenderEngine` equivalence of the
+  slider and the spelled routed form (applied once), decoder amount changes the frame, interactive vs
+  settled, encoded-export parity, developed-source invalidation/revisit/Sharpening-no-redevelop, one
+  interactive filter across ticks, and a settled render of another photo not evicting the session.
+- `RAWDetailRoutingBenchmark` (optional) prints the matched comparison, sharpness headroom and engine
+  cost: `swift test --filter RAWDetailRoutingBenchmark` (about 35 s). Set
+  `KROMORA_RAW_DETAIL_CROP_DIR` to also write 1:1 crops.
+
+**Decoder defaults on the four local Sony ARWs** (per image; all report both NR controls and sharpness
+supported): luminance NR 0.7125 (DSC00324, ISO 2000), 0.0015, 0.0029, 0.6764; colour NR 0.5 on all;
+sharpness 0.8904, 1.0, 1.0, 0.8316, i.e. 0.11, 0, 0, 0.17 of headroom. That is why Sharpening stays
+RGB. Only Sony ARWs were available, so DNG and other makers' defaults and support are unmeasured; the
+routing reads them per file and falls back to RGB where unsupported.
+
+**Matched comparison (2026-11-05, macOS 27.2, 1:1 centre 1500×1000 window of the full-resolution
+development, decoder at its defaults for everything else).** The RGB slider is bisected until its
+flat-field noise equals the decoder's. *Noise* is the standard deviation of the 5×5 high-pass residual
+in the flattest 48 px tile of the neutral frame; *edge* is mean gradient over the strongest 1% of
+neutral pixels relative to neutral; *overshoot* is the mean excursion beyond the neutral 5×5 range
+around those pixels (a halo proxy). Neutral luma noise: 0.00563, 0.00176, 0.00316, 0.00427.
+
+| RAW | Luminance slider | decoder noise / edge / overshoot | matched RGB slider | RGB noise / edge / overshoot | RGB at 100 (reach) |
+| --- | ---: | --- | ---: | --- | --- |
+| DSC00324 (ISO 2000) | 50 | 0.00324 / 0.992 / 0.00000 | 54 | 0.00322 / 0.725 / 0.00006 | 0.00156 / 0.386 |
+| DSC00324 | 100 | 0.00025 / 0.983 / 0.00000 | not reachable | | |
+| DSC01019 | 50 | 0.00124 / 0.985 / 0.00000 | 36 | 0.00124 / 0.830 / 0.00001 | 0.00044 / 0.528 |
+| DSC01019 | 100 | 0.00043 / 0.967 / 0.00000 | ≈100 | 0.00044 / 0.528 / 0.00000 | |
+| DSC01153 | 50 | 0.00285 / 0.980 / 0.00000 | 14 | 0.00283 / 1.016 / 0.00015 | 0.00102 / 0.727 |
+| DSC01153 | 100 | 0.00252 / 0.959 / 0.00001 | 26 | 0.00250 / 1.003 / 0.00035 | |
+| DSC04513 | 50 | 0.00258 / 0.994 / 0.00000 | 49 | 0.00257 / 1.046 / 0.00437 | 0.00121 / 0.742 |
+| DSC04513 | 100 | 0.00040 / 0.989 / 0.00000 | not reachable | | |
+
+Reading: at matched noise the decoder keeps 96–99% of edge contrast with no overshoot on all four
+files, while the RGB filter loses 17–27% of it where the two meet on DSC00324 and DSC01019 (DSC01153
+and DSC04513 sit at ≈1.0 because the RGB path's built-in sharpening re-adds contrast along with
+overshoot up to 0.0044, which shows as halos). Past slider ≈50 the decoder also goes further
+than RGB at 100 on three files (0.00025, 0.00043, 0.00040 against 0.00156, 0.00044, 0.00121). The
+exception is DSC01153 (a low-ISO file where the decoder has little noise to remove): decoder 100
+reduces flat noise by 20% where RGB 100 reaches 68% at 27% edge loss, so strong Luminance settings on
+such files are gentler than before. Crops (edge and flat tiles, neutral | decoder | RGB at matched
+noise) are in [`rendering-experiments/raw-detail/`](rendering-experiments/raw-detail/README.md); the
+RGB column shows smeared feathers and isolated dark specks on DSC00324 that the decoder column does not.
+These are single-patch, four-file measurements, not a perceptual study.
+
+**Colour NR is not routed.** Decoder colour NR 0.5 → 0.5/1.0 (slider 50/100) changes flat-patch
+chroma noise from 0.00064 to 0.00065/0.00064, 0.00061 to 0.00061/0.00061, 0.00346 to 0.00340/0.00338
+and 0.00022 to 0.00022/0.00022. The RGB control reaches 0.00023, 0.00015, 0.00138 and 0.00020 at 100
+(at the edge losses above). The decoder's range above its default does not serve the control's intent,
+so Colour NR stays RGB. Both the old and current Colour NR run `CINoiseReduction` on all three
+channels, so it also smooths luminance; that pre-existing behaviour is unchanged.
+
+**Cost (debug build, window-independent `RenderEngine`, 1024 px box, 24 interactive ticks then one
+new-value settled `.preview`).** The Colour NR (RGB) rows are the previous cost of a Luminance tick,
+since both ran the same filter.
+
+| RAW | control | first | tick p50 / p95 | settled |
+| --- | --- | ---: | ---: | ---: |
+| DSC00324 | Luminance NR (decoder) | 540 ms | 20.5 / 22.5 ms | 22 ms |
+| DSC00324 | Colour NR (RGB) | 204 ms | 4.9 / 6.2 ms | 17 ms |
+| DSC00324 | Sharpening (RGB) | 209 ms | 4.4 / 6.1 ms | 4 ms |
+| DSC00324 | Exposure (decoder, KRMA-1174) | 193 ms | 7.0 / 8.9 ms | 6 ms |
+| DSC01019 | Luminance NR (decoder) | 406 ms | 20.0 / 21.4 ms | 21 ms |
+| DSC01019 | Colour NR (RGB) | 326 ms | 6.0 / 7.8 ms | 8 ms |
+| DSC01153 | Luminance NR (decoder) | 403 ms | 19.3 / 21.0 ms | 22 ms |
+| DSC01153 | Colour NR (RGB) | 321 ms | 6.0 / 7.3 ms | 8 ms |
+| DSC04513 | Luminance NR (decoder) | 454 ms | 24.3 / 25.9 ms | 25 ms |
+| DSC04513 | Colour NR (RGB) | 280 ms | 5.8 / 6.6 ms | 6 ms |
+
+Reading: each interactive run used one `CIRAWFilter` and one property write per tick (26 outputs for
+26 requests). A decoder NR tick costs about 20–24 ms, three to four times the RGB tick and about 3× decoder
+exposure, because the decoder's denoise is real per-tick work. That is inside a 33 ms frame but over
+the 16.7 ms budget, so a fast Luminance drag on a 120 Hz display will skip frames; the RGB Sharpening and
+Colour ticks are unaffected. The first frame of a Luminance edit is 1.2–1.6× slower than the RGB control on three
+files, and 2.6× on the first file measured (540 vs 204 ms, which includes process warm-up). Memory was not re-measured; the filter is
+the existing session. Single runs, no GPU trace. No mitigation (such as holding the decoder amount
+during a drag and applying it on release) was added; it would make the interactive frame disagree with
+the settled one. If drag latency proves objectionable, that is the follow-up.
+
+**Preview/export.** Decoder NR acts at sensor scale: at a 384 px preview the effect is nearly invisible
+(delta 1/255) and at 1600 px it is partial, while 1:1 shows the full reduction. That is true of any NR
+(and of the RGB path, which acts in output pixels) and the interactive and settled frames agree on mean
+brightness; the full-resolution export applies the same decoder amount at scale 1. Existing RAW edits
+with Luminance NR therefore render differently (`pixelEpoch` 41); no legacy path is kept.

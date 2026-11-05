@@ -165,6 +165,41 @@ every RGB stage, and ahead of the decoder's tone curve and highlight handling.
   and processing prefix no longer survive a tick. Measured numbers are in
   [`TESTING.md`](TESTING.md#raw-exposure-routing-krma-1174).
 
+## RAW noise-reduction routing
+
+The global **Luminance** noise-reduction control follows the same rule as Exposure: one control, but a
+RAW renders it in the decoder when that is the better implementation (KRMA-1175).
+`EditDocument.routedForRendering(source:decoder:)` (`RAWDetailRouting.swift`) derives the render
+document: Luminance Amount, Detail and Contrast are consumed into
+`rawDevelop.luminanceNoiseReductionAmount` and reset on the derived `effects.detail`, so the RGB stage
+has nothing left to do for that channel and the work is applied once. The stored document, undo,
+copy/paste, Reset, package and comparison baselines are untouched, and routing a routed document is a
+no-op.
+
+- **Mapping.** The decoder's own default is per image (0.0015 on a low-ISO frame, 0.71 at ISO 2000), so
+  slider 0 leaves it alone and the control only adds on top:
+  `amount = base + (1 − base) × strength`, `strength = noise/100 × (1 − 0.65 × contrast/100) ×
+  (1.5 − detail/100)` clamped to 1. `base` is an explicit `rawDevelop` amount if present, else the
+  decoder default. Contrast keeps its RGB meaning (retain part of the unfiltered source), and Detail
+  becomes "smooth less" because the decoder has no sharpness inside its noise reduction. Apple's
+  per-image default is the floor and the control scales the same parameter, so the two never stack.
+  The mapping is monotonic and stable, not an equivalence claim.
+- **Where the decoder state comes from.** Routing needs the file's `isLuminanceNoiseReductionSupported`
+  flag and default. `RenderEngine.routedForRendering(_:source:)` reads them from the live interactive
+  session when it is the same file, otherwise once per file from a throwaway filter
+  (`routingStateCache`), so an export or a neighbouring photo never evicts the interactive session.
+  `RenderPipeline.buildImage` reads a fresh filter. Both only when Luminance NR is active.
+- **Unsupported controls.** If the decoder reports the control unsupported the channel stays RGB and
+  nothing is written; `RAWDevelopSettings.apply` and the interactive baseline keep their own gates.
+- **Still RGB.** Colour noise reduction (decoder 0.5 → 1.0 changed flat-patch chroma noise by under 2%
+  on all four files, so the decoder's upward range does not serve the control), Sharpening (Amount,
+  Radius, Detail, Masking: the decoder has no radius or mask and its default leaves 0–0.17 headroom),
+  standard images, and local-mask noise reduction and sharpness.
+- **Cost.** A Luminance tick re-outputs the decoder (one filter, one property write) instead of an RGB
+  blend, so the developed source and prefix no longer survive it; Sharpening and Colour ticks still do.
+  Measured in [`TESTING.md`](TESTING.md#raw-noise-reduction-routing-krma-1175).
+- `pixelEpoch` is 41: RAW frames rendered with RGB Luminance NR are stale.
+
 ## Auto and photo analysis
 
 `PhotoAnalysisCoordinator` owns Vision-backed analysis, semantic-mask generation, caching, and
