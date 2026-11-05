@@ -1352,9 +1352,12 @@ case in a run. No material regression was found, so no mitigation was added.
 **Calibration table** (decoder exposure whose whole-frame median luminance matches RGB exposure at
 the slider EV, 800 px, extended-linear sRGB luminance): −4→−2.98…−3.48, −3→−2.23…−2.54,
 −2→−1.48…−1.64, −1→−0.73…−0.80, +1→+0.71…+1.12, +2→+1.45…+1.66 (unreachable on DSC00324, median 0.31),
-+3→+2.16…+2.85, +4→+2.97…+3.85 across DSC00324, DSC01019, DSC01153 and DSC04513. The shipped 0.75
-sits at the lower edge for positive moves on dim files and at the center for negative ones. Per-camera
-differences are therefore up to roughly ±0.15 EV at matched medians, and highlight-heavy scenes brighten
-less than RGB at positive EV by design. Color and channel detail were not graded here; the earlier
-experiment's caveat (different tone, not proven recovery) stands. Only Sony ARWs were available; the
-DNG controls in the earlier experiment showed identical A/B output and were not re-run.
++3→+2.16…+2.85 (unreachable on DSC00324), and +4→+2.97…+3.85 (only DSC01019 and DSC04513; unreachable
+on DSC00324 and DSC01153). The upper-bound result from the binary search means the whole-frame median
+target was not reached, not that +8 decoder stops is a calibrated value. The shipped 0.75 sits at the
+lower edge for positive moves on dim files and at the center for negative ones. Per-camera differences
+are therefore up to roughly ±0.15 EV at matched medians, and highlight-heavy scenes brighten less than
+RGB at positive EV by design. Color and channel detail were not graded here; the earlier experiment's
+caveat (different tone, not proven recovery) stands. Only Sony ARWs were available. In the two earlier
+DNG controls, RAW and RGB exposure outputs matched at equal EV; those DNGs were not re-run with the
+shipped 0.75 mapping, so its DNG calibration remains unverified.
