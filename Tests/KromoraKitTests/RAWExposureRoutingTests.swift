@@ -82,6 +82,81 @@ final class RAWExposureRoutingTests: XCTestCase {
         }
     }
 
+    // MARK: - Per-family calibration (KRMA-1180)
+
+    private let toneCurveDecoder = RAWCapabilities(isLocalToneMapSupported: false)
+    private let linearDecoder = RAWCapabilities(isLocalToneMapSupported: true)
+
+    func testToneCurveAndUnknownDecodersUseTheMeasuredSonyRatio() throws {
+        let document = EditDocument(light: LightAdjustments(exposure: 2))
+        for decoder in [nil, toneCurveDecoder] {
+            let routed = document.routedForRendering(source: .raw, decoder: decoder)
+            XCTAssertEqual(try XCTUnwrap(routed.rawDevelop.exposure), 1.5, accuracy: 1e-12)
+        }
+        XCTAssertEqual(RAWExposureRouting.decoderStopsPerSliderStop, 0.75)
+    }
+
+    func testLocalToneMapDecodersMapOneSliderStopToOneDecoderStop() throws {
+        let document = EditDocument(light: LightAdjustments(exposure: -2.5))
+        let routed = document.routedForRendering(source: .raw, decoder: linearDecoder)
+        XCTAssertEqual(try XCTUnwrap(routed.rawDevelop.exposure), -2.5, accuracy: 1e-12)
+        XCTAssertEqual(routed.light.exposure, 0, "still applied exactly once")
+    }
+
+    func testExplicitDecoderExposureCombinesInDecoderStopsForEveryFamily() throws {
+        let document = EditDocument(
+            rawDevelop: RAWDevelopSettings(exposure: 0.4), light: LightAdjustments(exposure: 1))
+        XCTAssertEqual(
+            try XCTUnwrap(
+                document.routedForRendering(source: .raw, decoder: toneCurveDecoder).rawDevelop.exposure),
+            1.15, accuracy: 1e-12)
+        XCTAssertEqual(
+            try XCTUnwrap(
+                document.routedForRendering(source: .raw, decoder: linearDecoder).rawDevelop.exposure),
+            1.4, accuracy: 1e-12)
+    }
+
+    func testFamilySelectionIsMonotonicAndOriginPreservingForBoth() {
+        for decoder in [toneCurveDecoder, linearDecoder] {
+            XCTAssertEqual(RAWExposureRouting.decoderExposure(forSliderEV: 0, decoder: decoder), 0)
+            let range = LightAdjustments.exposureRange
+            var previous = RAWExposureRouting.decoderExposure(
+                forSliderEV: range.lowerBound, decoder: decoder)
+            for step in 1...20 {
+                let ev = range.lowerBound + (range.upperBound - range.lowerBound) * Double(step) / 20
+                let next = RAWExposureRouting.decoderExposure(forSliderEV: ev, decoder: decoder)
+                XCTAssertGreaterThan(next, previous)
+                previous = next
+            }
+        }
+    }
+
+    func testFamiliesShareNoDevelopKeyWhenTheirCalibrationsDiffer() {
+        let document = EditDocument(light: LightAdjustments(exposure: 1))
+        XCTAssertNotEqual(
+            RenderDocumentIdentity(document.routedForRendering(source: .raw, decoder: toneCurveDecoder))
+                .rawDevelop,
+            RenderDocumentIdentity(document.routedForRendering(source: .raw, decoder: linearDecoder))
+                .rawDevelop)
+    }
+
+    func testDecoderStateIsNeededOnlyForExposureOrLuminanceNoise() {
+        XCTAssertFalse(RAWExposureRouting.needsDecoderState(EditDocument()))
+        XCTAssertFalse(
+            RAWExposureRouting.needsDecoderState(EditDocument(light: LightAdjustments(contrast: 20))))
+        XCTAssertTrue(
+            RAWExposureRouting.needsDecoderState(EditDocument(light: LightAdjustments(exposure: 0.1))))
+    }
+
+    func testRoutingARoutedDocumentChangesNothingForEveryFamily() {
+        let document = EditDocument(
+            rawDevelop: RAWDevelopSettings(exposure: 0.3), light: LightAdjustments(exposure: 1))
+        for decoder in [toneCurveDecoder, linearDecoder] {
+            let once = document.routedForRendering(source: .raw, decoder: decoder)
+            XCTAssertEqual(once.routedForRendering(source: .raw, decoder: decoder), once)
+        }
+    }
+
     // MARK: - Identity and cache keys
 
     func testSliderTickChangesTheDevelopKeyAndNotTheRGBPrefixForRAW() {
@@ -139,7 +214,7 @@ final class RAWExposureRoutingTests: XCTestCase {
     }
 
     func testPixelEpochWasAdvancedForTheRoutingChange() {
-        XCTAssertGreaterThanOrEqual(RenderPipeline.pixelEpoch, 40)
+        XCTAssertGreaterThanOrEqual(RenderPipeline.pixelEpoch, 42)
     }
 
     // MARK: - Document lifecycle

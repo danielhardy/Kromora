@@ -86,6 +86,29 @@ final class RAWExposureRoutingBenchmark: XCTestCase {
         return result
     }
 
+    /// KRMA-1180: routing now reads the file's decoder family before the first exposure frame, from a
+    /// throwaway filter when no interactive session exists yet (cached per file afterwards). This
+    /// prints what that read costs on its own.
+    func testPrintDecoderFamilyReadCost() async throws {
+        let urls = Fixtures.localRAWURLs
+        guard !urls.isEmpty else { throw XCTSkip("no local RAWs; see Fixtures.localRAWURLs") }
+        for url in urls {
+            let source = ImageSource(url: url, nativeExtent: CGSize(width: 6000, height: 4000))
+            var samples: [Double] = []
+            var family = 0.0
+            for _ in 0..<5 {
+                samples.append(await milliseconds {
+                    let state = RenderPipeline.rawFilter(for: source.backing)
+                        .map(RenderEngine.InteractiveRAWFilterSession.captureCapabilities)
+                    family = RAWExposureRouting.stopsPerSliderStop(decoder: state)
+                })
+            }
+            print(
+                "RAW-EXPOSURE-BENCH family-read", url.lastPathComponent, "ratio=\(family)",
+                String(format: "p50=%.1fms max=%.1fms", percentile(samples, 0.5), samples.max() ?? 0))
+        }
+    }
+
     func testPrintInteractiveCostComparison() async throws {
         let urls = Fixtures.localRAWURLs
         guard !urls.isEmpty else { throw XCTSkip("no local RAWs; see Fixtures.localRAWURLs") }

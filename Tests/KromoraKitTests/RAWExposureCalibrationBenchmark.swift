@@ -5,7 +5,10 @@ import XCTest
 
 /// Opt-in measurement behind `RAWExposureRouting`'s calibration (KRMA-1174). It develops each local
 /// RAW at screen scale, then finds the decoder exposure whose whole-frame median linear luminance
-/// matches `CIExposureAdjust` at each slider EV. Needs `KROMORA_RAW_FIXTURE_DIR` or `realworldtest/`.
+/// matches `CIExposureAdjust` at each slider EV, and prints the decoder-stops-per-slider-stop ratio the
+/// calibration is chosen from (KRMA-1180 added fractional stops near neutral, ±5 and the ratio).
+/// A value reported as unreachable means the whole-frame median never got there (shoulder), not that
+/// the search bound is a calibrated value. Needs `KROMORA_RAW_FIXTURE_DIR` or `realworldtest/`.
 final class RAWExposureCalibrationBenchmark: XCTestCase {
     private let context = CIContext(options: [
         .workingColorSpace: CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!,
@@ -41,18 +44,22 @@ final class RAWExposureCalibrationBenchmark: XCTestCase {
             guard let neutral = develop(nil) else { continue }
             let m0 = medianLuminance(neutral)
             var line = "\(url.lastPathComponent) m0=\(String(format: "%.4f", m0))"
-            for slider in stride(from: -4.0, through: 4.0, by: 1.0) where slider != 0 {
+            for slider in [-5.0, -4, -3, -2, -1, -0.5, -0.25, 0.25, 0.5, 1, 2, 3, 4, 5] {
                 let rgb = CIFilter.exposureAdjust()
                 rgb.inputImage = neutral
                 rgb.ev = Float(slider)
                 let target = medianLuminance(rgb.outputImage!)
-                var lo = -8.0, hi = 8.0
-                for _ in 0..<14 {
+                var lo = -10.0, hi = 10.0
+                for _ in 0..<13 {
                     let mid = (lo + hi) / 2
                     let m = medianLuminance(develop(mid)!)
                     if m < target { lo = mid } else { hi = mid }
                 }
-                line += String(format: " | %+.0f→%+.2f", slider, (lo + hi) / 2)
+                let decoder = (lo + hi) / 2
+                let reachable = abs(decoder) < 9.9
+                line += reachable
+                    ? String(format: " | %+.2f→%+.2f (%.2f)", slider, decoder, decoder / slider)
+                    : String(format: " | %+.2f→unreachable", slider)
             }
             print("CALIBRATION", line)
         }

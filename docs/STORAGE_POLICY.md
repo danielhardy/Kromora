@@ -60,7 +60,8 @@ Every length is validated against the file size before any buffer is allocated.
   presentable inside P3 and is shown once while the P3 frame is rendered, and a P3 raster is never
   shown under an sRGB working space. No file is rewritten or wiped by the flip. KRMA-1174 raised the
   epoch to 40 the same way, because global Exposure on a RAW now renders through the decoder. KRMA-1175 raised it to 41 for the
-  same reason: global Luminance noise reduction on a RAW now renders through the decoder.
+  same reason: global Luminance noise reduction on a RAW now renders through the decoder. KRMA-1180 raised
+  it to 42 because Apple ProRAW Exposure now maps one slider stop to one decoder stop.
 - **Prerelease reset procedure.** Saved edit revisions are value documents and are not re-rendered or
   converted; prerelease libraries are not guaranteed to look the same under Display P3 (slider math
   now runs in extended linear P3, and every raster is P3). When that matters, quit Kromora and

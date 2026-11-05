@@ -145,19 +145,29 @@ every RGB stage, and ahead of the decoder's tone curve and highlight handling.
   is kept and *added* to the calibrated slider value as one decoder exposure; the same decoder
   exposure spelled either way shares one cache entry. Nothing is applied twice, and there is no
   legacy-rendering path: existing RAW edits that carry Exposure simply re-render through the
-  decoder (`pixelEpoch` 40).
-- **Calibration.** Decoder stops are not RGB stops, because the decoder tone curve follows exposure.
-  `RAWExposureRouting.decoderStopsPerSliderStop` is 0.75. `RAWExposureCalibrationBenchmark` found,
-  on four Sony ARWs, the decoder exposure whose whole-frame median luminance equals RGB exposure at
-  −4…−1 EV to be 0.74–0.82 of the slider (−1→−0.73…−0.80, −4→−2.98…−3.48), and 0.71–0.83 for +1 and
-  +2 EV on the dimmer files. On a bright scene (median 0.31) +2 EV cannot be matched at all: the
-  decoder saturates where RGB EV keeps multiplying. That roll-off is the intended difference, not a
-  bug; the slider promises matched *midtones* for ordinary moves, **not equal pixels**, and a RAW and
-  a JPEG of one scene will not respond identically.
+  decoder (`pixelEpoch` 40; 42 after the ProRAW calibration).
+- **Calibration (per decoder family, KRMA-1174/1180).** Decoder stops are not RGB stops on every
+  file. On tone-curve decoders (five Sony ARWs and a Samsung Bayer DNG) the decoder
+  applies its tone curve after exposure, and the exposure whose whole-frame median luminance equals RGB
+  exposure is 0.73–0.83 of the slider below the shoulder, so `decoderStopsPerSliderStop` is 0.75. On
+  Apple ProRAW DNGs (decoders reporting `isLocalToneMapSupported`) decoder exposure equals RGB exposure
+  at every setting from −5 to +5 and the frames match to 0.1 level, so
+  `linearDecoderStopsPerSliderStop` is 1.0. `RAWExposureRouting.stopsPerSliderStop(decoder:)` picks by
+  the file's decoder state; with no state (and for any unmeasured maker) it uses 0.75. The tone-curve
+  ratio is a matched-*midtone* mapping, not equal pixels: on a bright scene +2 EV cannot be matched at
+  all because the decoder saturates where RGB EV keeps multiplying, and that roll-off is intended. The
+  intended relationship is therefore: the same slider stop is the same RGB stop on a JPEG and a
+  ProRAW, and the same midtone stop on a tone-curve RAW with a gentler shoulder. Data and the
+  correlation's limits are in [`TESTING.md`](TESTING.md#calibration-beyond-sony-dng-and-per-family-mapping-krma-1180).
+- **Where the decoder state comes from.** `RenderEngine.routedForRendering(_:source:)` reads it for any
+  nonzero Exposure or active Luminance NR: from the live interactive session when it is the same
+  file, otherwise once per file from a throwaway filter (`routingStateCache`).
+  `RenderPipeline.buildImage` reads a fresh filter. The stored document never records the family.
 - **What is not claimed.** The experiments in `docs/rendering-experiments/raw-exposure/` show a
   different tone response and stronger tonal separation in a bright flag crop. They do not prove
-  recovered sensor highlights, and two DNG fixtures behaved identically under both paths. Treat the
-  decoder path as a tone-response choice, with per-camera variation, not as a recovery feature.
+  recovered sensor highlights. The Apple ProRAW fixtures render identically under both paths
+  (KRMA-1180), so there the decoder route is correctness, not a different look. Treat the decoder path
+  as a tone-response choice on tone-curve RAWs, with per-camera variation, not as a recovery feature.
 - **Still RGB.** Standard images, local-mask exposure, ordered `.exposure` adjustment nodes, and the
   Save-as-Look LUT export (a LUT cannot carry decoder work).
 - **Cost.** Each exposure tick is a decoder re-output instead of an RGB multiply. The interactive RAW
@@ -198,7 +208,8 @@ no-op.
 - **Cost.** A Luminance tick re-outputs the decoder (one filter, one property write) instead of an RGB
   blend, so the developed source and prefix no longer survive it; Sharpening and Colour ticks still do.
   Measured in [`TESTING.md`](TESTING.md#raw-noise-reduction-routing-krma-1175).
-- `pixelEpoch` is 41: RAW frames rendered with RGB Luminance NR are stale.
+- `pixelEpoch` is 41 for this change (RAW frames rendered with RGB Luminance NR are stale) and 42 after
+  the ProRAW exposure calibration (KRMA-1180).
 
 ## Auto and photo analysis
 

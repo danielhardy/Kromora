@@ -145,5 +145,22 @@ final class EditDocumentStoreTests: TempDirectoryTestCase {
         XCTAssertEqual(routed.light.exposure, 0)
         XCTAssertEqual(routed.rawDevelop.exposure ?? .nan, 1.15, accuracy: 1e-12)
         XCTAssertEqual(result.document, document, "render routing must not mutate the stored revision")
+
+        // KRMA-1180: the calibration family is decoder state, never stored. A local-tone-map decoder
+        // routes the same stored revision as 0.4 + 1.0 decoder stops.
+        let linear = result.document.routedForRendering(
+            source: .raw, decoder: RAWCapabilities(isLocalToneMapSupported: true))
+        XCTAssertEqual(linear.rawDevelop.exposure ?? .nan, 1.4, accuracy: 1e-12)
+
+        // The stored schema is unchanged: the persisted document encodes byte-for-byte as it did
+        // before the save, and carries no key a default document lacks.
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        XCTAssertEqual(try encoder.encode(result.document), try encoder.encode(document))
+        func keys(_ document: EditDocument) throws -> Set<String> {
+            let object = try JSONSerialization.jsonObject(with: try encoder.encode(document))
+            return Set((object as? [String: Any] ?? [:]).keys)
+        }
+        XCTAssertEqual(try keys(result.document), try keys(EditDocument()))
     }
 }

@@ -99,11 +99,12 @@ extension RenderEngine {
     }
 
     /// `document` as the renderer builds from it: global Exposure and, when the file's decoder
-    /// supports it, Luminance noise reduction folded into the decoder (`RAWDetailRouting`).
-    /// The decoder state is read only when Luminance noise reduction is active, from the live interactive
-    /// session when it is the same file, otherwise once per file from a throwaway filter.
+    /// supports it, Luminance noise reduction folded into the decoder (`RAWExposureRouting`,
+    /// `RAWDetailRouting`). The decoder state (Exposure calibration family, noise-reduction support) is
+    /// read only when one of those controls is active, from the live interactive session when it is
+    /// the same file, otherwise once per file from a throwaway filter.
     func routedForRendering(_ document: EditDocument, source: ImageSource) -> EditDocument {
-        guard source.kind == .raw, RAWDetailRouting.needsDecoderState(document) else {
+        guard source.kind == .raw, RAWExposureRouting.needsDecoderState(document) else {
             return document.routedForRendering(source: source.kind)
         }
         let fingerprint = source.decoderFingerprint

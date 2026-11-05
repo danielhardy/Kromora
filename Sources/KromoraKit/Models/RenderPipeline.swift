@@ -74,7 +74,9 @@ enum RenderPipeline {
     /// v41 (KRMA-1178) moves the Look after the core corrections: ordered nodes, Light, and Color
     /// now run before it, and spatial Effects and Detail after it (v36's Look-first order is
     /// superseded). Any document combining a Look with non-neutral sliders renders different pixels.
-    static let pixelEpoch = 41
+    /// v42 (KRMA-1180) calibrates RAW Exposure per decoder family: a local-tone-map decoder (Apple
+    /// ProRAW) now maps one slider stop to one decoder stop instead of 0.75, so those frames differ.
+    static let pixelEpoch = 42
 
     /// Build the graph for `document` over `source`.
     ///
@@ -107,7 +109,7 @@ enum RenderPipeline {
     ) -> CIImage? {
         let document = document.routedForRendering(
             source: source.kind,
-            decoder: source.kind == .raw && RAWDetailRouting.needsDecoderState(document)
+            decoder: source.kind == .raw && RAWExposureRouting.needsDecoderState(document)
                 ? rawFilter(for: source.backing).map(
                     RenderEngine.InteractiveRAWFilterSession.captureCapabilities)
                 : nil)

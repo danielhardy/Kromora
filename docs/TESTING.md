@@ -1394,16 +1394,22 @@ first frames include cold-start cost.
 Global Exposure on a RAW is applied by `CIRAWFilter.exposure` (see
 [`ENGINEERING_GUIDE.md`](ENGINEERING_GUIDE.md#raw-exposure-routing)). Coverage:
 
-- `RAWExposureRoutingTests` (fast): the routing rule, combination with an existing explicit decoder
-  exposure, identity/cache-key consequences, Codable reopen, reset/undo, copy/paste, comparison.
+- `RAWExposureRoutingTests` (fast): the routing rule, the per-decoder-family calibration (KRMA-1180),
+  combination with an existing explicit decoder exposure, identity/cache-key consequences, Codable
+  reopen, reset/undo, copy/paste, comparison.
 - `RAWExposureRoutingRenderTests` (serial; RAW methods optional): real `RenderEngine` equivalence of
   the slider and the decoder spelling (applied once), exposure-before-Look, interactive vs settled
   brightness, histogram and encoded export parity, developed-source invalidation/revisit hits, one
-  interactive filter across ticks, and the unchanged standard-image RGB path.
-- `RAWExposureCalibrationBenchmark` and `RAWExposureRoutingBenchmark` (optional) print the
-  calibration table and the cost comparison; run them with
-  `swift test --filter RAWExposureCalibrationBenchmark` (about five minutes) and
-  `swift test --filter RAWExposureRoutingBenchmark`.
+  interactive filter across ticks, and the unchanged standard-image RGB path. KRMA-1180 runs each of
+  these once per calibration family present locally and adds: calibrated-slider midtones against RGB
+  with the Look off and on, a Look-candidate-sized render, a per-file calibration that does not leak
+  across files, and a package-reopened edit holding Light exposure plus explicit RAW exposure.
+- `RAWExposureCalibrationBenchmark`, `RAWExposureFamilyBenchmark` and `RAWExposureRoutingBenchmark`
+  (optional) print the calibration table, the decoder-versus-RGB frame statistics and the cost
+  comparison; run them with `swift test --filter RAWExposureCalibrationBenchmark` (about four minutes
+  per three files), `swift test --filter RAWExposureFamilyBenchmark` (about four minutes for eight
+  files) and `swift test --filter RAWExposureRoutingBenchmark`. Point `KROMORA_RAW_FIXTURE_DIR` at a
+  directory of symlinks to isolate a family.
 
 **Measured 2026-11-04 (macOS 27.2, Apple Silicon, debug test build, window-independent
 `RenderEngine`, 1024 px box, 24 interactive exposure ticks then one new-value settled `.preview`).**
@@ -1436,10 +1442,110 @@ on DSC00324 and DSC01153). The upper-bound result from the binary search means t
 target was not reached, not that +8 decoder stops is a calibrated value. The shipped 0.75 sits at the
 lower edge for positive moves on dim files and at the center for negative ones. Per-camera differences
 are therefore up to roughly ±0.15 EV at matched medians, and highlight-heavy scenes brighten less than
-RGB at positive EV by design. Color and channel detail were not graded here; the earlier experiment's
-caveat (different tone, not proven recovery) stands. Only Sony ARWs were available. In the two earlier
-DNG controls, RAW and RGB exposure outputs matched at equal EV; those DNGs were not re-run with the
-shipped 0.75 mapping, so its DNG calibration remains unverified.
+RGB at positive EV by design. Color and channel detail were not graded in that first pass; KRMA-1180 below does. The Sony-only
+statement, and the unverified DNG calibration, are superseded by that section.
+
+#### Calibration beyond Sony: DNG and per-family mapping (KRMA-1180)
+
+**Files.** The four Sony ARWs above plus DSC01104.ARW, a Samsung SM-N960U1 Bayer DNG
+(`20181011_181213.dng`, tone-curve decoder) and two Apple ProRAW DNGs (iPhone 14 Pro `IMG_0206.DNG`,
+iPhone 17 Pro `IMG_0695.DNG`; TIFF PhotometricInterpretation 34892 LinearRaw). No other maker's RAW
+was available, so Canon, Nikon, Fujifilm and the rest are **unmeasured** and use the Sony-derived
+ratio. The two earlier DNG controls in `docs/rendering-experiments/raw-exposure/` (IMG_0370,
+IMG_0797) were equal-pixel at equal EV, which matches the ProRAW result below.
+
+**Calibration (800 px, whole-frame median luminance, decoder exposure → ratio to slider; 2026-11-05).**
+
+| file | −5 | −4 | −2 | −1 | −0.5 | −0.25 | +0.25 | +0.5 | +1 | +2 | +3 | +4 | +5 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Samsung DNG | .77 | .75 | .73 | .73 | .74 | .75 | .77 | .78 | .83 | .99 | unreach. | unreach. | unreach. |
+| IMG_0206 ProRAW | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| IMG_0695 ProRAW | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| DSC00324 (Sony, bright) | .76 | .74 | .76 | .80 | .84 | .86 | .93 | .98 | 1.12 | unreach. | unreach. | unreach. | unreach. |
+| DSC04513 (Sony, dark) | .94 | .87 | .82 | .79 | .78 | .77 | .76 | .75 | .74 | .72 | .72 | .74 | .83 |
+
+("unreach." means the whole-frame median never matched, i.e. the decoder's shoulder; the search bound
+is not a calibrated value.) The Samsung DNG behaves like the Sony family: 0.73–0.78 below neutral and
+for small positive moves, rising toward 1 as the shoulder starts. The Sony rows show the same
+shoulder effect where the scene is already bright, so near neutral the ratio spans roughly 0.75–0.98
+by scene. Both Apple files sit exactly on 1.00 at every setting, ±5 included, with no shoulder.
+
+**Decoder versus RGB frames, Looks off and on** (`RAWExposureFamilyBenchmark`, 1024 px, final
+encoded Display P3 frames, ten slider settings from −3 to +3, Look = the DSC03293 Rec709 recipe cube).
+Reading, not grading:
+
+- *Apple ProRAW:* the decoder and RGB frames are the same to within 0.1 level of median/mean luma
+  and chroma, 0.001 of channel balance, and equal clipping and edge energy, at every setting, with the
+  Look off and on (for example IMG_0695
+  +1 EV: p50 197.0/197.0, hi-clip 29.61%/29.57%; Look on, +2 EV: 213.0/213.0). The decoder offers no
+  highlight shoulder, no recovery and no colour difference there; routing it is cost-neutral
+  correctness, and the 1.00 mapping is what makes the slider equal the RGB response a JPEG gets.
+- *Samsung DNG and the Sony ARWs (six tone-curve files), Look off:* within ±0.25 EV the decoder and
+  RGB frames differ by at most 2.2 levels of median luma, 0.025 of R/G balance, 0.02 of B/G balance and
+  8% of mid-luma chroma; within ±0.5 EV, at most 5.8 levels, 0.05, 0.04 and 16%. At +1 EV the
+  median still agrees on the darker files (Samsung 145.8 decoder / 148.9 RGB; DSC01153 109.4 / 109.8)
+  but not on the bright DSC00324 (189.7 / 206.4). From +2 EV the decoder is deliberately darker on
+  bright scenes (Samsung +2: 184.0 / 201.0; DSC00324 +2: 221.9 / 253.6) and clips far less (Samsung
+  +2 EV hi-clip 16.9% / 70.3%; DSC00324 +1 EV 0% / 12.2%, +2 EV 0.9% / 67.9%), which is the shoulder doing
+  what it was kept for. Highlight edge energy is lower there (Samsung +2: 2.9 / 4.4, where RGB's higher
+  figure comes largely from a clipped-plateau edge), so the frames differ in tone, **not** in
+  demonstrated recovered sensor detail.
+- *Colour, Look off:* on larger negative moves the decoder holds saturation where RGB EV desaturates
+  (mid-luma chroma Samsung −1 EV 59.4 / 45.0, −3 EV 58.0 / 25.3; DSC01153 −1 EV 62.2 / 55.2) and the
+  channel balance diverges most on the Samsung file (R/G 1.333 / 1.223 at −1 EV, 1.521 / 1.247 at −3 EV);
+  on positive moves it is less saturated than RGB near the shoulder (DSC01153 +2 EV 73.6 / 102.9).
+  This is a real, directional difference for negative moves on tone-curve RAWs. No hue rotation or
+  channel-detail loss showed in these statistics, but only numbers were reviewed here, not a blind
+  viewing.
+- *Looks on:* the Look sits after exposure for both routes and compresses the differences. Within
+  ±0.5 EV median luma differs by at most 3.0 levels, and within ±1 EV by at most 9.5 (DSC01153 −1 EV:
+  133.4 / 142.9) with R/G and B/G balance within 0.011. Larger gaps remain at the extremes
+  (DSC01019 +2 EV 189.5 / 173.5). `testCalibratedSliderMatchesRGBMidtonesWithLooksOffAndOn` asserts
+  mean luma within 20% for −2, −1 and +1 EV with and without a Look.
+- Very low-key files (DSC04513) show decoder highlight gradients inflated by a handful of bright
+  pixels at −3…0 EV; the statistic is gradient *among* pixels above 200 and is noisy when few exist.
+
+**Decision.** Two calibrations, chosen by the file's decoder family, because one ratio cannot serve
+both: 0.75 (Sony ARW, Samsung Bayer DNG) and 1.0 (Apple ProRAW), where 0.75 would have made the
+slider 25% too weak. `RAWExposureRouting.stopsPerSliderStop(decoder:)` selects by
+`RAWCapabilities.isLocalToneMapSupported`, which is false on all five ARWs and the Samsung DNG and true
+on both ProRAW files; any file whose family is unknown uses 0.75 (the safer, shoulder-preserving
+default). This is an observed correlation over two camera makers, not a documented decoder contract:
+if a future file reports local tone map yet behaves like a tone-curve decoder, the calibration
+benchmark will show it and the selector is the one place to refine. No finer per-camera or
+per-scene curve is added: the scene-dependent spread (about 0.75–0.98 near neutral on tone-curve
+files) is the decoder's shoulder, and chasing it would remove the very roll-off that stops bright
+highlights clipping.
+
+**Intended slider relationship.** One Exposure control for every source. On a JPEG/HEIC, and on a
+linear (ProRAW) RAW, a slider stop is a stop of RGB exposure and the two respond identically. On a
+tone-curve RAW (most camera RAWs), a slider stop is calibrated to the same *midtone* brightness as the
+RGB stop below the shoulder (±1 EV and small moves), and positive moves on bright scenes brighten less
+and clip less than the JPEG would. It is a matched-midtone promise, not equal pixels, recovered
+highlights, or identical colour on negative moves.
+
+**Cost on the added families** (`RAWExposureRoutingBenchmark`, same method as above, three DNGs,
+single debug run; RGB is the old path):
+
+| RAW | path | first | tick p50 / p95 | settled (new value) | footprint |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Samsung DNG | RGB | 260 ms | 2.6 / 3.0 ms | 3 ms | 344 MB |
+| Samsung DNG | decoder | 110 ms | 4.2 / 4.5 ms | 4 ms | 346 MB |
+| IMG_0206 ProRAW | RGB | 184 ms | 2.7 / 2.9 ms | 3 ms | 289 MB |
+| IMG_0206 ProRAW | decoder | 208 ms | 4.7 / 4.8 ms | 5 ms | 264 MB |
+| IMG_0695 ProRAW | RGB | 199 ms | 2.6 / 2.8 ms | 3 ms | 311 MB |
+| IMG_0695 ProRAW | decoder | 238 ms | 4.3 / 4.5 ms | 4 ms | 283 MB |
+
+Same shape as the Sony files: one `CIRAWFilter` (1 construction, 26 decoder outputs, 0 prefix
+materializations), a tick about 1.6–2 ms dearer than an RGB tick and far under 16.7 ms, equal or lower
+footprint. Choosing the calibration needs the file's decoder state before the first exposure frame.
+The live interactive session supplies it at no cost (opening a photo already creates it). With no
+session — an export, a Look candidate, another photo — routing reads it once per file from a
+throwaway filter and caches it (`routingStateCache`); that read costs 28 ms (Samsung DNG), 44–52 ms
+(ProRAW), 65–92 ms (Sony ARW) on a debug build (`testPrintDecoderFamilyReadCost`), once per file per
+engine, against export renders that take seconds. The "first" column above includes it and shows no
+material regression on the DNGs (a −150 ms to +40 ms spread is run-order warm-up noise). The display-bound
+capture was not run. `pixelEpoch` is 42 because ProRAW frames and caches rendered at 0.75 are stale.
 
 ### RAW noise-reduction routing (KRMA-1175)
 
