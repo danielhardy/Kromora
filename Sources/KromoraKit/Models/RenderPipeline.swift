@@ -220,7 +220,7 @@ enum RenderPipeline {
         )
     }
 
-    /// Finish a graph from a completed or otherwise reusable graded image (Look and sliders applied).
+    /// Finish a graph from a reusable image after global corrections, the Look, and global finishing.
     static func buildImage(
         graded: CIImage,
         document: EditDocument,
