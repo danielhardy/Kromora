@@ -12,6 +12,8 @@ no third-party runtime dependencies.
 ![Swift](https://img.shields.io/badge/Swift-6-orange)
 ![Dependencies](https://img.shields.io/badge/runtime%20dependencies-none-brightgreen)
 
+![Kromora editing a night-sky photo, with the original beside the adjusted result](docs/images/kromora-hero.jpg)
+
 </div>
 
 ---
