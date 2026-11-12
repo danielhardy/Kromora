@@ -20,6 +20,64 @@ final class PreviewSurfaceTests: XCTestCase {
         }
     }
 
+    func testPixelSnappingAlignsQuadOriginAtIntegerScale() {
+        let oneToOne = PreviewSurfaceView.Coordinator.pixelSnappedOrigin(
+            CGPoint(x: 10.4, y: -3.7), imageOrigin: .zero, scale: 1, isRotated: false)
+        XCTAssertEqual(oneToOne?.x ?? 0, 10, accuracy: 1e-9)
+        XCTAssertEqual(oneToOne?.y ?? 0, -4, accuracy: 1e-9)
+
+        let snapped = PreviewSurfaceView.Coordinator.pixelSnappedOrigin(
+            CGPoint(x: 10.4, y: -3.7), imageOrigin: CGPoint(x: 0.25, y: 0), scale: 2,
+            isRotated: false)
+        XCTAssertEqual(snapped?.x ?? 0, 10.5, accuracy: 1e-9)  // 10.4 + 0.5 = 10.9 -> 11
+        XCTAssertEqual(snapped?.y ?? 0, -4, accuracy: 1e-9)
+        for scale in [0.5, 1.37] {
+            XCTAssertNil(
+                PreviewSurfaceView.Coordinator.pixelSnappedOrigin(
+                    CGPoint(x: 0.3, y: 0.3), imageOrigin: .zero, scale: scale, isRotated: false))
+        }
+        XCTAssertNil(
+            PreviewSurfaceView.Coordinator.pixelSnappedOrigin(
+                CGPoint(x: 0.3, y: 0.3), imageOrigin: .zero, scale: 1, isRotated: true))
+    }
+
+    func testMipmappedPresentationReducesCheckerboardBeforeMinification() async throws {
+        let side = 32
+        var pixels = [UInt8](repeating: 255, count: side * side * 4)
+        for y in 0..<side {
+            for x in 0..<side where (x + y).isMultiple(of: 2) {
+                let offset = (y * side + x) * 4
+                pixels[offset] = 0
+                pixels[offset + 1] = 0
+                pixels[offset + 2] = 0
+            }
+        }
+        let image = CIImage(
+            bitmapData: Data(pixels), bytesPerRow: side * 4,
+            size: CGSize(width: side, height: side), format: .RGBA8,
+            colorSpace: CGColorSpaceCreateDeviceRGB())
+        let surface = PreviewSurface()
+        XCTAssertTrue(surface.present(image, quality: .preview, coversPresentationExtent: true))
+
+        let presentation = try await waitForPresentationTexture(surface)
+        XCTAssertGreaterThan(presentation.mipmapLevelCount, 1)
+        let rendered = try XCTUnwrap(
+            PreviewSurfaceView.Coordinator().renderRetainedTexture(
+                surface: surface, navigation: CanvasNavigation(),
+                destinationSize: CGSize(width: CGFloat(side / 4), height: CGFloat(side / 4))))
+
+        var output = [UInt8](repeating: 0, count: side * side / 4)
+        output.withUnsafeMutableBytes { raw in
+            rendered.getBytes(
+                raw.baseAddress!, bytesPerRow: side,
+                from: MTLRegionMake2D(0, 0, side / 4, side / 4), mipmapLevel: 0)
+        }
+        let center = bgraPixel(in: output, width: side / 4, at: (side / 8, side / 8))
+        XCTAssertLessThanOrEqual(abs(Int(center.0) - Int(center.1)), 2)
+        XCTAssertLessThanOrEqual(abs(Int(center.1) - Int(center.2)), 2)
+        XCTAssertTrue((110...145).contains(Int(center.0)), "checkerboard should average near mid-gray")
+    }
+
     func testBundledMetalSourcesAreResolvable() {
         XCTAssertNotNil(KromoraKitResourceBundle.url(forMetalSource: "PreviewSurface"))
         XCTAssertNotNil(KromoraKitResourceBundle.metalSource(named: "PreviewSurface"))

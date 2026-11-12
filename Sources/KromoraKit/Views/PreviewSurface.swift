@@ -1019,7 +1019,7 @@ final class PreviewSurface {
         else { return nil }
 
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false
+            pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: true
         )
         descriptor.usage = [.shaderRead, .shaderWrite, .renderTarget]
         descriptor.storageMode = .private
@@ -1039,6 +1039,12 @@ final class PreviewSurface {
             bounds: CGRect(origin: .zero, size: extent.size),
             colorSpace: space.cgColorSpace
         )
+        // The planner can hand the presenter a texture up to ~2x the displayed size; a mip chain
+        // lets the trilinear sampler minify without the aliasing of a single bilinear tap.
+        if texture.mipmapLevelCount > 1, let blit = commandBuffer.makeBlitCommandEncoder() {
+            blit.generateMipmaps(for: texture)
+            blit.endEncoding()
+        }
         guard
             let sample = encodeHistogramSample(
                 from: texture, space: space, commandBuffer: commandBuffer
@@ -1317,6 +1323,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
             let samplerDescriptor = MTLSamplerDescriptor()
             samplerDescriptor.minFilter = .linear
             samplerDescriptor.magFilter = .linear
+            samplerDescriptor.mipFilter = .linear
+            samplerDescriptor.maxAnisotropy = 4
             samplerDescriptor.sAddressMode = .clampToEdge
             samplerDescriptor.tAddressMode = .clampToEdge
             samplerState = RenderEngine.presentationDevice.makeSamplerState(
@@ -1703,6 +1711,22 @@ struct PreviewSurfaceView: NSViewRepresentable {
                 blue: Double(color.blueComponent), alpha: 1)
         }
 
+        /// At an integer effective scale an unrotated quad's texels map onto whole device pixels, so
+        /// the transform origin is snapped such that the quad origin lands on a pixel boundary. A
+        /// fractional origin would resample 100 % half a pixel soft and shimmer while panning.
+        static func pixelSnappedOrigin(
+            _ origin: CGPoint, imageOrigin: CGPoint, scale: CGFloat, isRotated: Bool
+        ) -> CGPoint? {
+            guard !isRotated, scale >= 1, abs(scale - scale.rounded()) < 0.000_001 else {
+                return nil
+            }
+            let quadX = origin.x + imageOrigin.x * scale
+            let quadY = origin.y + imageOrigin.y * scale
+            return CGPoint(
+                x: origin.x + quadX.rounded() - quadX,
+                y: origin.y + quadY.rounded() - quadY)
+        }
+
         private static func quadGeometry(
             imageExtent: CGRect, navigation: CanvasNavigation, destination: CGRect,
             virtualExtent: CGRect?, viewSpaceRotationAngle: Double = 0, alpha: Float = 1
@@ -1728,14 +1752,21 @@ struct PreviewSurfaceView: NSViewRepresentable {
                 : CGPoint(
                     x: imageExtent.minX - transformExtent.minX,
                     y: imageExtent.minY - transformExtent.minY)
+            var transformOrigin = transform.origin
+            if let snapped = pixelSnappedOrigin(
+                transformOrigin, imageOrigin: imageOrigin, scale: transform.scale,
+                isRotated: isRotated)
+            {
+                transformOrigin = snapped
+            }
             let origin = CGPoint(
-                x: transform.origin.x + imageOrigin.x * transform.scale,
-                y: transform.origin.y + imageOrigin.y * transform.scale)
+                x: transformOrigin.x + imageOrigin.x * transform.scale,
+                y: transformOrigin.y + imageOrigin.y * transform.scale)
             let size = CGSize(width: imageExtent.width * transform.scale,
                               height: imageExtent.height * transform.scale)
             let center = CGPoint(
-                x: transform.origin.x + transformExtent.width * transform.scale / 2,
-                y: transform.origin.y + transformExtent.height * transform.scale / 2)
+                x: transformOrigin.x + transformExtent.width * transform.scale / 2,
+                y: transformOrigin.y + transformExtent.height * transform.scale / 2)
             let values = [
                 origin.x, origin.y, size.width, size.height,
                 transform.scale, destination.width, destination.height, center.x, center.y,
@@ -1750,7 +1781,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
                     Vertex(position: SIMD2(1, 1), texcoord: SIMD2(1, 1)),
                 ],
                 uniforms: Uniforms(
-                    transformOrigin: SIMD2(Float(transform.origin.x), Float(transform.origin.y)),
+                    transformOrigin: SIMD2(Float(transformOrigin.x), Float(transformOrigin.y)),
                     imageOrigin: SIMD2(
                         Float(imageOrigin.x), Float(imageOrigin.y)),
                     imageSize: SIMD2(Float(imageExtent.width), Float(imageExtent.height)),
