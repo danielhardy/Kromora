@@ -1002,7 +1002,21 @@ actor RenderEngine: RenderEngining {
         longEdge: Int
     ) async -> CanonicalPreviewRaster? {
         guard !Task.isCancelled else { return nil }
-        return resources.canonicalPreviewFrame(from: image, space: space, longEdge: longEdge)
+        // Readback, digest, and JPEG encode block their thread, so they run on the concurrent
+        // pool with only the Sendable context and completed image. The actor stays free to
+        // start the next visible preview frame (KRMA-1198).
+        let context = resources.context
+        return await Self.produceCanonicalPreviewFrame(
+            image, space: space, longEdge: longEdge, context: context)
+    }
+
+    @concurrent
+    private static func produceCanonicalPreviewFrame(
+        _ image: sending CIImage, space: WorkingSpace, longEdge: Int, context: CIContext
+    ) async -> CanonicalPreviewRaster? {
+        guard !Task.isCancelled else { return nil }
+        return RenderEngineResources.canonicalPreviewFrame(
+            from: image, space: space, longEdge: longEdge, context: context)
     }
 
     func makePerceptualDigest(

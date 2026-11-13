@@ -41,6 +41,21 @@ final class LatestPreviewFrameStoreTests: TempDirectoryTestCase {
         return directory.appendingPathComponent("\(hash).kframe")
     }
 
+    /// KRMA-1198: canonical production runs off the engine actor, so an actor call made while it
+    /// is in flight is not queued behind it, and the output matches the actor-free path.
+    func testCanonicalFrameProductionLeavesTheEngineActorFreeAndKeepsOutput() async throws {
+        let engine = RenderEngine()
+        let image = CIImage(cgImage: try Fixtures.makeCGImage(width: 640, height: 480))
+        async let raster = engine.makeCanonicalPreviewRaster(image, space: .sRGB, longEdge: 2048)
+        let digest = await engine.makePerceptualDigest(image, space: .sRGB)
+        let rasterResult = await raster
+        let produced = try XCTUnwrap(rasterResult)
+        XCTAssertEqual(produced.pixelWidth, 2048)
+        XCTAssertEqual(produced.pixelHeight, 1536)
+        XCTAssertEqual(produced.perceptualDigest, digest)
+        XCTAssertFalse(produced.jpegData.isEmpty)
+    }
+
     func testRoundTripUsesARealCanonicalRasterAcrossInstances() async throws {
         let directory = cacheDirectory()
         let source = CIImage(cgImage: try Fixtures.makeCGImage(width: 320, height: 240))
