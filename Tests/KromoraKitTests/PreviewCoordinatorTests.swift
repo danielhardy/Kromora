@@ -189,6 +189,54 @@ final class PreviewCoordinatorTests: XCTestCase {
         coordinator.endInteraction()
     }
 
+    func testSlowInteractiveRendersPublishDuringDragAndSettledReplacesThem() async throws {
+        let fake = ControlledRenderEngine()
+        let coordinator = PreviewCoordinator(
+            engine: fake, interactiveDelay: .zero, settleDelay: .seconds(10)
+        )
+        var publications: [PreviewCoordinator.Publication] = []
+        coordinator.onPublication = { publications.append($0) }
+        coordinator.beginInteraction()
+        let source = makeSource()
+
+        coordinator.submit(request(source: source, exposure: 0.1), phase: .interactive)
+        try await waitUntil("the first interactive render") { await fake.requests.count == 1 }
+
+        // Newer values arrive while the first render is still in flight.
+        for step in 2...4 {
+            coordinator.submit(
+                request(source: source, exposure: Double(step) / 10), phase: .interactive
+            )
+        }
+        await fake.releaseNext()
+        try await waitUntil("the first frame to publish despite newer input") {
+            publications.count == 1
+        }
+        XCTAssertEqual(publications[0].phase, .interactive)
+        XCTAssertEqual(publications[0].request.document.rawDevelop.exposure, 0.1)
+
+        // The pacer renders only the latest pending value, and it also publishes while input
+        // continues.
+        try await waitUntil("the pending value to render") { await fake.requests.count == 2 }
+        coordinator.submit(request(source: source, exposure: 0.5), phase: .interactive)
+        await fake.releaseNext()
+        try await waitUntil("the second frame to publish") { publications.count == 2 }
+        XCTAssertEqual(publications[1].request.document.rawDevelop.exposure, 0.4)
+        XCTAssertGreaterThan(publications[1].revision, publications[0].revision)
+
+        try await waitUntil("the newest pending value to render") { await fake.requests.count == 3 }
+        coordinator.endInteraction()
+        // The interactive render straddling gesture end is fenced out; the settled render then
+        // takes the editor lane.
+        await fake.releaseNext()
+        try await waitUntil("the settled render") { await fake.requests.count == 4 }
+        XCTAssertEqual(publications.count, 2)
+        await fake.releaseNext()
+        try await waitUntil("the settled publication") { publications.count == 3 }
+        XCTAssertEqual(publications[2].phase, .settled)
+        XCTAssertEqual(publications[2].request.document.rawDevelop.exposure, 0.5)
+    }
+
     func testInteractiveToneCurvePublishesBeforeGestureEnds() async throws {
         let fake = FakeRenderEngine()
         let coordinator = PreviewCoordinator(engine: fake, settleDelay: .seconds(10))

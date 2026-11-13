@@ -953,11 +953,11 @@ final class PreviewAdmissionCoordinator {
     func scheduleInteractivePreview() {
         guard let destination, let source = destination.admissionImageSource else { return }
         cancelIdlePreviewBuild()
-        // This revision is also RenderEngine's source-wide supersession fence. Advance it for
-        // every interactive value, including values inside one drag, so work for an older slider
-        // position can stop at the engine's next cancellation boundary instead of delaying the
-        // newest value behind a long retouch or RAW render.
-        destination.admissionPresentation.advanceDisplayRevision()
+        // This revision is also RenderEngine's source-wide supersession fence. Advance it when an
+        // interactive burst starts, but not for each value inside a drag: older in-flight frames
+        // must stay publishable so a render slower than the input cadence still shows progress.
+        // `beginInteraction` advances for a tracked drag; this covers untracked callers.
+        if !isPreviewInteractionActive { destination.admissionPresentation.advanceDisplayRevision() }
         cancelHistogram(clear: false, pump: false)
         let (requested, lut) = displayRequest
         let plan = destination.admissionPresentation.plan(

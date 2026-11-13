@@ -774,7 +774,7 @@ final class CropWorkflowTests: TempDirectoryTestCase {
         )
     }
 
-    func testCropGeometrySliderChangesAdvanceDisplayGenerationPerValueAndSettleAfterRelease() async throws {
+    func testCropGeometrySliderChangesKeepOneDisplayGenerationPerDragAndSettleAfterRelease() async throws {
         let fake = FakeRenderEngine()
         let url = try Fixtures.writeGradientPNG(
             width: 32, height: 24, named: "interactive-geometry.png", in: tempDirectory)
@@ -785,7 +785,7 @@ final class CropWorkflowTests: TempDirectoryTestCase {
 
         viewModel.beginCrop()
         viewModel.beginPreviewInteraction()
-        var previousRevision = viewModel.displayRevision
+        let previousRevision = viewModel.displayRevision
 
         let changes: [(@MainActor () -> Void, (FakeRenderEngine.Request) -> Bool)] = [
             ({ viewModel.setCropStraightenAngle(12) }, { request in
@@ -812,11 +812,10 @@ final class CropWorkflowTests: TempDirectoryTestCase {
                 guard case .interactive = request.scale else { return false }
                 return matches(request)
             }
-            XCTAssertGreaterThan(
+            XCTAssertEqual(
                 viewModel.displayRevision, previousRevision,
-                "each interactive value advances the supersession fence so older slider work can stop"
+                "values inside one drag share the fence so slower in-flight frames can still present"
             )
-            previousRevision = viewModel.displayRevision
             try await waitUntil("the published interactive crop geometry frame") {
                 viewModel.previewSurface.revision > beforeSurfaceRevision
             }

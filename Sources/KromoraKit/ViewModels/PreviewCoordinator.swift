@@ -56,6 +56,9 @@ final class PreviewCoordinator {
         let sourceRevision: UInt64
         let displayRevision: UInt64
         let revision: UInt64
+        /// The interactive burst that admitted this token. Settled work, navigation, and a change
+        /// of source or display generation all end the burst, which fences its late frames.
+        let burst: UInt64
     }
 
     private let engine: any RenderEngining
@@ -81,6 +84,12 @@ final class PreviewCoordinator {
     private var latestToken: Token?
     private var nextRevision: UInt64 = 0
     private var isInteracting = false
+    /// An interactive frame is publishable when it is newer than the last one presented in the same
+    /// burst, even if a newer value has since been admitted. Without this, a render slower than the
+    /// input cadence is always superseded and nothing reaches the screen until the drag pauses.
+    private var burst: UInt64 = 0
+    private var burstActive = false
+    private var lastPresentedInteractiveRevision: UInt64 = 0
     private var isShutdown = false
     private var warmSemanticMasks: SemanticWarmth?
 
@@ -186,9 +195,20 @@ final class PreviewCoordinator {
         }
 
         nextRevision &+= 1
+        let continuesBurst = phase == .interactive && burstActive
+            && latestToken.map {
+                $0.source == request.source && $0.assetID == assetID
+                    && $0.sourceRevision == sourceRevision && $0.displayRevision == displayRevision
+            } == true
+        if phase == .interactive {
+            if !continuesBurst { burst &+= 1 }
+            burstActive = true
+        } else {
+            endBurst()
+        }
         let token = Token(
             source: request.source, assetID: assetID, sourceRevision: sourceRevision,
-            displayRevision: displayRevision, revision: nextRevision
+            displayRevision: displayRevision, revision: nextRevision, burst: burst
         )
         telemetry.input(source: request.source, request: request, revision: token.revision)
         KromoraObservability.liveEdit(.pointerInput, source: request.source, quality: request.quality,
@@ -197,7 +217,11 @@ final class PreviewCoordinator {
         latestRequest = request
         latestToken = token
 
-        cancelInteractiveJob(pump: false)
+        // A render already inside the burst keeps running so it can present; the pacer holds the
+        // newest value and starts it afterwards.
+        if !(continuesBurst && interactiveRenderInFlight) {
+            cancelInteractiveJob(pump: false)
+        }
         interactiveTask?.cancel()
         interactiveTask = nil
         if cancelSettledPredecessor {
@@ -242,6 +266,7 @@ final class PreviewCoordinator {
                                     quality: latestRequest?.quality, detail: "navigation")
         }
         nextRevision &+= 1
+        endBurst()
         latestRequest = nil
         latestToken = nil
         interactiveTask?.cancel()
@@ -272,9 +297,10 @@ final class PreviewCoordinator {
         let displayRevision = latestToken?.displayRevision ?? 0
         let originatingRevision = latestToken?.revision
         nextRevision &+= 1
+        endBurst()
         let token = Token(
             source: request.source, assetID: latestToken?.assetID, sourceRevision: sourceRevision,
-            displayRevision: displayRevision, revision: nextRevision
+            displayRevision: displayRevision, revision: nextRevision, burst: burst
         )
         latestToken = token
         interactiveTask?.cancel()
@@ -290,6 +316,11 @@ final class PreviewCoordinator {
             telemetry.input(source: settledRequest.source, request: settledRequest, revision: token.revision)
         }
         scheduleSettled(settledRequest, token: token)
+    }
+
+    private func endBurst() {
+        burstActive = false
+        burst &+= 1
     }
 
     private func scheduleInteractive(_ request: RenderRequest, token: Token) {
@@ -395,7 +426,7 @@ final class PreviewCoordinator {
             let publishedBase = await renderSingle(
                 baseRequest, token: token, phase: phase, engine: engine
             )
-            guard !Task.isCancelled, isCurrent(token) else { return }
+            guard !Task.isCancelled, canPublish(token, phase: phase) else { return }
             // Pointer-to-pixel latency is a property of the frame the user actually saw, and both
             // phases share this revision. Once the base frame has been published, the refinement
             // must not overwrite its timings with its own, later ones.
@@ -453,7 +484,7 @@ final class PreviewCoordinator {
         KromoraObservability.liveEdit(.renderEnd, source: request.source, quality: request.quality,
                                    revision: token.revision, detail: maskDetail)
         guard !Task.isCancelled else { return false }
-        guard isCurrent(token) else {
+        guard canPublish(token, phase: phase) else {
             let age = nextRevision >= token.revision ? nextRevision - token.revision : 0
             telemetry.stale(token.revision, age: age)
             KromoraObservability.liveEdit(.staleRevision, source: request.source, quality: request.quality,
@@ -465,6 +496,7 @@ final class PreviewCoordinator {
             onFailure?(request)
             return false
         }
+        if phase == .interactive { lastPresentedInteractiveRevision = token.revision }
         onPublication?(Publication(
             request: request, image: image, gpuImage: gpuImage,
             revision: token.revision, assetID: token.assetID,
@@ -476,6 +508,19 @@ final class PreviewCoordinator {
 
     private func isCurrent(_ token: Token) -> Bool {
         latestToken == token && latestRequest?.source == token.source
+    }
+
+    /// Settled frames must be the newest admission. Interactive frames only need to belong to the
+    /// live burst for the same photo and generations, and be newer than what is on screen.
+    private func canPublish(_ token: Token, phase: Phase) -> Bool {
+        guard phase == .interactive else { return isCurrent(token) }
+        guard burstActive, token.burst == burst, let latest = latestToken,
+            latest.source == token.source, latest.assetID == token.assetID,
+            latest.sourceRevision == token.sourceRevision,
+            latest.displayRevision == token.displayRevision,
+            latestRequest?.source == token.source
+        else { return false }
+        return token.revision > lastPresentedInteractiveRevision
     }
 
     private static func request(_ request: RenderRequest, quality: RenderQuality) -> RenderRequest {
