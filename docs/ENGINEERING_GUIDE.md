@@ -130,6 +130,30 @@ mean all channels are 0, and per-channel totals count values at 255. The canvas 
 presentation-only and can be toggled from the Info histogram. Exposure remains available in the
 Light inspector alongside the other global tone controls.
 
+### Histogram and scope semantics
+
+The engine's histogram tally renders the settled preview to a bounded RGBAf buffer in the active
+working space's transfer encoding (`HistogramData(rgbaFloat:)`), not an 8-bit display copy. Each
+channel bins at `round(clamp(v, 0, 1) * 255)`. A channel counts as clipped high when it is at or
+above 1 − 0.5/255 (the 8-bit 255 level) or exceeds 1, so extended and out-of-gamut values are
+counted instead of hidden. A pixel is a clipped shadow when every channel is at or below 0.5/255,
+including negative channels. NaN reads as 0. The retained spatial samples use half-float values
+from the same encoded pixels, preserving negative and above-one values for scope consumers.
+
+The live Info panel reads the presentation texture directly. `PreviewSurface` downsamples the
+RGBA16F presentation texture into a bounded RGBA16F sample (rendered in the presented space's
+encoding, so values below 0 and above 1 survive), reads it back as half floats, and tallies it with
+the same float path (`HistogramData(rgbaHalf:)` → `rgbaFloat:`). Nothing is quantized to 8 bits
+before binning or retaining scope samples. Scope data uses half-float RGB values; waveform and
+vectorscope plotting clamp points to the visible 0...1 plotting range, while histogram bins and
+clipping totals retain the documented extended-range semantics.
+
+The two tallies differ only in space and role. The engine tally measures the working space's
+transfer encoding and is the fallback when no presentation sample exists. The live sample measures
+what is delivered to the display (the presented frame's space). Both apply the clipping rules above,
+so a value that clips in one reports the same clipped counts in the other whenever the two spaces
+agree; a wider working space mapped into a narrower delivery space can clip in delivery only.
+
 ## RAW exposure routing
 
 The Light **Exposure** slider is one control for every source, but it is rendered by the source's

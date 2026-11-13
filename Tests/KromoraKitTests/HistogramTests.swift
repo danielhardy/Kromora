@@ -17,6 +17,50 @@ final class HistogramTests: TempDirectoryTestCase {
 
     // MARK: - The tally, against a hand-built buffer
 
+    /// Known float patches: mid grey bins at its rounded level, 1.0 and above-range values clip
+    /// high, negative (out-of-gamut) channels clip as shadows, and NaN reads as 0.
+    func testFloatTallyBinsAndClipsKnownPatches() throws {
+        let patches: [[Float]] = [
+            [0.5, 0.5, 0.5, 1],       // mid grey → bin 128, no clipping
+            [1.0, 0.2, 0.2, 1],       // exactly 1.0 → red clipped
+            [1.4, 0.2, 0.2, 1],       // extended above 1.0 → red clipped, bins at 255
+            [-0.1, -0.2, 0, 1],       // negative → shadow clip
+            [.nan, 0, 0, 1],          // NaN → 0, shadow clip
+        ]
+        let floats = patches.flatMap { $0 }
+        let h = try XCTUnwrap(HistogramData(rgbaFloat: floats, width: patches.count, height: 1))
+
+        XCTAssertEqual(h.totalPixelCount, 5)
+        XCTAssertEqual(h.red[128], 1)
+        XCTAssertEqual(h.red[255], 2)
+        XCTAssertEqual(h.clippedRed, 2)
+        XCTAssertEqual(h.clippedGreen, 0)
+        XCTAssertEqual(h.clippedHighlights, 2)
+        XCTAssertEqual(h.clippedShadows, 2)
+        XCTAssertEqual(h.samples[0], Float16(0.5))
+        XCTAssertEqual(h.samples[3], Float16(1))
+        XCTAssertEqual(h.samples[6], Float16(1.4))
+        XCTAssertEqual(h.samples[9], Float16(-0.1))
+        XCTAssertEqual(h.samples[12], Float16(0), "NaN scope samples use the documented zero value")
+    }
+
+    func testHalfTallyMatchesFloatTallyAndHonorsRowPadding() throws {
+        // Two pixels per row plus one padding pixel per row.
+        let row: [Float16] = [-0.2, 0, 0, 1, 1.3, 0.5, 0.5, 1, 9, 9, 9, 9]
+        let h = try XCTUnwrap(HistogramData(
+            rgbaHalf: row + row, width: 2, height: 2, bytesPerRow: 12 * MemoryLayout<Float16>.stride))
+        XCTAssertEqual(h.totalPixelCount, 4)
+        XCTAssertEqual(h.clippedRed, 2)
+        XCTAssertEqual(h.clippedShadows, 2)
+        XCTAssertEqual(h.red[255], 2)
+        XCTAssertEqual(h.green[128], 2)
+    }
+
+    func testFloatTallyRejectsShortBuffer() {
+        XCTAssertNil(HistogramData(rgbaFloat: [0, 0, 0, 1], width: 2, height: 1))
+    }
+
+
     /// Pure red, 32×16. Every pixel counted once per channel, and the Rec.709 luma of pure red
     /// (0.2126) landing in bin 54.
     ///
@@ -104,7 +148,9 @@ final class HistogramTests: TempDirectoryTestCase {
         XCTAssertEqual(histogram.red[240], 1)
         XCTAssertEqual(histogram.green[34], 1)
         XCTAssertEqual(histogram.blue[12], 1)
-        XCTAssertEqual(Array(histogram.samples), [240, 34, 12])
+        XCTAssertEqual(Array(histogram.samples), [
+            Float16(240.0 / 255), Float16(34.0 / 255), Float16(12.0 / 255),
+        ])
     }
 
     func testPresentationSampleSizePreservesAspectRatioAndCapsLongEdgeAt512() throws {

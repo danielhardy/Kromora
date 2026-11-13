@@ -31,9 +31,9 @@ struct HistogramData: Equatable, Sendable {
     }
 
     /// Bounded row-major RGB samples from the exact rendered preview represented by this
-    /// histogram. Keeping these samples lets the inspector draw spatial scopes without asking the
-    /// renderer for another image or retaining framework objects.
-    let samples: [UInt8]
+    /// histogram. Half-float values preserve the source range for spatial scopes without retaining
+    /// framework objects or asking the renderer for another image.
+    let samples: [Float16]
     let sampleWidth: Int
     let sampleHeight: Int
 
@@ -41,7 +41,7 @@ struct HistogramData: Equatable, Sendable {
     /// Cache it at construction instead of hashing the full sample buffer on every view update.
     let sampleIdentity: Int
 
-    private static func identity(samples: [UInt8], width: Int, height: Int) -> Int {
+    private static func identity(samples: [Float16], width: Int, height: Int) -> Int {
         var hasher = Hasher()
         hasher.combine(width)
         hasher.combine(height)
@@ -83,7 +83,7 @@ struct HistogramData: Equatable, Sendable {
     }
 
     init(red: [Int], green: [Int], blue: [Int], luma: [Int],
-         samples: [UInt8] = [], sampleWidth: Int = 0, sampleHeight: Int = 0,
+         samples: [Float16] = [], sampleWidth: Int = 0, sampleHeight: Int = 0,
          clippedHighlights: Int = 0, clippedShadows: Int = 0,
          clippedRed: Int = 0, clippedGreen: Int = 0, clippedBlue: Int = 0) {
         self.red = red
@@ -148,20 +148,101 @@ struct HistogramData: Equatable, Sendable {
             }
         }
 
-        var samples = [UInt8](repeating: 0, count: width * height * 3)
+        var samples = [Float16]()
+        samples.reserveCapacity(width * height * 3)
         for y in 0..<height {
             for x in 0..<width {
                 let from = y * stride + x * 4
-                let to = (y * width + x) * 3
-                samples[to] = bytes[from]
-                samples[to + 1] = bytes[from + 1]
-                samples[to + 2] = bytes[from + 2]
+                samples.append(Float16(Float(bytes[from]) / 255))
+                samples.append(Float16(Float(bytes[from + 1]) / 255))
+                samples.append(Float16(Float(bytes[from + 2]) / 255))
             }
         }
         self.init(red: red, green: green, blue: blue, luma: luma,
                   samples: samples, sampleWidth: width, sampleHeight: height,
                   clippedHighlights: clippedHighlights, clippedShadows: clippedShadows,
                   clippedRed: clippedRed, clippedGreen: clippedGreen, clippedBlue: clippedBlue)
+    }
+
+    /// Tally a float RGBA buffer holding values encoded in the delivery space's transfer curve,
+    /// nominally 0...1 but allowed to leave that range (extended and out-of-gamut values).
+    ///
+    /// Semantics (see `docs/ENGINEERING_GUIDE.md`, "Histogram and scope semantics"):
+    /// - A channel bins at `round(clamp(v, 0, 1) * 255)`, so in-range values match the 8-bit tally.
+    /// - A channel is clipped high when `v >= 1 - 0.5/255`, which is exactly where the 8-bit tally
+    ///   reaches 255, and also when `v > 1`, so above-range values are counted rather than hidden.
+    /// - A pixel is a clipped shadow when every channel is `<= 0.5/255` (8-bit level 0), which
+    ///   includes negative, out-of-gamut channels.
+    /// - NaN channels are treated as 0.
+    /// The retained spatial samples keep the unclamped values in half-float form.
+    init?(rgbaFloat floats: [Float], width: Int, height: Int, bytesPerRow: Int? = nil) {
+        let rowBytes = bytesPerRow ?? width * 4 * MemoryLayout<Float>.stride
+        guard width > 0, height > 0, rowBytes.isMultiple(of: MemoryLayout<Float>.stride) else {
+            return nil
+        }
+        let stride = rowBytes / MemoryLayout<Float>.stride
+        guard stride >= width * 4, floats.count >= height * stride else { return nil }
+        var red = [Int](repeating: 0, count: 256)
+        var green = [Int](repeating: 0, count: 256)
+        var blue = [Int](repeating: 0, count: 256)
+        var luma = [Int](repeating: 0, count: 256)
+        var samples = [Float16]()
+        samples.reserveCapacity(width * height * 3)
+        var clippedHighlights = 0
+        var clippedShadows = 0
+        var clippedRed = 0
+        var clippedGreen = 0
+        var clippedBlue = 0
+        let threshold: Float = 0.5 / 255
+        for y in 0..<height {
+            for x in 0..<width {
+                let from = y * stride + x * 4
+                let rv = floats[from].isNaN ? 0 : floats[from]
+                let gv = floats[from + 1].isNaN ? 0 : floats[from + 1]
+                let bv = floats[from + 2].isNaN ? 0 : floats[from + 2]
+                samples.append(Float16(rv))
+                samples.append(Float16(gv))
+                samples.append(Float16(bv))
+
+                let r = Int((min(max(rv, 0), 1) * 255).rounded())
+                let g = Int((min(max(gv, 0), 1) * 255).rounded())
+                let b = Int((min(max(bv, 0), 1) * 255).rounded())
+                red[r] += 1
+                green[g] += 1
+                blue[b] += 1
+                // Rec.709 luma, rounded to nearest bin from the encoded channel bins.
+                let l = (2126 * r + 7152 * g + 722 * b + 5000) / 10000
+                luma[min(255, l)] += 1
+                if rv >= 1 - threshold { clippedRed += 1 }
+                if gv >= 1 - threshold { clippedGreen += 1 }
+                if bv >= 1 - threshold { clippedBlue += 1 }
+                if rv >= 1 - threshold || gv >= 1 - threshold || bv >= 1 - threshold {
+                    clippedHighlights += 1
+                }
+                if rv <= threshold, gv <= threshold, bv <= threshold { clippedShadows += 1 }
+            }
+        }
+        self.init(red: red, green: green, blue: blue, luma: luma,
+                  samples: samples, sampleWidth: width, sampleHeight: height,
+                  clippedHighlights: clippedHighlights, clippedShadows: clippedShadows,
+                  clippedRed: clippedRed, clippedGreen: clippedGreen, clippedBlue: clippedBlue)
+    }
+
+    /// Tally the half-float RGBA presentation sample read back before any 8-bit quantization.
+    /// Widening Float16 to Float is exact, so this shares `init(rgbaFloat:)`'s semantics.
+    init?(rgbaHalf halves: [Float16], width: Int, height: Int, bytesPerRow: Int? = nil) {
+        let rowBytes = bytesPerRow ?? width * 4 * MemoryLayout<Float16>.stride
+        guard width > 0, height > 0, rowBytes.isMultiple(of: MemoryLayout<Float16>.stride) else {
+            return nil
+        }
+        let stride = rowBytes / MemoryLayout<Float16>.stride
+        guard stride >= width * 4, halves.count >= height * stride else { return nil }
+        // Repack to tight rows so the float tally sees exactly width * 4 values per row.
+        var floats = [Float](repeating: 0, count: width * height * 4)
+        for y in 0..<height {
+            for i in 0..<(width * 4) { floats[y * width * 4 + i] = Float(halves[y * stride + i]) }
+        }
+        self.init(rgbaFloat: floats, width: width, height: height)
     }
 
     /// Tally bytes read from the BGRA presentation texture. The histogram and spatial samples

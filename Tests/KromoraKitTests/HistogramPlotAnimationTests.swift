@@ -8,9 +8,11 @@ final class HistogramPlotAnimationTests: XCTestCase {
     private func histogram(peak: Int, samples: [UInt8] = []) -> HistogramData {
         var bins = [Int](repeating: 0, count: 256)
         bins[peak] = 1000
+        let normalizedSamples = samples.map { Float16(Float($0) / 255) }
         return HistogramData(
             red: bins, green: bins, blue: bins, luma: bins,
-            samples: samples, sampleWidth: samples.isEmpty ? 0 : 1, sampleHeight: samples.isEmpty ? 0 : 1)
+            samples: normalizedSamples, sampleWidth: samples.isEmpty ? 0 : 1,
+            sampleHeight: samples.isEmpty ? 0 : 1)
     }
 
     private func interpolate(

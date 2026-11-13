@@ -651,17 +651,16 @@ struct HistogramChart: View, @MainActor Animatable {
         for y in 0..<data.sampleHeight {
             for x in 0..<data.sampleWidth {
                 let offset = (y * data.sampleWidth + x) * 3
-                let red = Int(data.samples[offset])
-                let green = Int(data.samples[offset + 1])
-                let blue = Int(data.samples[offset + 2])
-                let channelValue: Int
+                let red = Double(data.samples[offset])
+                let green = Double(data.samples[offset + 1])
+                let blue = Double(data.samples[offset + 2])
+                let channelValue: Double
                 if let channelIndex {
                     channelValue = channelIndex == 0 ? red : (channelIndex == 1 ? green : blue)
                 } else {
-                    let weighted = 0.2126 * Double(red) + 0.7152 * Double(green) + 0.0722 * Double(blue)
-                    channelValue = Int(weighted.rounded())
+                    channelValue = 0.2126 * red + 0.7152 * green + 0.0722 * blue
                 }
-                let level = Double(channelValue) / 255.0
+                let level = min(max(channelValue, 0), 1)
                 let px = CGFloat(x) / CGFloat(max(1, data.sampleWidth - 1)) * size.width
                 let py = size.height * (1 - CGFloat(level))
                 points.addEllipse(in: CGRect(x: px, y: py, width: 1.5, height: 1.5))
@@ -689,7 +688,9 @@ struct HistogramChart: View, @MainActor Animatable {
         context.stroke(grid, with: .color(.white.opacity(0.22)), lineWidth: 0.6)
         var points = Path()
         for offset in stride(from: 0, to: data.sampleWidth * data.sampleHeight * 3, by: 3) {
-            let r = Double(data.samples[offset]) / 255, g = Double(data.samples[offset+1]) / 255, b = Double(data.samples[offset+2]) / 255
+            let r = min(max(Double(data.samples[offset]), 0), 1)
+            let g = min(max(Double(data.samples[offset+1]), 0), 1)
+            let b = min(max(Double(data.samples[offset+2]), 0), 1)
             let u = (b - (0.299*r + 0.587*g + 0.114*b)) * 0.565
             let v = (r - (0.299*r + 0.587*g + 0.114*b)) * 0.713
             let p = CGPoint(x: center.x + CGFloat(u * 2) * radius, y: center.y - CGFloat(v * 2) * radius)

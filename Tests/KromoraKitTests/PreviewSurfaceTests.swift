@@ -581,6 +581,50 @@ final class PreviewSurfaceTests: XCTestCase {
         XCTAssertLessThanOrEqual(histogram.red.reduce(0, +), 512 * 256)
     }
 
+    /// Known flat patches pushed through the real presentation sampler (RGBA16F texture → RGBA16F
+    /// sample → half readback → float tally). Values outside 0...1 must reach the tally intact.
+    func testPresentationSampleTalliesOutOfRangePatchesBeforeQuantization() async throws {
+        struct Patch {
+            let rgb: (Double, Double, Double)
+            let bin: (Int, Int, Int)
+            let clippedHigh: Bool
+            let clippedShadow: Bool
+        }
+        let patches = [
+            Patch(rgb: (-0.2, -0.1, -0.05), bin: (0, 0, 0), clippedHigh: false, clippedShadow: true),
+            Patch(rgb: (0.001, 0.001, 0.001), bin: (0, 0, 0), clippedHigh: false, clippedShadow: true),
+            Patch(rgb: (0.999, 0.5, 0.2), bin: (255, 128, 51), clippedHigh: true, clippedShadow: false),
+            Patch(rgb: (1.3, 0.5, 0.2), bin: (255, 128, 51), clippedHigh: true, clippedShadow: false),
+        ]
+        let extended = try XCTUnwrap(CGColorSpace(name: CGColorSpace.extendedDisplayP3))
+        for patch in patches {
+            let surface = PreviewSurface()
+            let color = try XCTUnwrap(
+                CIColor(
+                    red: patch.rgb.0, green: patch.rgb.1, blue: patch.rgb.2, alpha: 1,
+                    colorSpace: extended))
+            let image = CIImage(color: color).cropped(to: CGRect(x: 0, y: 0, width: 600, height: 300))
+            XCTAssertTrue(surface.present(image, space: .displayP3))
+            _ = try await waitForPresentationTexture(surface)
+            guard case .sample(let h) = try XCTUnwrap(surface.presentationHistogramSample).state else {
+                return XCTFail("presentation sample missing for \(patch.rgb)")
+            }
+            let total = h.totalPixelCount
+            XCTAssertEqual(h.red[patch.bin.0], total, "red bin for \(patch.rgb)")
+            XCTAssertEqual(h.green[patch.bin.1], total, "green bin for \(patch.rgb)")
+            XCTAssertEqual(h.blue[patch.bin.2], total, "blue bin for \(patch.rgb)")
+            XCTAssertEqual(h.clippedRed, patch.clippedHigh ? total : 0, "\(patch.rgb)")
+            XCTAssertEqual(h.clippedHighlights, patch.clippedHigh ? total : 0, "\(patch.rgb)")
+            XCTAssertEqual(h.clippedShadows, patch.clippedShadow ? total : 0, "\(patch.rgb)")
+            XCTAssertEqual(Float(h.samples[0]), Float(patch.rgb.0), accuracy: 0.001,
+                           "waveform/parade sample must retain red range for \(patch.rgb)")
+            XCTAssertEqual(Float(h.samples[1]), Float(patch.rgb.1), accuracy: 0.001,
+                           "scope sample must retain green precision for \(patch.rgb)")
+            XCTAssertEqual(Float(h.samples[2]), Float(patch.rgb.2), accuracy: 0.001,
+                           "scope sample must retain blue precision for \(patch.rgb)")
+        }
+    }
+
     func testClearResetsTheWorkingSpace() {
         let surface = PreviewSurface()
         surface.present(CIImage(color: .red), space: .displayP3)

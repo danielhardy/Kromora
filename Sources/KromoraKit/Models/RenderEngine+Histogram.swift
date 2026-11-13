@@ -4,7 +4,7 @@ import Foundation
 
 /// Histogram tallying, split out of `RenderEngine.swift` (KRMA-530) because it is a self-contained
 /// analysis responsibility: it reads a completed graph or builds one through the shared
-/// `buildImage` funnel, then rasterizes a bounded RGBA8 buffer for the bin counts. It has no state
+/// `buildImage` funnel, then rasterizes a bounded RGBAf buffer for the bin counts. It has no state
 /// of its own beyond the actor's shared `context`.
 extension RenderEngine {
     /// Tally the rendered document into 256 bins per channel.
@@ -80,19 +80,19 @@ extension RenderEngine {
         let width = Int(rect.width)
         let height = Int(rect.height)
         guard !Task.isCancelled, width > 0, height > 0 else { return nil }
-        let bytesPerRow = width * 4
-        var bytes = [UInt8](repeating: 0, count: height * bytesPerRow)
+        let bytesPerRow = width * 4 * MemoryLayout<Float>.stride
+        var floats = [Float](repeating: 0, count: width * height * 4)
         guard !Task.isCancelled else { return nil }
-        bytes.withUnsafeMutableBytes { ptr in
+        floats.withUnsafeMutableBytes { ptr in
             guard let base = ptr.baseAddress else { return }
             guard !Task.isCancelled else { return }
             context.render(
                 scaled, toBitmap: base, rowBytes: bytesPerRow, bounds: rect,
-                format: .RGBA8, colorSpace: space.cgColorSpace
+                format: .RGBAf, colorSpace: space.cgColorSpace
             )
         }
         guard !Task.isCancelled else { return nil }
-        return HistogramData(rgba8: bytes, width: width, height: height, bytesPerRow: bytesPerRow)
+        return HistogramData(rgbaFloat: floats, width: width, height: height, bytesPerRow: bytesPerRow)
     }
 }
 

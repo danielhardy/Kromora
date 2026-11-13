@@ -798,12 +798,13 @@ final class PreviewSurface {
         address: UInt, width: Int, height: Int, bytesPerRow: Int, byteCount: Int
     ) -> HistogramData? {
         guard let pointer = UnsafeMutableRawPointer(bitPattern: address) else { return nil }
-        let bytes = Array(
+        let halves = Array(
             UnsafeBufferPointer(
-                start: pointer.assumingMemoryBound(to: UInt8.self), count: byteCount
+                start: pointer.assumingMemoryBound(to: Float16.self),
+                count: byteCount / MemoryLayout<Float16>.stride
             ))
         return HistogramData(
-            bgra8: bytes, width: width, height: height, bytesPerRow: bytesPerRow
+            rgbaHalf: halves, width: width, height: height, bytesPerRow: bytesPerRow
         )
     }
 
@@ -1098,7 +1099,7 @@ final class PreviewSurface {
                 usesRetainedCompleteFrame: false, alpha: 1
             )
         }()
-        // The new detail's bgra8 copy is asynchronous. Until it lands, keep the last confirmed
+        // The new detail's histogram copy is asynchronous. Until it lands, keep the last confirmed
         // partial ROI of the same source on screen instead of exposing only the underlay.
         var heldDetail: PresentationFrame?
         if hasCompleteUnderlay, presentationTexture == nil,
@@ -1226,7 +1227,7 @@ final class PreviewSurface {
             )
         else { return nil }
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .bgra8Unorm, width: sampleSize.width, height: sampleSize.height,
+            pixelFormat: .rgba16Float, width: sampleSize.width, height: sampleSize.height,
             mipmapped: false
         )
         descriptor.usage = [.renderTarget, .shaderWrite]
@@ -1253,7 +1254,7 @@ final class PreviewSurface {
                 )), colorSpace: space.cgColorSpace
         )
 
-        let bytesPerRow = ((sampleSize.width * 4 + 255) / 256) * 256
+        let bytesPerRow = ((sampleSize.width * 8 + 255) / 256) * 256
         let byteCount = bytesPerRow * sampleSize.height
         guard
             let readbackBuffer = RenderEngine.presentationDevice.makeBuffer(
