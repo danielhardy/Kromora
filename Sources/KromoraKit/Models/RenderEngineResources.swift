@@ -341,7 +341,8 @@ final class RenderEngineResources {
     func makeProcessingTexture(
         width: Int,
         height: Int,
-        pixelFormat: MTLPixelFormat = .rgba16Float
+        pixelFormat: MTLPixelFormat = .rgba16Float,
+        mipmapped: Bool = false
     ) -> MTLTexture? {
         guard let device, width > 0, height > 0 else { return nil }
         let descriptor = MTLTextureDescriptor()
@@ -349,7 +350,10 @@ final class RenderEngineResources {
         descriptor.pixelFormat = pixelFormat
         descriptor.width = width
         descriptor.height = height
-        descriptor.mipmapLevelCount = 1
+        // A mip chain lets the presentation sampler minify a frame planned up to ~2x the displayed
+        // size; the presenter generates it when it adopts the texture.
+        descriptor.mipmapLevelCount = mipmapped
+            ? Int(floor(log2(Double(max(width, height))))) + 1 : 1
         descriptor.usage = [.shaderRead, .shaderWrite, .renderTarget]
         descriptor.storageMode = .private
         return device.makeTexture(descriptor: descriptor)

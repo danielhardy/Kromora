@@ -567,7 +567,8 @@ actor RenderEngine: RenderEngining {
         guard width > 0, height > 0,
               let texture = resources.makeProcessingTexture(
                   width: width, height: height,
-                  pixelFormat: RenderEngineResources.previewTexturePixelFormat(for: request.quality)
+                  pixelFormat: RenderEngineResources.previewTexturePixelFormat(for: request.quality),
+                  mipmapped: true
               )
         else { return nil }
 
