@@ -1202,6 +1202,70 @@ final class PreviewSurfaceTests: XCTestCase {
         )
     }
 
+    func testPendingROIKeepsPriorDetailDrawnAndNeverAcrossSources() async throws {
+        let surface = PreviewSurface()
+        let identity = PreviewFrameIdentity(
+            sourceToken: "source", document: EditDocument(), space: .current)
+        let extent = CGRect(x: 0, y: 0, width: 800, height: 600)
+        var published = CanvasNavigation()
+        published.setZoom(8)
+
+        func publish(_ image: CIImage, _ id: PreviewFrameIdentity, covers: Bool, factor: CGFloat) throws {
+            XCTAssertTrue(
+                surface.present(
+                    image, detailIdentity: id, detailFactor: factor,
+                    presentationImageExtent: extent, coversPresentationExtent: covers,
+                    layoutImageExtent: covers ? nil : image.extent,
+                    presentationNavigation: published))
+            surface.markPresentationSucceeded(
+                displayRevision: try XCTUnwrap(surface.pendingDisplayRevision()))
+        }
+
+        try publish(CIImage(color: .blue).cropped(to: extent), identity, covers: true, factor: 0.5)
+        _ = try await waitForPresentationTexture(surface)
+        try publish(
+            CIImage(color: .red).cropped(to: CGRect(x: 240, y: 180, width: 160, height: 120)),
+            identity, covers: false, factor: 1)
+        _ = try await waitForPresentationTexture(surface)
+
+        var panned = published
+        panned.pan(
+            by: CGSize(width: -80, height: 45), imageExtent: extent,
+            viewportSize: CGSize(width: 800, height: 600))
+
+        XCTAssertTrue(
+            surface.present(
+                CIImage(color: .green).cropped(to: CGRect(x: 200, y: 150, width: 160, height: 120)),
+                detailIdentity: identity, detailFactor: 1,
+                presentationImageExtent: extent, coversPresentationExtent: false,
+                layoutImageExtent: CGRect(x: 200, y: 150, width: 160, height: 120),
+                presentationNavigation: panned))
+        XCTAssertNil(surface.presentationTexture)
+        var movedOn = panned
+        movedOn.pan(
+            by: CGSize(width: -40, height: 20), imageExtent: extent,
+            viewportSize: CGSize(width: 800, height: 600))
+        XCTAssertTrue(
+            surface.presentsHeldDetail(for: movedOn),
+            "the prior ROI must stay drawn until the new texture materializes")
+
+        _ = try await waitForPresentationTexture(surface)
+        XCTAssertFalse(surface.presentsHeldDetail(for: movedOn))
+
+        let other = PreviewFrameIdentity(
+            sourceToken: "other", document: EditDocument(), space: .current)
+        XCTAssertTrue(
+            surface.present(
+                CIImage(color: .green).cropped(to: CGRect(x: 100, y: 100, width: 160, height: 120)),
+                detailIdentity: other, detailFactor: 1,
+                presentationImageExtent: extent, coversPresentationExtent: false,
+                layoutImageExtent: CGRect(x: 100, y: 100, width: 160, height: 120),
+                presentationNavigation: published))
+        XCTAssertFalse(
+            surface.presentsHeldDetail(for: movedOn),
+            "detail from another source must never be shown")
+    }
+
     func testPresentationImageRemainsBoundedAbove100PercentAndKeepsTheSourceVisible() throws {
         let source = CIImage(color: CIColor(red: 0.9, green: 0.2, blue: 0.1, alpha: 1))
             .cropped(to: CGRect(x: 37, y: 19, width: 640, height: 400))
