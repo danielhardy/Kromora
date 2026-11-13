@@ -453,6 +453,31 @@ final class RenderEngineTests: TempDirectoryTestCase {
         assertPixelsDiffer(exposed, neutral, "completed RAW previews must carry develop changes")
     }
 
+    /// KRMA-1209: a settled RAW developed source completes into a private texture, never a CPU
+    /// bitmap, and a repeat render reuses the cached developed source.
+    func testSettledRAWDevelopedSourceMaterializesWithoutCPUReadback() async throws {
+        guard let rawURL = Fixtures.localRAWURL else {
+            throw XCTSkip("no local RAW to develop; see Fixtures.localRAWURL")
+        }
+        let rawSource = ImageSource(url: rawURL, nativeExtent: CGSize(width: 4000, height: 3000))
+        let engine = RenderEngine()
+        let request = RenderRequest(
+            source: rawSource, document: EditDocument(),
+            targetSize: CGSize(width: 256, height: 256), quality: .preview, output: .raster
+        )
+        let first = await engine.makeCIImage(request)
+        XCTAssertNotNil(first)
+        let afterFirst = await engine.workStatistics()
+        XCTAssertEqual(afterFirst.processingPrefixCPUReadbacks, 0)
+        XCTAssertGreaterThan(afterFirst.processingPrefixTextureSubmissions, 0)
+
+        let second = await engine.makeCIImage(request)
+        XCTAssertNotNil(second)
+        let afterSecond = await engine.workStatistics()
+        XCTAssertEqual(afterSecond.rawOutputRequests, afterFirst.rawOutputRequests)
+        XCTAssertEqual(afterSecond.processingPrefixCPUReadbacks, 0)
+    }
+
     /// The whole point of Phase 2, asserted directly: the same document rendered for display and
     /// encoded for export must be the same pixels. Not "close" — the same graph, the same rasterizer,
     /// one scale value apart.

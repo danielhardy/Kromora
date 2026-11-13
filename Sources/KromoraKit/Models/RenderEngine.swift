@@ -1816,7 +1816,7 @@ actor RenderEngine: RenderEngining {
         thumbnail: Bool
     ) async -> CIImage? {
         guard source.kind == .standard else {
-            return developedSource(
+            return await developedSource(
                 source, rawDevelop, developHash: developHash, scale, rotation: rotation, space: space, interactive: interactive,
                 thumbnail: thumbnail
             )
@@ -2625,7 +2625,7 @@ actor RenderEngine: RenderEngining {
         space: WorkingSpace,
         interactive: Bool = false,
         thumbnail: Bool = false
-    ) -> CIImage? {
+    ) async -> CIImage? {
         let canUsePreparedSession = source.kind == .raw && !scale.isFull &&
             (interactive || interactiveRAWSession?.fingerprint == source.decoderFingerprint)
         if canUsePreparedSession {
@@ -2636,10 +2636,10 @@ actor RenderEngine: RenderEngining {
                 reused ? .cacheHit : .cacheMiss, source: source, quality: .interactive,
                 detail: "layer=interactiveRAWFilter reused=\(reused)"
             )
-            let result = session.output(
+            let result = await session.output(
                 rawDevelop: rawDevelop, developHash: developHash, scale: scale, rotation: rotation,
                 materialize: { [self] image in
-                    materializedImage(
+                    await materializedPrefixImage(
                         image, space: space,
                         maxWorkingSetBytes: resources.configuration.developedSourceMaxCostBytes
                     )?.image
@@ -2686,10 +2686,13 @@ actor RenderEngine: RenderEngining {
         // RAW output is mutable-filter-backed. Complete it before putting it in the settled cache,
         // otherwise a later render can ask Core Image to evaluate the same decoder graph again.
         if source.kind == .raw {
-            if let completed = materializedImage(
+            // The texture path encodes the mutable filter's graph before suspending, so the filter is
+            // not referenced once the command buffer is committed.
+            if let completed = await materializedPrefixImage(
                 image, space: space,
                 maxWorkingSetBytes: resources.configuration.developedSourceMaxCostBytes
             ) {
+                guard !Task.isCancelled else { return nil }
                 cache.insert(completed.image, for: key, cost: completed.costBytes)
                 return completed.image
             }
@@ -2822,13 +2825,13 @@ actor RenderEngine: RenderEngining {
             )
         }
 
-        func output(
+        nonisolated(nonsending) func output(
             rawDevelop: RAWDevelopSettings,
             developHash: String,
             scale: RenderScale,
             rotation: ImageRotation = .zero,
-            materialize: (CIImage) -> CIImage?
-        ) -> OutputResult {
+            materialize: (CIImage) async -> CIImage?
+        ) async -> OutputResult {
             // The scale factor is computed from the display size so a quarter-turned sensor
             // fits the preview box the same way the settled path does. The filter already
             // orients `outputImage`; a second bake would turn portrait RAWs back to landscape.
@@ -2860,7 +2863,7 @@ actor RenderEngine: RenderEngining {
             let output = ImageDecoder.displayOrientedRAWOutput(
                 rawOutput, sensorSize: filter.nativeSize, orientation: orientation
             )
-            guard let completed = materialize(output) else {
+            guard let completed = await materialize(output) else {
                 // The mutable filter remains correctly configured, but do not retain its lazy
                 // output: a later property write could otherwise change the image behind the cache.
                 cachedOutputKey = nil
