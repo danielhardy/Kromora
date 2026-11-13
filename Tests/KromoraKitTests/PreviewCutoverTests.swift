@@ -259,7 +259,12 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
             return "preview requests=\(seen.count), seen=\(seen)"
         }
 
+        // Releasing the gate lets the second photo settle; the cancelled first render must have
+        // left the single editor lane rather than leaking it.
         await fake.releasePreviews()
+        try await waitUntil("the second photo to settle") { viewModel.previewState == .ready }
+        let urls = await fake.previewRequests.compactMap { $0.source?.backing }
+        XCTAssertEqual(urls.last, .url(second), "the second photo is the last admitted render")
     }
 
     /// Navigation changes must remain a display concern while still driving a fresh render when

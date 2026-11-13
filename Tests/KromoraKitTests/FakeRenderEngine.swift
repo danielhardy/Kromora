@@ -100,7 +100,8 @@ actor FakeRenderEngine: RenderEngining {
     private var shouldFailHistogram = false
     private var histogramMarkersByURL: [URL: Int] = [:]
     private var previewIsGated = false
-    private var parkedPreviews: [CheckedContinuation<Void, Never>] = []
+    private var parkedPreviews: [(id: UUID, continuation: CheckedContinuation<Void, Never>)] = []
+    private var cancelledPreviewParks: Set<UUID> = []
     private var thumbnailIsGated = false
     private var parkedThumbnails: [CheckedContinuation<Void, Never>] = []
     private var eventContinuation: AsyncStream<Event>.Continuation?
@@ -224,7 +225,22 @@ actor FakeRenderEngine: RenderEngining {
             }
             emit(.previewRequested(record))
             if previewIsGated {
-                await withCheckedContinuation { parkedPreviews.append($0) }
+                // Like the real renderer, a parked render observes cancellation: the scheduler
+                // keeps a cancelled job's lane slot until its task returns, so an uncancellable
+                // park would hold the editor lane for as long as the gate stays closed.
+                let parkID = UUID()
+                await withTaskCancellationHandler {
+                    await withCheckedContinuation { continuation in
+                        // Cancellation can win the race to the actor before the park registers.
+                        if cancelledPreviewParks.remove(parkID) != nil {
+                            continuation.resume()
+                        } else {
+                            parkedPreviews.append((parkID, continuation))
+                        }
+                    }
+                } onCancel: {
+                    Task { await self.unparkPreview(parkID) }
+                }
             }
             if shouldFailPreview { throw ImageError.processingFailed }
             var perSource: CGImage?
@@ -398,14 +414,22 @@ actor FakeRenderEngine: RenderEngining {
 
     func releaseNextPreview() {
         guard !parkedPreviews.isEmpty else { return }
-        parkedPreviews.removeFirst().resume()
+        parkedPreviews.removeFirst().continuation.resume()
     }
 
     func releasePreviews() {
         previewIsGated = false
         let parked = parkedPreviews
         parkedPreviews.removeAll()
-        parked.forEach { $0.resume() }
+        parked.forEach { $0.continuation.resume() }
+    }
+
+    private func unparkPreview(_ id: UUID) {
+        guard let index = parkedPreviews.firstIndex(where: { $0.id == id }) else {
+            cancelledPreviewParks.insert(id)
+            return
+        }
+        parkedPreviews.remove(at: index).continuation.resume()
     }
 
     /// Hold edited-thumbnail responses so a test can advance the document or source before the
