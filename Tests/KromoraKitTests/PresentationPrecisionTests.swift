@@ -49,5 +49,6 @@ final class PresentationPrecisionTests: XCTestCase {
     func testPresentationPipelinesExistForDrawableAndReadbackTargets() {
         let coordinator = PreviewSurfaceView.Coordinator()
         XCTAssertTrue(coordinator.hasPresentationPipeline)
+        XCTAssertTrue(coordinator.hasReadbackPipeline)
     }
 }

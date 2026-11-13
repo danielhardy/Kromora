@@ -1431,6 +1431,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
         /// Test/debug seam: the drawable path needs this pipeline. A missing bundled `.metal`
         /// source must not abort process launch; the coordinator then uses the Core Image fallback.
         var hasPresentationPipeline: Bool { pipeline != nil }
+        var hasReadbackPipeline: Bool { readbackPipeline != nil }
 
         private struct Vertex {
             var position: SIMD2<Float>
