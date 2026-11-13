@@ -136,3 +136,71 @@ final class FrameRefinementPolicyTests: XCTestCase {
         XCTAssertNil(PerceptualDigest(bytes: Data(count: 10)))
     }
 }
+
+final class FrameFidelityTransitionTests: XCTestCase {
+    private func digest(_ value: UInt8) -> PerceptualDigest {
+        PerceptualDigest(bytes: Data(repeating: value, count: PerceptualDigest.byteCount))!
+    }
+
+    func testInteractiveToSettledCrossfadesEvenWithIdenticalDigests() {
+        XCTAssertEqual(
+            FrameRefinementPolicy.transition(
+                fromFidelity: .interactive, to: .settled,
+                from: digest(10), to: digest(10), reduceMotion: false),
+            .crossfade(duration: FrameRefinementPolicy.crossfadeDuration))
+    }
+
+    func testProvisionalToSettledIsDigestAware() {
+        XCTAssertEqual(
+            FrameRefinementPolicy.transition(
+                fromFidelity: .provisional, to: .settled,
+                from: digest(10), to: digest(200), reduceMotion: false),
+            .crossfade(duration: FrameRefinementPolicy.crossfadeDuration))
+        XCTAssertEqual(
+            FrameRefinementPolicy.transition(
+                fromFidelity: .provisional, to: .settled,
+                from: digest(10), to: digest(10), reduceMotion: false), .immediate)
+        XCTAssertEqual(
+            FrameRefinementPolicy.transition(
+                fromFidelity: .provisional, to: .settled,
+                from: nil, to: nil, reduceMotion: false),
+            .crossfade(duration: FrameRefinementPolicy.crossfadeDuration))
+    }
+
+    func testReduceMotionAndNonUpgradesSwapImmediately() {
+        XCTAssertEqual(
+            FrameRefinementPolicy.transition(
+                fromFidelity: .interactive, to: .settled,
+                from: nil, to: nil, reduceMotion: true), .immediate)
+        let pairs: [(FrameFidelity, FrameFidelity)] = [
+            (.settled, .interactive), (.settled, .settled),
+            (.interactive, .interactive), (.interactive, .provisional)]
+        for (old, new) in pairs {
+            XCTAssertEqual(
+                FrameRefinementPolicy.transition(
+                    fromFidelity: old, to: new, from: nil, to: nil, reduceMotion: false),
+                .immediate)
+        }
+    }
+
+    func testFidelityMapping() {
+        XCTAssertEqual(FrameFidelity(quality: .preview, source: .embedded), .provisional)
+        XCTAssertEqual(FrameFidelity(quality: .preview, source: .thumbnail), .provisional)
+        XCTAssertEqual(FrameFidelity(quality: .interactive, source: .refinement), .interactive)
+        XCTAssertEqual(FrameFidelity(quality: .preview, source: .settled), .settled)
+    }
+
+    func testBudgetAdapterRaisesLowersAndClamps() {
+        var adapter = InteractiveBudgetAdapter()
+        for _ in 0..<50 { adapter.record(renderMilliseconds: 3, frameBudgetMilliseconds: 16.7) }
+        XCTAssertEqual(adapter.multiplier, InteractiveBudgetAdapter.range.upperBound)
+        adapter.record(renderMilliseconds: 12, frameBudgetMilliseconds: 16.7)
+        XCTAssertEqual(adapter.multiplier, InteractiveBudgetAdapter.range.upperBound)
+        adapter.record(renderMilliseconds: 15, frameBudgetMilliseconds: 16.7)
+        XCTAssertLessThan(adapter.multiplier, InteractiveBudgetAdapter.range.upperBound)
+        for _ in 0..<50 { adapter.record(renderMilliseconds: 20, frameBudgetMilliseconds: 16.7) }
+        XCTAssertEqual(adapter.multiplier, InteractiveBudgetAdapter.range.lowerBound)
+        adapter.record(renderMilliseconds: .nan, frameBudgetMilliseconds: 16.7)
+        XCTAssertEqual(adapter.multiplier, InteractiveBudgetAdapter.range.lowerBound)
+    }
+}

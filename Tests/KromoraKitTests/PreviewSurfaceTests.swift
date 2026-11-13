@@ -83,6 +83,62 @@ final class PreviewSurfaceTests: XCTestCase {
         XCTAssertNotNil(KromoraKitResourceBundle.metalSource(named: "PreviewSurface"))
     }
 
+    func testInteractiveToSettledCrossfadesUnlessReduceMotion() async throws {
+        for reduceMotion in [false, true] {
+            let surface = PreviewSurface()
+            surface.setReduceMotion(reduceMotion)
+            let extent = CGRect(x: 0, y: 0, width: 32, height: 24)
+            let asset = PhotoAssetID(rawValue: "test-asset")
+            XCTAssertTrue(
+                surface.present(
+                    CIImage(color: .black).cropped(to: extent), quality: .interactive,
+                    presentationImageExtent: extent, coversPresentationExtent: true,
+                    presentationAssetID: asset))
+            _ = try await waitForPresentationTexture(surface)
+            XCTAssertTrue(
+                surface.present(
+                    CIImage(color: .white).cropped(to: extent), quality: .preview,
+                    presentationImageExtent: extent, coversPresentationExtent: true,
+                    presentationAssetID: asset))
+            XCTAssertEqual(surface.crossfadeAdmissionCount, reduceMotion ? 0 : 1)
+        }
+    }
+
+    func testRejectedSettledUpgradeKeepsTheTransitionBaselineForRetry() async throws {
+        let surface = PreviewSurface()
+        let extent = CGRect(x: 0, y: 0, width: 32, height: 24)
+        let asset = PhotoAssetID(rawValue: "retry-asset")
+        let provisional = CIImage(color: .black).cropped(to: extent)
+        let settled = CIImage(color: .white).cropped(to: extent)
+
+        XCTAssertTrue(
+            surface.present(
+                provisional, quality: .preview,
+                presentationImageExtent: extent, coversPresentationExtent: true,
+                presentationAssetID: asset, rasterSource: .embedded))
+        let provisionalRevision = try XCTUnwrap(surface.pendingDisplayRevision())
+        _ = try await waitForPresentationTexture(surface)
+        surface.markPresentationSucceeded(displayRevision: provisionalRevision)
+
+        XCTAssertTrue(
+            surface.present(
+                settled, quality: .preview,
+                presentationImageExtent: extent, coversPresentationExtent: true,
+                presentationAssetID: asset))
+        XCTAssertEqual(surface.crossfadeAdmissionCount, 1)
+        let rejectedRevision = try XCTUnwrap(surface.pendingDisplayRevision())
+        surface.rejectPresentation(displayRevision: rejectedRevision)
+
+        XCTAssertTrue(
+            surface.present(
+                settled, quality: .preview,
+                presentationImageExtent: extent, coversPresentationExtent: true,
+                presentationAssetID: asset))
+        XCTAssertEqual(
+            surface.crossfadeAdmissionCount, 2,
+            "a retry must compare with the last confirmed provisional frame")
+    }
+
     func testStaleSettledReplacementCrossfadesFor120MillisecondsThenReleasesOldTexture()
         async throws
     {

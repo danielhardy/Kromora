@@ -251,6 +251,81 @@ enum FrameRefinementPolicy {
         else { return .immediate }
         return .crossfade(duration: crossfadeDuration)
     }
+
+    /// Decision for a replacement of the *same photo, same geometry* that is not a stale stored
+    /// refinement. Only upgrades animate; a same-or-lower fidelity replacement swaps at once.
+    ///
+    /// - From `.interactive`: always crossfades. The 8×8 digest averages away the resolution and
+    ///   sharpening difference that makes the release of a drag visible, so a small distance does
+    ///   not mean the swap is invisible.
+    /// - From `.provisional` (thumbnail or embedded JPEG): colour and tone are what differ, which
+    ///   the digest does measure. Two digests under the threshold swap at once; a missing digest
+    ///   crossfades, because camera rendering versus Kromora's develop is rarely identical.
+    static func transition(
+        fromFidelity old: FrameFidelity, to new: FrameFidelity,
+        from oldDigest: PerceptualDigest?, to newDigest: PerceptualDigest?,
+        reduceMotion: Bool
+    ) -> FrameTransition {
+        guard !reduceMotion, new > old else { return .immediate }
+        if old == .provisional, let oldDigest, let newDigest,
+           oldDigest.distance(to: newDigest) <= crossfadeDigestThreshold {
+            return .immediate
+        }
+        return .crossfade(duration: crossfadeDuration)
+    }
+}
+
+/// How much detail and colour fidelity a presented frame carries, lowest first.
+enum FrameFidelity: Int, Sendable, Comparable {
+    /// A thumbnail or embedded camera JPEG, rendered with the camera's tone and colour.
+    case provisional
+    /// A budget-capped, 8-bit frame rendered while a control is being dragged.
+    case interactive
+    /// A full-quality settled or refined render.
+    case settled
+
+    static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
+
+    init(quality: RenderQuality, source: PresentationRasterSource) {
+        switch source {
+        case .thumbnail, .embedded: self = .provisional
+        case .stored, .settled, .refinement:
+            self = quality == .interactive || quality == .thumbnail ? .interactive : .settled
+        }
+    }
+}
+
+/// Adapts the interactive pixel budget to measured render time. Pure so it is testable without a
+/// display. The multiplier scales `RenderScale`'s fit-view budget: it rises while renders finish
+/// well inside the frame budget and falls when they approach it, within `range`, so a fast GPU on
+/// a large display is not pinned to 1.5 MP while a slow one is not pushed past the next tick.
+///
+/// Not yet wired into request construction: that needs release-time measurements (see
+/// `docs/TESTING.md`), because changing the interactive pixel count also changes the cache key
+/// and the stored-frame comparison.
+struct InteractiveBudgetAdapter: Sendable, Equatable {
+    static let range: ClosedRange<Double> = 1.0...2.5
+    static let raiseBelowFraction = 0.5
+    static let lowerAboveFraction = 0.85
+    static let raiseFactor = 1.15
+    static let lowerFactor = 0.8
+
+    private(set) var multiplier: Double = 1.0
+
+    mutating func record(renderMilliseconds: Double, frameBudgetMilliseconds: Double) {
+        guard renderMilliseconds.isFinite, renderMilliseconds >= 0,
+              frameBudgetMilliseconds.isFinite, frameBudgetMilliseconds > 0 else { return }
+        let fraction = renderMilliseconds / frameBudgetMilliseconds
+        let next: Double
+        if fraction < Self.raiseBelowFraction {
+            next = multiplier * Self.raiseFactor
+        } else if fraction > Self.lowerAboveFraction {
+            next = multiplier * Self.lowerFactor
+        } else {
+            return
+        }
+        multiplier = min(max(next, Self.range.lowerBound), Self.range.upperBound)
+    }
 }
 
 // MARK: - Envelope

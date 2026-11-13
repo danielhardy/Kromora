@@ -625,3 +625,18 @@ an optional source relation, so a geometry edit transforms the finished retouch 
 source content. The renderer rasterizes one brush mask per spot and limits its fill and membrane
 graph to the spot bounds plus padding. Heal derives its correction from the exterior ring only;
 Clone uses the translated patch directly.
+
+## Quality step-up transitions (KRMA-1206)
+
+`PreviewSurface.present` crossfades (`FrameRefinementPolicy.crossfadeDuration`, 120 ms) when a frame of
+higher `FrameFidelity` replaces a lower one for the same asset and presentation extent: interactive →
+settled always (the 8×8 digest cannot see the resolution and sharpening step), thumbnail/embedded →
+settled unless both digests are within `crossfadeDigestThreshold` (a missing digest animates). Equal or
+lower fidelity, a different asset or geometry, and Reduce Motion swap immediately. The stale stored-frame
+path keeps its own digest rule.
+
+`InteractiveBudgetAdapter` defines the adaptive interactive pixel-budget policy (×1.15 while renders take
+under 50 % of the frame budget, ×0.8 above 85 %, clamped to 1.0…2.5× the 1.5 MP fit-view budget). It is
+deliberately not wired into `RenderRequest.renderScale` yet: raising the budget changes the render cache
+key and stored-frame comparison, and the audit gave no measurements. Wire it only with release-time
+numbers in `docs/TESTING.md`.
