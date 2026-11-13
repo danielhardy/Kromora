@@ -681,6 +681,99 @@ final class PreviewSurfaceTests: XCTestCase {
         }
     }
 
+    /// A completed RGBA16F texture of `color`, wrapped the way `RenderEngine.makeCIImage` returns it.
+    private func completedEngineFrame(
+        width: Int, height: Int, color: CIColor
+    ) throws -> (image: CIImage, texture: MTLTexture) {
+        let device = RenderEngine.presentationDevice
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .rgba16Float, width: width, height: height, mipmapped: true)
+        descriptor.usage = [.shaderRead, .shaderWrite, .renderTarget]
+        descriptor.storageMode = .private
+        let texture = try XCTUnwrap(device.makeTexture(descriptor: descriptor))
+        let commandBuffer = try XCTUnwrap(RenderEngine.presentationQueue.makeCommandBuffer())
+        RenderEngine.presentationContext.render(
+            CIImage(color: color), to: texture, commandBuffer: commandBuffer,
+            bounds: CGRect(x: 0, y: 0, width: width, height: height),
+            colorSpace: WorkingSpace.sRGB.cgColorSpace)
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+        let image = try XCTUnwrap(
+            CIImage(mtlTexture: texture, options: [.colorSpace: WorkingSpace.sRGB.cgColorSpace]))
+        let finite = image.cropped(to: CGRect(x: 0, y: 0, width: width, height: height))
+        CompletedFrameTexture.attach(texture, to: finite)
+        return (finite, texture)
+    }
+
+    func testEngineTextureIsDrawnDirectlyFromTheFirstPublicationWithoutACopy() async throws {
+        let frame = try completedEngineFrame(
+            width: 640, height: 320, color: CIColor(red: 0.8, green: 0.25, blue: 0.1))
+        let surface = PreviewSurface()
+        RenderDiagnostics.reset()
+
+        XCTAssertTrue(surface.present(frame.image, space: .sRGB))
+
+        XCTAssertTrue(
+            surface.presentationTexture === frame.texture,
+            "the engine's completed texture is drawable before any asynchronous work finishes")
+        XCTAssertEqual(
+            surface.presentationTextureExtent, CGRect(x: 0, y: 0, width: 640, height: 320))
+        let generation = surface.presentationTextureGeneration
+
+        // Repeated Metal draws of one publication keep using the same texture.
+        surface.markPresentationSucceeded(displayRevision: surface.revision)
+        let coordinator = PreviewSurfaceView.Coordinator()
+        for _ in 0..<2 {
+            _ = try XCTUnwrap(
+                coordinator.renderRetainedTexture(
+                    surface: surface, navigation: CanvasNavigation(),
+                    destinationSize: CGSize(width: 640, height: 320)))
+            XCTAssertTrue(surface.presentationTexture === frame.texture)
+            XCTAssertEqual(surface.presentationTextureGeneration, generation)
+        }
+
+        var sample: HistogramData.PresentationSample?
+        for _ in 0..<200 {
+            sample = surface.presentationHistogramSample
+            if case .sample = sample?.state { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        guard case .sample(let histogram)? = sample?.state else {
+            return XCTFail("the adopted texture must still produce a histogram sample")
+        }
+        XCTAssertGreaterThan(histogram.samples[0], histogram.samples[2])
+        XCTAssertEqual(
+            RenderDiagnostics.snapshot.presentationCoreImageEvaluations, 0,
+            "adopting the engine texture must not evaluate Core Image on the presenter")
+    }
+
+    func testSourceChangeFromEngineTextureToPlainImageDoesNotReuseTheOldTexture() async throws {
+        let frame = try completedEngineFrame(
+            width: 320, height: 160, color: CIColor(red: 0.1, green: 0.2, blue: 0.9))
+        let surface = PreviewSurface()
+        XCTAssertTrue(surface.present(frame.image, space: .sRGB))
+        XCTAssertTrue(surface.presentationTexture === frame.texture)
+
+        let plain = CIImage(color: CIColor(red: 1, green: 1, blue: 0))
+            .cropped(to: CGRect(x: 0, y: 0, width: 320, height: 160))
+        XCTAssertTrue(surface.present(plain, space: .sRGB))
+
+        XCTAssertFalse(
+            surface.presentationTexture === frame.texture,
+            "an image without an engine texture goes through the copy path, never the old texture")
+        let copy = try await waitForPresentationTexture(surface)
+        XCTAssertFalse(copy === frame.texture)
+    }
+
+    func testDerivedImageDoesNotInheritTheEngineTexture() async throws {
+        let frame = try completedEngineFrame(
+            width: 128, height: 64, color: CIColor(red: 0.5, green: 0.5, blue: 0.5))
+        XCTAssertNotNil(CompletedFrameTexture.texture(of: frame.image))
+        XCTAssertNil(
+            CompletedFrameTexture.texture(
+                of: frame.image.transformed(by: CGAffineTransform(translationX: 10, y: 0))))
+    }
+
     func testClearResetsTheWorkingSpace() {
         let surface = PreviewSurface()
         surface.present(CIImage(color: .red), space: .displayP3)
@@ -1441,8 +1534,12 @@ final class PreviewSurfaceTests: XCTestCase {
                 quality: .preview, output: .raster
             ))
         let engineImage = try XCTUnwrap(maybeImage)
+        let completedTexture = try XCTUnwrap(CompletedFrameTexture.texture(of: engineImage))
         let surface = PreviewSurface()
         XCTAssertTrue(surface.present(engineImage))
+        XCTAssertTrue(
+            surface.presentationTexture === completedTexture,
+            "the completed engine texture must cross the publication boundary without a copy")
         _ = try await waitForPresentationTexture(surface)
         let coordinator = PreviewSurfaceView.Coordinator()
         let size = CGSize(width: 32, height: 16)

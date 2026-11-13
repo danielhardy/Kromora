@@ -595,11 +595,15 @@ actor RenderEngine: RenderEngining {
         // Metal textures start at (0, 0), while an ROI retains its source-space origin in the
         // Core Image graph. Restore that origin so the presentation surface can place the ROI
         // inside the virtual committed-crop extent without shifting it to the frame corner.
-        return rect.origin == .zero
+        let result = rect.origin == .zero
             ? finite
             : finite.transformed(by: CGAffineTransform(
                 translationX: rect.minX, y: rect.minY
             ))
+        // The command buffer above has completed, so the presentation surface may draw this
+        // texture directly instead of rendering the image into a second one.
+        CompletedFrameTexture.attach(texture, to: result)
+        return result
     }
 
     func pickRetouchSource(
