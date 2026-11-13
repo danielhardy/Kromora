@@ -60,6 +60,7 @@ fragment float4 preview_quad_fragment(
     sampler imageSampler [[sampler(0)]]
 ) {
     float4 color = image.sample(imageSampler, input.texcoord);
-    color.a *= uniforms.alpha;
-    return color;
+    // Core Image output is premultiplied: scaling all four channels keeps it premultiplied.
+    // Pairs with the `.one` / `.oneMinusSourceAlpha` blend factors set on the pipeline.
+    return color * uniforms.alpha;
 }
