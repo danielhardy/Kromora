@@ -471,7 +471,7 @@ Grid and filmstrip assignments are both recorded because those views share one i
 
 | Scenario | Budget |
 | --- | --- |
-| Exact stored Edit open, same session or relaunch | 1 raster assignment, 0 render requests, 0 geometry changes |
+| Exact stored Edit open at fit, when its raster covers the fit plan | 1 raster assignment, 0 render requests, 0 geometry changes |
 | Stale stored Edit frame | 2 raster assignments (stored, refinement), 1 render request, at most 1 crossfade |
 | Cold Edit open | At most 3 raster assignments (thumbnail or embedded, settled) and a canonical write |
 | Photo A → B → A | 0 assignments of A's pixels to B's canvas; each open stays within its cold or warm row |
