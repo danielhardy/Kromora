@@ -14,6 +14,21 @@ struct PreviewFrameIdentity: Equatable, Sendable {
 @MainActor
 @Observable
 final class PreviewSurface {
+    /// The settled frame stays half-float from the Core Image render through the drawable so a
+    /// 16-bit render is not quantized to 8 bits (banding in skies and vignettes) before display.
+    /// The layer remains tagged with the frame's SDR working space; this is independent of EDR.
+    static let presentationPixelFormat: MTLPixelFormat = .rgba16Float
+
+    private struct TransitionPolicyState {
+        var digest: PerceptualDigest?
+        var staleRefinementPending: Bool
+        var fidelity: FrameFidelity
+        var assetID: PhotoAssetID?
+
+        static let initial = TransitionPolicyState(
+            digest: nil, staleRefinementPending: false, fidelity: .settled, assetID: nil)
+    }
+
     /// Diagnostic count used by the presentation acceptance tests. A publication evaluates the
     /// source image once; retained-texture redraws must not evaluate it again.
     private(set) var revision: UInt64 = 0
@@ -53,6 +68,9 @@ final class PreviewSurface {
     @ObservationIgnored var onPresentationHistogramSampleChange: ((HistogramData.PresentationSample) -> Void)?
     @ObservationIgnored private var presentedDigest: PerceptualDigest?
     @ObservationIgnored private var staleRefinementPending = false
+    @ObservationIgnored private var presentedFidelity: FrameFidelity = .settled
+    @ObservationIgnored private var presentedAssetID: PhotoAssetID?
+    @ObservationIgnored private var lastConfirmedTransitionPolicy = TransitionPolicyState.initial
     @ObservationIgnored private var transitionTexture: MTLTexture?
     @ObservationIgnored private var transitionTextureExtent: CGRect?
     @ObservationIgnored private var transitionImageExtent: CGRect?
@@ -128,6 +146,21 @@ final class PreviewSurface {
     func prepareStaleRefinement(using digest: PerceptualDigest) {
         presentedDigest = digest
         staleRefinementPending = true
+        lastConfirmedTransitionPolicy = transitionPolicyState
+    }
+
+    private var transitionPolicyState: TransitionPolicyState {
+        get {
+            TransitionPolicyState(
+                digest: presentedDigest, staleRefinementPending: staleRefinementPending,
+                fidelity: presentedFidelity, assetID: presentedAssetID)
+        }
+        set {
+            presentedDigest = newValue.digest
+            staleRefinementPending = newValue.staleRefinementPending
+            presentedFidelity = newValue.fidelity
+            presentedAssetID = newValue.assetID
+        }
     }
 
     /// Capture-host seam for hardware benchmarks: when the WindowServer reports no scan-out
@@ -214,12 +247,25 @@ final class PreviewSurface {
         recordPresentationAssignmentIfNeeded(
             assetID: presentationAssetID, source: rasterSource, nextExtent: nextPresentationImageExtent
         )
-        let transition: FrameTransition = staleRefinementPending
-            && quality == .preview && coversPresentationExtent
-            ? FrameRefinementPolicy.transition(
+        let nextFidelity = FrameFidelity(quality: quality, source: rasterSource)
+        let transition: FrameTransition
+        if staleRefinementPending && quality == .preview && coversPresentationExtent {
+            transition = FrameRefinementPolicy.transition(
                 from: presentedDigest, to: perceptualDigest, reduceMotion: reduceMotion
             )
-            : .immediate
+        } else if coversPresentationExtent, self.coversPresentationExtent,
+            let presentationAssetID, presentationAssetID == presentedAssetID,
+            nextPresentationImageExtent == self.presentationImageExtent
+        {
+            transition = FrameRefinementPolicy.transition(
+                fromFidelity: presentedFidelity, to: nextFidelity,
+                from: presentedDigest, to: perceptualDigest, reduceMotion: reduceMotion
+            )
+        } else {
+            transition = .immediate
+        }
+        presentedFidelity = nextFidelity
+        presentedAssetID = presentationAssetID
         if case .crossfade = transition,
             let oldTexture = presentationTexture ?? lastValidPresentationTexture
         {
@@ -303,7 +349,13 @@ final class PreviewSurface {
             surfaceRevision: surfaceRevision,
             state: materializesPresentationTexture ? .pending : .unavailable
         )
-        if materializesPresentationTexture {
+        if materializesPresentationTexture,
+            adoptCompletedFrameTexture(
+                for: image, space: space, surfaceRevision: surfaceRevision,
+                telemetryRevision: revision)
+        {
+            // The engine's own texture is already drawable; no copy and no Core Image first draw.
+        } else if materializesPresentationTexture {
             beginPresentationTextureMaterialization(
                 image: image, space: space, surfaceRevision: surfaceRevision,
                 telemetryRevision: revision, completeFrameIdentity: currentDetail?.identity,
@@ -426,6 +478,7 @@ final class PreviewSurface {
 
     func markPresentationSucceeded(displayRevision: UInt64) {
         guard pendingDisplayID == displayRevision else { return }
+        lastConfirmedTransitionPolicy = transitionPolicyState
         lastValidImage = image
         lastValidPresentationTexture = presentationTexture
         lastValidPresentationTextureExtent = presentationTextureExtent
@@ -492,6 +545,7 @@ final class PreviewSurface {
     func rejectPresentation(displayRevision: UInt64) {
         guard pendingDisplayID == displayRevision else { return }
         pendingDisplayID = nil
+        transitionPolicyState = lastConfirmedTransitionPolicy
         image = lastValidImage
         presentationTexture = lastValidPresentationTexture
         presentationTextureExtent = lastValidPresentationTextureExtent
@@ -616,6 +670,76 @@ final class PreviewSurface {
             telemetryByRevision[telemetryRevision]?.telemetry
                 .markPresentationMaterializationSubmitted(telemetryRevision, submitMS: submitMS)
         }
+    }
+
+    /// Draw the texture the engine already completed for `image`, from the first draw, instead of
+    /// rendering the image into a second texture. Mip generation and the histogram sample run on
+    /// the presentation queue ahead of any draw. Returns false when `image` carries no engine
+    /// texture (stored, embedded and thumbnail frames), leaving the copy path to run.
+    private func adoptCompletedFrameTexture(
+        for image: CIImage, space: WorkingSpace, surfaceRevision: UInt64,
+        telemetryRevision: UInt64?
+    ) -> Bool {
+        let extent = image.extent.integral
+        guard let texture = CompletedFrameTexture.texture(of: image),
+            texture.width > 0, CGFloat(texture.width) == extent.width,
+            CGFloat(texture.height) == extent.height,
+            let commandBuffer = RenderEngine.presentationQueue.makeCommandBuffer()
+        else { return false }
+        if texture.mipmapLevelCount > 1, let blit = commandBuffer.makeBlitCommandEncoder() {
+            blit.generateMipmaps(for: texture)
+            blit.endEncoding()
+        }
+        guard
+            let sample = Self.encodeHistogramSample(
+                from: texture, space: space, commandBuffer: commandBuffer)
+        else { return false }
+        presentationTexture = texture
+        presentationTextureExtent = extent
+        presentationTextureGeneration &+= 1
+        pendingPresentationMaterializationRevision = nil
+        presentationMaterializations[surfaceRevision] = (texture, extent, sample.readbackBuffer)
+        // As in the copy path, only the buffer's numeric address crosses the closure boundary.
+        let address = UInt(bitPattern: sample.readbackBuffer.contents())
+        let width = sample.width
+        let height = sample.height
+        let bytesPerRow = sample.bytesPerRow
+        let byteCount = sample.byteCount
+        let started = LiveEditTelemetryClock.now
+        commandBuffer.addCompletedHandler { [self] commandBuffer in
+            let gpuMS: Double?
+            if commandBuffer.gpuStartTime > 0, commandBuffer.gpuEndTime > 0 {
+                gpuMS = max(0, (commandBuffer.gpuEndTime - commandBuffer.gpuStartTime) * 1_000)
+            } else {
+                gpuMS = nil
+            }
+            let state: HistogramData.PresentationSampleState
+            if commandBuffer.status == .completed {
+                state =
+                    Self.histogramData(
+                        address: address, width: width, height: height,
+                        bytesPerRow: bytesPerRow, byteCount: byteCount
+                    ).map(HistogramData.PresentationSampleState.sample) ?? .failed
+            } else {
+                state = .unavailable
+            }
+            Task { @MainActor in
+                self.presentationMaterializations.removeValue(forKey: surfaceRevision)
+                if let telemetryRevision {
+                    self.telemetryByRevision[telemetryRevision]?.telemetry
+                        .markPresentationMaterializationCompleted(telemetryRevision, gpuMS: gpuMS)
+                }
+                self.updatePresentationHistogramSample(revision: surfaceRevision, state: state)
+            }
+        }
+        commandBuffer.commit()
+        if let telemetryRevision {
+            telemetryByRevision[telemetryRevision]?.telemetry
+                .markPresentationMaterializationSubmitted(
+                    telemetryRevision,
+                    submitMS: max(0, (LiveEditTelemetryClock.now - started) * 1_000))
+        }
+        return true
     }
 
     private func updatePresentationHistogramSample(
@@ -841,6 +965,9 @@ final class PreviewSurface {
         finishCrossfade()
         presentedDigest = nil
         staleRefinementPending = false
+        presentedFidelity = .settled
+        presentedAssetID = nil
+        lastConfirmedTransitionPolicy = .initial
         image = nil
         presentationImageExtent = nil
         coversPresentationExtent = false
@@ -897,6 +1024,11 @@ final class PreviewSurface {
         presentationStack(for: current)?.underlay != nil
     }
 
+    /// True when the previous partial ROI stays drawn while the newest ROI's texture is pending.
+    func presentsHeldDetail(for current: CanvasNavigation) -> Bool {
+        presentationStack(for: current)?.heldDetail != nil
+    }
+
     fileprivate struct PresentationFrame {
         let image: CIImage
         let texture: MTLTexture?
@@ -914,6 +1046,9 @@ final class PreviewSurface {
         let detail: PresentationFrame
         let underlay: PresentationFrame?
         let transition: PresentationFrame?
+        /// The previous partial ROI, drawn between the underlay and `detail` while the new
+        /// detail's texture is still materializing so a pan never drops to underlay-only.
+        var heldDetail: PresentationFrame? = nil
     }
 
     /// Select the pixels that may be moved under the pointer. A partial ROI is detail: it follows
@@ -963,6 +1098,27 @@ final class PreviewSurface {
                 usesRetainedCompleteFrame: false, alpha: 1
             )
         }()
+        // The new detail's bgra8 copy is asynchronous. Until it lands, keep the last confirmed
+        // partial ROI of the same source on screen instead of exposing only the underlay.
+        var heldDetail: PresentationFrame?
+        if hasCompleteUnderlay, presentationTexture == nil,
+            let texture = lastValidPresentationTexture,
+            let textureExtent = lastValidPresentationTextureExtent,
+            !lastValidCoversPresentationExtent,
+            let held = lastValidDetail, let pending = currentDetail,
+            held.identity.sourceToken == pending.identity.sourceToken
+        {
+            heldDetail = PresentationFrame(
+                image: lastValidImage ?? image,
+                texture: texture, textureExtent: textureExtent,
+                presentationImageExtent: lastValidPresentationImageExtent,
+                layoutImageExtent: lastValidLayoutImageExtent,
+                space: lastValidSpace,
+                navigation: current,
+                generation: presentationTextureGeneration,
+                usesRetainedCompleteFrame: false, alpha: 1
+            )
+        }
         guard hasCompleteUnderlay, let retainedCompleteImage else {
             return PresentationStack(detail: detail, underlay: nil, transition: transitionFrame)
         }
@@ -980,7 +1136,8 @@ final class PreviewSurface {
             usesRetainedCompleteFrame: true,
             alpha: 1
         )
-        return PresentationStack(detail: detail, underlay: underlay, transition: transitionFrame)
+        return PresentationStack(
+            detail: detail, underlay: underlay, transition: transitionFrame, heldDetail: heldDetail)
     }
 
     private struct MaterializationSubmission {
@@ -1019,7 +1176,8 @@ final class PreviewSurface {
         else { return nil }
 
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: true
+            pixelFormat: Self.presentationPixelFormat, width: width, height: height,
+            mipmapped: true
         )
         descriptor.usage = [.shaderRead, .shaderWrite, .renderTarget]
         descriptor.storageMode = .private
@@ -1184,7 +1342,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
         view.enableSetNeedsDisplay = true
         view.isPaused = true
         view.framebufferOnly = false
-        view.colorPixelFormat = .bgra8Unorm
+        view.colorPixelFormat = PreviewSurface.presentationPixelFormat
         view.colorspace = WorkingSpace.current.cgColorSpace
         view.autoResizeDrawable = true
         view.onEffectiveAppearanceChange = { [weak coordinator = context.coordinator] appearance in
@@ -1268,6 +1426,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
         private var needsDisplayAfterInFlightDraw = false
         private var displayNotificationTokens: [NSObjectProtocol] = []
         private let pipeline: MTLRenderPipelineState?
+        private let readbackPipeline: MTLRenderPipelineState?
         private let samplerState: MTLSamplerState?
         /// Test/debug seam: the drawable path needs this pipeline. A missing bundled `.metal`
         /// source must not abort process launch; the coordinator then uses the Core Image fallback.
@@ -1289,6 +1448,17 @@ struct PreviewSurfaceView: NSViewRepresentable {
             var alpha: Float
         }
 
+        /// The fragment shader returns premultiplied color scaled by the transition alpha, so the
+        /// source factor is `.one`; `.sourceAlpha` would apply coverage a second time and darken
+        /// partially covered edges.
+        static func configurePremultipliedBlending(_ attachment: MTLRenderPipelineColorAttachmentDescriptor) {
+            attachment.isBlendingEnabled = true
+            attachment.sourceRGBBlendFactor = .one
+            attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
+            attachment.sourceAlphaBlendFactor = .one
+            attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        }
+
         override init() {
             // The presentation shaders are precompiled by scripts/build-metal-libraries.sh into
             // KromoraPresentation.metallib. Loading library data performs no runtime source
@@ -1308,16 +1478,17 @@ struct PreviewSurfaceView: NSViewRepresentable {
                 let descriptor = MTLRenderPipelineDescriptor()
                 descriptor.vertexFunction = vertex
                 descriptor.fragmentFunction = fragment
-                descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
-                descriptor.colorAttachments[0].isBlendingEnabled = true
-                descriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
-                descriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
-                descriptor.colorAttachments[0].sourceAlphaBlendFactor = .sourceAlpha
-                descriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+                descriptor.colorAttachments[0].pixelFormat = PreviewSurface.presentationPixelFormat
+                Self.configurePremultipliedBlending(descriptor.colorAttachments[0])
                 pipeline = try? RenderEngine.presentationDevice.makeRenderPipelineState(
+                    descriptor: descriptor)
+                // Same shader into the 8-bit readback target used by the offscreen seam.
+                descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+                readbackPipeline = try? RenderEngine.presentationDevice.makeRenderPipelineState(
                     descriptor: descriptor)
             } else {
                 pipeline = nil
+                readbackPipeline = nil
             }
 
             let samplerDescriptor = MTLSamplerDescriptor()
@@ -1391,6 +1562,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
             }
             if stack.detail.texture != nil, stack.detail.textureExtent != nil {
                 frames.append(stack.detail)
+            } else if let held = stack.heldDetail {
+                frames.append(held)
             }
             return frames
         }
@@ -1401,9 +1574,10 @@ struct PreviewSurfaceView: NSViewRepresentable {
 
         private func encode(
             _ frames: [PreviewSurface.PresentationFrame], destination: CGRect, rotation: Double,
-            encoder: MTLRenderCommandEncoder
+            encoder: MTLRenderCommandEncoder, readback: Bool = false
         ) {
-            guard let pipeline, let samplerState else { return }
+            guard let pipeline = readback ? readbackPipeline : pipeline, let samplerState
+            else { return }
             encoder.setRenderPipelineState(pipeline)
             encoder.setFragmentSamplerState(samplerState, index: 0)
             for frame in frames {
@@ -1986,7 +2160,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
             Self.setViewport(viewport, encoder: encoder)
             encode(
                 metalFrames, destination: destination, rotation: viewSpaceRotationAngle,
-                encoder: encoder)
+                encoder: encoder, readback: true)
             encoder.endEncoding()
             commandBuffer.commit()
             return (target, commandBuffer)
