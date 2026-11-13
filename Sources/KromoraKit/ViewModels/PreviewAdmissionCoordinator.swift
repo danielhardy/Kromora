@@ -867,7 +867,17 @@ final class PreviewAdmissionCoordinator {
                 for: request, sourceRevision: sourceRevision, editsResolved: editsResolved,
                 storedLook: storedLook
             ) {
+                // The stored raster is capped at `FrameClassifier.previewLongEdge`. On a canvas
+                // that needs more pixels it is only a provisional frame: show it and render once.
+                let storedCoversCanvas = plan.isCovered(
+                    byRasterWidth: stored.candidate.image.width,
+                    height: stored.candidate.image.height
+                )
                 switch stored.classification {
+                case .exact where !storedCoversCanvas:
+                    destination.admissionPrepareStaleRefinement(
+                        using: stored.candidate.metadata.perceptualDigest
+                    )
                 case .exact:
                     destination.admissionPreviewCoordinator.cancel()
                     let image = CIImage(cgImage: stored.candidate.image)

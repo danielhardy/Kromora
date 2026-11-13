@@ -617,10 +617,14 @@ final class RelaunchParityTests: TempDirectoryTestCase {
                 XCTFail("missing first-launch settled request for \(asset.displayName)")
                 continue
             }
+            let nativeExtent = source.nativeExtent
+            let scale = 2048 / max(nativeExtent.width, nativeExtent.height)
+            let rasterWidth = Int((nativeExtent.width * scale).rounded(.up))
+            let rasterHeight = Int((nativeExtent.height * scale).rounded(.up))
             await store.enqueueWrite(try FrameFixtures.frame(
                 identity: source.portableIdentity, edit: request.document.editHash,
                 look: .none, space: request.space,
-                epoch: RenderPipeline.pixelEpoch, width: 2048, height: 1365
+                epoch: RenderPipeline.pixelEpoch, width: rasterWidth, height: rasterHeight
             ))
         }
         await store.waitForPendingWrites()

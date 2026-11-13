@@ -76,6 +76,15 @@ struct ResolutionPlan: Equatable, Sendable {
             && abs(visiblePresentationRect.height - cropRect.height) <= epsilon
     }
 
+    /// Whether a stored raster of this size holds at least the pixels the plan's presented photo
+    /// needs. A smaller raster is upsampled on screen, so it can only be provisional. One pixel of
+    /// slack absorbs the rounding between the planner's extent and the stored frame's integer size.
+    func isCovered(byRasterWidth width: Int, height: Int) -> Bool {
+        let required = presentationImageExtent
+        guard required.width.isFinite, required.height.isFinite else { return true }
+        return CGFloat(width) + 1 >= required.width && CGFloat(height) + 1 >= required.height
+    }
+
     static func roi(_ roi: CGRect, coversCrop cropRect: CGRect, nativeExtent: CGSize) -> Bool {
         guard nativeExtent.width.isFinite, nativeExtent.height.isFinite,
             nativeExtent.width > 0, nativeExtent.height > 0

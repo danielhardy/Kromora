@@ -479,6 +479,27 @@ final class PreviewAdmissionCoordinatorTests: TempDirectoryTestCase {
         await destination.scheduler.cancelAllAndWait()
     }
 
+    func testExactStoredFrameSmallerThanTheCanvasIsProvisionalAndRefinesOnce() async throws {
+        let engine = FakeRenderEngine()
+        let destination = makeDestination(engine: engine)
+        let coordinator = makeCoordinator(destination: destination, engine: engine)
+        // The fake source is 32×24 and the viewport covers it, so the canvas needs 32×24 pixels.
+        try await seedStoredFrame(
+            destination, edit: EditDocument().editHash, width: 16, height: 12
+        )
+        destination.admissionStoredEditsResolved = true
+
+        coordinator.schedulePreview()
+
+        try await waitUntil("the settled refinement render") {
+            await engine.previewRequests.count == 1
+        }
+        XCTAssertEqual(destination.cachePublicationCount, 0, "an undersized frame is never final")
+        XCTAssertEqual(destination.staleRefinementPreparationCount, 1)
+        coordinator.shutdown()
+        await destination.scheduler.cancelAllAndWait()
+    }
+
     func testStaleStoredFrameWaitsForStoredEditsThenRendersOnce() async throws {
         let engine = FakeRenderEngine()
         let destination = makeDestination(engine: engine)
@@ -653,12 +674,15 @@ final class PreviewAdmissionCoordinatorTests: TempDirectoryTestCase {
     private func seedStoredFrame(
         _ destination: FakePreviewAdmissionDestination, edit: String,
         look: LookSignature = .none,
-        identity: PortablePhotoIdentity? = nil, expectCandidate: Bool = true
+        identity: PortablePhotoIdentity? = nil, expectCandidate: Bool = true,
+        width: Int = 64, height: Int = 48
     ) async throws {
         let frameIdentity = identity ?? destination.source.portableIdentity
         let store = destination.admissionPresentation.store
         await store.enqueueWrite(
-            try FrameFixtures.frame(identity: frameIdentity, edit: edit, look: look)
+            try FrameFixtures.frame(
+                identity: frameIdentity, edit: edit, look: look, width: width, height: height
+            )
         )
         await store.waitForPendingWrites()
         let session = destination.beginSession()
