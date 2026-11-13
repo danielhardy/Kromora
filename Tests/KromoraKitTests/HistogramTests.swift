@@ -56,6 +56,21 @@ final class HistogramTests: TempDirectoryTestCase {
         XCTAssertEqual(h.green[128], 2)
     }
 
+    func testShadowClippingBoundaryMatchesRoundedBlackBin() throws {
+        let threshold: Float = 0.5 / 255
+        let patches: [[Float]] = [
+            [threshold.nextDown, threshold.nextDown, threshold.nextDown, 1],
+            [threshold, threshold, threshold, 1],
+            [threshold.nextUp, threshold.nextUp, threshold.nextUp, 1],
+        ]
+        let histogram = try XCTUnwrap(
+            HistogramData(rgbaFloat: patches.flatMap { $0 }, width: patches.count, height: 1))
+
+        XCTAssertEqual(histogram.red[0], 1)
+        XCTAssertEqual(histogram.red[1], 2)
+        XCTAssertEqual(histogram.clippedShadows, 1)
+    }
+
     func testFloatTallyRejectsShortBuffer() {
         XCTAssertNil(HistogramData(rgbaFloat: [0, 0, 0, 1], width: 2, height: 1))
     }

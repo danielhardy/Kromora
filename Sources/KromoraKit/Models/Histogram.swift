@@ -1,8 +1,8 @@
 import CoreGraphics
 import Foundation
 
-/// Per-channel tonal distribution of an image, in 256 bins (one per 8-bit
-/// level). Computed from a bounded RGBA8 sample of the presented pixels.
+/// Per-channel tonal distribution of a bounded rendered-image sample, in 256 bins (one per
+/// 8-bit level). The bins use quantized values; retained spatial scope samples use Float16.
 ///
 /// `Sendable` because the tally result crosses from a presentation-queue completion to the main
 /// actor for publication.
@@ -20,7 +20,7 @@ struct HistogramData: Equatable, Sendable {
         case pending
         case sample(HistogramData)
         case unavailable
-        /// Texture materialization succeeded, but its first byte tally failed; retry from that
+        /// Texture materialization succeeded, but its first precision tally failed; retry from that
         /// retained texture instead of asking the render engine to evaluate the source graph.
         case failed
     }
@@ -164,15 +164,16 @@ struct HistogramData: Equatable, Sendable {
                   clippedRed: clippedRed, clippedGreen: clippedGreen, clippedBlue: clippedBlue)
     }
 
-    /// Tally a float RGBA buffer holding values encoded in the delivery space's transfer curve,
-    /// nominally 0...1 but allowed to leave that range (extended and out-of-gamut values).
+    /// Tally a float RGBA buffer in the measured space's transfer encoding (working space for the
+    /// engine tally, presented delivery space for the live sample), nominally 0...1 but allowed to
+    /// leave that range (extended and out-of-gamut values).
     ///
     /// Semantics (see `docs/ENGINEERING_GUIDE.md`, "Histogram and scope semantics"):
     /// - A channel bins at `round(clamp(v, 0, 1) * 255)`, so in-range values match the 8-bit tally.
     /// - A channel is clipped high when `v >= 1 - 0.5/255`, which is exactly where the 8-bit tally
     ///   reaches 255, and also when `v > 1`, so above-range values are counted rather than hidden.
-    /// - A pixel is a clipped shadow when every channel is `<= 0.5/255` (8-bit level 0), which
-    ///   includes negative, out-of-gamut channels.
+    /// - A pixel is a clipped shadow when every channel is `< 0.5/255`, matching values that round
+    ///   to 8-bit level 0 and including negative, out-of-gamut channels.
     /// - NaN channels are treated as 0.
     /// The retained spatial samples keep the unclamped values in half-float form.
     init?(rgbaFloat floats: [Float], width: Int, height: Int, bytesPerRow: Int? = nil) {
@@ -219,7 +220,7 @@ struct HistogramData: Equatable, Sendable {
                 if rv >= 1 - threshold || gv >= 1 - threshold || bv >= 1 - threshold {
                     clippedHighlights += 1
                 }
-                if rv <= threshold, gv <= threshold, bv <= threshold { clippedShadows += 1 }
+                if rv < threshold, gv < threshold, bv < threshold { clippedShadows += 1 }
             }
         }
         self.init(red: red, green: green, blue: blue, luma: luma,

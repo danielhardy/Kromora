@@ -122,23 +122,23 @@ These controls use normal document history and package persistence.
 
 ## Exposure and color scopes
 
-The Info histogram describes the settled rendered preview in the active working space. Its bounded
-RGBA sample (longest edge at most 512 pixels) also drives waveform, RGB parade, and vectorscope
-plots. Clipping totals are counts in that same bounded
-sample, not extrapolated full-resolution pixel counts: highlights mean any channel is 255, shadows
-mean all channels are 0, and per-channel totals count values at 255. The canvas alert is
-presentation-only and can be toggled from the Info histogram. Exposure remains available in the
-Light inspector alongside the other global tone controls.
+The Info histogram normally describes the settled preview sample in the presented delivery space;
+the engine's active working-space tally is the fallback when a presentation sample is unavailable.
+The bounded RGB sample (longest edge at most 512 pixels) also drives waveform, RGB parade, and
+vectorscope plots. Clipping totals count pixels in that bounded sample, not extrapolated full-resolution
+pixels. The canvas alert is presentation-only and can be toggled from the Info histogram. Exposure
+remains available in the Light inspector alongside the other global tone controls.
 
 ### Histogram and scope semantics
 
 The engine's histogram tally renders the settled preview to a bounded RGBAf buffer in the active
 working space's transfer encoding (`HistogramData(rgbaFloat:)`), not an 8-bit display copy. Each
 channel bins at `round(clamp(v, 0, 1) * 255)`. A channel counts as clipped high when it is at or
-above 1 − 0.5/255 (the 8-bit 255 level) or exceeds 1, so extended and out-of-gamut values are
-counted instead of hidden. A pixel is a clipped shadow when every channel is at or below 0.5/255,
-including negative channels. NaN reads as 0. The retained spatial samples use half-float values
-from the same encoded pixels, preserving negative and above-one values for scope consumers.
+above 1 − 0.5/255 (the 8-bit 255 level), so extended and out-of-gamut values are counted instead
+of hidden. A pixel is a clipped shadow when every channel is below 0.5/255, matching values that
+round to 8-bit level 0 and including negative channels. NaN reads as 0. The retained spatial samples
+use half-float values from the same encoded pixels, preserving negative and above-one values for scope
+consumers.
 
 The live Info panel reads the presentation texture directly. `PreviewSurface` downsamples the
 RGBA16F presentation texture into a bounded RGBA16F sample (rendered in the presented space's
