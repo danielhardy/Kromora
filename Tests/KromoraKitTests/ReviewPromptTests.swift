@@ -69,10 +69,10 @@ final class ReviewPromptWiringTests: TempDirectoryTestCase {
         let presenter = FakeReviewPresenter()
         let viewModel = makeAppViewModel(
             preferences: defaultsWithPriorFinish(), reviewPresenter: presenter)
-        viewModel.exportBatchSettled(edited)
+        viewModel.export.onBatchSettled?(edited)
         try await Task.sleep(for: AppViewModel.reviewPromptDelay + .milliseconds(500))
         XCTAssertEqual(presenter.requestCount, 1)
-        viewModel.exportBatchSettled(edited)
+        viewModel.export.onBatchSettled?(edited)
         try await Task.sleep(for: AppViewModel.reviewPromptDelay + .milliseconds(500))
         XCTAssertEqual(presenter.requestCount, 1, "within 120 days")
     }
@@ -82,7 +82,7 @@ final class ReviewPromptWiringTests: TempDirectoryTestCase {
         let viewModel = makeAppViewModel(
             preferences: defaultsWithPriorFinish(), reviewPresenter: presenter,
             isCoveredByUI: true)
-        viewModel.exportBatchSettled(edited)
+        viewModel.export.onBatchSettled?(edited)
         try await Task.sleep(for: AppViewModel.reviewPromptDelay + .milliseconds(500))
         XCTAssertEqual(presenter.requestCount, 0)
     }
@@ -92,7 +92,7 @@ final class ReviewPromptWiringTests: TempDirectoryTestCase {
         let defaults = defaultsWithPriorFinish()
         let viewModel = makeAppViewModel(preferences: defaults, reviewPresenter: presenter)
         viewModel.isSheetOrActivityCoveringWindow = { true }
-        viewModel.exportBatchSettled(edited)
+        viewModel.export.onBatchSettled?(edited)
         viewModel.isSheetOrActivityCoveringWindow = { false }
         try await Task.sleep(for: AppViewModel.reviewPromptDelay + .milliseconds(100))
 
@@ -104,7 +104,7 @@ final class ReviewPromptWiringTests: TempDirectoryTestCase {
         let presenter = FakeReviewPresenter()
         let viewModel = makeAppViewModel(
             preferences: defaultsWithPriorFinish(), reviewPresenter: presenter)
-        viewModel.exportBatchSettled(edited)
+        viewModel.export.onBatchSettled?(edited)
         viewModel.presentError("boom")
         try await Task.sleep(for: AppViewModel.reviewPromptDelay + .milliseconds(500))
         XCTAssertEqual(presenter.requestCount, 0)
@@ -114,7 +114,7 @@ final class ReviewPromptWiringTests: TempDirectoryTestCase {
         let presenter = FakeReviewPresenter()
         let viewModel = makeAppViewModel(
             preferences: defaultsWithPriorFinish(), reviewPresenter: presenter)
-        viewModel.exportBatchSettled(edited)
+        viewModel.export.onBatchSettled?(edited)
         viewModel.cancelPendingReviewPrompt()
         try await Task.sleep(for: AppViewModel.reviewPromptDelay + .milliseconds(100))
         XCTAssertEqual(presenter.requestCount, 0)
@@ -124,7 +124,7 @@ final class ReviewPromptWiringTests: TempDirectoryTestCase {
         let presenter = FakeReviewPresenter()
         let viewModel = makeAppViewModel(
             preferences: defaultsWithPriorFinish(), reviewPresenter: presenter)
-        viewModel.exportBatchSettled(edited)
+        viewModel.export.onBatchSettled?(edited)
         viewModel.export.onActivityChanged?(true)
         try await Task.sleep(for: AppViewModel.reviewPromptDelay + .milliseconds(100))
         XCTAssertEqual(presenter.requestCount, 0)
@@ -134,7 +134,7 @@ final class ReviewPromptWiringTests: TempDirectoryTestCase {
         let presenter = FakeReviewPresenter()
         let viewModel = makeAppViewModel(
             preferences: defaultsWithPriorFinish(), reviewPresenter: presenter)
-        viewModel.exportBatchSettled(edited)
+        viewModel.export.onBatchSettled?(edited)
         await viewModel.shutdown()
         try await Task.sleep(for: AppViewModel.reviewPromptDelay + .milliseconds(100))
         XCTAssertEqual(presenter.requestCount, 0)
@@ -145,6 +145,36 @@ final class ReviewPromptWiringTests: TempDirectoryTestCase {
         let viewModel = makeAppViewModel(
             preferences: defaultsWithPriorFinish(), reviewPresenter: presenter)
         viewModel.export.onExportCompleted?(tempDirectory.appendingPathComponent("x.tiff"))
+        try await Task.sleep(for: AppViewModel.reviewPromptDelay + .milliseconds(500))
+        XCTAssertEqual(presenter.requestCount, 0)
+    }
+
+    func testShareAfterPriorExportFinishAsksOnLaterLaunch() async throws {
+        let presenter = FakeReviewPresenter()
+        let viewModel = makeAppViewModel(
+            preferences: defaultsWithPriorFinish(), reviewPresenter: presenter)
+        viewModel.exportWorkflow.onShareFinished?()
+        try await Task.sleep(for: AppViewModel.reviewPromptDelay + .milliseconds(500))
+        XCTAssertEqual(presenter.requestCount, 1)
+    }
+
+    func testShareFinishIsCountedWhenCoveredWithoutDeferredAsk() async throws {
+        let presenter = FakeReviewPresenter()
+        let defaults = defaultsWithPriorFinish()
+        let viewModel = makeAppViewModel(
+            preferences: defaults, reviewPresenter: presenter, isCoveredByUI: true)
+        viewModel.exportWorkflow.onShareFinished?()
+        try await Task.sleep(for: AppViewModel.reviewPromptDelay + .milliseconds(500))
+        XCTAssertEqual(defaults.integer(forKey: ReviewPromptPolicy.finishCountKey), 2)
+        XCTAssertEqual(presenter.requestCount, 0)
+    }
+
+    func testNewShareSessionCancelsPendingAsk() async throws {
+        let presenter = FakeReviewPresenter()
+        let viewModel = makeAppViewModel(
+            preferences: defaultsWithPriorFinish(), reviewPresenter: presenter)
+        viewModel.exportWorkflow.onShareFinished?()
+        viewModel.exportWorkflow.onShareSessionStarted?()
         try await Task.sleep(for: AppViewModel.reviewPromptDelay + .milliseconds(500))
         XCTAssertEqual(presenter.requestCount, 0)
     }

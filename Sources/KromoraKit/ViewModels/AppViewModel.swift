@@ -1533,9 +1533,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         export.onExportCompleted = { [weak self] url in
             self?.exportWorkflow.exportCompleted(at: url)
         }
-        export.onBatchSettled = { [weak self] outcome in
-            self?.exportBatchSettled(outcome)
-        }
+        reviewPrompts.connect(export: export, exportWorkflow: exportWorkflow)
         export.defaultFolderURL = { [weak self] in self?.settings.ensureDefaultExportFolder() }
 
         derive.onStatus = { [weak self] in self?.statusMessage = $0 }
@@ -1628,14 +1626,11 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
 
     // MARK: - Review prompt
 
-    func exportBatchSettled(_ outcome: ExportCoordinator.BatchOutcome) {
-        if !isShuttingDown { reviewPrompts.batchSettled(outcome) }
-    }
-
     func cancelPendingReviewPrompt() { reviewPrompts.cancelPending() }
 
     private func canRequestReviewNow() -> Bool {
-        !isShuttingDown && !export.isExporting && errorMessage == nil
+        !isShuttingDown && !export.isExporting && !exportWorkflow.hasActiveShareSession
+            && errorMessage == nil
             && !FirstRunOnboarding.shouldPresentWelcome(in: preferences)
             && !isSheetOrActivityCoveringWindow()
     }
@@ -4408,7 +4403,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         export.onStatus = nil
         export.onError = nil
         export.onExportCompleted = nil
-        export.onBatchSettled = nil
+        reviewPrompts.disconnect(export: export, exportWorkflow: exportWorkflow)
         export.onActivityChanged = nil
         derive.onStatus = nil
         derive.onError = nil

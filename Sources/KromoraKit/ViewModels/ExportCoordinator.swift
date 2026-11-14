@@ -428,6 +428,14 @@ final class ExportCoordinator {
     func renderEncodedData(
         for item: BatchItem, document: EditDocument, lut: CubeLUT?, options: ExportOptions
     ) async throws -> Data {
+        try await renderEncodedOutput(for: item, document: document, lut: lut, options: options).data
+    }
+
+    /// As `renderEncodedData(for:...)`, also reporting whether the resolved document changes the
+    /// image (identity output is not an edited finish).
+    func renderEncodedOutput(
+        for item: BatchItem, document: EditDocument, lut: CubeLUT?, options: ExportOptions
+    ) async throws -> (data: Data, isEdited: Bool) {
         try options.validate()
         guard let sourceAccess = await Self.sourceAccess(for: item, using: exportEngine) else {
             throw ImageError.exportFailed
@@ -439,13 +447,14 @@ final class ExportCoordinator {
         defer {
             if hasSourceScope { sourceAccess.url?.stopAccessingSecurityScopedResource() }
         }
-        return try await exportEngine.render(RenderRequest(
+        let data = try await exportEngine.render(RenderRequest(
             source: sourceAccess.source, assetID: itemAssetID, document: resolution.document,
             lut: itemLUT, quality: .export,
             output: .encoded(format: options.format, quality: CGFloat(options.quality)),
             space: options.colorSpace,
             exportOptions: options
         )).data
+        return (data, !resolution.document.isIdentity)
     }
 
     /// Start a single export using the file destination embedded in options.

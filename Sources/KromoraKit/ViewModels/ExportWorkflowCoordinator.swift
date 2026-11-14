@@ -52,6 +52,14 @@ final class ExportWorkflowCoordinator {
     weak var shareAnchorView: NSView?
     private var activeShareDirectories: Set<URL> = []
     private var sharePickerSessions: [URL: SharePickerSession] = [:]
+    /// Called when a new Share session begins, so a pending review request is dropped.
+    var onShareSessionStarted: (() -> Void)?
+    /// Called at most once per picker session, when the first edited file representation has
+    /// been rendered and handed to the requesting service. Kromora cannot observe whether the
+    /// external service ultimately delivered the file, so this is the measurable Share success.
+    var onShareFinished: (() -> Void)?
+    /// Whether a Share picker or the service it launched is still live.
+    var hasActiveShareSession: Bool { !sharePickerSessions.isEmpty }
     private let shareRoot: URL
     /// Presents the picker at the Share control. Tests replace it to observe ordering.
     var showPicker: ([Any], NSSharingServicePicker, SharePickerPlacement) -> Void = { _, picker, placement in
@@ -310,6 +318,7 @@ final class ExportWorkflowCoordinator {
             destination.setExportStatus("Select at least one photo to share")
             return
         }
+        onShareSessionStarted?()
         let directory = makeShareDirectory()
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -354,17 +363,22 @@ final class ExportWorkflowCoordinator {
                         return
                     }
                     do {
-                        let url = try await self.export.runJob(.share) {
-                            try await self.renderShareFile(
+                        let (url, isEdited) = try await self.export.runJob(.share) {
+                            var isEdited = false
+                            let url = try await self.renderShareFile(
                                 name: name, into: directory
                             ) { options in
-                                try await self.export.renderEncodedData(
+                                let output = try await self.export.renderEncodedOutput(
                                     for: item, document: request.document, lut: request.lut,
                                     options: options
                                 )
+                                isEdited = output.isEdited
+                                return output.data
                             }
+                            return (url, isEdited)
                         }
                         completion(url, false, nil)
+                        self.shareRepresentationSupplied(in: directory, isEdited: isEdited)
                     } catch {
                         completion(nil, false, error)
                     }
@@ -374,6 +388,15 @@ final class ExportWorkflowCoordinator {
             return provider
         }
         presentSharePicker(for: providers, copyItems: copyItems, in: directory)
+    }
+
+    /// Counts the session's first edited representation once; later requests, identity output,
+    /// and sessions that already ended are ignored.
+    private func shareRepresentationSupplied(in directory: URL, isEdited: Bool) {
+        guard isEdited, let session = sharePickerSessions[directory.standardizedFileURL],
+              !session.countedFinish else { return }
+        session.countedFinish = true
+        onShareFinished?()
     }
 
     /// The handle a sharing service uses to cancel a lazy render it no longer wants.
@@ -395,6 +418,7 @@ final class ExportWorkflowCoordinator {
             self.destination?.setExportStatus("Open an image first")
             return
         }
+        onShareSessionStarted?()
         let directory = makeShareDirectory()
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -423,6 +447,8 @@ final class ExportWorkflowCoordinator {
                         )
                     }
                     completion(url, false, nil)
+                    self.shareRepresentationSupplied(
+                        in: directory, isEdited: !request.document.isIdentity)
                 } catch {
                     completion(nil, false, error)
                 }
@@ -698,6 +724,8 @@ enum SharePasteboardWriter {
 private final class SharePickerSession {
     let picker: NSSharingServicePicker
     let delegate: SharePickerDelegate
+    /// Whether this session already contributed its one qualifying finish.
+    var countedFinish = false
 
     init(picker: NSSharingServicePicker, delegate: SharePickerDelegate) {
         self.picker = picker

@@ -19,7 +19,7 @@ struct SystemReviewPromptPresenter: ReviewPromptPresenting {
     }
 }
 
-/// Counts clean edited exports and, when the policy and quiet-app gates allow, asks the system for
+/// Counts clean edited exports and edited Share completions and, when the policy and quiet-app gates allow, asks the system for
 /// a review about a second later. A busy app is never retried later.
 @MainActor
 final class ReviewPromptCoordinator {
@@ -47,9 +47,33 @@ final class ReviewPromptCoordinator {
         self.canRequestNow = canRequestNow
     }
 
+    /// Routes export batch and Share completions here, and a new Share session cancels a pending ask.
+    func connect(export: ExportCoordinator, exportWorkflow: ExportWorkflowCoordinator) {
+        export.onBatchSettled = { [weak self] in self?.batchSettled($0) }
+        exportWorkflow.onShareSessionStarted = { [weak self] in self?.cancelPending() }
+        exportWorkflow.onShareFinished = { [weak self] in self?.shareSettled() }
+    }
+
+    func disconnect(export: ExportCoordinator, exportWorkflow: ExportWorkflowCoordinator) {
+        export.onBatchSettled = nil
+        exportWorkflow.onShareSessionStarted = nil
+        exportWorkflow.onShareFinished = nil
+    }
+
     func batchSettled(_ outcome: ExportCoordinator.BatchOutcome) {
-        guard ReviewPromptPolicy.qualifies(outcome), policy.recordQualifyingFinish(),
-              canRequestNow() else { return }
+        guard ReviewPromptPolicy.qualifies(outcome) else { return }
+        settle(requiringQuietNow: true)
+    }
+
+    /// An edited file was rendered and supplied to a sharing service. The picker is still open
+    /// at this moment, so the quiet-app gate is evaluated only after the settling delay, when a
+    /// finished service has gone away; a still-covered app is counted but never asked later.
+    func shareSettled() {
+        settle(requiringQuietNow: false)
+    }
+
+    private func settle(requiringQuietNow: Bool) {
+        guard policy.recordQualifyingFinish(), !requiringQuietNow || canRequestNow() else { return }
         cancelPending()
         task = Task { [weak self] in
             try? await Task.sleep(for: Self.delay)

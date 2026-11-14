@@ -750,4 +750,82 @@ final class ExportWorkflowCoordinatorTests: XCTestCase {
         failureDelegate.sharingService(service, didFailToShareItems: [], error: CocoaError(.fileReadUnknown))
         XCTAssertTrue(failed)
     }
+
+    // MARK: - Share finishes (review prompt signal)
+
+    private var editedDocument: EditDocument {
+        var document = EditDocument()
+        document.light.exposure = 0.5
+        return document
+    }
+
+    /// A two-photo share whose items carry the given documents, with the finish count observed.
+    private func makeCountedShare(
+        documents: [EditDocument?], engine: FakeRenderEngine = FakeRenderEngine()
+    ) throws -> (workflow: ExportWorkflowCoordinator, providers: [NSItemProvider], picker: () -> NSSharingServicePicker?, finishes: () -> Int, starts: () -> Int, window: NSWindow) {
+        let root = try makeShareRoot()
+        let (workflow, destination, window) = makeMultiShare(engine: engine, root: root)
+        destination.batch = ExportBatchRequest(
+            items: documents.enumerated().map { index, document in
+                ExportCoordinator.BatchItem(
+                    url: nil, data: Data([UInt8(index + 1)]), name: "P\(index).dng", document: document)
+            },
+            document: EditDocument(), lut: nil
+        )
+        var finishes = 0
+        var starts = 0
+        workflow.onShareFinished = { finishes += 1 }
+        workflow.onShareSessionStarted = { starts += 1 }
+        var items: [Any] = []
+        var shown: NSSharingServicePicker?
+        workflow.showPicker = { pickerItems, picker, _ in
+            items = pickerItems
+            shown = picker
+        }
+        workflow.shareDialog()
+        let providers = try XCTUnwrap(items as? [NSItemProvider])
+        return (workflow, providers, { shown }, { finishes }, { starts }, window)
+    }
+
+    func testEditedShareCountsOncePerSessionAcrossRepresentations() async throws {
+        let share = try makeCountedShare(documents: [editedDocument, editedDocument])
+        XCTAssertEqual(share.starts(), 1)
+        XCTAssertEqual(share.finishes(), 0, "opening the picker does not count")
+        for provider in share.providers { _ = try await loadFile(provider) }
+        _ = try await loadFile(share.providers[0])
+        XCTAssertEqual(share.finishes(), 1)
+        XCTAssertTrue(share.workflow.hasActiveShareSession)
+        withExtendedLifetime(share.window) {}
+    }
+
+    func testIdentityShareDoesNotCountButLaterEditedRepresentationDoes() async throws {
+        let share = try makeCountedShare(documents: [EditDocument(), editedDocument])
+        _ = try await loadFile(share.providers[0])
+        XCTAssertEqual(share.finishes(), 0)
+        _ = try await loadFile(share.providers[1])
+        XCTAssertEqual(share.finishes(), 1)
+        withExtendedLifetime(share.window) {}
+    }
+
+    func testFailedRenderDoesNotCountShare() async throws {
+        let engine = FakeRenderEngine()
+        await engine.setShouldFailEncode(true)
+        let share = try makeCountedShare(documents: [editedDocument, editedDocument], engine: engine)
+        do {
+            _ = try await loadFile(share.providers[0])
+            XCTFail("render should fail")
+        } catch {}
+        XCTAssertEqual(share.finishes(), 0)
+        withExtendedLifetime(share.window) {}
+    }
+
+    func testDismissingPickerBeforeAnyRequestDoesNotCountShare() throws {
+        let share = try makeCountedShare(documents: [editedDocument, editedDocument])
+        let picker = try XCTUnwrap(share.picker())
+        let delegate = try XCTUnwrap(picker.delegate as? SharePickerDelegate)
+        delegate.sharingServicePicker(picker, didChoose: nil)
+        XCTAssertEqual(share.finishes(), 0)
+        XCTAssertFalse(share.workflow.hasActiveShareSession)
+        withExtendedLifetime(share.window) {}
+    }
 }
