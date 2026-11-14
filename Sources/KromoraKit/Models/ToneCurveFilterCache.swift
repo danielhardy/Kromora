@@ -3,11 +3,13 @@ import Foundation
 
 /// Actor-confined Core Image resource for the separable master RGB curve.
 ///
-/// The kernel is compiled once and the curve is represented by one 256×1 texture (4 KiB), rather
-/// than by a 64³ RGBA cube (4 MiB). `CIFilter`/`CIKernel`/`CIImage` are deliberately not Sendable;
+/// The kernel is compiled once and the curve is represented by one 1024×1 texture (16 KiB), rather
+/// than by a 64³ RGBA cube (4 MiB). The table is indexed by the **sRGB-encoded** value, the domain
+/// the curve graph is drawn in; the kernel converts from and to the engine's linear working space
+/// and extends values outside [0, 1] with slope 1 instead of clamping them. `CIFilter`/`CIKernel`/`CIImage` are deliberately not Sendable;
 /// the owning `RenderEngine` actor serializes access to this cache.
 final class ToneCurveFilterCache {
-    private static let sampleCount = 256
+    private static let sampleCount = 1024
     // Precompiled Metal kernel (Sources/KromoraKit/Resources/KromoraCIKernels.ci.metal).
     private static let kernel = CIKernelLibrary.kernel(named: "applyToneCurve")
 
@@ -62,10 +64,10 @@ final class ToneCurveFilterCache {
             working = image.transformed(
                 by: CGAffineTransform(translationX: -origin.x, y: -origin.y))
         }
-        // The curve is a 256×1 lookup indexed by pixel value, not by destination position.
+        // The curve is a 1024×1 lookup indexed by pixel value, not by destination position.
         // Core Image asks which region of each sampler a destination tile needs. Returning the
         // destination rect for the lookup makes any settled crop or render tile that misses
-        // (0, 0, 256, 1) sample empty texels, so that region renders black. The interactive
+        // (0, 0, 1024, 1) sample empty texels, so that region renders black. The interactive
         // frame often still covers the texture and stays visible until the drag ends.
         let curveExtent = sampledImage.extent
         let curved =

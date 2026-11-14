@@ -317,6 +317,89 @@ final class RenderPipelineTests: TempDirectoryTestCase {
                           "neutral sharpening must preserve the unsharpened pixels")
     }
 
+    /// KRMA-1202: the sharpening radius is a native-pixel length. Sharpening a half-scale image with
+    /// the render scale must land closer to the downsampled native result than ignoring the scale.
+    func testSharpeningRadiusIsResolutionIndependentAcrossRenderScales() throws {
+        let width = 192, height = 64
+        var pixels = [Float](repeating: 1, count: width * height * 4)
+        for y in 0..<height {
+            for x in 0..<width {
+                let value = Float(0.5 + 0.25 * tanh(Double(x - width / 2) / 6))
+                let offset = (y * width + x) * 4
+                pixels[offset] = value
+                pixels[offset + 1] = value
+                pixels[offset + 2] = value
+            }
+        }
+        let native = CIImage(
+            bitmapData: pixels.withUnsafeBytes { Data($0) }, bytesPerRow: width * 16,
+            size: CGSize(width: width, height: height), format: .RGBAf, colorSpace: nil)
+        let detail = DetailAdjustments(sharpeningRadius: 4, sharpeningAmount: 100)
+        func half(_ image: CIImage) -> CIImage {
+            image.transformed(by: CGAffineTransform(scaleX: 0.5, y: 0.5))
+                .cropped(to: CGRect(x: 0, y: 0, width: width / 2, height: height / 2))
+        }
+        func luma(_ image: CIImage, width w: Int, height h: Int) -> [Float] {
+            let p = detailPixels(image, width: w, height: h)
+            return (0..<(w * h)).map { p[$0 * 4] }
+        }
+        let reference = luma(
+            half(RenderPipeline.applyDetailControls(
+                detail, to: native, referenceExtent: native.extent, renderScale: 1)),
+            width: width / 2, height: height / 2)
+        let downsampled = half(native)
+        let scaled = luma(
+            RenderPipeline.applyDetailControls(
+                detail, to: downsampled, referenceExtent: downsampled.extent, renderScale: 0.5),
+            width: width / 2, height: height / 2)
+        let unscaled = luma(
+            RenderPipeline.applyDetailControls(
+                detail, to: downsampled, referenceExtent: downsampled.extent, renderScale: 1),
+            width: width / 2, height: height / 2)
+        func maxError(_ a: [Float], _ b: [Float]) -> Float {
+            zip(a, b).map { abs($0 - $1) }.max() ?? 0
+        }
+        XCTAssertLessThan(maxError(scaled, reference), 0.05,
+                          "scaled preview sharpening should match the native result within tolerance")
+        XCTAssertLessThan(maxError(scaled, reference), maxError(unscaled, reference),
+                          "ignoring the render scale must be farther from the native result")
+    }
+
+    func testLocalSharpeningUsesTheRenderScale() throws {
+        let width = 192, height = 64
+        let native = noisyDetailFixture(chromaNoise: false, width: width, height: height)
+        let layer = LocalAdjustmentLayer(
+            components: [MaskComponent(source: .linear(LinearGradientDefinition()))],
+            adjustments: LocalAdjustments(sharpness: 100))
+        func sharpen(_ image: CIImage, scale: CGFloat) -> CIImage {
+            let mask = CIImage(color: CIColor(red: 1, green: 1, blue: 1, alpha: 1))
+                .cropped(to: image.extent)
+            return RenderPipeline.applyLocalAdjustments(
+                [layer], masks: [layer.id: mask], to: image, renderScale: scale)
+        }
+        func half(_ image: CIImage) -> CIImage {
+            image.transformed(by: CGAffineTransform(scaleX: 0.5, y: 0.5))
+                .cropped(to: CGRect(x: 0, y: 0, width: width / 2, height: height / 2))
+        }
+        func luma(_ image: CIImage, width w: Int, height h: Int) -> [Float] {
+            let pixels = detailPixels(image, width: w, height: h)
+            return (0..<(w * h)).map { pixels[$0 * 4] }
+        }
+        func maxError(_ a: [Float], _ b: [Float]) -> Float {
+            zip(a, b).map { abs($0 - $1) }.max() ?? 0
+        }
+
+        let reference = luma(half(sharpen(native, scale: 1)), width: width / 2, height: height / 2)
+        let downsampled = half(native)
+        let scaled = luma(sharpen(downsampled, scale: 0.5), width: width / 2, height: height / 2)
+        let unscaled = luma(sharpen(downsampled, scale: 1), width: width / 2, height: height / 2)
+
+        XCTAssertLessThan(maxError(scaled, reference), 0.05,
+                          "local sharpening should follow the same native-pixel radius as global Detail")
+        XCTAssertLessThan(maxError(scaled, reference), maxError(unscaled, reference),
+                          "local sharpening must not retain output-pixel sizing in a reduced render")
+    }
+
     func testRetouchSpotChangesRenderedPixelsAndNeutralRetouchIsIdentity() throws {
         let baseline = try build(EditDocument())
         let neutral = try build(EditDocument(retouch: .neutral))
@@ -447,9 +530,14 @@ final class RenderPipelineTests: TempDirectoryTestCase {
                 LightAdjustments(toneCurve: curve), to: source
             ))
 
-        XCTAssertLessThan(samples[64], 0.2, "the lower control point should darken the ramp")
-        XCTAssertGreaterThan(samples[128], 0.6, "the middle control point should lift the ramp")
-        XCTAssertGreaterThan(samples[192], 0.7, "the upper control point should reach the ramp")
+        // The curve is drawn in sRGB-encoded coordinates (KRMA-1204), so compare encoded values.
+        func encoded(_ linear: Float) -> Float {
+            linear <= 0.0031308 ? 12.92 * linear : 1.055 * powf(linear, 1 / 2.4) - 0.055
+        }
+        func ramp(_ index: Int) -> Double { Double(encoded(Float(index) / 255)) }
+        XCTAssertEqual(Double(encoded(samples[64])), curve.value(at: ramp(64)), accuracy: 0.01)
+        XCTAssertEqual(Double(encoded(samples[128])), curve.value(at: ramp(128)), accuracy: 0.01)
+        XCTAssertEqual(Double(encoded(samples[192])), curve.value(at: ramp(192)), accuracy: 0.01)
         for index in 1..<samples.count {
             XCTAssertGreaterThanOrEqual(
                 samples[index], samples[index - 1] - 0.002,

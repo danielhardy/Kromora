@@ -259,6 +259,128 @@ final class CropROITests: TempDirectoryTestCase {
             "the committed-crop ROI must match the same visible export crop")
     }
 
+    func testDetailNativeROIParityMatchesFullExportCrop() async throws {
+        let url = try Fixtures.writeClarityPNG(
+            width: 512, height: 320, named: "detail-roi-parity.png", in: tempDirectory)
+        let source = ImageSource(url: url, nativeExtent: CGSize(width: 512, height: 320))
+        let document = EditDocument(
+            effects: EffectsAdjustments(detail: DetailAdjustments(
+                sharpeningRadius: 4, sharpeningAmount: 80,
+                luminanceNoise: 25, colorNoise: 20
+            )),
+            crop: CropAdjustments(
+                normalizedRect: CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5))
+        )
+        let roi = CGRect(x: 128, y: 80, width: 256, height: 160)
+        let engine = RenderEngine()
+        let preview = try await engine.render(
+            RenderRequest(
+                source: source, document: document, targetSize: source.nativeExtent,
+                sourceROI: roi, quality: .preview, output: .raster
+            ))
+        let export = try await engine.render(
+            RenderRequest(
+                source: source, document: document, quality: .export, output: .raster
+            ))
+
+        XCTAssertEqual(preview.extent, export.extent)
+        assertPixelsEqual(
+            try Pixels.bytes(of: try Pixels.decode(preview.data)),
+            try Pixels.bytes(of: try Pixels.decode(export.data)), tolerance: 2,
+            "native-scale ROI Detail must match the same region of a full export")
+    }
+
+    func testLocalSpatialROIWithFeatheredMaskMatchesFullExportCrop() async throws {
+        let url = try Fixtures.writeClarityPNG(
+            width: 512, height: 320, named: "local-spatial-roi-parity.png", in: tempDirectory)
+        let source = ImageSource(url: url, nativeExtent: CGSize(width: 512, height: 320))
+        let mask = RadialGradientDefinition(
+            center: CGPoint(x: 0.46, y: 0.52), horizontalRadius: 0.38,
+            verticalRadius: 0.42, feather: 0.7)
+        let localLayer = LocalAdjustmentLayer(
+            name: "Feathered local clarity",
+            components: [MaskComponent(source: .radial(mask))],
+            adjustments: LocalAdjustments(clarity: 80))
+        let document = EditDocument(
+            effects: EffectsAdjustments(detail: DetailAdjustments(
+                sharpeningRadius: 2, sharpeningAmount: 60)),
+            localAdjustments: [localLayer])
+        let roi = CGRect(x: 128, y: 80, width: 256, height: 160)
+        let engine = RenderEngine()
+        let preview = try await engine.render(
+            RenderRequest(
+                source: source, document: document, targetSize: source.nativeExtent,
+                sourceROI: roi, quality: .preview, output: .raster
+            ))
+        let export = try await engine.render(
+            RenderRequest(
+                source: source, document: document, quality: .export, output: .raster
+            ))
+
+        XCTAssertEqual(preview.extent, roi.size)
+        let exportImage = try Pixels.decode(export.data)
+        let exportROI = try XCTUnwrap(exportImage.cropping(to: roi))
+        let detailOnly = EditDocument(effects: document.effects)
+        let detailPreview = try await engine.render(
+            RenderRequest(
+                source: source, document: detailOnly, targetSize: source.nativeExtent,
+                sourceROI: roi, quality: .preview, output: .raster
+            ))
+        let detailExport = try await engine.render(
+            RenderRequest(
+                source: source, document: detailOnly, quality: .export, output: .raster
+            ))
+        assertPixelsEqual(
+            try Pixels.bytes(of: try Pixels.decode(detailPreview.data)),
+            try Pixels.bytes(of: XCTUnwrap(Pixels.decode(detailExport.data).cropping(to: roi))),
+            tolerance: 2, "global Detail ROI baseline")
+        assertPixelsEqual(
+            try Pixels.bytes(of: try Pixels.decode(preview.data)),
+            try Pixels.bytes(of: exportROI), tolerance: 2,
+            "zoomed local spatial output with a feathered mask must match the full export crop")
+    }
+
+    func testGeometryROIWithFeatheredLocalSpatialLayerMatchesFullExportCrop() async throws {
+        let url = try Fixtures.writeClarityPNG(
+            width: 512, height: 320, named: "geometry-local-spatial-roi.png", in: tempDirectory)
+        let source = ImageSource(url: url, nativeExtent: CGSize(width: 512, height: 320))
+        let localLayer = LocalAdjustmentLayer(
+            name: "Feathered local clarity",
+            components: [MaskComponent(source: .radial(RadialGradientDefinition(
+                center: CGPoint(x: 0.5, y: 0.5), horizontalRadius: 0.4,
+                verticalRadius: 0.4, feather: 0.7)))],
+            adjustments: LocalAdjustments(exposure: 0.6, clarity: 80))
+        let document = EditDocument(
+            effects: EffectsAdjustments(detail: DetailAdjustments(
+                sharpeningRadius: 2, sharpeningAmount: 60)),
+            crop: CropAdjustments(straightenAngle: 10),
+            localAdjustments: [localLayer])
+        let presentationROI = CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)
+        let engine = RenderEngine()
+        let preview = try await engine.render(
+            RenderRequest(
+                source: source, document: document, targetSize: source.nativeExtent,
+                sourceROI: CGRect(x: 128, y: 80, width: 256, height: 160),
+                presentationROI: presentationROI, quality: .preview, output: .raster
+            ))
+        let export = try await engine.render(
+            RenderRequest(
+                source: source, document: document, quality: .export, output: .raster
+            ))
+        let exportImage = try Pixels.decode(export.data)
+        let crop = CGRect(
+            x: presentationROI.minX * CGFloat(exportImage.width),
+            y: presentationROI.minY * CGFloat(exportImage.height),
+            width: presentationROI.width * CGFloat(exportImage.width),
+            height: presentationROI.height * CGFloat(exportImage.height)
+        ).integral
+        XCTAssertEqual(preview.extent, crop.size)
+        assertPixelsEqual(
+            try Pixels.bytes(of: try Pixels.decode(preview.data)),
+            try Pixels.bytes(of: XCTUnwrap(exportImage.cropping(to: crop))), tolerance: 2,
+            "geometry ROI with a feathered local spatial layer must match the full export crop")
+    }
+
     func testGeometryViewportROIRendersThePostGeometryFragment() async throws {
         let url = try Fixtures.writeGradientPNG(
             width: 96, height: 64, named: "geometry-roi.png", in: tempDirectory)

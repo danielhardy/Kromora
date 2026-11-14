@@ -360,9 +360,12 @@ float4 localAnalyticMask(
     float4 secondPoint,
     float4 transform,
     float4 radial,
-    float4 controls
+    float4 controls,
+    destination dest
 ) {
-    float2 coordinate = samplerCoord(image);
+    // The destination coordinate keeps the mask in the complete frame when Core Image crops the
+    // output to an ROI; the constant-color sampler's coordinate does not survive that crop.
+    float2 coordinate = dest.coord();
     float2 normalized = (coordinate - geometry.xy) / max(geometry.zw, float2(0.00001));
     normalized.y = 1.0 - normalized.y;
 
@@ -482,16 +485,43 @@ float4 retouchSampleField(sampler image, sampler field, float2 sourceScale) {
 
 // MARK: - Master RGB tone curve (ToneCurveFilterCache)
 
+// The curve UI is drawn in sRGB-encoded (perceptual) coordinates, but Core Image hands kernels
+// extended *linear* Display P3. Convert each channel to the sRGB transfer, look the curve up in
+// that domain, and convert back. The table covers [0, 1] encoded with 1024 texels; values outside
+// it keep the curve's endpoint output plus the original offset (slope-1 extension), so RAW
+// highlight headroom and out-of-gamut negatives survive an active curve.
+constant float toneCurveLastTexel = 1023.0;
+
+static float toneCurveEncode(float v) {
+    float a = fabs(v);
+    float e = a <= 0.0031308 ? 12.92 * a : 1.055 * pow(a, 1.0 / 2.4) - 0.055;
+    return copysign(e, v);
+}
+
+static float toneCurveDecode(float v) {
+    float a = fabs(v);
+    float l = a <= 0.04045 ? a / 12.92 : pow((a + 0.055) / 1.055, 2.4);
+    return copysign(l, v);
+}
+
+static float toneCurveChannel(sampler curve, float linear, int channel) {
+    float encoded = toneCurveEncode(linear);
+    float clamped = clamp(encoded, 0.0, 1.0);
+    // +0.5 lands on the texel center (texel i spans [i, i+1)).
+    float4 texel = sample(curve, float2(clamped * toneCurveLastTexel + 0.5, 0.5));
+    float mapped = channel == 0 ? texel.r : (channel == 1 ? texel.g : texel.b);
+    return toneCurveDecode(mapped + (encoded - clamped));
+}
+
 float4 applyToneCurve(sampler image, sampler curve) {
     float4 pixel = sample(image, samplerCoord(image));
     if (pixel.a <= 0.00001) { return pixel; }
 
-    // +0.5 lands on the texel center (texel i spans [i, i+1)); without it every lookup
-    // interpolates between the wrong neighbouring pair, biasing output by up to half a texel.
-    float red = sample(curve, float2(clamp(pixel.r / pixel.a, 0.0, 1.0) * 255.0 + 0.5, 0.5)).r;
-    float green = sample(curve, float2(clamp(pixel.g / pixel.a, 0.0, 1.0) * 255.0 + 0.5, 0.5)).g;
-    float blue = sample(curve, float2(clamp(pixel.b / pixel.a, 0.0, 1.0) * 255.0 + 0.5, 0.5)).b;
-    return float4(float3(red, green, blue) * pixel.a, pixel.a);
+    float3 rgb = pixel.rgb / pixel.a;
+    float3 mapped = float3(toneCurveChannel(curve, rgb.r, 0),
+                           toneCurveChannel(curve, rgb.g, 1),
+                           toneCurveChannel(curve, rgb.b, 2));
+    return float4(mapped * pixel.a, pixel.a);
 }
 
 } // namespace coreimage

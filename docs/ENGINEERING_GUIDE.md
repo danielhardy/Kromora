@@ -86,6 +86,12 @@ retention controls in the `detail` value. On a RAW with supported luminance nois
 renderer routes global Luminance controls to the decoder before the Look; otherwise they stay in the
 shared RGB graph. Global colour noise reduction and sharpening run in the RGB graph after the Look.
 Local mask layers use RGB processing to scope sharpening, noise cleanup, and moiré softening.
+Detail is resolution-independent (KRMA-1202): the sharpening radius is a native-source-pixel length scaled
+by the render factor, so previews sharpen the same fraction of the photograph as the export. Below a 0.5
+output-pixel radius the radius holds at 0.5 and the amount attenuates proportionally (the documented
+fit-preview approximation; native-scale output is exact). `CINoiseReduction`'s threshold scales by the render
+factor because downsampling already averages noise. Masked/local Detail uses the same render factor, and ROI
+renders include spatial support for active Detail before restoring the visible crop.
 Export output sharpening is a separate delivery choice (screen, matte, or glossy, each low/standard/high) carried
 by `ExportOptions` and applied after sizing, so it does not change the edit document or preview.
 

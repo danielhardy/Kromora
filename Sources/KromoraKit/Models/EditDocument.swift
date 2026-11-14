@@ -89,6 +89,12 @@ struct EditDocument: Codable, Sendable, Equatable {
     }
 
     /// True when this document would leave the source untouched.
+    /// True when any global or local stage runs a neighbourhood filter, so a viewport ROI needs
+    /// source support around it. Mask feathering is evaluated in mask space over the full frame.
+    var hasSpatialWork: Bool {
+        effects.hasSpatialWork || localAdjustments.contains(where: \.hasSpatialWork)
+    }
+
     var isIdentity: Bool {
         rawDevelop.isNeutral && light.isIdentity && color.isIdentity && effects.isIdentity && crop.isIdentity &&
             rotation == .zero &&

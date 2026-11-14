@@ -249,7 +249,7 @@ struct RenderBuildPlan: Sendable, Equatable {
         let processingROI = effectiveROI.map {
             RenderPipeline.expandedSourceROI(
                 $0, nativeExtent: nativeExtent,
-                needsSpatialSupport: document.effects.hasSpatialWork
+                needsSpatialSupport: document.hasSpatialWork
             )
         }
         // This is the geometry of the complete scaled source, even when the graph below is
@@ -1616,7 +1616,7 @@ actor RenderEngine: RenderEngining {
             // demand through straighten/flip/perspective without treating a native ROI as if it
             // were still in the transformed image's coordinate space.
             let extent = geometricallyDeveloped.extent
-            let support = document.effects.hasSpatialWork ? CGFloat(0.028) : CGFloat(0.001)
+            let support = document.hasSpatialWork ? RenderPipeline.spatialSupportFraction : CGFloat(0.001)
             let expanded = CGRect(
                 x: max(0, presentationROI.minX - support) * extent.width + extent.minX,
                 y: max(0, presentationROI.minY - support) * extent.height + extent.minY,
@@ -1637,6 +1637,9 @@ actor RenderEngine: RenderEngining {
         let finalFrameExtent = effectivePlan.finalFrameExtent
         let fullFrameExtent = effectivePlan.fullFrameExtent
         let includePostRenderWhiteBalance = effectivePlan.includePostRenderWhiteBalance
+        let detailScale = scale.factor(
+            for: RenderPipeline.geometryExtent(
+                of: document.rotation.orientedExtent(source.nativeExtent), for: document.crop))
         let upstream: CIImage
         if !scale.isFull, RenderPipeline.hasPrefixWork(
             document, lut: lut, includePostRenderWhiteBalance: includePostRenderWhiteBalance
@@ -1645,21 +1648,22 @@ actor RenderEngine: RenderEngining {
                 source: source, document: document, identity: identity, lut: lut, developed: working,
                 scale: scale,
                 sourceROI: processingROI,
-                spatialReferenceExtent: fullFrameExtent,
+                spatialReferenceExtent: fullFrameExtent, detailScale: detailScale,
                 space: space, includePostRenderWhiteBalance: includePostRenderWhiteBalance,
                 quality: quality
             ) ?? RenderPipeline.buildGradedImage(
                 developed: working, document: document, lut: lut, space: space, lutCache: lutCache,
                 toneCurveCache: toneCurveCache,
                 includePostRenderWhiteBalance: includePostRenderWhiteBalance,
-                spatialReferenceExtent: fullFrameExtent
+                spatialReferenceExtent: fullFrameExtent, renderScale: detailScale
             )
         } else {
             upstream = RenderPipeline.buildGradedImage(
                 developed: working, document: document, lut: lut, space: space, lutCache: lutCache,
                 toneCurveCache: toneCurveCache,
                 includePostRenderWhiteBalance: includePostRenderWhiteBalance,
-                spatialReferenceExtent: hasEarlyCrop ? fullFrameExtent : nil
+                spatialReferenceExtent: hasEarlyCrop ? fullFrameExtent : nil,
+                renderScale: detailScale
             )
         }
         let resolvedMasks = try await resolvedLocalMasks(
@@ -1683,7 +1687,9 @@ actor RenderEngine: RenderEngining {
             throw CancellationError()
         }
         let localAdjustedGraph = RenderPipeline.applyLocalAdjustments(
-            document.localAdjustments, masks: resolvedMasks.images, to: upstream
+            document.localAdjustments, masks: resolvedMasks.images, to: upstream,
+            spatialReferenceExtent: fullFrameExtent,
+            renderScale: detailScale
         )
         let localAdjusted: CIImage
         if !scale.isFull, resolveSemanticMasks,
@@ -2454,6 +2460,7 @@ actor RenderEngine: RenderEngining {
         scale: RenderScale,
         sourceROI: CGRect?,
         spatialReferenceExtent: CGRect,
+        detailScale: CGFloat,
         space: WorkingSpace,
         includePostRenderWhiteBalance: Bool,
         quality: RenderQuality
@@ -2486,7 +2493,7 @@ actor RenderEngine: RenderEngining {
             developed: developed, document: document, lut: lut, space: space, lutCache: lutCache,
             toneCurveCache: toneCurveCache,
             includePostRenderWhiteBalance: includePostRenderWhiteBalance,
-            spatialReferenceExtent: spatialReferenceExtent
+            spatialReferenceExtent: spatialReferenceExtent, renderScale: detailScale
         )
         nextPrefixFlightToken &+= 1
         let token = nextPrefixFlightToken

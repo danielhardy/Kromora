@@ -631,6 +631,14 @@ struct LocalAdjustmentLayer: Codable, Sendable, Equatable, Identifiable {
     }
 
     var isIdentity: Bool { !isEnabled || amount == 0 || !components.contains(where: \.isUsable) || adjustments.isIdentity }
+    /// True when a visible layer runs a neighbourhood filter (Texture, Clarity, Dehaze, Sharpness,
+    /// Noise or Moire Reduction), so a cropped ROI needs source support around it.
+    var hasSpatialWork: Bool {
+        hasVisibleLook
+            && (adjustments.texture != 0 || adjustments.clarity != 0 || adjustments.dehaze != 0
+                || adjustments.sharpness > 0 || adjustments.noiseReduction > 0
+                || adjustments.moireReduction > 0)
+    }
     var hasVisibleLook: Bool { isEnabled && amount > 0 && components.contains(where: \.isUsable) && !adjustments.isIdentity }
     var isAutoOwned: Bool { ownership == .auto && autoProvenance != nil }
 

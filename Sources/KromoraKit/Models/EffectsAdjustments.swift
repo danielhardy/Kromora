@@ -259,7 +259,7 @@ struct EffectsAdjustments: Codable, Equatable, Sendable {
     }
 
     var hasSpatialWork: Bool {
-        texture != 0 || clarity != 0 || dehaze != 0
+        texture != 0 || clarity != 0 || dehaze != 0 || !detail.isIdentity
     }
 
     private enum CodingKeys: String, CodingKey { case texture, clarity, dehaze, vignette, grain, detail }

@@ -76,7 +76,11 @@ enum RenderPipeline {
     /// superseded). Any document combining a Look with non-neutral sliders renders different pixels.
     /// v42 (KRMA-1180) calibrates RAW Exposure per decoder family: a local-tone-map decoder (Apple
     /// ProRAW) now maps one slider stop to one decoder stop instead of 0.75, so those frames differ.
-    static let pixelEpoch = 42
+    /// v43 (KRMA-1204, KRMA-1202) evaluates tone curves in sRGB-encoded coordinates through a
+    /// 1024-texel table without clamping extended values, and scales Detail to native-source pixels.
+    /// Active curves and Detail now change rendered frames; this single accuracy-batch bump
+    /// invalidates frames produced by the previous pixel pipeline.
+    static let pixelEpoch = 43
 
     /// Build the graph for `document` over `source`.
     ///
@@ -139,7 +143,7 @@ enum RenderPipeline {
         let processingROI = visibleROI.map {
             expandedSourceROI(
                 $0, nativeExtent: orientedNativeExtent,
-                needsSpatialSupport: document.effects.hasSpatialWork)
+                needsSpatialSupport: document.hasSpatialWork)
         }
         let working =
             processingROI.map {
@@ -164,7 +168,8 @@ enum RenderPipeline {
             spatialReferenceExtent: earlyCrop ? fullFrame : nil,
             finalFrameExtent: finalFrame, applyRotation: false,
             retouchSourceSize: source.nativeExtent.hasUsableArea ? source.nativeExtent : nil,
-            retouchSourceAlreadyApplied: true
+            retouchSourceAlreadyApplied: true,
+            renderScale: scale.factor(for: geometryNativeExtent)
         )
         guard let visibleROI, earlyCrop else { return result }
         return result.cropped(
@@ -197,7 +202,8 @@ enum RenderPipeline {
         finalFrameExtent: CGRect? = nil,
         applyRotation: Bool = true,
         retouchSourceSize: CGSize? = nil,
-        retouchSourceAlreadyApplied: Bool = false
+        retouchSourceAlreadyApplied: Bool = false,
+        renderScale: CGFloat = 1
     ) -> CIImage {
         let orientedSource = developed
         let retouchedSource =
@@ -218,7 +224,7 @@ enum RenderPipeline {
             developed: developed, document: document, lut: lut, space: space, lutCache: lutCache,
             toneCurveCache: toneCurveCache,
             includePostRenderWhiteBalance: includePostRenderWhiteBalance,
-            spatialReferenceExtent: spatialReferenceExtent
+            spatialReferenceExtent: spatialReferenceExtent, renderScale: renderScale
         )
         return buildImage(
             graded: adjusted, document: document,
@@ -268,7 +274,8 @@ enum RenderPipeline {
         lutCache: LUTFilterCache? = nil,
         toneCurveCache: ToneCurveFilterCache? = nil,
         includePostRenderWhiteBalance: Bool = true,
-        spatialReferenceExtent: CGRect? = nil
+        spatialReferenceExtent: CGRect? = nil,
+        renderScale: CGFloat = 1
     ) -> CIImage {
         let corrected = buildCorrectedImage(
             developed: developed, document: document, toneCurveCache: toneCurveCache,
@@ -282,7 +289,7 @@ enum RenderPipeline {
         )
         return applyDetailControls(
             document.effects.detail, to: effectsAdjusted,
-            referenceExtent: spatialReferenceExtent ?? developed.extent)
+            referenceExtent: spatialReferenceExtent ?? developed.extent, renderScale: renderScale)
     }
 
     /// The core global photographic corrections that precede the Look.
@@ -315,7 +322,9 @@ enum RenderPipeline {
     static func applyLocalAdjustments(
         _ layers: [LocalAdjustmentLayer],
         masks: [UUID: CIImage],
-        to image: CIImage
+        to image: CIImage,
+        spatialReferenceExtent: CGRect? = nil,
+        renderScale: CGFloat = 1
     ) -> CIImage {
         layers.reduce(image) { input, layer in
             guard layer.hasVisibleLook, let mask = masks[layer.id],
@@ -341,17 +350,17 @@ enum RenderPipeline {
                     texture: layer.adjustments.texture,
                     clarity: layer.adjustments.clarity,
                     dehaze: layer.adjustments.dehaze
-                ), to: adjusted)
+                ), to: adjusted, spatialReferenceExtent: spatialReferenceExtent ?? input.extent)
             adjusted = applyDetailControls(
                 DetailAdjustments(
                     sharpeningAmount: layer.adjustments.sharpness,
                     // A local layer has one Noise Reduction control. Route it through the luminance
                     // path once; setting both global controls would apply two full filter passes.
                     luminanceNoise: layer.adjustments.noiseReduction
-                ), to: adjusted, referenceExtent: input.extent)
+                ), to: adjusted, referenceExtent: spatialReferenceExtent ?? input.extent,
+                renderScale: renderScale)
             if layer.adjustments.moireReduction > 0 {
-                let softened = adjusted.applyingFilter("CIMedianFilter").cropped(
-                    to: adjusted.extent)
+                let softened = clampedFilter(adjusted, "CIMedianFilter", parameters: [:])
                 adjusted = blend(
                     effect: softened, over: adjusted,
                     amount: CGFloat(layer.adjustments.moireReduction / 100),
@@ -726,16 +735,19 @@ enum RenderPipeline {
         )
     }
 
+    /// Source support, as a fraction of the shortest side, that a spatial stage needs around the
+    /// visible ROI so edge pixels match the uncropped graph. The largest spatial radius is 2.8% of
+    /// the full frame's shortest side and its Gaussian footprint reaches about three radii.
+    static let spatialSupportFraction: CGFloat = 0.084
+
     static func expandedSourceROI(
         _ roi: CGRect, nativeExtent: CGSize, needsSpatialSupport: Bool
     ) -> CGRect {
         guard needsSpatialSupport, nativeExtent.width > 0, nativeExtent.height > 0 else {
             return roi
         }
-        // Clarity/Dehaze use the largest spatial radius (2.8% of the full decoded shortest side).
-        // Include that support in the decode ROI so edge pixels match the uncropped graph; the
-        // final visible crop is restored after all shared Look/slider stages.
-        let margin = min(nativeExtent.width, nativeExtent.height) * 0.028
+        // The final visible crop is restored after all shared Look/slider stages.
+        let margin = min(nativeExtent.width, nativeExtent.height) * spatialSupportFraction
         return roi.insetBy(dx: -margin, dy: -margin)
             .intersection(CGRect(origin: .zero, size: nativeExtent))
     }
@@ -1200,13 +1212,28 @@ enum RenderPipeline {
         return result
     }
 
+    /// Smallest sharpening radius, in output pixels, that Core Image resolves usefully.
+    private static let minimumSharpeningRadius: CGFloat = 0.5
+
     /// Detail controls share this stage across preview, comparison, and export. Masking derives an
     /// edge-protection matte from the source luminance; high settings suppress sharpening in flat
     /// regions while retaining fine detail at strong edges.
+    ///
+    /// **Resolution independence (KRMA-1202).** `renderScale` is the factor by which the image was
+    /// downsampled from native source pixels (1 at export and 1:1). The sharpening radius is a
+    /// native-pixel length, so the radius applied is `sharpeningRadius * renderScale`; a preview
+    /// then sharpens the same fraction of the photograph as the export. A scaled radius under
+    /// `minimumSharpeningRadius` output pixels cannot be resolved, so the radius holds at that floor
+    /// and the amount is attenuated in proportion (`radius / floor`): a documented fit-preview
+    /// approximation that never over-sharpens. `CINoiseReduction` thresholds per-pixel noise, which
+    /// downsampling averages down by roughly the linear scale, so its threshold scales by
+    /// `renderScale` too. Native-scale rendering is unchanged.
     static func applyDetailControls(
-        _ detail: DetailAdjustments, to image: CIImage, referenceExtent: CGRect
+        _ detail: DetailAdjustments, to image: CIImage, referenceExtent: CGRect,
+        renderScale: CGFloat = 1
     ) -> CIImage {
         guard !detail.isIdentity else { return image }
+        let scale = renderScale.isFinite && renderScale > 0 ? min(renderScale, 1) : 1
         let extent = image.extent
         var result = image
         // Keep these controls independent. CINoiseReduction's noiseLevel is the actual threshold;
@@ -1216,10 +1243,11 @@ enum RenderPipeline {
         // each control's Contrast setting only to retain more of the unfiltered source.
         if detail.luminanceNoise > 0 {
             let amount = CGFloat(detail.luminanceNoise / 100)
-            let denoised = result.applyingFilter(
+            let denoised = clampedFilter(
+                result,
                 "CINoiseReduction",
                 parameters: [
-                    "inputNoiseLevel": amount * 0.2,
+                    "inputNoiseLevel": amount * 0.2 * scale,
                     "inputSharpness": CGFloat(detail.luminanceDetail / 100),
                 ]
             ).cropped(to: extent)
@@ -1231,10 +1259,11 @@ enum RenderPipeline {
         }
         if detail.colorNoise > 0 {
             let amount = CGFloat(detail.colorNoise / 100)
-            let denoised = result.applyingFilter(
+            let denoised = clampedFilter(
+                result,
                 "CINoiseReduction",
                 parameters: [
-                    "inputNoiseLevel": amount * 0.2,
+                    "inputNoiseLevel": amount * 0.2 * scale,
                     "inputSharpness": CGFloat(detail.colorDetail / 100),
                 ]
             ).cropped(to: extent)
@@ -1245,18 +1274,19 @@ enum RenderPipeline {
             )
         }
         if detail.sharpeningAmount > 0 {
-            let referenceShortSide = max(1, min(referenceExtent.width, referenceExtent.height))
-            let radius = normalizedRadius(
-                detail.sharpeningRadius / referenceShortSide, for: referenceExtent)
-            let amount = CGFloat(
-                detail.sharpeningAmount / 100 * (0.5 + detail.sharpeningDetail / 100))
-            let sharpened = result.applyingFilter(
+            let scaledRadius = CGFloat(detail.sharpeningRadius) * scale
+            let radius = max(minimumSharpeningRadius, scaledRadius)
+            let radiusAttenuation = min(1, scaledRadius / minimumSharpeningRadius)
+            let amount =
+                CGFloat(detail.sharpeningAmount / 100 * (0.5 + detail.sharpeningDetail / 100))
+                * radiusAttenuation
+            let sharpened = clampedFilter(
+                result,
                 "CIUnsharpMask",
                 parameters: [
-                    "inputRadius": max(0.1, radius),
+                    "inputRadius": radius,
                     "inputIntensity": amount,
-                ]
-            ).cropped(to: extent)
+                ])
             if detail.sharpeningMasking > 0,
                 let edges = CIFilter(
                     name: "CIEdges",
@@ -1296,14 +1326,14 @@ enum RenderPipeline {
         let mediumFactor: Double =
             settings.medium == .glossy ? 0.8 : settings.medium == .matte ? 1.2 : 1
         let radiusFactor: Double = settings.medium == .screen ? 0.65 : 1
-        return image.applyingFilter(
+        return clampedFilter(
+            image,
             "CIUnsharpMask",
             parameters: [
                 "inputRadius": max(
                     0.3, min(image.extent.width, image.extent.height) * 0.001 * radiusFactor),
                 "inputIntensity": settings.strength.amount * mediumFactor,
-            ]
-        ).cropped(to: image.extent)
+            ])
     }
 
     /// Apply a vignette over the current (post-crop) image extent. The mask uses normalized
@@ -1351,7 +1381,8 @@ enum RenderPipeline {
         let radius = normalizedRadius(0.004, for: referenceExtent)
         let effect: CIImage
         if value > 0 {
-            effect = image.applyingFilter(
+            effect = clampedFilter(
+                image,
                 "CISharpenLuminance",
                 parameters: [
                     "inputSharpness": 0.85 * amount,
@@ -1384,7 +1415,8 @@ enum RenderPipeline {
         let radius = normalizedRadius(0.028, for: referenceExtent)
         let candidate =
             value > 0
-            ? image.applyingFilter(
+            ? clampedFilter(
+                image,
                 "CISharpenLuminance",
                 parameters: [
                     "inputRadius": radius,
@@ -1418,7 +1450,8 @@ enum RenderPipeline {
         let radius = normalizedRadius(0.026, for: referenceExtent)
         let local: CIImage
         if value > 0 {
-            local = image.applyingFilter(
+            local = clampedFilter(
+                image,
                 "CIUnsharpMask",
                 parameters: [
                     "inputRadius": radius,
@@ -1503,6 +1536,16 @@ enum RenderPipeline {
         let shortestSide = min(abs(extent.width), abs(extent.height))
         guard shortestSide.isFinite, shortestSide > 0 else { return 1 }
         return max(0.5, shortestSide * fraction)
+    }
+
+    /// Core Image treats pixels outside an extent as clear, so a neighbourhood filter fed the raw
+    /// image darkens and over-sharpens its border. Replicate the edge pixels, filter, and crop back.
+    private static func clampedFilter(
+        _ image: CIImage, _ name: String, parameters: [String: Any]
+    ) -> CIImage {
+        image.clampedToExtent()
+            .applyingFilter(name, parameters: parameters)
+            .cropped(to: image.extent)
     }
 
     private static func croppedBlur(_ image: CIImage, radius: CGFloat) -> CIImage {

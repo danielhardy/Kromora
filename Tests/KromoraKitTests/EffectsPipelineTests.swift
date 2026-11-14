@@ -215,6 +215,128 @@ final class EffectsPipelineTests: XCTestCase {
         }
     }
 
+    /// KRMA-1203: spatial filters must replicate edge pixels rather than sample clear pixels
+    /// outside the extent. A constant opaque image has no detail, so every pixel, including the
+    /// outermost ring, must match the interior and stay fully opaque.
+    func testSpatialFiltersKeepBorderPixelsOpaqueAndUnchanged() throws {
+        let width = 128
+        let height = 96
+        let source = CIImage(color: CIColor(red: 0.5, green: 0.4, blue: 0.3, alpha: 1))
+            .cropped(to: CGRect(x: 0, y: 0, width: width, height: height))
+        let expected = try Pixels.bytes(of: source)
+
+        let detail = DetailAdjustments(
+            sharpeningRadius: 3, sharpeningAmount: 100, luminanceNoise: 100, colorNoise: 100)
+        let cases: [(String, CIImage)] = [
+            ("texture", RenderPipeline.applyEffects(EffectsAdjustments(texture: 100), to: source)),
+            ("clarity", RenderPipeline.applyEffects(EffectsAdjustments(clarity: 100), to: source)),
+            ("dehaze", RenderPipeline.applyEffects(EffectsAdjustments(dehaze: 100), to: source)),
+            (
+                "detail",
+                RenderPipeline.applyDetailControls(detail, to: source, referenceExtent: source.extent)
+            ),
+            (
+                "outputSharpening",
+                RenderPipeline.applyOutputSharpening(
+                    OutputSharpening(medium: .matte, strength: .high), to: source)
+            ),
+        ]
+        for (name, output) in cases {
+            let bytes = try Pixels.bytes(of: output)
+            XCTAssertEqual(bytes.count, expected.count, name)
+            let centre = (height / 2 * width + width / 2) * 4
+            for (x, y) in [(0, 0), (width - 1, 0), (0, height - 1), (width - 1, height - 1),
+                (width / 2, 0), (0, height / 2)]
+            {
+                let i = (y * width + x) * 4
+                XCTAssertEqual(bytes[i + 3], 255, accuracy: 1, "\(name) alpha at \(x),\(y)")
+                for c in 0..<3 {
+                    XCTAssertEqual(
+                        Int(bytes[i + c]), Int(bytes[centre + c]), accuracy: 3,
+                        "\(name) channel \(c) at \(x),\(y)")
+                }
+            }
+        }
+    }
+
+    /// KRMA-1203: every outer ring must match a render of the same photograph padded with
+    /// replicated edge pixels, on a gradient-plus-checker field that has real detail at the border.
+    func testSpatialFiltersMatchPaddedReferenceAtOuterEdges() throws {
+        let width = 96
+        let height = 64
+        let bounds = CGRect(x: 0, y: 0, width: width, height: height)
+        let gradient = CIFilter(name: "CILinearGradient", parameters: [
+            "inputPoint0": CIVector(x: 0, y: 0), "inputPoint1": CIVector(x: CGFloat(width), y: CGFloat(height)),
+            "inputColor0": CIColor(red: 0.1, green: 0.2, blue: 0.7, alpha: 1),
+            "inputColor1": CIColor(red: 0.9, green: 0.6, blue: 0.1, alpha: 1),
+        ])!.outputImage!
+        let checker = CIFilter(name: "CICheckerboardGenerator", parameters: [
+            "inputWidth": 6, "inputColor0": CIColor(red: 0.3, green: 0.3, blue: 0.3, alpha: 0.35),
+            "inputColor1": CIColor(red: 0.7, green: 0.7, blue: 0.7, alpha: 0.35),
+        ])!.outputImage!
+        let source = checker.composited(over: gradient).cropped(to: bounds)
+        let padded = source.clampedToExtent().cropped(to: bounds.insetBy(dx: -64, dy: -64))
+
+        func stage(_ name: String, _ image: CIImage, _ reference: CGRect) -> CIImage {
+            switch name {
+            case "detail":
+                let detail = DetailAdjustments(
+                    sharpeningRadius: 3, sharpeningAmount: 100, luminanceNoise: 100, colorNoise: 100)
+                return RenderPipeline.applyDetailControls(
+                    detail, to: image, referenceExtent: reference)
+            case "maskedDetail":
+                let detail = DetailAdjustments(
+                    sharpeningRadius: 3, sharpeningAmount: 100, sharpeningMasking: 50)
+                return RenderPipeline.applyDetailControls(
+                    detail, to: image, referenceExtent: reference)
+            case "local":
+                var layer = LocalAdjustmentLayer(name: "moire")
+                layer.adjustments.moireReduction = 100
+                layer.adjustments.noiseReduction = 100
+                let mask = CIImage(color: .white).cropped(to: image.extent)
+                return RenderPipeline.applyLocalAdjustments(
+                    [layer], masks: [layer.id: mask], to: image)
+            default:
+                var effects = EffectsAdjustments()
+                switch name {
+                case "texture": effects.texture = 100
+                case "clarity": effects.clarity = 100
+                default: effects.dehaze = 100
+                }
+                return RenderPipeline.applySpatialEffects(
+                    effects, to: image, spatialReferenceExtent: reference)
+            }
+        }
+        let stages = ["texture", "clarity", "dehaze", "detail", "maskedDetail", "local"]
+        for name in stages {
+            let direct = try Pixels.bytes(of: stage(name, source, bounds))
+            let reference = try Pixels.bytes(of: stage(name, padded, bounds).cropped(to: bounds))
+            XCTAssertEqual(direct.count, reference.count, name)
+            for y in 0..<height {
+                for x in 0..<width where x < 20 || y < 20 || x >= width - 20 || y >= height - 20 {
+                    let i = (y * width + x) * 4
+                    for c in 0..<4 {
+                        XCTAssertEqual(
+                            Int(direct[i + c]), Int(reference[i + c]), accuracy: 3,
+                            "\(name) channel \(c) at \(x),\(y)")
+                    }
+                }
+            }
+        }
+    }
+
+    func testDocumentSpatialWorkIncludesVisibleLocalSpatialLayers() {
+        var document = EditDocument()
+        XCTAssertFalse(document.hasSpatialWork)
+        var layer = LocalAdjustmentLayer(name: "local")
+        layer.components = [MaskComponent(source: .radial(RadialGradientDefinition()))]
+        layer.adjustments.moireReduction = 50
+        document.localAdjustments = [layer]
+        XCTAssertTrue(document.hasSpatialWork)
+        document.localAdjustments[0].isEnabled = false
+        XCTAssertFalse(document.hasSpatialWork)
+    }
+
     func testEffectsPreserveExtentAndAlpha() throws {
         let source = CIImage(color: CIColor(red: 0.7, green: 0.3, blue: 0.2, alpha: 0.4))
             .cropped(to: CGRect(x: 0, y: 0, width: 17, height: 11))
