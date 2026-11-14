@@ -115,6 +115,11 @@ xcodebuild_args=(
   -derivedDataPath "$derived_data_path"
 )
 
+# Base.xcconfig sets ARCHS = arm64 on the app target only. The Swift package target
+# otherwise builds ARCHS_STANDARD (arm64 and x86_64) for Release, and Float16 is
+# unavailable in the Intel slice. A command-line setting applies to that target too.
+architecture_args=(ARCHS=arm64)
+
 # Preserve the short revision shown in About for distributable builds while letting
 # direct Xcode development builds use the existing "Development build" fallback.
 git_commit="$(git rev-parse --short=12 HEAD 2>/dev/null || true)"
@@ -131,11 +136,11 @@ if [[ "${KROMORA_VERIFICATION_BUILD:-}" == "1" ]]; then
 fi
 
 if [[ "$mode" == "verify" ]]; then
-  xcodebuild "${xcodebuild_args[@]}" "${signing_args[@]}" "${build_metadata_args[@]}" build
+  xcodebuild "${xcodebuild_args[@]}" "${signing_args[@]}" "${build_metadata_args[@]}" "${architecture_args[@]}" build
   "$project_root/scripts/verify-xcode-app.sh"
 else
   archive_path="$derived_data_path/Kromora.xcarchive"
-  xcodebuild "${xcodebuild_args[@]}" "${signing_args[@]}" "${build_metadata_args[@]}" -archivePath "$archive_path" archive
+  xcodebuild "${xcodebuild_args[@]}" "${signing_args[@]}" "${build_metadata_args[@]}" "${architecture_args[@]}" -archivePath "$archive_path" archive
 
   # Archives are signed with the Apple Development certificate and Organizer re-signs the app with
   # Apple Distribution at upload, but it leaves the SwiftPM resource bundle under Contents/Resources

@@ -3,8 +3,12 @@ PRODUCT_NAME = Kromora
 PRODUCT_BUNDLE_IDENTIFIER = com.last8.kromora.photo
 
 // The supported platform and architecture for the macOS app.
+// ARCHS binds the app target. EXCLUDED_ARCHS is the setting a Swift package
+// target can inherit; without it a Release build still compiles KromoraKit
+// for x86_64, where Float16 is unavailable.
 MACOSX_DEPLOYMENT_TARGET = 26.0
 ARCHS = arm64
+EXCLUDED_ARCHS = x86_64
 
 // The app's user-facing marketing version and monotonically increasing build number.
 MARKETING_VERSION = 0.1

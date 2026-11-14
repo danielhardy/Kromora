@@ -226,6 +226,14 @@ final class XcodeProjectInvariantTests: XCTestCase {
         )
     }
 
+    func testAppStoreBuildLimitsThePackageTargetToArm64() throws {
+        guard let script = readText(at: packageRoot.appendingPathComponent("scripts/app-store-build.sh")) else { return }
+        XCTAssertTrue(
+            script.contains("ARCHS=arm64"),
+            "\(Self.invariant): app-store-build.sh must pass ARCHS=arm64. The xcconfig architecture setting does not apply to the Swift package target, so Release otherwise compiles an Intel slice."
+        )
+    }
+
     private var xcodeProjectURL: URL {
         packageRoot.appendingPathComponent("Kromora.xcodeproj/project.pbxproj")
     }
