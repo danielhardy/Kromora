@@ -78,34 +78,38 @@ polish, hygiene, or verification debt.
 
 ## Summary of findings
 
-| # | Pri | Area | Finding | Confidence |
-| --- | --- | --- | --- | --- |
-| 01 | P0 | Speed | A continuous drag discards every in-flight interactive frame, so the canvas can freeze until the pointer pauses | Code-confirmed |
-| 02 | P0 | Speed / stability | One shared engine actor serializes export, thumbnails, warming, and RAW develop with the visible preview; several of these block the actor synchronously | Code-confirmed |
-| 03 | P0 | Stability | During a zoomed pan, each new ROI frame vanishes, leaving only the blurry underlay, until its display texture materializes | Code-confirmed |
-| 04 | P1 | Accuracy | An exact stored frame (a 2048 px JPEG) is treated as final and never refined, even on canvases larger than 2048 px | Code-confirmed |
-| 05 | P1 | Accuracy / stability | The presenter minifies up to 2× with bilinear sampling and no mipmaps, and quads are not pixel-snapped: aliasing, shimmer, and a soft "100 %" view | Code-confirmed |
-| 06 | P1 | Accuracy | The sharpening radius is in output pixels, so preview ≠ export and interactive ≠ settled; noise reduction is scale-dependent | Code-confirmed |
-| 07 | P1 | Accuracy | Unsharp, sharpen-luminance, and noise-reduction filters are not edge-clamped, and the ROI margin ignores Detail: halos at photo and viewport borders | Code-indicated |
-| 08 | P1 | Accuracy | The custom tone curve runs on linear working values through a 256-texel LUT clamped to [0, 1]: coarse shadows and lost highlight headroom | Code-indicated |
-| 09 | P1 | Stability / speed | Each publication is drawn first by a Core Image fallback and then by a separate Metal path from an extra bgra8 copy | Code-confirmed |
-| 10 | P1 | Stability | Quality step-ups (interactive → settled, embedded → settled) swap instantly between visibly different renders | Code-confirmed |
-| 11 | P2 | Accuracy | The display chain is 8-bit end to end (bgra8 drawable and texture, no dither): banding in gradients | Code-confirmed |
-| 12 | P2 | Stability | Drawable resize has no transaction or placement policy: stretch and jump during window or inspector resize | Code-confirmed |
-| 13 | P2 | Speed | RAW developed-source materialization uses a synchronous CPU readback instead of the existing GPU texture path | Code-confirmed |
-| 14 | P2 | Speed | Per-frame allocation churn: new processing texture, new presentation texture, and two `MTLBuffer`s per draw | Code-confirmed |
-| 15 | P2 | Stability | ROI renders cover exactly the visible rect, with no overscan; every pan exposes the lower-detail underlay | Code-confirmed |
-| 16 | P2 | Stability | The crossfade is paced by `Task.sleep(16 ms)` rather than the display link | Code-confirmed |
-| 17 | P3 | Accuracy | The shader multiplies alpha on already premultiplied texels (edge darkening during crossfade or at antialiased edges) | Code-indicated |
-| 18 | P3 | Accuracy | Histogram and scopes sample the 8-bit display-encoded presentation texture | Code-confirmed |
-| 19 | P3 | Speed | Thumbnail fringe repair runs a CPU per-pixel loop on the render actor | Code-confirmed |
-| 20 | P3 | Verification | Tests do not cover drag cadence, cross-scale Detail parity, border pixels, or the presenter's handoff | — |
+Tickets for findings 01–20 were filed on 2026-11-12 as KRMA-1197 through KRMA-1216 (finding N is KRMA-(1196+N)). The status column is the DispatchGraph status when this note was added: KRMA-1197, KRMA-1199, KRMA-1201, KRMA-1202, KRMA-1204, and KRMA-1205 are done; KRMA-1198 is in verification; the rest are backlog. KRMA-1217 (done) is a verification follow-up of KRMA-1197, not a separate finding.
+
+| # | Ticket | Status | Pri | Area | Finding | Confidence |
+| --- | --- | --- | --- | --- | --- | --- |
+| 01 | KRMA-1197 | done | P0 | Speed | A continuous drag discards every in-flight interactive frame, so the canvas can freeze until the pointer pauses | Code-confirmed |
+| 02 | KRMA-1198 | verification | P0 | Speed / stability | One shared engine actor serializes export, thumbnails, warming, and RAW develop with the visible preview; several of these block the actor synchronously | Code-confirmed |
+| 03 | KRMA-1199 | done | P0 | Stability | During a zoomed pan, each new ROI frame vanishes, leaving only the blurry underlay, until its display texture materializes | Code-confirmed |
+| 04 | KRMA-1200 | backlog | P1 | Accuracy | An exact stored frame (a 2048 px JPEG) is treated as final and never refined, even on canvases larger than 2048 px | Code-confirmed |
+| 05 | KRMA-1201 | done | P1 | Accuracy / stability | The presenter minifies up to 2× with bilinear sampling and no mipmaps, and quads are not pixel-snapped: aliasing, shimmer, and a soft "100 %" view | Code-confirmed |
+| 06 | KRMA-1202 | done | P1 | Accuracy | The sharpening radius is in output pixels, so preview ≠ export and interactive ≠ settled; noise reduction is scale-dependent | Code-confirmed |
+| 07 | KRMA-1203 | backlog | P1 | Accuracy | Unsharp, sharpen-luminance, and noise-reduction filters are not edge-clamped, and the ROI margin ignores Detail: halos at photo and viewport borders | Code-indicated |
+| 08 | KRMA-1204 | done | P1 | Accuracy | The custom tone curve runs on linear working values through a 256-texel LUT clamped to [0, 1]: coarse shadows and lost highlight headroom | Code-indicated |
+| 09 | KRMA-1205 | done | P1 | Stability / speed | Each publication is drawn first by a Core Image fallback and then by a separate Metal path from an extra bgra8 copy | Code-confirmed |
+| 10 | KRMA-1206 | backlog | P1 | Stability | Quality step-ups (interactive → settled, embedded → settled) swap instantly between visibly different renders | Code-confirmed |
+| 11 | KRMA-1207 | backlog | P2 | Accuracy | The display chain is 8-bit end to end (bgra8 drawable and texture, no dither): banding in gradients | Code-confirmed |
+| 12 | KRMA-1208 | backlog | P2 | Stability | Drawable resize has no transaction or placement policy: stretch and jump during window or inspector resize | Code-confirmed |
+| 13 | KRMA-1209 | backlog | P2 | Speed | RAW developed-source materialization uses a synchronous CPU readback instead of the existing GPU texture path | Code-confirmed |
+| 14 | KRMA-1210 | backlog | P2 | Speed | Per-frame allocation churn: new processing texture, new presentation texture, and two `MTLBuffer`s per draw | Code-confirmed |
+| 15 | KRMA-1211 | backlog | P2 | Stability | ROI renders cover exactly the visible rect, with no overscan; every pan exposes the lower-detail underlay | Code-confirmed |
+| 16 | KRMA-1212 | backlog | P2 | Stability | The crossfade is paced by `Task.sleep(16 ms)` rather than the display link | Code-confirmed |
+| 17 | KRMA-1213 | backlog | P3 | Accuracy | The shader multiplies alpha on already premultiplied texels (edge darkening during crossfade or at antialiased edges) | Code-indicated |
+| 18 | KRMA-1214 | backlog | P3 | Accuracy | Histogram and scopes sample the 8-bit display-encoded presentation texture | Code-confirmed |
+| 19 | KRMA-1215 | backlog | P3 | Speed | Thumbnail fringe repair runs a CPU per-pixel loop on the render actor | Code-confirmed |
+| 20 | KRMA-1216 | backlog | P3 | Verification | Tests do not cover drag cadence, cross-scale Detail parity, border pixels, or the presenter's handoff | — |
 
 ---
 
 ## P0 — fix as soon as possible
 
 ### 01. P0 — A continuous drag discards every in-flight interactive frame
+
+**Ticket:** KRMA-1197 (done). Verification follow-up: KRMA-1217 (done).
 
 **Code-confirmed.** Every slider or curve tick advances the display revision in
 `PreviewAdmissionCoordinator.scheduleInteractivePreview()`
@@ -150,6 +154,8 @@ displayed one is published, and that the settled frame still replaces the last i
 
 ### 02. P0 — One engine actor serializes the visible preview behind blocking background work
 
+**Ticket:** KRMA-1198 (verification).
+
 **Code-confirmed.** Editor, comparison, histogram, prefetch, idle-warm, thumbnail, and export work
 all call `RenderEngine.shared`. `ImageWorkScheduler` gives the editor its own lane, but that
 priority ends at the actor: a job that is already inside the actor runs to completion first. Several
@@ -185,6 +191,8 @@ The `concurrent-export-editing` capture exists, but `docs/TESTING.md` records no
 
 ### 03. P0 — A zoomed pan shows a blur flash on every new ROI frame
 
+**Ticket:** KRMA-1199 (done).
+
 **Code-confirmed control flow; visual frequency unmeasured.** `PreviewSurface.present` sets
 `presentationTexture = nil` for every new publication
 ([PreviewSurface.swift:249](../../Sources/KromoraKit/Views/PreviewSurface.swift)) and starts asynchronous
@@ -213,6 +221,8 @@ with a retained complete frame, then asserts that every drawn stack includes a d
 
 ### 04. P1 — An exact stored frame is final even when it is lower resolution than the canvas
 
+**Ticket:** KRMA-1200 (backlog).
+
 **Code-confirmed.** `submitSettledPreview` presents an `.exact` stored frame and returns without
 rendering
 ([PreviewAdmissionCoordinator.swift:871](../../Sources/KromoraKit/ViewModels/PreviewAdmissionCoordinator.swift)).
@@ -229,6 +239,8 @@ it without a crossfade. Update the budget row to "0 renders when the stored rast
 canvas".
 
 ### 05. P1 — Presenter resampling: minification aliasing and no pixel snapping
+
+**Ticket:** KRMA-1201 (done).
 
 **Code-confirmed.**
 - `ResolutionPlanner` picks the first of `[0.125, 0.25, 0.5, 0.75, 1.0]` at or above the required
@@ -257,6 +269,8 @@ canvas".
 
 ### 06. P1 — Detail controls are not resolution-independent
 
+**Ticket:** KRMA-1202 (done).
+
 **Code-confirmed math.** In `applyDetailControls`, the sharpening radius is computed as
 `normalizedRadius(detail.sharpeningRadius / referenceShortSide, for: referenceExtent)`
 ([RenderPipeline.swift:1250](../../Sources/KromoraKit/Models/RenderPipeline.swift)). This reduces to
@@ -276,6 +290,8 @@ at full fidelity only at ≥ 1:1, and label the fit view. Add a parity test that
 native scale and compares it with the same region of a `.full` export.
 
 ### 07. P1 — Spatial filters sample transparent pixels at photo and ROI borders
+
+**Ticket:** KRMA-1203 (backlog).
 
 **Code-indicated; confirm with a border-pixel test.** `croppedBlur` correctly uses
 `clampedToExtent()`, but `CIUnsharpMask` (Detail sharpening :1254, Dehaze :1422, output sharpening
@@ -303,6 +319,8 @@ render. Add a zoomed-ROI-versus-full-export comparison with Detail enabled.
 
 ### 08. P1 — The tone curve runs in linear light through a 256-texel LUT and clamps highlights
 
+**Ticket:** KRMA-1204 (done).
+
 **Code-indicated; confirm against the curve UI's intended domain.** `applyToneCurve` (the CI kernel in
 [KromoraCIKernels.ci.metal:485](../../Sources/KromoraKit/Resources/KromoraCIKernels.ci.metal)) indexes
 a 256×1 table ([ToneCurveFilterCache.swift:10](../../Sources/KromoraKit/Models/ToneCurveFilterCache.swift))
@@ -328,6 +346,8 @@ test that a point at (0.25, 0.35) moves an encoded-0.25 patch to encoded 0.35.
 
 ### 09. P1 — Two presenter paths and an extra copy for every publication
 
+**Ticket:** KRMA-1205 (done).
+
 **Code-confirmed path split; visual delta unmeasured.** The engine already returns a completed,
 texture-backed `CIImage` (RGBA16F, or RGBA8 for interactive frames). `present` then:
 
@@ -350,6 +370,8 @@ Image fallback only for hosts without a pipeline. That removes a render pass and
 frame, removes finding 03's window, and leaves one placement implementation to test.
 
 ### 10. P1 — Quality step-ups are hard swaps between visibly different renders
+
+**Ticket:** KRMA-1206 (backlog).
 
 **Code-confirmed.** `FrameRefinementPolicy` crossfades only when a stale *stored* frame is refined
 (`staleRefinementPending && quality == .preview && coversPresentationExtent`, PreviewSurface.swift:217).
@@ -374,6 +396,8 @@ frame budget, so a fast GPU on a large display does not drop to 1.5 MP needlessl
 
 ### 11. P2 — The display chain is 8-bit with no dither
 
+**Ticket:** KRMA-1207 (backlog).
+
 **Code-confirmed.** The drawable is `.bgra8Unorm` (PreviewSurface.swift:1181), the presentation copy is
 `.bgra8Unorm` (:1022), and interactive engine textures are `.rgba8Unorm`. The 16-bit settled
 render is therefore quantized to 8 bits before display, with no dithering, so smooth skies and
@@ -385,6 +409,8 @@ quantization.
 
 ### 12. P2 — Drawable resize stretches the last frame
 
+**Ticket:** KRMA-1208 (backlog).
+
 **Code-confirmed.** `PreviewMTKView` sets neither `presentsWithTransaction` nor
 `layerContentsPlacement`/`contentsGravity`, and uses `autoResizeDrawable = true`. During a live
 window resize or an inspector toggle, Core Animation scales the previous drawable to the new bounds
@@ -394,6 +420,8 @@ until the next draw, so the photo stretches and then snaps. **Recommendation:** 
 `viewDidEndLiveResize`), so the resized drawable commits with the window's layout transaction.
 
 ### 13. P2 — RAW developed sources are materialized through a CPU readback
+
+**Ticket:** KRMA-1209 (backlog).
 
 **Code-confirmed.** A settled-cache miss for a RAW source completes the decoder output through
 `materializedImage`, a synchronous `render(toBitmap:)` into an RGBAh CPU buffer that is wrapped
@@ -407,6 +435,8 @@ reused once encoding returns; confirm this with the existing RAW parity tests.
 
 ### 14. P2 — Per-frame allocation churn
 
+**Ticket:** KRMA-1210 (backlog).
+
 **Code-confirmed.** Each `makeCIImage` allocates a new private texture
 (`RenderEngineResources.makeProcessingTexture`), each publication allocates a new bgra8 texture and
 readback buffer, and each draw allocates two `MTLBuffer`s per quad (PreviewSurface.swift `encode`).
@@ -416,6 +446,8 @@ size-keyed texture pool (or an `MTLHeap`) for engine output and presentation, an
 
 ### 15. P2 — ROI renders have no overscan
 
+**Ticket:** KRMA-1211 (backlog).
+
 **Code-confirmed.** The preview ROI is exactly `plan.visiblePresentationRect`. Any pan immediately
 uncovers the complete-frame underlay, which is a different (lower) detail level with possibly
 different sharpening, so a rectangular seam follows the viewport until the next ROI lands.
@@ -424,6 +456,8 @@ while the visible rect stays inside it. This also reduces ROI cache misses in
 `processingPrefix`, whose key includes `sourceROI`.
 
 ### 16. P2 — The crossfade is paced by a sleeping task
+
+**Ticket:** KRMA-1212 (backlog).
 
 **Code-confirmed.** `beginCrossfade` loops on `Task.sleep(for: .milliseconds(16))`
 (PreviewSurface.swift:464). That is not tied to vsync and runs at less than half rate on
@@ -437,6 +471,8 @@ link's target timestamp.
 
 ### 17. P3 — Alpha is applied twice to premultiplied texels
 
+**Ticket:** KRMA-1213 (backlog).
+
 The fragment shader multiplies only `color.a` by the uniform alpha, and the pipeline blends with
 `sourceAlpha` / `oneMinusSourceAlpha`
 ([PreviewSurface.metal:63](../../Sources/KromoraKit/Resources/PreviewSurface.metal), PreviewSurface.swift
@@ -446,6 +482,8 @@ texels are multiplied by alpha twice and darken. **Recommendation:** blend with 
 
 ### 18. P3 — Scopes read the display-encoded 8-bit sample
 
+**Ticket:** KRMA-1214 (backlog).
+
 The presentation histogram is sampled from the bgra8 display texture, so it cannot show
 out-of-gamut or above-1.0 values, and its bins are display-encoded rather than working-space
 values. After finding 11, sample the 16-bit texture and report clipping against the delivery space
@@ -453,12 +491,16 @@ explicitly.
 
 ### 19. P3 — Thumbnail fringe repair on the actor
 
+**Ticket:** KRMA-1215 (backlog).
+
 `fillingThumbnailCoverageFringe` redraws every thumbnail into a CPU bitmap and loops over its
 columns on the render actor (RenderEngine.swift:950). It is small, but it runs once per thumbnail.
 Fix the cause instead: render to an integral, pixel-aligned crop, which `canonicalPreviewRaster`
 already does by flooring.
 
 ### 20. P3 — Verification gaps
+
+**Ticket:** KRMA-1216 (backlog).
 
 The suite has no test for any of these properties:
 
