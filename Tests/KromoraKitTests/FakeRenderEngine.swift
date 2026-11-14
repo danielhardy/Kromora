@@ -100,6 +100,8 @@ actor FakeRenderEngine: RenderEngining {
     private var shouldFailHistogram = false
     private var histogramMarkersByURL: [URL: Int] = [:]
     private var previewIsGated = false
+    private var textureIsGated = false
+    private var parkedTextures: [CheckedContinuation<Void, Never>] = []
     private var parkedPreviews: [(id: UUID, continuation: CheckedContinuation<Void, Never>)] = []
     private var cancelledPreviewParks: Set<UUID> = []
     private var thumbnailIsGated = false
@@ -295,6 +297,9 @@ actor FakeRenderEngine: RenderEngining {
         let record = Request(request: request)
         textureRequests.append(record)
         emit(.textureRequested(record))
+        if textureIsGated {
+            await withCheckedContinuation { parkedTextures.append($0) }
+        }
         // Keep visible-preview tests on the established CGImage seam. RenderEngine returns a
         // completed texture here; nil makes the protocol's compatibility fallback exercise the
         // existing fake raster result without conflating the two call types.
@@ -409,6 +414,17 @@ actor FakeRenderEngine: RenderEngining {
     /// Hold raster preview requests so comparison tests can release an obsolete baseline after a
     /// source switch and prove its generation guard rejects the late result.
     func gatePreviews() { previewIsGated = true }
+
+    /// Hold `makeCIImage` (adjacent prefetch) so a test can prove it does not block a visible
+    /// preview or that a late completion is fenced.
+    func gateTextures() { textureIsGated = true }
+
+    func releaseTextures() {
+        textureIsGated = false
+        let parked = parkedTextures
+        parkedTextures.removeAll()
+        parked.forEach { $0.resume() }
+    }
 
     func failPreviews() { shouldFailPreview = true }
 

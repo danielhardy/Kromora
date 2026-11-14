@@ -911,7 +911,8 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         await previewPresentation.waitForCanonicalWriteForDiagnostics(for: identity)
     }
     @ObservationIgnored lazy var previewAdmissionCoordinator = PreviewAdmissionCoordinator(
-        workScheduler: workScheduler, engine: engine, destination: self
+        workScheduler: workScheduler, engine: engine, prefetchEngine: backgroundEngine,
+        destination: self
     )
     @ObservationIgnored private lazy var idleFrameWarmerCoordinator = IdleFrameWarmerCoordinator(
         scheduler: workScheduler, engine: backgroundEngine, editStore: editStore,

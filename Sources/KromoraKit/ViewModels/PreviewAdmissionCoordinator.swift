@@ -180,15 +180,20 @@ final class PreviewAdmissionCoordinator {
 
     private let workScheduler: ImageWorkScheduler
     private let engine: any RenderEngining
+    /// Serves speculative adjacent-photo prefetch. Production injects the background engine so a
+    /// RAW cache-miss development never occupies the actor that serves the visible preview.
+    private let prefetchEngine: any RenderEngining
     weak var destination: (any PreviewAdmissionDestination)?
 
     init(
         workScheduler: ImageWorkScheduler,
         engine: any RenderEngining,
+        prefetchEngine: (any RenderEngining)? = nil,
         destination: (any PreviewAdmissionDestination)? = nil
     ) {
         self.workScheduler = workScheduler
         self.engine = engine
+        self.prefetchEngine = prefetchEngine ?? engine
         self.destination = destination
     }
 
@@ -1189,7 +1194,7 @@ final class PreviewAdmissionCoordinator {
                 destination.admissionActiveAssetID == assetID,
                 destination.admissionSourceRevision == revision
             else { return }
-            let engine = self.engine
+            let engine = self.prefetchEngine
             self.workScheduler.enqueue(
                 id: self.adjacentPreviewPrefetchJobID, lane: .editor, priority: .background
             ) { [weak destination, engine] in

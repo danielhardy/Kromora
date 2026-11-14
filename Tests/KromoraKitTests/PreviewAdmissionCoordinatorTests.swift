@@ -341,6 +341,117 @@ final class PreviewAdmissionCoordinatorTests: TempDirectoryTestCase {
         await session.shutdown()
     }
 
+    // MARK: Adjacent prefetch isolation (KRMA-1219)
+
+    private struct PrefetchHarness {
+        let visible: FakeRenderEngine
+        let previewEngine: any RenderEngining
+        let prefetch: FakeRenderEngine
+        let destination: FakePreviewAdmissionDestination
+        let coordinator: PreviewAdmissionCoordinator
+        let session: PortableLibrarySession
+    }
+
+    private func makePrefetchHarness(
+        using previewEngineOverride: (any RenderEngining)? = nil
+    ) async throws -> PrefetchHarness {
+        let urls = try ["a.png", "b.png", "c.png"].map {
+            try Fixtures.writeGradientPNG(width: 16, height: 12, named: $0, in: tempDirectory)
+        }
+        let session = try PortableLibrarySession(
+            at: tempDirectory.appendingPathComponent("Prefetch-\(UUID().uuidString).kromoralibrary"))
+        _ = try session.importURLs(urls, duplicatePolicy: .importAnyway)
+        let visible = FakeRenderEngine()
+        let prefetch = FakeRenderEngine()
+        let destination = makeDestination(engine: visible)
+        let previewEngine = previewEngineOverride ?? visible
+        destination.admissionCollection.loadPortableAssets(try session.browsingAssets())
+        await destination.admissionCollection.scanCompletion()
+        destination.admissionCollection.setSelection(at: 0)
+        destination.assetID = destination.admissionCollection.items[0].id
+        destination.admissionNavigationIsEdit = true
+        destination.admissionCanWarmAdjacentDocuments = true
+        destination.adjacentInMemoryDocument = EditDocument()
+        let coordinator = PreviewAdmissionCoordinator(
+            workScheduler: destination.scheduler, engine: previewEngine, prefetchEngine: prefetch,
+            destination: destination)
+        return PrefetchHarness(
+            visible: visible, previewEngine: previewEngine, prefetch: prefetch, destination: destination,
+            coordinator: coordinator, session: session)
+    }
+
+    private func finish(_ harness: PrefetchHarness) async {
+        harness.coordinator.shutdown()
+        await harness.destination.scheduler.cancelAllAndWait()
+        await harness.session.shutdown()
+    }
+
+    func testAdjacentPrefetchRunsOnPrefetchEngineAndNeverTheVisibleEngine() async throws {
+        let harness = try await makePrefetchHarness()
+        harness.coordinator.scheduleAdjacentPreviewPrefetch()
+        try await waitUntil("prefetch requests reach the prefetch engine") {
+            await harness.prefetch.textureRequests.count >= 1
+        }
+        let visibleTextures = await harness.visible.textureRequests
+        XCTAssertTrue(visibleTextures.isEmpty, "the visible preview engine receives no prefetch")
+        await finish(harness)
+    }
+
+    func testVisiblePreviewCompletesWithPixelParityWhileAdjacentPrefetchIsHeld() async throws {
+        let harness = try await makePrefetchHarness(using: RenderEngine())
+        let url = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "visible.png", in: tempDirectory)
+        let source = ImageSource(
+            backing: .url(url), kind: .standard, nativeExtent: CGSize(width: 16, height: 12))
+        let request = RenderRequest(
+            source: source, document: EditDocument(adjustments: [.exposure(ev: 0.3)]),
+            lut: nil, quality: .interactive, output: .raster, space: .sRGB, requestRevision: 1)
+        let reference = await RenderEngine().makeCGImage(request)
+        await harness.prefetch.gateTextures()
+        harness.coordinator.scheduleAdjacentPreviewPrefetch()
+        try await waitUntil("gated prefetch request") {
+            await harness.prefetch.textureRequests.count == 1
+        }
+
+        let preview = await harness.previewEngine.makeCGImage(request)
+        XCTAssertNotNil(preview, "the preview completes while prefetch is held")
+        XCTAssertEqual(
+            preview?.dataProvider?.data as Data?, reference?.dataProvider?.data as Data?)
+
+        await harness.prefetch.releaseTextures()
+        await finish(harness)
+    }
+
+    func testCancellingHeldAdjacentPrefetchStopsFurtherRequests() async throws {
+        let harness = try await makePrefetchHarness()
+        await harness.prefetch.gateTextures()
+        harness.coordinator.scheduleAdjacentPreviewPrefetch()
+        try await waitUntil("gated prefetch request") {
+            await harness.prefetch.textureRequests.count == 1
+        }
+        harness.coordinator.cancelAdjacentPreviewPrefetch()
+        await harness.prefetch.releaseTextures()
+        await harness.destination.scheduler.cancelAllAndWait()
+        let count = await harness.prefetch.textureRequests.count
+        XCTAssertEqual(count, 1, "a cancelled job issues no request after the held one returns")
+        await finish(harness)
+    }
+
+    func testStaleSourceRevisionRejectsRemainingAdjacentPrefetch() async throws {
+        let harness = try await makePrefetchHarness()
+        await harness.prefetch.gateTextures()
+        harness.coordinator.scheduleAdjacentPreviewPrefetch()
+        try await waitUntil("gated prefetch request") {
+            await harness.prefetch.textureRequests.count == 1
+        }
+        harness.destination.admissionSourceRevision += 1
+        await harness.prefetch.releaseTextures()
+        await harness.destination.scheduler.cancelAllAndWait()
+        let count = await harness.prefetch.textureRequests.count
+        XCTAssertEqual(count, 1, "a stale revision stops the remaining neighbours")
+        await finish(harness)
+    }
+
     func testStaleDisplayRevisionAndAssetDropStoredFrameHit() async throws {
         let engine = FakeRenderEngine()
         let destination = makeDestination(engine: engine)
@@ -858,7 +969,8 @@ private final class FakePreviewAdmissionDestination: PreviewAdmissionDestination
     func admissionPrepareStaleRefinement(using digest: PerceptualDigest) {
         staleRefinementPreparationCount += 1
     }
-    func admissionDocument(for assetID: PhotoAssetID) -> EditDocument? { nil }
+    var adjacentInMemoryDocument: EditDocument?
+    func admissionDocument(for assetID: PhotoAssetID) -> EditDocument? { adjacentInMemoryDocument }
     func admissionSourceReference(for item: ImageCollection.Item) -> EditSourceReference {
         EditSourceReference(assetID: item.id, url: item.url)
     }

@@ -1786,3 +1786,43 @@ render of another photo does not evict the session. Explicit `rawDevelop` amount
 (the sweep writes them directly). That the tests pass does not address the response shape above: they
 assert routing is applied once and consistently, not that the decoder's response to the amount is
 monotonic.
+
+## Engine actor contention (KRMA-1198)
+
+Canonical preview frame production (2048 px readback, perceptual digest, JPEG encode) runs on the
+concurrent pool with only the engine's `Sendable` `CIContext` and the completed `CIImage`, so a drag
+that starts right after a settle no longer queues behind that encode. Remaining work on the
+`RenderEngine` actor that serves the visible preview: RAW graph construction and encoding an RGBAh
+intermediate into a private GPU texture on a cache miss for the *visible* photo (the preview needs
+that developed source). GPU completion is awaited asynchronously, so this path no longer holds the
+actor through a CPU bitmap readback. Look-browser candidates, histogram/Auto analysis, and mask
+overlays also remain on the preview actor.
+
+KRMA-1218 moved the rest off that actor by separate engine ownership, so each has its own `CIContext`,
+queue, and caches. Full-resolution export already ran on `ExportCoordinator.exportEngine`. Edited
+thumbnails and idle-warm (including their RAW development and `createCGImage` readback) now run on
+`AppViewModel.backgroundEngine`. Costs: a second RAW developed-source cache and GPU context for
+background photos, and a background photo that becomes the visible one is developed again on the
+preview engine. `BackgroundRenderIsolationTests` holds export rasterization with a gated
+`ExportRasterizer`, proves a preview request on an independent engine completes with identical
+pixels, requests cancellation while the export is held, and verifies that the view model's production
+background engine differs from its injected preview engine. `PreviewCoordinatorTests` covers stale
+revision publication; `IdleFrameWarmerCoordinatorTests` covers cancellation fencing for late thumbnail
+results. `EditedThumbnailCoordinatorTests` and `IdleFrameWarmerCoordinatorTests` each hold the production
+coordinator's renderer mid-request (`testVisiblePreviewProgresses…`), prove a visible-preview render
+on an independent engine completes with identical pixels meanwhile, and prove that releasing the
+held render after shutdown/cancel publishes nothing. KRMA-1219 routes speculative
+adjacent-photo prefetch (`PreviewAdmissionCoordinator.scheduleAdjacentPreviewPrefetch`) to the same
+`backgroundEngine` through an injected `prefetchEngine`, so a neighbor's RAW cache-miss development and
+RGBAh materialization no longer occupy the visible preview actor. Cost: prefetch now warms the
+background engine's caches, not the preview engine's, so a neighbor the user navigates to is developed
+again on the preview engine (the prefetch no longer shortens that first render; it only warms the
+background engine, which also serves thumbnails and idle warming). `PreviewAdmissionCoordinatorTests`
+(`testAdjacentPrefetch…`, `testVisiblePreviewCompletesWithPixelParity…`, `testCancellingHeldAdjacent…`,
+`testStaleSourceRevisionRejects…`) drive the production scheduler with a gated fake prefetch engine:
+requests reach only the prefetch engine, a visible-preview render on an independent engine completes with
+identical pixels while prefetch is held, cancellation and a stale source revision stop further requests.
+RAW cache-miss development is not exercised there (the fake engine returns no image); its isolation is
+structural. The `createCGImage` readback itself is not
+gated (it is not injectable); its isolation is structural. The `concurrent-export-editing` capture is deferred to a
+supervised performance session; no new numbers are claimed here.
