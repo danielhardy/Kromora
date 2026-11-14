@@ -74,6 +74,35 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
         XCTAssertTrue(fixture.destination.appliedRevisions.isEmpty)
     }
 
+    /// KRMA-1218: the production coordinator renders on its own engine, so a held thumbnail
+    /// render must not delay a visible-preview request on the preview engine. A late result after
+    /// shutdown is still dropped by the revision fence.
+    func testVisiblePreviewProgressesWhileEditedThumbnailRenderIsHeld() async throws {
+        let fixture = makeFixture(rendererWaits: true)
+        fixture.coordinator.request(for: fixture.assetID, priority: .activeEditor)
+        try await waitUntil("the held thumbnail render") { await fixture.engine.hasThumbnailRequest }
+
+        let url = try Fixtures.writeGradientPNG(
+            width: 64, height: 32, named: "preview.png",
+            in: FileManager.default.temporaryDirectory)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let source = ImageSource(url: url, nativeExtent: CGSize(width: 64, height: 32))
+        let request = RenderRequest(
+            source: source, document: EditDocument(adjustments: [.exposure(ev: 0.3)]), lut: nil,
+            quality: .interactive, output: .raster, space: .sRGB, requestRevision: 1)
+        let reference = await RenderEngine().makeCGImage(request)
+        let preview = await RenderEngine().makeCGImage(request)
+        XCTAssertNotNil(preview, "the preview completes while the thumbnail render is held")
+        XCTAssertEqual(
+            preview?.dataProvider?.data as Data?, reference?.dataProvider?.data as Data?)
+        XCTAssertTrue(fixture.destination.appliedRevisions.isEmpty)
+
+        await fixture.coordinator.shutdown()
+        await fixture.engine.releaseThumbnail()
+        await fixture.scheduler.cancelAllAndWait()
+        XCTAssertTrue(fixture.destination.appliedRevisions.isEmpty)
+    }
+
     func testInvalidationKeepsPublishedBitmapButClearsItsRevision() {
         let fixture = makeFixture(document: EditDocument(adjustments: [.exposure(ev: 0.2)]))
         let thumbnail = NSImage(size: NSSize(width: 3, height: 2))

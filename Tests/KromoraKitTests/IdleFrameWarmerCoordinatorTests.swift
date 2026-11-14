@@ -664,6 +664,38 @@ final class IdleFrameWarmerCoordinatorTests: TempDirectoryTestCase {
         await finish(harness)
     }
 
+    /// KRMA-1218: a held idle-warm thumbnail render must not delay a visible-preview request on
+    /// the preview engine, and cancelling it must leave no stale frames behind.
+    func testVisiblePreviewProgressesWhileIdleWarmRenderIsHeld() async throws {
+        let harness = try await makeHarness(names: ["held.png"])
+        let candidate = try XCTUnwrap(harness.destination.idleFrameWarmerCandidates.first)
+        await harness.engine.enableThumbnailGate()
+        harness.coordinator.schedule()
+        try await waitUntil("gated idle-warm thumbnail") {
+            await harness.engine.thumbnailRequests.count == 1
+        }
+
+        let request = RenderRequest(
+            source: candidate.source, document: EditDocument(adjustments: [.exposure(ev: 0.3)]),
+            lut: nil, quality: .interactive, output: .raster, space: .sRGB, requestRevision: 1)
+        let reference = await RenderEngine().makeCGImage(request)
+        let preview = await RenderEngine().makeCGImage(request)
+        XCTAssertNotNil(preview, "the preview completes while idle warming is held")
+        XCTAssertEqual(
+            preview?.dataProvider?.data as Data?, reference?.dataProvider?.data as Data?)
+
+        harness.destination.idleFrameWarmerIsBlocked = true
+        harness.coordinator.cancel()
+        await harness.engine.releaseThumbnailGate()
+        try await waitUntil("late renderer result returns") {
+            await harness.engine.activeRasterCallCount == 0
+        }
+        try await Task.sleep(for: .milliseconds(20))
+        let edited = await harness.thumbnailStore.metadata(.edited, for: candidate.identity)
+        XCTAssertNil(edited)
+        await finish(harness)
+    }
+
     func testCanonicalWriteRejectsNoncanonicalPreviewAndROIRenders() async throws {
         let harness = try await makeHarness(names: ["roi.png"])
         let candidate = try XCTUnwrap(harness.destination.idleFrameWarmerCandidates.first)

@@ -702,7 +702,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
     let workScheduler: ImageWorkScheduler
     /// Edit-aware collection thumbnail scheduling and cache publication.
     @ObservationIgnored private lazy var editedThumbnailCoordinator = EditedThumbnailCoordinator(
-        workScheduler: workScheduler, engine: engine, editStore: editStore,
+        workScheduler: workScheduler, engine: backgroundEngine, editStore: editStore,
         frameStore: thumbnailFrameStore, frameLookupLedger: frameLookupLedger, destination: self
     )
     /// Persisted original and latest-edited thumbnails in `Derived/Thumbnails`. Rebuildable cache:
@@ -799,6 +799,8 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
     /// The renderer. An `any RenderEngining` rather than the concrete actor so a test can drive the
     /// preview flow without a GPU — the reason Step 4 introduced the protocol.
     private let engine: any RenderEngining
+    /// Thumbnail, idle-warm, and prefetch work runs here, off the preview actor (KRMA-1218).
+    let backgroundEngine: any RenderEngining
 
     /// Narrow presentation-only accessors for the masking canvas. The backing source and renderer
     /// remain owned by the view model; callers receive only the values needed for an overlay task.
@@ -912,7 +914,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         workScheduler: workScheduler, engine: engine, destination: self
     )
     @ObservationIgnored private lazy var idleFrameWarmerCoordinator = IdleFrameWarmerCoordinator(
-        scheduler: workScheduler, engine: engine, editStore: editStore,
+        scheduler: workScheduler, engine: backgroundEngine, editStore: editStore,
         thumbnailStore: thumbnailFrameStore, previewPresentation: previewPresentation,
         destination: self
     )
@@ -1050,6 +1052,7 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         defer { interval.end() }
 
         self.engine = engine
+        self.backgroundEngine = engine is RenderEngine ? RenderEngine() : engine
         self.frameLookupLedger = frameLookupLedger
         let analysisCoordinator =
             photoAnalysisCoordinator ?? PhotoAnalysisCoordinator(engine: engine)
@@ -1232,6 +1235,8 @@ public final class AppViewModel: LookPreviewProviding, PhotosImportDestination,
         if let renderEngine = engine as? RenderEngine {
             semanticCoordinatorInstallTask = Task {
                 await renderEngine.installSemanticMaskCoordinator(analysisCoordinator)
+                await (backgroundEngine as? RenderEngine)?
+                    .installSemanticMaskCoordinator(analysisCoordinator)
             }
         }
 
