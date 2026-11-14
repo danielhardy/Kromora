@@ -23,6 +23,8 @@ struct SliderValueField: View {
     @State private var errorMessage: String?
     @FocusState private var isFocused: Bool
 
+    private static let errorLineHeight: CGFloat = 16
+
     var body: some View {
         Group {
             if isEditing {
@@ -64,10 +66,13 @@ struct SliderValueField: View {
                         .fixedSize()
                         .padding(.horizontal, 4)
                         .background(.background, in: RoundedRectangle(cornerRadius: 3))
-                        .offset(y: 16)
+                        .offset(y: Self.errorLineHeight)
                         .allowsHitTesting(false)
                 }
             }
+            // Reserve a line under the field so the message lays out in its own space instead of
+            // drawing over (and being covered by) the slider below the row.
+            .padding(.bottom, errorMessage == nil ? 0 : Self.errorLineHeight)
             .zIndex(1)
             .accessibilityLabel(title)
             .onSubmit(commit)
